@@ -43,13 +43,15 @@ struct SidebarView: View {
                 // The neutral mode is intentionally a plain session switcher: no
                 // project folders or Terminals container, just every open shell at
                 // the same source-list depth.
-                ForEach(flattenedSessionRows) { row in
-                    SessionRow(
-                        session: row.session,
-                        chrome: chrome,
-                        projectName: row.projectName,
-                        leadingIndent: 0
-                    )
+                ForEach(store.orderedProjects) { project in
+                    ForEach(project.sessions) { session in
+                        SessionRow(
+                            session: session,
+                            chrome: chrome,
+                            projectName: project.name,
+                            leadingIndent: 0
+                        )
+                    }
                 }
             } else if settings.projectSortOrder == .recentActivity {
                 // Recent activity deliberately flattens every shell across every
@@ -65,26 +67,18 @@ struct SidebarView: View {
                     }
                 }
             } else {
-                // A flat list rather than SwiftUI Sections, with small injected labels
-                // when name grouping is active. This keeps the sidebar rhythm tight
-                // while making the chosen grouping visible instead of silently sorting.
-                ForEach(projectGroups) { group in
-                    if let title = group.title {
-                        ProjectGroupLabel(title: title, chrome: chrome)
-                    }
-                    ForEach(group.projects) { project in
-                        ProjectHeader(
-                            project: project,
-                            isCollapsed: collapsedProjects.contains(project.id),
-                            toggleCollapsed: { toggleCollapsed(project.id) },
-                            chrome: chrome
-                        )
-                        if !collapsedProjects.contains(project.id) {
-                            let splitMarks = splitLinkMarks(for: project)
-                            ForEach(project.sessions) { session in
-                                SessionRow(session: session, chrome: chrome,
-                                           splitLink: splitMarks[session.id])
-                            }
+                ForEach(store.orderedProjects) { project in
+                    ProjectHeader(
+                        project: project,
+                        isCollapsed: collapsedProjects.contains(project.id),
+                        toggleCollapsed: { toggleCollapsed(project.id) },
+                        chrome: chrome
+                    )
+                    if !collapsedProjects.contains(project.id) {
+                        let splitMarks = splitLinkMarks(for: project)
+                        ForEach(project.sessions) { session in
+                            SessionRow(session: session, chrome: chrome,
+                                       splitLink: splitMarks[session.id])
                         }
                     }
                 }
@@ -121,23 +115,10 @@ struct SidebarView: View {
         }
     }
 
-    private struct ProjectGroup: Identifiable {
-        let id: String
-        let title: String?
-        let projects: [Project]
-    }
-
     private struct ActivitySessionRow: Identifiable {
         let session: Session
         let projectName: String
         let activityAt: Date
-
-        var id: Session.ID { session.id }
-    }
-
-    private struct FlattenedSessionRow: Identifiable {
-        let session: Session
-        let projectName: String
 
         var id: Session.ID { session.id }
     }
@@ -147,46 +128,6 @@ struct SidebarView: View {
         let rows: [ActivitySessionRow]
 
         var id: SidebarActivityBucket { bucket }
-    }
-
-    private var projectGroups: [ProjectGroup] {
-        let ordered = store.orderedProjects
-        let terminals = ordered.filter { $0.kind == .terminals }
-        let folders = ordered.filter { $0.kind != .terminals }
-        var groups: [ProjectGroup] = []
-
-        // The Terminals section already carries its own recognisable header, so it
-        // remains above any user-selected project grouping.
-        if !terminals.isEmpty {
-            groups.append(ProjectGroup(id: "terminals", title: nil, projects: terminals))
-        }
-
-        switch settings.projectSortOrder {
-        case .none:
-            if !folders.isEmpty {
-                groups.append(ProjectGroup(id: "projects", title: nil, projects: folders))
-            }
-        case .name:
-            // Name grouping is deliberately just a direct A→Z ordering. Keeping the
-            // existing project rows (without injected A/B/C headers) preserves the
-            // normal sidebar hierarchy and avoids turning each initial into a folder.
-            if !folders.isEmpty {
-                groups.append(ProjectGroup(id: "projects-by-name", title: nil, projects: folders))
-            }
-        case .recentActivity:
-            // This presentation bypasses the project tree entirely; see
-            // `activitySessionGroups` above the List.
-            break
-        }
-        return groups
-    }
-
-    private var flattenedSessionRows: [FlattenedSessionRow] {
-        store.orderedProjects.flatMap { project in
-            project.sessions.map { session in
-                FlattenedSessionRow(session: session, projectName: project.name)
-            }
-        }
     }
 
     private var activitySessionGroups: [ActivitySessionGroup] {
@@ -253,25 +194,6 @@ struct SidebarView: View {
         }
         closeRun()
         return marks
-    }
-}
-
-/// A small in-list label makes active project grouping scannable without bringing
-/// back List section spacing or a full-width card treatment.
-private struct ProjectGroupLabel: View {
-    let title: String
-    let chrome: ChromeTheme?
-
-    var body: some View {
-        Text(title)
-            .font(.system(size: 10, weight: .semibold))
-            .tracking(0.7)
-            .foregroundStyle(chrome.map { AnyShapeStyle($0.foreground.opacity(0.55)) }
-                ?? AnyShapeStyle(.secondary))
-            .padding(.top, 8)
-            .padding(.bottom, 2)
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 8))
     }
 }
 

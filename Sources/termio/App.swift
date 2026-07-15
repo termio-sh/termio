@@ -926,7 +926,6 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
     private weak var splitViewController: NSSplitViewController?
     private weak var branchPickerHostingView: NSView?
     private var navigatorActionsState: NavigatorToolbarActionsState?
-    private var navigatorActionsHandler: NavigatorToolbarActionHandler?
     private var branchPickerWidthConstraint: NSLayoutConstraint?
     private var terminalPaneFrameObserver: NSObjectProtocol?
 
@@ -1012,7 +1011,6 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
 
     private func popUpToolbarMenu(_ menu: NSMenu, from anchor: NSView) {
         menu.popUp(positioning: nil, at: CGPoint(x: 0, y: anchor.bounds.height), in: anchor)
-        updateNavigatorActionsSelection()
     }
 
     private func updateNavigatorActionsSelection() {
@@ -1137,7 +1135,6 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
             item.view = actions
             item.isBordered = false
             navigatorActionsState = state
-            navigatorActionsHandler = handler
             updateNavigatorActionsSelection()
             return item
         case .inspectorTabs:

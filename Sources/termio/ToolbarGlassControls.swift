@@ -87,13 +87,13 @@ struct NavigatorActionsToolbar: View {
 
     private var legacyControl: some View {
         HStack(spacing: ToolbarGlassMetrics.itemSpacing) {
-            legacyActionButton(
+            actionButton(
                 symbol: "line.3.horizontal.decrease",
                 help: "Choose how projects are ordered",
                 selected: state.groupingIsActive,
                 action: actionHandler.presentSortMenu
             )
-            legacyActionButton(
+            actionButton(
                 symbol: "plus",
                 help: "New terminal or project",
                 selected: false,
@@ -104,7 +104,6 @@ struct NavigatorActionsToolbar: View {
         .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.06)))
     }
 
-    @available(macOS 26.0, *)
     private func actionButton(
         symbol: String,
         help: String,
@@ -114,36 +113,28 @@ struct NavigatorActionsToolbar: View {
         Button(action: action) {
             icon(symbol)
                 .background {
-                    if selected {
-                        Capsule()
-                            .fill(.clear)
-                            .glassEffect(.regular.interactive(), in: .capsule)
-                            .glassEffectID("navigatorSelection", in: glassNamespace)
-                    }
+                    selectionBackground(selected: selected)
                 }
-                .contentShape(.capsule)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .help(help)
     }
 
-    private func legacyActionButton(
-        symbol: String,
-        help: String,
-        selected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            icon(symbol)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(selected ? Color(nsColor: .controlColor) : .clear)
-                        .shadow(color: selected ? .black.opacity(0.18) : .clear, radius: 0.5, y: 0.5)
-                )
-                .contentShape(Capsule())
+    @ViewBuilder
+    private func selectionBackground(selected: Bool) -> some View {
+        if #available(macOS 26.0, *) {
+            if selected {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .glassEffectID("navigatorSelection", in: glassNamespace)
+            }
+        } else {
+            Capsule(style: .continuous)
+                .fill(selected ? Color(nsColor: .controlColor) : .clear)
+                .shadow(color: selected ? .black.opacity(0.18) : .clear, radius: 0.5, y: 0.5)
         }
-        .buttonStyle(.plain)
-        .help(help)
     }
 
     private func icon(_ symbol: String) -> some View {

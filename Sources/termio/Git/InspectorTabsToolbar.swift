@@ -29,8 +29,6 @@ struct InspectorTabsToolbar: View {
     /// Outer height of the glass track, matched to the native bordered toolbar controls either
     /// side of it so all the toolbar backgrounds line up. The track is built bottom-up as
     /// `glyphHeight + 2 * trackPadding`, so those two derive from this single number.
-    static let toolbarControlHeight: CGFloat = ToolbarGlassMetrics.controlHeight
-
     private let segments: [(tab: InspectorTab, icon: String, help: String)] = [
         (.files, "list.bullet.indent", "Project Files"),
         (.search, "magnifyingglass", "Search Files"),
@@ -51,7 +49,7 @@ struct InspectorTabsToolbar: View {
         // background reads at one consistent height. An unconstrained control can also report a
         // tall intrinsic height that grows the unified toolbar (and, with `.fullSizeContentView`,
         // nudges the window frame) when the item is inserted, so the clamp stays.
-        .frame(height: Self.toolbarControlHeight)
+        .frame(height: ToolbarGlassMetrics.controlHeight)
         .fixedSize()
         // Fade in over the same ~0.25s the split view takes to slide the inspector open, so
         // the cluster and the pane read as one motion instead of a snap followed by a slide.
