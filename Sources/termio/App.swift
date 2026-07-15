@@ -925,7 +925,8 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
     /// inspector's left edge (divider 1, between the terminal and the file column).
     private weak var splitViewController: NSSplitViewController?
     private weak var branchPickerHostingView: NSView?
-    private weak var navigatorActionsControl: NSSegmentedControl?
+    private weak var navigatorSortButton: NSButton?
+    private weak var navigatorNewButton: NSButton?
     private var branchPickerWidthConstraint: NSLayoutConstraint?
     private var terminalPaneFrameObserver: NSObjectProtocol?
 
@@ -1001,27 +1002,46 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
         updateNavigatorActionsSelection()
     }
 
-    @objc private func showNavigatorActionsMenu(_ sender: NSSegmentedControl) {
-        let eventSegment: Int
-        if let event = NSApp.currentEvent {
-            let point = sender.convert(event.locationInWindow, from: nil)
-            eventSegment = point.x < sender.width(forSegment: 0) ? 0 : 1
-        } else {
-            eventSegment = -1
-        }
-        let segment = eventSegment >= 0 ? eventSegment : sender.selectedSegment
-        guard segment >= 0 else {
-            updateNavigatorActionsSelection()
-            return
-        }
-        let menu = segment == 0 ? makeProjectSortMenu() : makeNewSessionMenu()
-        menu.popUp(positioning: nil, at: CGPoint(x: 0, y: sender.bounds.height), in: sender)
+    @objc private func showProjectSortMenu(_ sender: NSButton) {
+        popUpToolbarMenu(makeProjectSortMenu(), from: sender)
+    }
+
+    @objc private func showNewSessionMenu(_ sender: NSButton) {
+        popUpToolbarMenu(makeNewSessionMenu(), from: sender)
+    }
+
+    private func popUpToolbarMenu(_ menu: NSMenu, from button: NSButton) {
+        menu.popUp(positioning: nil, at: CGPoint(x: 0, y: button.bounds.height), in: button)
         updateNavigatorActionsSelection()
     }
 
     private func updateNavigatorActionsSelection() {
-        navigatorActionsControl?.setSelected(settings.projectSortOrder != .none, forSegment: 0)
-        navigatorActionsControl?.setSelected(false, forSegment: 1)
+        navigatorSortButton?.state = settings.projectSortOrder == .none ? .off : .on
+        navigatorNewButton?.state = .off
+    }
+
+    private func makeNavigatorActionButton(
+        symbol: String,
+        accessibilityDescription: String,
+        toolTip: String,
+        action: Selector,
+        toggles: Bool = false
+    ) -> NSButton {
+        let button = NSButton()
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: accessibilityDescription)
+        button.imagePosition = .imageOnly
+        button.bezelStyle = .toolbar
+        button.controlSize = .regular
+        button.setButtonType(toggles ? .pushOnPushOff : .momentaryPushIn)
+        button.target = self
+        button.action = action
+        button.toolTip = toolTip
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 32),
+            button.heightAnchor.constraint(equalToConstant: 32),
+        ])
+        return button
     }
 
     /// Builds the `+` pull-down for the `.newTerminal` toolbar item: exactly the
@@ -1126,27 +1146,32 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
             item.action = #selector(NSSplitViewController.toggleSidebar(_:))
             return item
         case .sortProjects:
-            // `NSToolbarItemGroup` still renders its child items as separate glass capsules on
-            // macOS 26. A native segmented control supplies the shared outer capsule and divider
-            // that Mail uses, while each segment keeps its own pull-down menu.
+            // Keep these as two compact toolbar buttons rather than an NSSegmentedControl: the
+            // latter always draws a centre divider, while this pairing preserves two clear click
+            // targets without implying a mutually-exclusive segmented choice.
             let item = NSToolbarItem(itemIdentifier: .sortProjects)
             item.label = "Navigator Actions"
             item.toolTip = "Sort projects or create a terminal"
-            let control = NSSegmentedControl(frame: NSRect(x: 0, y: 0, width: 66, height: 28))
-            control.segmentCount = 2
-            control.segmentStyle = .capsule
-            control.trackingMode = .selectAny
-            control.target = self
-            control.action = #selector(showNavigatorActionsMenu(_:))
-            control.setImage(NSImage(systemSymbolName: "line.3.horizontal.decrease", accessibilityDescription: "Sort projects"), forSegment: 0)
-            control.setToolTip("Choose how projects are ordered", forSegment: 0)
-            control.setShowsMenuIndicator(false, forSegment: 0)
-            control.setWidth(30, forSegment: 0)
-            control.setImage(NSImage(systemSymbolName: "plus", accessibilityDescription: "New"), forSegment: 1)
-            control.setToolTip("New terminal or project", forSegment: 1)
-            control.setWidth(36, forSegment: 1)
-            item.view = control
-            navigatorActionsControl = control
+            let sort = makeNavigatorActionButton(
+                symbol: "line.3.horizontal.decrease",
+                accessibilityDescription: "Sort projects",
+                toolTip: "Choose how projects are ordered",
+                action: #selector(showProjectSortMenu(_:)),
+                toggles: true
+            )
+            let new = makeNavigatorActionButton(
+                symbol: "plus",
+                accessibilityDescription: "New",
+                toolTip: "New terminal or project",
+                action: #selector(showNewSessionMenu(_:))
+            )
+            let actions = NSStackView(views: [sort, new])
+            actions.orientation = .horizontal
+            actions.alignment = .centerY
+            actions.spacing = 2
+            item.view = actions
+            navigatorSortButton = sort
+            navigatorNewButton = new
             updateNavigatorActionsSelection()
             return item
         case .inspectorTabs:
