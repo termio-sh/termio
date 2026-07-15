@@ -64,5 +64,10 @@ let package = Package(
                 .swiftLanguageMode(.v5),
             ]
         ),
+        .testTarget(
+            name: "termioTests",
+            dependencies: ["termio"],
+            path: "Tests/termioTests"
+        ),
     ]
 )

@@ -87,6 +87,7 @@ extension TermioStore {
             // instead of spinning forever — the failure mode cmux's own tracker
             // suffers from (issue #3749).
             lastWorkingAt[id] = Date()
+            sessionActivity[id] = Date()
             // A working agent is the strongest "this project is active" signal, so
             // float its project up under the "Recent Activity" sort (see `orderedProjects`).
             if let pid = project(for: id)?.id { liveActivity[pid] = Date() }

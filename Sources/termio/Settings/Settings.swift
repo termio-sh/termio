@@ -39,16 +39,17 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// Whether the sidebar groups its projects by an ordering rule. Pinned projects always
-/// stay above the unpinned projects (see `TermioStore.orderedProjects`).
+/// How the sidebar presents its projects or shells. Pinned projects stay above the
+/// unpinned projects whenever the project hierarchy itself is visible (see
+/// `TermioStore.orderedProjects`).
 enum ProjectSortOrder: String, CaseIterable, Identifiable {
     /// Keep the stored project order. This is the neutral default, so the toolbar
     /// filter stays inactive until the user explicitly selects a grouping rule.
     case none
-    /// Most recently active project first — a project rises whenever one of its
-    /// agents reports work (or the user switches to one of its sessions).
+    /// Flatten all shells into three time folders: within one day, within seven days,
+    /// and older sessions.
     case recentActivity
-    /// Stable A→Z by project name.
+    /// Stable A→Z by project name, without adding letter headers to the sidebar.
     case name
 
     var id: String { rawValue }

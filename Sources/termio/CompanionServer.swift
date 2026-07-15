@@ -928,6 +928,7 @@ extension TermioStore {
             statuses[session.id] = .idle
         }
         liveActivity[project.id] = Date()
+        sessionActivity[session.id] = Date()
         if let pty = ptyProcesses[session.id] { return pty }
         _ = surface(for: session, in: project)
         return ptyProcesses[session.id]

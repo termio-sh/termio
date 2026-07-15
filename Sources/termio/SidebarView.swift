@@ -39,25 +39,52 @@ struct SidebarView: View {
         // macOS has no `listSectionSpacing`. The header carries its own grouping
         // weight (small-caps label + folder mark), so folded projects stack tight.
         List {
-            // A flat list rather than SwiftUI Sections, with small injected labels when
-            // a grouping rule is active. This keeps the sidebar rhythm tight while making
-            // the chosen grouping visible instead of silently applying only a sort order.
-            ForEach(projectGroups) { group in
-                if let title = group.title {
-                    ProjectGroupLabel(title: title, chrome: chrome)
-                }
-                ForEach(group.projects) { project in
-                    ProjectHeader(
-                        project: project,
-                        isCollapsed: collapsedProjects.contains(project.id),
-                        toggleCollapsed: { toggleCollapsed(project.id) },
-                        chrome: chrome
+            if settings.projectSortOrder == .none {
+                // The neutral mode is intentionally a plain session switcher: no
+                // project folders or Terminals container, just every open shell at
+                // the same source-list depth.
+                ForEach(flattenedSessionRows) { row in
+                    SessionRow(
+                        session: row.session,
+                        chrome: chrome,
+                        projectName: row.projectName,
+                        leadingIndent: 0
                     )
-                    if !collapsedProjects.contains(project.id) {
-                        let splitMarks = splitLinkMarks(for: project)
-                        ForEach(project.sessions) { session in
-                            SessionRow(session: session, chrome: chrome,
-                                       splitLink: splitMarks[session.id])
+                }
+            } else if settings.projectSortOrder == .recentActivity {
+                // Recent activity deliberately flattens every shell across every
+                // project. The time folders, not project headers, own this hierarchy.
+                ForEach(activitySessionGroups) { group in
+                    ActivitySessionGroupLabel(title: group.bucket.title, chrome: chrome)
+                    ForEach(group.rows) { row in
+                        SessionRow(
+                            session: row.session,
+                            chrome: chrome,
+                            projectName: row.projectName
+                        )
+                    }
+                }
+            } else {
+                // A flat list rather than SwiftUI Sections, with small injected labels
+                // when name grouping is active. This keeps the sidebar rhythm tight
+                // while making the chosen grouping visible instead of silently sorting.
+                ForEach(projectGroups) { group in
+                    if let title = group.title {
+                        ProjectGroupLabel(title: title, chrome: chrome)
+                    }
+                    ForEach(group.projects) { project in
+                        ProjectHeader(
+                            project: project,
+                            isCollapsed: collapsedProjects.contains(project.id),
+                            toggleCollapsed: { toggleCollapsed(project.id) },
+                            chrome: chrome
+                        )
+                        if !collapsedProjects.contains(project.id) {
+                            let splitMarks = splitLinkMarks(for: project)
+                            ForEach(project.sessions) { session in
+                                SessionRow(session: session, chrome: chrome,
+                                           splitLink: splitMarks[session.id])
+                            }
                         }
                     }
                 }
@@ -100,6 +127,28 @@ struct SidebarView: View {
         let projects: [Project]
     }
 
+    private struct ActivitySessionRow: Identifiable {
+        let session: Session
+        let projectName: String
+        let activityAt: Date
+
+        var id: Session.ID { session.id }
+    }
+
+    private struct FlattenedSessionRow: Identifiable {
+        let session: Session
+        let projectName: String
+
+        var id: Session.ID { session.id }
+    }
+
+    private struct ActivitySessionGroup: Identifiable {
+        let bucket: SidebarActivityBucket
+        let rows: [ActivitySessionRow]
+
+        var id: SidebarActivityBucket { bucket }
+    }
+
     private var projectGroups: [ProjectGroup] {
         let ordered = store.orderedProjects
         let terminals = ordered.filter { $0.kind == .terminals }
@@ -118,66 +167,55 @@ struct SidebarView: View {
                 groups.append(ProjectGroup(id: "projects", title: nil, projects: folders))
             }
         case .name:
-            groups.append(contentsOf: groupedFolders(folders) { project in
-                let initial = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .uppercased().first
-                return initial.map(String.init) ?? "#"
-            })
+            // Name grouping is deliberately just a direct A→Z ordering. Keeping the
+            // existing project rows (without injected A/B/C headers) preserves the
+            // normal sidebar hierarchy and avoids turning each initial into a folder.
+            if !folders.isEmpty {
+                groups.append(ProjectGroup(id: "projects-by-name", title: nil, projects: folders))
+            }
         case .recentActivity:
-            groups.append(contentsOf: activityGroups(folders))
+            // This presentation bypasses the project tree entirely; see
+            // `activitySessionGroups` above the List.
+            break
         }
         return groups
     }
 
-    private func groupedFolders(
-        _ folders: [Project],
-        key: (Project) -> String
-    ) -> [ProjectGroup] {
-        var result: [ProjectGroup] = []
-        for (pinned, prefix) in [(true, "PINNED · "), (false, "")] {
-            let projects = folders.filter { $0.pinned == pinned }
-            var buckets: [String: [Project]] = [:]
-            var order: [String] = []
-            for project in projects {
-                let groupKey = key(project)
-                if buckets[groupKey] == nil { order.append(groupKey) }
-                buckets[groupKey, default: []].append(project)
-            }
-            for groupKey in order {
-                guard let projects = buckets[groupKey] else { continue }
-                result.append(ProjectGroup(
-                    id: "\(pinned ? "pinned" : "projects")-\(groupKey)",
-                    title: prefix + groupKey,
-                    projects: projects
-                ))
+    private var flattenedSessionRows: [FlattenedSessionRow] {
+        store.orderedProjects.flatMap { project in
+            project.sessions.map { session in
+                FlattenedSessionRow(session: session, projectName: project.name)
             }
         }
-        return result
     }
 
-    private func activityGroups(_ folders: [Project]) -> [ProjectGroup] {
-        let titles = ["ACTIVE NOW", "RECENT ACTIVITY", "OTHER PROJECTS"]
-        func activityTitle(for project: Project) -> String {
-            if project.sessions.contains(where: { store.statuses[$0.id] == .working }) {
-                return titles[0]
+    private var activitySessionGroups: [ActivitySessionGroup] {
+        let now = Date()
+        let rows = store.projects.flatMap { project in
+            project.sessions.map { session in
+                ActivitySessionRow(
+                    session: session,
+                    projectName: project.name,
+                    activityAt: store.sessionActivity[session.id]
+                        ?? store.lastWorkingAt[session.id]
+                        ?? session.launchedAt
+                        ?? session.createdAt
+                )
             }
-            return store.liveActivity[project.id] == nil ? titles[2] : titles[1]
         }
 
-        var result: [ProjectGroup] = []
-        for (pinned, prefix) in [(true, "PINNED · "), (false, "")] {
-            let projects = folders.filter { $0.pinned == pinned }
-            for title in titles {
-                let bucket = projects.filter { activityTitle(for: $0) == title }
-                guard !bucket.isEmpty else { continue }
-                result.append(ProjectGroup(
-                    id: "\(pinned ? "pinned" : "projects")-\(title)",
-                    title: prefix + title,
-                    projects: bucket
-                ))
-            }
+        return SidebarActivityBucket.allCases.map { bucket in
+            let bucketRows = rows
+                .filter { SidebarActivityBucket.bucket(for: $0.activityAt, now: now) == bucket }
+                .sorted {
+                    if $0.activityAt != $1.activityAt { return $0.activityAt > $1.activityAt }
+                    if $0.projectName != $1.projectName {
+                        return $0.projectName.localizedCaseInsensitiveCompare($1.projectName) == .orderedAscending
+                    }
+                    return $0.session.title.localizedCaseInsensitiveCompare($1.session.title) == .orderedAscending
+                }
+            return ActivitySessionGroup(bucket: bucket, rows: bucketRows)
         }
-        return result
     }
 
     /// Which sessions of `project` get a split-group bracket, and which segment of
@@ -234,6 +272,29 @@ private struct ProjectGroupLabel: View {
             .padding(.bottom, 2)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 8))
+    }
+}
+
+/// Recent-activity buckets are virtual folders rather than project headers: they
+/// contain individual shells gathered across the whole sidebar tree.
+private struct ActivitySessionGroupLabel: View {
+    let title: String
+    let chrome: ChromeTheme?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "folder")
+                .font(.system(size: 12, weight: .medium))
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.7)
+        }
+        .foregroundStyle(chrome.map { AnyShapeStyle($0.foreground.opacity(0.55)) }
+            ?? AnyShapeStyle(.secondary))
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 8))
     }
 }
 
@@ -648,6 +709,9 @@ private struct SessionRow: View {
     @EnvironmentObject var settings: AppSettings
     let session: Session
     let chrome: ChromeTheme?
+    /// When time grouping flattens the project hierarchy, retain the shell's source
+    /// project in its title so otherwise-identical "Terminal" rows stay distinct.
+    var projectName: String? = nil
     /// Leading inset for the row's content. Sessions sit at 16 under a project, or a
     /// step deeper (32) when nested under a worktree folder node.
     var leadingIndent: CGFloat = 16
@@ -681,7 +745,7 @@ private struct SessionRow: View {
             }
             .frame(width: 16)
             .help(store.statusDescription(for: session.id))
-            Text(store.displayTitle(for: session))
+            Text(groupedDisplayTitle)
                 .font(settings.interfaceFont)
                 .foregroundStyle(chrome.map { AnyShapeStyle($0.foreground) } ?? AnyShapeStyle(.primary))
                 .lineLimit(1)
@@ -747,6 +811,11 @@ private struct SessionRow: View {
                 .animation(.easeInOut(duration: 0.12), value: isHovering)
         )
         .animation(.easeInOut(duration: 0.12), value: isHovering)
+    }
+
+    private var groupedDisplayTitle: String {
+        guard let projectName else { return store.displayTitle(for: session) }
+        return "\(projectName) — \(store.displayTitle(for: session))"
     }
 }
 

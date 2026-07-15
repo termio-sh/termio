@@ -32,6 +32,9 @@ final class TermioStore: ObservableObject {
                 // Switching to a session counts as activity for its project, so the
                 // "Recent Activity" sort floats a project the moment you focus it.
                 if let pid = project(for: id)?.id { liveActivity[pid] = Date() }
+                // Keep the same signal at shell granularity for the sidebar's
+                // time-window grouping. It remains transient like `liveActivity`.
+                sessionActivity[id] = Date()
             }
             persist()
         }
@@ -78,6 +81,9 @@ final class TermioStore: ObservableObject {
     /// falls back to the stored project order until activity resumes), which keeps the
     /// high-frequency working-event updates off the disk-writing `projects` array.
     @Published var liveActivity: [Project.ID: Date] = [:]
+
+    /// Per-shell counterpart to `liveActivity`, used by the sidebar's time buckets.
+    @Published var sessionActivity: [Session.ID: Date] = [:]
 
     /// The project whose Security panel is open, or `nil` when none is. Transient UI
     /// state (not persisted) driving the sandbox-configuration sheet.
