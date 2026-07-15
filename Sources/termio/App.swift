@@ -925,6 +925,7 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
     /// inspector's left edge (divider 1, between the terminal and the file column).
     private weak var splitViewController: NSSplitViewController?
     private weak var branchPickerHostingView: NSView?
+    private weak var navigatorActionsControl: NSSegmentedControl?
     private var branchPickerWidthConstraint: NSLayoutConstraint?
     private var terminalPaneFrameObserver: NSObjectProtocol?
 
@@ -978,9 +979,9 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
         }
     }
 
-    /// Builds the project-sort pull-down for the `.sortProjects` toolbar item: one
-    /// entry per `ProjectSortOrder`, each setting `AppSettings.projectSortOrder`. The
-    /// checkmark on the active order is refreshed on open via `menuNeedsUpdate`.
+    /// Builds the sidebar grouping pull-down for the `.sortProjects` toolbar item. Its
+    /// neutral choice leaves the stored project order alone; the other choices activate
+    /// a visible grouping rule.
     func makeProjectSortMenu() -> NSMenu {
         let menu = NSMenu()
         menu.delegate = self
@@ -997,6 +998,30 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
         guard let raw = sender.representedObject as? String,
               let order = ProjectSortOrder(rawValue: raw) else { return }
         settings.projectSortOrder = order
+        updateNavigatorActionsSelection()
+    }
+
+    @objc private func showNavigatorActionsMenu(_ sender: NSSegmentedControl) {
+        let eventSegment: Int
+        if let event = NSApp.currentEvent {
+            let point = sender.convert(event.locationInWindow, from: nil)
+            eventSegment = point.x < sender.width(forSegment: 0) ? 0 : 1
+        } else {
+            eventSegment = -1
+        }
+        let segment = eventSegment >= 0 ? eventSegment : sender.selectedSegment
+        guard segment >= 0 else {
+            updateNavigatorActionsSelection()
+            return
+        }
+        let menu = segment == 0 ? makeProjectSortMenu() : makeNewSessionMenu()
+        menu.popUp(positioning: nil, at: CGPoint(x: 0, y: sender.bounds.height), in: sender)
+        updateNavigatorActionsSelection()
+    }
+
+    private func updateNavigatorActionsSelection() {
+        navigatorActionsControl?.setSelected(settings.projectSortOrder != .none, forSegment: 0)
+        navigatorActionsControl?.setSelected(false, forSegment: 1)
     }
 
     /// Builds the `+` pull-down for the `.newTerminal` toolbar item: exactly the
@@ -1107,20 +1132,22 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
             let item = NSToolbarItem(itemIdentifier: .sortProjects)
             item.label = "Navigator Actions"
             item.toolTip = "Sort projects or create a terminal"
-            let control = NSSegmentedControl(frame: NSRect(x: 0, y: 0, width: 80, height: 28))
+            let control = NSSegmentedControl(frame: NSRect(x: 0, y: 0, width: 66, height: 28))
             control.segmentCount = 2
             control.segmentStyle = .capsule
-            control.trackingMode = .momentary
+            control.trackingMode = .selectAny
+            control.target = self
+            control.action = #selector(showNavigatorActionsMenu(_:))
             control.setImage(NSImage(systemSymbolName: "line.3.horizontal.decrease", accessibilityDescription: "Sort projects"), forSegment: 0)
             control.setToolTip("Choose how projects are ordered", forSegment: 0)
-            control.setShowsMenuIndicator(true, forSegment: 0)
-            control.setMenu(makeProjectSortMenu(), forSegment: 0)
-            control.setWidth(44, forSegment: 0)
+            control.setShowsMenuIndicator(false, forSegment: 0)
+            control.setWidth(30, forSegment: 0)
             control.setImage(NSImage(systemSymbolName: "plus", accessibilityDescription: "New"), forSegment: 1)
             control.setToolTip("New terminal or project", forSegment: 1)
-            control.setMenu(makeNewSessionMenu(), forSegment: 1)
             control.setWidth(36, forSegment: 1)
             item.view = control
+            navigatorActionsControl = control
+            updateNavigatorActionsSelection()
             return item
         case .inspectorTabs:
             // The native segmented switch (Files / Changes), pinned to the inspector's left edge by

@@ -247,12 +247,16 @@ extension TermioStore {
         }
     }
 
-    /// The projects in sidebar display order: pinned ones first, then the rest, each
-    /// group ordered by the user's chosen sort (`AppSettings.projectSortOrder`). A
-    /// computed view over `projects` — the stored array keeps its own insertion order,
-    /// so ordering is a presentation concern that never mutates (or persists) the tree.
+    /// The projects in sidebar display order. Without grouping this preserves the stored
+    /// order; active grouping orders each pinned/unpinned set. The computed view never
+    /// mutates (or persists) the stored tree.
     var orderedProjects: [Project] {
         let order = settings.projectSortOrder
+        if order == .none {
+            // Keep the original insertion order while retaining the existing pinned
+            // section at the top of the navigator.
+            return projects.filter(\.pinned) + projects.filter { !$0.pinned }
+        }
         return projects.sorted { a, b in
             // The Terminals section is the entry funnel, so it sits above every
             // project — ahead even of pinned ones, whichever sort is active.
@@ -260,6 +264,8 @@ extension TermioStore {
             // Pinned projects always float to the top, whichever sort is active.
             if a.pinned != b.pinned { return a.pinned }
             switch order {
+            case .none:
+                return false
             case .name:
                 return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
             case .recentActivity:
