@@ -253,9 +253,11 @@ extension TermioStore {
     var orderedProjects: [Project] {
         let order = settings.projectSortOrder
         if order == .none {
-            // Keep the original insertion order while retaining the existing pinned
-            // section at the top of the navigator.
-            return projects.filter(\.pinned) + projects.filter { !$0.pinned }
+            // Keep the original insertion order while retaining the existing Terminals
+            // and pinned sections at the top of the navigator.
+            let terminals = projects.filter { $0.kind == .terminals }
+            let folders = projects.filter { $0.kind != .terminals }
+            return terminals + folders.filter(\.pinned) + folders.filter { !$0.pinned }
         }
         return projects.sorted { a, b in
             // The Terminals section is the entry funnel, so it sits above every

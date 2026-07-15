@@ -1016,8 +1016,11 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
     }
 
     private func updateNavigatorActionsSelection() {
-        navigatorSortButton?.state = settings.projectSortOrder == .none ? .off : .on
+        let groupingIsActive = settings.projectSortOrder != .none
+        navigatorSortButton?.state = groupingIsActive ? .on : .off
+        navigatorSortButton?.contentTintColor = groupingIsActive ? .controlAccentColor : .secondaryLabelColor
         navigatorNewButton?.state = .off
+        navigatorNewButton?.contentTintColor = .secondaryLabelColor
     }
 
     private func makeNavigatorActionButton(
@@ -1029,6 +1032,7 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
     ) -> NSButton {
         let button = NSButton()
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: accessibilityDescription)
+        button.image?.isTemplate = true
         button.imagePosition = .imageOnly
         button.bezelStyle = .toolbar
         button.controlSize = .regular

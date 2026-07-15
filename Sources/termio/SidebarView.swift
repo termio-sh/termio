@@ -39,23 +39,26 @@ struct SidebarView: View {
         // macOS has no `listSectionSpacing`. The header carries its own grouping
         // weight (small-caps label + folder mark), so folded projects stack tight.
         List {
-            // A flat list of projects (each opened folder, including any git worktree
-            // the user opened, is just a project), in display order: pinned first, then
-            // the rest ordered by the sidebar toolbar's sort (Recent Activity / Name).
-            // A project can be pinned from its right-click menu below. See
-            // `TermioStore.orderedProjects` — the stored tree keeps its own order.
-            ForEach(store.orderedProjects) { project in
-                ProjectHeader(
-                    project: project,
-                    isCollapsed: collapsedProjects.contains(project.id),
-                    toggleCollapsed: { toggleCollapsed(project.id) },
-                    chrome: chrome
-                )
-                if !collapsedProjects.contains(project.id) {
-                    let splitMarks = splitLinkMarks(for: project)
-                    ForEach(project.sessions) { session in
-                        SessionRow(session: session, chrome: chrome,
-                                   splitLink: splitMarks[session.id])
+            // A flat list rather than SwiftUI Sections, with small injected labels when
+            // a grouping rule is active. This keeps the sidebar rhythm tight while making
+            // the chosen grouping visible instead of silently applying only a sort order.
+            ForEach(projectGroups) { group in
+                if let title = group.title {
+                    ProjectGroupLabel(title: title, chrome: chrome)
+                }
+                ForEach(group.projects) { project in
+                    ProjectHeader(
+                        project: project,
+                        isCollapsed: collapsedProjects.contains(project.id),
+                        toggleCollapsed: { toggleCollapsed(project.id) },
+                        chrome: chrome
+                    )
+                    if !collapsedProjects.contains(project.id) {
+                        let splitMarks = splitLinkMarks(for: project)
+                        ForEach(project.sessions) { session in
+                            SessionRow(session: session, chrome: chrome,
+                                       splitLink: splitMarks[session.id])
+                        }
                     }
                 }
             }
@@ -89,6 +92,92 @@ struct SidebarView: View {
                 collapsedProjects.insert(id)
             }
         }
+    }
+
+    private struct ProjectGroup: Identifiable {
+        let id: String
+        let title: String?
+        let projects: [Project]
+    }
+
+    private var projectGroups: [ProjectGroup] {
+        let ordered = store.orderedProjects
+        let terminals = ordered.filter { $0.kind == .terminals }
+        let folders = ordered.filter { $0.kind != .terminals }
+        var groups: [ProjectGroup] = []
+
+        // The Terminals section already carries its own recognisable header, so it
+        // remains above any user-selected project grouping.
+        if !terminals.isEmpty {
+            groups.append(ProjectGroup(id: "terminals", title: nil, projects: terminals))
+        }
+
+        switch settings.projectSortOrder {
+        case .none:
+            if !folders.isEmpty {
+                groups.append(ProjectGroup(id: "projects", title: nil, projects: folders))
+            }
+        case .name:
+            groups.append(contentsOf: groupedFolders(folders) { project in
+                let initial = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .uppercased().first
+                return initial.map(String.init) ?? "#"
+            })
+        case .recentActivity:
+            groups.append(contentsOf: activityGroups(folders))
+        }
+        return groups
+    }
+
+    private func groupedFolders(
+        _ folders: [Project],
+        key: (Project) -> String
+    ) -> [ProjectGroup] {
+        var result: [ProjectGroup] = []
+        for (pinned, prefix) in [(true, "PINNED · "), (false, "")] {
+            let projects = folders.filter { $0.pinned == pinned }
+            var buckets: [String: [Project]] = [:]
+            var order: [String] = []
+            for project in projects {
+                let groupKey = key(project)
+                if buckets[groupKey] == nil { order.append(groupKey) }
+                buckets[groupKey, default: []].append(project)
+            }
+            for groupKey in order {
+                guard let projects = buckets[groupKey] else { continue }
+                result.append(ProjectGroup(
+                    id: "\(pinned ? "pinned" : "projects")-\(groupKey)",
+                    title: prefix + groupKey,
+                    projects: projects
+                ))
+            }
+        }
+        return result
+    }
+
+    private func activityGroups(_ folders: [Project]) -> [ProjectGroup] {
+        let titles = ["ACTIVE NOW", "RECENT ACTIVITY", "OTHER PROJECTS"]
+        func activityTitle(for project: Project) -> String {
+            if project.sessions.contains(where: { store.statuses[$0.id] == .working }) {
+                return titles[0]
+            }
+            return store.liveActivity[project.id] == nil ? titles[2] : titles[1]
+        }
+
+        var result: [ProjectGroup] = []
+        for (pinned, prefix) in [(true, "PINNED · "), (false, "")] {
+            let projects = folders.filter { $0.pinned == pinned }
+            for title in titles {
+                let bucket = projects.filter { activityTitle(for: $0) == title }
+                guard !bucket.isEmpty else { continue }
+                result.append(ProjectGroup(
+                    id: "\(pinned ? "pinned" : "projects")-\(title)",
+                    title: prefix + title,
+                    projects: bucket
+                ))
+            }
+        }
+        return result
     }
 
     /// Which sessions of `project` get a split-group bracket, and which segment of
@@ -126,6 +215,25 @@ struct SidebarView: View {
         }
         closeRun()
         return marks
+    }
+}
+
+/// A small in-list label makes active project grouping scannable without bringing
+/// back List section spacing or a full-width card treatment.
+private struct ProjectGroupLabel: View {
+    let title: String
+    let chrome: ChromeTheme?
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(0.7)
+            .foregroundStyle(chrome.map { AnyShapeStyle($0.foreground.opacity(0.55)) }
+                ?? AnyShapeStyle(.secondary))
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 8))
     }
 }
 
