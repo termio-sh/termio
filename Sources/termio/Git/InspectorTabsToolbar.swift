@@ -12,8 +12,8 @@ import SwiftUI
 /// segmented control: a glass track holding both segments, with the selected segment lifted
 /// on its own pill that fluidly morphs across as you switch panes.
 ///
-/// The track is tinted lighter (whiter) so it never sits darker than the borderless system
-/// collapse button at the inspector's other edge. Both glyphs keep the same neutral
+/// The track uses the same regular material as the native single collapse button at the inspector's
+/// other edge. Both glyphs keep the same neutral
 /// `.secondary` tone — matching the neighbouring toolbar buttons — and selection is shown
 /// purely by the brighter, raised pill, never by recolouring or tinting a glyph.
 struct InspectorTabsToolbar: View {
@@ -29,9 +29,7 @@ struct InspectorTabsToolbar: View {
     /// Outer height of the glass track, matched to the native bordered toolbar controls either
     /// side of it so all the toolbar backgrounds line up. The track is built bottom-up as
     /// `glyphHeight + 2 * trackPadding`, so those two derive from this single number.
-    static let toolbarControlHeight: CGFloat = 36
-    private static let trackPadding: CGFloat = 3
-    private static var glyphHeight: CGFloat { toolbarControlHeight - 2 * trackPadding }
+    static let toolbarControlHeight: CGFloat = ToolbarGlassMetrics.controlHeight
 
     private let segments: [(tab: InspectorTab, icon: String, help: String)] = [
         (.files, "list.bullet.indent", "Project Files"),
@@ -67,8 +65,8 @@ struct InspectorTabsToolbar: View {
 
     @available(macOS 26.0, *)
     private var glassControl: some View {
-        GlassEffectContainer(spacing: 4) {
-            HStack(spacing: 2) {
+        GlassEffectContainer(spacing: ToolbarGlassMetrics.containerSpacing) {
+            HStack(spacing: ToolbarGlassMetrics.itemSpacing) {
                 ForEach(segments, id: \.tab) { seg in
                     let selected = store.inspectorTab == seg.tab
                     icon(seg)
@@ -90,17 +88,17 @@ struct InspectorTabsToolbar: View {
                         .help(seg.help)
                 }
             }
-            .padding(Self.trackPadding)
-            // The shared track: a faint, slightly-whitened glass so it stays lighter than the
-            // system collapse button and lets the brighter selected pill read as raised.
-            .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
+            .padding(ToolbarGlassMetrics.trackPadding)
+            // The shared track matches the native single button's regular material;
+            // only the selected pill is brighter and raised.
+            .glassEffect(.regular, in: .capsule)
         }
     }
 
     // MARK: Fallback (macOS < 26)
 
     private var legacyControl: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: ToolbarGlassMetrics.itemSpacing) {
             ForEach(segments, id: \.tab) { seg in
                 let selected = store.inspectorTab == seg.tab
                 Button { store.inspectorTab = seg.tab } label: {
@@ -116,7 +114,7 @@ struct InspectorTabsToolbar: View {
                 .help(seg.help)
             }
         }
-        .padding(Self.trackPadding)
+        .padding(ToolbarGlassMetrics.trackPadding)
         .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.06)))
     }
 
@@ -130,6 +128,6 @@ struct InspectorTabsToolbar: View {
             // it (and Files) comparable visual mass.
             .font(.system(size: 17, weight: .medium))
             .foregroundStyle(.secondary)
-            .frame(width: 34, height: Self.glyphHeight)
+            .frame(width: ToolbarGlassMetrics.segmentWidth, height: ToolbarGlassMetrics.glyphHeight)
     }
 }

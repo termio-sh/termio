@@ -2,6 +2,12 @@ import XCTest
 @testable import termio
 
 final class SidebarActivityGroupingTests: XCTestCase {
+    func testToolbarGlassMetricsMatchTheSharedToolbarControlGeometry() {
+        XCTAssertEqual(ToolbarGlassMetrics.controlHeight, 36)
+        XCTAssertEqual(ToolbarGlassMetrics.trackPadding, 3)
+        XCTAssertEqual(ToolbarGlassMetrics.itemSpacing, 2)
+    }
+
     func testClassifiesSessionsIntoTheThreeRecentActivityBuckets() {
         let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
 

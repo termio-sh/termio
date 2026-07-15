@@ -913,112 +913,6 @@ private final class KeyBorderlessPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-/// The neutral pressed-state plate inside one segment of the navigator-actions
-/// capsule. It mirrors the standard segmented-control selection: a soft inset
-/// rounded rectangle, not an accent-coloured toggle.
-private final class NavigatorActionSelectionView: NSView {
-    override func draw(_ dirtyRect: NSRect) {
-        let plate = bounds.insetBy(dx: 2, dy: 3)
-        NSColor.labelColor.withAlphaComponent(0.13).setFill()
-        NSBezierPath(roundedRect: plate, xRadius: plate.height / 2, yRadius: plate.height / 2).fill()
-    }
-}
-
-/// Two actions sharing one glass track. Native segmented controls always paint a
-/// centre divider, while two independent toolbar buttons paint their own bezels.
-/// This view keeps one undivided capsule and draws the same neutral inset selection
-/// plate used by standard segmented controls.
-private final class NavigatorActionsToolbarView: NSView {
-    private static let segmentWidth: CGFloat = 36
-    private static let controlHeight: CGFloat = 36
-
-    private let material = NSVisualEffectView()
-    private let selection = NavigatorActionSelectionView()
-    let sortButton = NSButton()
-    let newButton = NSButton()
-
-    var groupingIsActive = false {
-        didSet { updateAppearance() }
-    }
-
-    init(target: AnyObject?, sortAction: Selector, newAction: Selector) {
-        super.init(frame: .zero)
-        material.material = .headerView
-        material.blendingMode = .withinWindow
-        material.state = .active
-        material.wantsLayer = true
-        material.layer?.masksToBounds = true
-        material.layer?.borderWidth = 1
-        material.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
-        addSubview(material)
-
-        selection.isHidden = true
-        material.addSubview(selection)
-
-        configure(sortButton,
-                  symbol: "line.3.horizontal.decrease",
-                  accessibilityDescription: "Sort projects",
-                  toolTip: "Choose how projects are ordered",
-                  target: target,
-                  action: sortAction)
-        configure(newButton,
-                  symbol: "plus",
-                  accessibilityDescription: "New",
-                  toolTip: "New terminal or project",
-                  target: target,
-                  action: newAction)
-        material.addSubview(sortButton)
-        material.addSubview(newButton)
-        updateAppearance()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: Self.segmentWidth * 2, height: Self.controlHeight)
-    }
-
-    override func layout() {
-        super.layout()
-        material.frame = bounds
-        material.layer?.cornerRadius = bounds.height / 2
-        let leadingWidth = min(Self.segmentWidth, bounds.width / 2)
-        selection.frame = NSRect(x: 0, y: 0, width: leadingWidth, height: bounds.height)
-        sortButton.frame = selection.frame
-        newButton.frame = NSRect(
-            x: leadingWidth,
-            y: 0,
-            width: bounds.width - leadingWidth,
-            height: bounds.height
-        )
-    }
-
-    private func configure(
-        _ button: NSButton,
-        symbol: String,
-        accessibilityDescription: String,
-        toolTip: String,
-        target: AnyObject?,
-        action: Selector
-    ) {
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: accessibilityDescription)
-        button.image?.isTemplate = true
-        button.imagePosition = .imageOnly
-        button.isBordered = false
-        button.setButtonType(.momentaryPushIn)
-        button.target = target
-        button.action = action
-        button.toolTip = toolTip
-    }
-
-    private func updateAppearance() {
-        selection.isHidden = !groupingIsActive
-        sortButton.contentTintColor = .labelColor
-        newButton.contentTintColor = .labelColor
-    }
-}
-
 /// Delegate for the window's real toolbar, mirroring CodeEdit's chrome. It declares a leading
 /// navigator toggle, the AppKit-provided sidebar tracking separator (bound to the sidebar
 /// divider), the custom branch-picker title item, and a trailing inspector toggle. The store and
@@ -1031,7 +925,8 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
     /// inspector's left edge (divider 1, between the terminal and the file column).
     private weak var splitViewController: NSSplitViewController?
     private weak var branchPickerHostingView: NSView?
-    private weak var navigatorActionsView: NavigatorActionsToolbarView?
+    private var navigatorActionsState: NavigatorToolbarActionsState?
+    private var navigatorActionsHandler: NavigatorToolbarActionHandler?
     private var branchPickerWidthConstraint: NSLayoutConstraint?
     private var terminalPaneFrameObserver: NSObjectProtocol?
 
@@ -1107,21 +1002,21 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
         updateNavigatorActionsSelection()
     }
 
-    @objc private func showProjectSortMenu(_ sender: NSButton) {
-        popUpToolbarMenu(makeProjectSortMenu(), from: sender)
+    private func showProjectSortMenu(from anchor: NSView) {
+        popUpToolbarMenu(makeProjectSortMenu(), from: anchor)
     }
 
-    @objc private func showNewSessionMenu(_ sender: NSButton) {
-        popUpToolbarMenu(makeNewSessionMenu(), from: sender)
+    private func showNewSessionMenu(from anchor: NSView) {
+        popUpToolbarMenu(makeNewSessionMenu(), from: anchor)
     }
 
-    private func popUpToolbarMenu(_ menu: NSMenu, from button: NSButton) {
-        menu.popUp(positioning: nil, at: CGPoint(x: 0, y: button.bounds.height), in: button)
+    private func popUpToolbarMenu(_ menu: NSMenu, from anchor: NSView) {
+        menu.popUp(positioning: nil, at: CGPoint(x: 0, y: anchor.bounds.height), in: anchor)
         updateNavigatorActionsSelection()
     }
 
     private func updateNavigatorActionsSelection() {
-        navigatorActionsView?.groupingIsActive = settings.projectSortOrder != .none
+        navigatorActionsState?.groupingIsActive = settings.projectSortOrder != .none
     }
 
     /// Builds the `+` pull-down for the `.newTerminal` toolbar item: exactly the
@@ -1226,18 +1121,23 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
             item.action = #selector(NSSplitViewController.toggleSidebar(_:))
             return item
         case .sortProjects:
-            // Use one undivided capsule rather than AppKit's segmented or paired button styles:
-            // they respectively add a centre divider or draw their own separate pressed bezels.
             let item = NSToolbarItem(itemIdentifier: .sortProjects)
             item.label = "Navigator Actions"
             item.toolTip = "Sort projects or create a terminal"
-            let actions = NavigatorActionsToolbarView(
-                target: self,
-                sortAction: #selector(showProjectSortMenu(_:)),
-                newAction: #selector(showNewSessionMenu(_:))
-            )
+            let state = NavigatorToolbarActionsState()
+            let handler = NavigatorToolbarActionHandler()
+            let actions = NSHostingView(rootView: NavigatorActionsToolbar(
+                state: state,
+                actionHandler: handler
+            ))
+            handler.anchorView = actions
+            handler.showSortMenu = { [weak self] anchor in self?.showProjectSortMenu(from: anchor) }
+            handler.showNewMenu = { [weak self] anchor in self?.showNewSessionMenu(from: anchor) }
+            actions.sizingOptions = [.intrinsicContentSize]
             item.view = actions
-            navigatorActionsView = actions
+            item.isBordered = false
+            navigatorActionsState = state
+            navigatorActionsHandler = handler
             updateNavigatorActionsSelection()
             return item
         case .inspectorTabs:
