@@ -678,13 +678,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setNavigatorItemsVisible(!item.isCollapsed)
     }
 
-    /// Inserts or removes the sidebar's own toolbar actions (the sort pull-down and the `+`
-    /// new-terminal button) as the navigator opens/closes, so the sidebar's toolbar region empties
+    /// Inserts or removes the sidebar's grouped toolbar actions as the navigator opens/closes, so
+    /// the sidebar's toolbar region empties
     /// when the sidebar is collapsed — matching Finder/Xcode, which drop their sidebar buttons with
     /// the sidebar, and freeing the horizontal room that otherwise forces NSToolbar's `»` overflow.
-    /// The paired flexible space (which right-aligns the two against the sidebar divider) is inserted
-    /// and removed *with* them. When open the region reads `toggleNavigator, flex, sortProjects,
-    /// newTerminal | sidebarTrackingSeparator`. Mirrors `setInspectorSwitchVisible`.
+    /// The paired flexible space (which right-aligns the group against the sidebar divider) is inserted
+    /// and removed *with* it. When open the region reads `toggleNavigator, flex, sortProjects
+    /// | sidebarTrackingSeparator`. Mirrors `setInspectorSwitchVisible`.
     private func setNavigatorItemsVisible(_ visible: Bool) {
         guard let toolbar = window?.toolbar else { return }
         func index(of id: NSToolbarItem.Identifier) -> Int? {
@@ -697,16 +697,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         defer { NSAnimationContext.endGrouping() }
         if visible {
             guard index(of: .sortProjects) == nil, let sep = index(of: .sidebarTrackingSeparator) else { return }
-            // Insert in reverse at the separator's index so the final order is flex, sortProjects, newTerminal.
-            toolbar.insertItem(withItemIdentifier: .newTerminal, at: sep)
+            // Reuse the sort identifier so existing toolbar configurations migrate to the group.
             toolbar.insertItem(withItemIdentifier: .sortProjects, at: sep)
             toolbar.insertItem(withItemIdentifier: .flexibleSpace, at: sep)
         } else {
-            // Only clean up when the buttons are actually present (nothing to remove at launch with
+            // Only clean up when the group is actually present (nothing to remove at launch with
             // the sidebar already collapsed). Re-find each id after every removal — indices shift.
-            guard let sortIdx = index(of: .sortProjects) else { return }
-            toolbar.removeItem(at: sortIdx)
-            if let i = index(of: .newTerminal) { toolbar.removeItem(at: i) }
+            guard let actionsIdx = index(of: .sortProjects) else { return }
+            toolbar.removeItem(at: actionsIdx)
+            // Discard the pre-group `+` item if an existing saved toolbar layout still has it.
+            if let legacyNewIdx = index(of: .newTerminal) { toolbar.removeItem(at: legacyNewIdx) }
             // Drop the flexible space that right-aligned them (the one just before the sidebar separator).
             if let sep = index(of: .sidebarTrackingSeparator), sep > 0,
                toolbar.items[sep - 1].itemIdentifier == .flexibleSpace {
@@ -1067,7 +1067,7 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
     // open (see `setInspectorSwitchVisible`) — keeping the separator in the default set would draw a
     // stray divider line in the toolbar while the panel is collapsed.
     // Sidebar-collapsed baseline: just the navigator toggle, the branch title, and the inspector
-    // toggle. The sidebar's own actions (`sortProjects` + `newTerminal`) and their right-aligning
+    // toggle. The sidebar's grouped actions and their right-aligning
     // flexible space are inserted by the app delegate only while the navigator is open (see
     // `setNavigatorItemsVisible`) — keeping them in the default set is what over-packed the row and
     // forced NSToolbar's `»` overflow when the sidebar was collapsed.
@@ -1101,35 +1101,26 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
             item.action = #selector(NSSplitViewController.toggleSidebar(_:))
             return item
         case .sortProjects:
-            // A pull-down that sets how the sidebar orders projects (Recent Activity /
-            // Name). Sits just left of the `+`, at the trailing edge of the sidebar's
-            // toolbar region. Native `NSMenuToolbarItem` so it carries the standard
-            // menu chevron and free Liquid Glass bordered look, matching the toggles.
-            let item = NSMenuToolbarItem(itemIdentifier: .sortProjects)
-            item.label = "Sort"
-            item.toolTip = "Choose how projects are ordered"
-            item.image = NSImage(systemSymbolName: "line.3.horizontal.decrease", accessibilityDescription: "Sort projects")
-            item.isBordered = true
-            item.showsIndicator = true
-            item.menu = makeProjectSortMenu()
-            return item
-        case .newTerminal:
-            // Pinned to the trailing edge of the sidebar's toolbar region (just before the
-            // tracking separator), so it reads as the navigator's own "new" action — like the
-            // `+` at the foot of Finder's sidebar: a plain `+` that pops a menu on click. It
-            // still carries a pull-down (the two ways something new enters the sidebar — a loose
-            // terminal or a project), but with `showsIndicator = false` it keeps the exact width
-            // of the single-action `+` it replaced, so the sidebar's `minimumThickness` (240)
-            // stays valid and the button never grows the chevron that would push it toward the
-            // NSToolbar `»` overflow. Finder's sidebar `+` shows no chevron either — a `+` reads
-            // as "add" on its own, unlike the sort item, whose glyph does keep its indicator.
-            let item = NSMenuToolbarItem(itemIdentifier: .newTerminal)
-            item.label = "New"
-            item.toolTip = "New terminal or project"
-            item.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New")
-            item.isBordered = true
-            item.showsIndicator = false
-            item.menu = makeNewSessionMenu()
+            // `NSToolbarItemGroup` still renders its child items as separate glass capsules on
+            // macOS 26. A native segmented control supplies the shared outer capsule and divider
+            // that Mail uses, while each segment keeps its own pull-down menu.
+            let item = NSToolbarItem(itemIdentifier: .sortProjects)
+            item.label = "Navigator Actions"
+            item.toolTip = "Sort projects or create a terminal"
+            let control = NSSegmentedControl(frame: NSRect(x: 0, y: 0, width: 80, height: 28))
+            control.segmentCount = 2
+            control.segmentStyle = .capsule
+            control.trackingMode = .momentary
+            control.setImage(NSImage(systemSymbolName: "line.3.horizontal.decrease", accessibilityDescription: "Sort projects"), forSegment: 0)
+            control.setToolTip("Choose how projects are ordered", forSegment: 0)
+            control.setShowsMenuIndicator(true, forSegment: 0)
+            control.setMenu(makeProjectSortMenu(), forSegment: 0)
+            control.setWidth(44, forSegment: 0)
+            control.setImage(NSImage(systemSymbolName: "plus", accessibilityDescription: "New"), forSegment: 1)
+            control.setToolTip("New terminal or project", forSegment: 1)
+            control.setMenu(makeNewSessionMenu(), forSegment: 1)
+            control.setWidth(36, forSegment: 1)
+            item.view = control
             return item
         case .inspectorTabs:
             // The native segmented switch (Files / Changes), pinned to the inspector's left edge by

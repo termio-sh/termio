@@ -26,10 +26,10 @@ struct InspectorTabsToolbar: View {
     /// fires on every open.
     @State private var appeared = false
 
-    /// Outer height of the glass track, matched to the native bordered toolbar buttons either
+    /// Outer height of the glass track, matched to the native bordered toolbar controls either
     /// side of it so all the toolbar backgrounds line up. The track is built bottom-up as
     /// `glyphHeight + 2 * trackPadding`, so those two derive from this single number.
-    static let toolbarControlHeight: CGFloat = 30
+    static let toolbarControlHeight: CGFloat = 28
     private static let trackPadding: CGFloat = 3
     private static var glyphHeight: CGFloat { toolbarControlHeight - 2 * trackPadding }
 
