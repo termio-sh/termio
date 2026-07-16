@@ -567,6 +567,17 @@ extension TermioStore {
         // shortcuts always reach termio's menu.
         builder.withCustom("keybind", "super+shift+p=unbind")
         builder.withCustom("keybind", "super+shift+o=unbind")
+        // Font size and split zoom are termio menu actions too: font size is
+        // driven from the persisted `fontSize` setting (so it survives relaunch
+        // and applies to every surface), and zoom is a host SplitTree operation
+        // (ghostty has no splits in embedded mode). Unbind ghostty's built-in
+        // versions so ⌘=/⌘-/⌘0 and ⌘⇧↩ reach `buildMainMenu` instead of being
+        // swallowed by the surface.
+        builder.withCustom("keybind", "super+equal=unbind")
+        builder.withCustom("keybind", "super+plus=unbind")
+        builder.withCustom("keybind", "super+minus=unbind")
+        builder.withCustom("keybind", "super+zero=unbind")
+        builder.withCustom("keybind", "super+shift+enter=unbind")
     }
 
     /// The light/dark theme pair libghostty switches between as the system

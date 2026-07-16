@@ -7,6 +7,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case appearance
     case interface
     case terminal
+    case keyboard
     case agents
     case usage
     case mobile
@@ -18,6 +19,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .appearance: return "Appearance"
         case .interface: return "Interface"
         case .terminal: return "Terminal"
+        case .keyboard: return "Keyboard"
         case .agents: return "Agents"
         case .usage: return "Usage"
         case .mobile: return "Mobile"
@@ -29,6 +31,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .appearance: return "paintbrush"
         case .interface: return "sidebar.left"
         case .terminal: return "terminal"
+        case .keyboard: return "keyboard"
         case .agents: return "sparkles"
         case .usage: return "gauge.medium"
         case .mobile: return "iphone"

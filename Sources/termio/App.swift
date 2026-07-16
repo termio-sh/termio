@@ -34,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private lazy var store = TermioStore.restored(settings: settings)
     private lazy var usageMonitor = UsageMonitor(settings: settings)
     private var menuBar: MenuBarController?
+    /// Rebuilds the main menu when the user rebinds a shortcut in Settings.
+    private var keybindingsObserver: NSObjectProtocol?
     private var companionServer: CompanionServer?
     private var settingsWindow: NSWindow?
     private var settingsObserver: AnyCancellable?
@@ -104,6 +106,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Sweep up session processes a previous instance stranded (crash,
         // force-quit, dev rebuild's kill -9) before this run adds its own.
         PTYProcess.reapStrayOrphans()
+        // Menu items cache their key equivalents at build time, so rebuild the
+        // whole main menu whenever a user rebinds a shortcut in Settings.
+        keybindingsObserver = NotificationCenter.default.addObserver(
+            forName: .termioKeybindingsChanged, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { NSApp.mainMenu = buildMainMenu() }
+        }
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -894,11 +903,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         store.splitSelectedPane(.vertical)
     }
 
-    /// View ▸ Close Pane (⌥⌘W) — collapses the focused pane out of the layout.
-    /// The session itself stays alive in the sidebar; killing it remains the
-    /// sidebar's explicit close.
+    /// View ▸ Close Pane (⌘W) — collapses the focused pane out of the layout,
+    /// terminal-style. The session itself stays alive in the sidebar (killing it
+    /// remains the sidebar's explicit close). With no split on screen there is no
+    /// pane to peel off, so ⌘W falls through to closing the window, matching
+    /// iTerm2 where the last pane's ⌘W closes its container.
     @objc func closeSplitPane(_ sender: Any?) {
-        store.closeSelectedPane()
+        if store.splitRoot != nil {
+            store.closeSelectedPane()
+        } else {
+            window?.performClose(sender)
+        }
+    }
+
+    /// Window ▸ Close Window (⌘⇧W) — closes the whole window regardless of splits.
+    @objc func closeMainWindow(_ sender: Any?) {
+        window?.performClose(sender)
+    }
+
+    /// View ▸ Zoom Split (⌘⇧↩) — maximise the focused pane, or restore the split.
+    @objc func toggleSplitZoom(_ sender: Any?) {
+        store.toggleSelectedPaneZoom()
+    }
+
+    // Font size drives the persisted `fontSize` setting, so a bump survives
+    // relaunch and re-styles every open surface at once (the store's settings
+    // observer reapplies appearance). Clamped to the Appearance stepper's range.
+    @objc func increaseFontSize(_ sender: Any?) {
+        settings.fontSize = min(32, (settings.fontSize + 1).rounded())
+    }
+
+    @objc func decreaseFontSize(_ sender: Any?) {
+        settings.fontSize = max(8, (settings.fontSize - 1).rounded())
+    }
+
+    @objc func resetFontSize(_ sender: Any?) {
+        settings.fontSize = 13
     }
 
     @objc func focusPaneLeft(_ sender: Any?) { store.focusPane(.left) }
@@ -1318,13 +1358,20 @@ private func buildMainMenu() -> NSMenu {
     fileMenu.addItem(
         withTitle: "New Terminal",
         action: #selector(AppDelegate.newScratchTerminal(_:)),
-        keyEquivalent: "t"
+        command: .newTerminal
     )
     fileMenu.addItem(.separator())
     fileMenu.addItem(
         withTitle: "Open Project…",
         action: #selector(AppDelegate.openProject(_:)),
-        keyEquivalent: "o"
+        command: .openProject
+    )
+    fileMenu.addItem(.separator())
+    // ⌘⇧W closes the whole window (⌘W is Close Pane, terminal-style — see View menu).
+    fileMenu.addItem(
+        withTitle: "Close Window",
+        action: #selector(AppDelegate.closeMainWindow(_:)),
+        command: .closeWindow
     )
     fileItem.submenu = fileMenu
 
@@ -1346,63 +1393,83 @@ private func buildMainMenu() -> NSMenu {
     // surface, so the key never reaches the menu. Both shortcuts are
     // additionally unbound in the surface config (see `applyAppearance`) so
     // they can't be swallowed either.
-    let openQuickly = viewMenu.addItem(
+    viewMenu.addItem(
         withTitle: "Open Quickly…",
         action: #selector(AppDelegate.toggleOpenQuickly(_:)),
-        keyEquivalent: "o"
+        command: .openQuickly
     )
-    openQuickly.keyEquivalentModifierMask = [.command, .shift]
-    let palette = viewMenu.addItem(
+    viewMenu.addItem(
         withTitle: "Command Palette…",
         action: #selector(AppDelegate.toggleCommandPalette(_:)),
-        keyEquivalent: "p"
+        command: .commandPalette
     )
-    palette.keyEquivalentModifierMask = [.command, .shift]
     viewMenu.addItem(.separator())
     // iTerm2's split shortcuts: ⌘D right, ⌘⇧D down. The new pane opens a plain
     // terminal in the focused session's project (see `splitSelectedPane`).
     viewMenu.addItem(
         withTitle: "Split Right",
         action: #selector(AppDelegate.splitPaneRight(_:)),
-        keyEquivalent: "d"
+        command: .splitRight
     )
-    let splitDown = viewMenu.addItem(
+    viewMenu.addItem(
         withTitle: "Split Down",
         action: #selector(AppDelegate.splitPaneDown(_:)),
-        keyEquivalent: "d"
+        command: .splitDown
     )
-    splitDown.keyEquivalentModifierMask = [.command, .shift]
-    // ⌥⌘W: closes the *pane* (the layout slot), not the session — ⌘W stays
-    // unbound so the window's own close keeps its meaning.
-    let closePane = viewMenu.addItem(
+    // ⌘⇧↩ maximises the focused pane (tmux/iTerm2 zoom), toggling back to the split.
+    viewMenu.addItem(
+        withTitle: "Zoom Split",
+        action: #selector(AppDelegate.toggleSplitZoom(_:)),
+        command: .splitZoom
+    )
+    // ⌘W closes the focused *pane* (the layout slot), not the session, matching
+    // terminal convention; the last pane's ⌘W falls through to the window. The
+    // whole window is ⌘⇧W (File ▸ Close Window).
+    viewMenu.addItem(
         withTitle: "Close Pane",
         action: #selector(AppDelegate.closeSplitPane(_:)),
-        keyEquivalent: "w"
+        command: .closePane
     )
-    closePane.keyEquivalentModifierMask = [.command, .option]
     viewMenu.addItem(.separator())
     // ⌥⌘ arrows move focus between panes, scored on the split geometry.
-    for (title, action, key) in [
-        ("Focus Pane Left", #selector(AppDelegate.focusPaneLeft(_:)), NSLeftArrowFunctionKey),
-        ("Focus Pane Right", #selector(AppDelegate.focusPaneRight(_:)), NSRightArrowFunctionKey),
-        ("Focus Pane Up", #selector(AppDelegate.focusPaneUp(_:)), NSUpArrowFunctionKey),
-        ("Focus Pane Down", #selector(AppDelegate.focusPaneDown(_:)), NSDownArrowFunctionKey),
+    for (command, action) in [
+        (KeyCommandID.focusPaneLeft, #selector(AppDelegate.focusPaneLeft(_:))),
+        (.focusPaneRight, #selector(AppDelegate.focusPaneRight(_:))),
+        (.focusPaneUp, #selector(AppDelegate.focusPaneUp(_:))),
+        (.focusPaneDown, #selector(AppDelegate.focusPaneDown(_:))),
     ] {
-        let item = viewMenu.addItem(
-            withTitle: title,
+        viewMenu.addItem(
+            withTitle: KeyCommandCatalog.info(command).title,
             action: action,
-            keyEquivalent: String(UnicodeScalar(UInt16(key))!)
+            command: command
         )
-        item.keyEquivalentModifierMask = [.command, .option]
     }
     viewMenu.addItem(.separator())
     // Mirrors Xcode's inspector shortcut (⌥⌘0) for the trailing file-tree panel.
-    let toggleFiles = viewMenu.addItem(
+    viewMenu.addItem(
         withTitle: "Show Project Files",
         action: #selector(AppDelegate.toggleFilesInspector(_:)),
-        keyEquivalent: "0"
+        command: .toggleProjectFiles
     )
-    toggleFiles.keyEquivalentModifierMask = [.command, .option]
+    viewMenu.addItem(.separator())
+    // Safari-style terminal font size: ⌘= bigger, ⌘- smaller, ⌘0 default. Drives
+    // the persisted Appearance font size (ghostty's own binds are unbound in the
+    // surface — see `applyAppearance`) so it survives relaunch and all panes match.
+    viewMenu.addItem(
+        withTitle: "Increase Font Size",
+        action: #selector(AppDelegate.increaseFontSize(_:)),
+        command: .increaseFontSize
+    )
+    viewMenu.addItem(
+        withTitle: "Decrease Font Size",
+        action: #selector(AppDelegate.decreaseFontSize(_:)),
+        command: .decreaseFontSize
+    )
+    viewMenu.addItem(
+        withTitle: "Reset Font Size",
+        action: #selector(AppDelegate.resetFontSize(_:)),
+        command: .resetFontSize
+    )
     viewItem.submenu = viewMenu
 
     return mainMenu

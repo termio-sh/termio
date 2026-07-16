@@ -61,13 +61,19 @@ struct TerminalPane: View {
             // guarantee with an NSView registry; termio's surface cache plus
             // frame-driven layout is the equivalent with the existing pattern.
             let layout = store.splitRoot?.layout(in: bounds)
+            // Zoom collapses the split to just the selected pane at full size
+            // and hides the dividers — the layout is otherwise untouched, so
+            // un-zooming snaps straight back to the same ratios.
+            let zoomed = store.isPaneZoomed && layout != nil
             ZStack {
                 if mounted.isEmpty {
                     WelcomeView()
                 }
                 ForEach(mounted, id: \.session.id) { item in
                     let id = item.session.id
-                    let paneFrame = layout?.frames[id]
+                    let paneFrame = zoomed
+                        ? (id == store.selectedSessionID ? bounds : nil)
+                        : layout?.frames[id]
                     let isVisible = paneFrame != nil
                         || (layout == nil && store.selectedSessionID == id)
                     // Hidden sessions keep the full pane size, so returning to
@@ -103,7 +109,7 @@ struct TerminalPane: View {
                     .opacity(closing ? 0 : (isVisible ? 1 : 0))
                     .allowsHitTesting(isVisible && !closing)
                 }
-                if let layout {
+                if let layout, !zoomed {
                     // Identified by the (stable) branch id, so a divider keeps its
                     // view identity — and its in-flight drag anchor — while its own
                     // drag rewrites the ratio underneath it.

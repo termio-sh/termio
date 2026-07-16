@@ -71,6 +71,12 @@ final class TermioStore: ObservableObject {
     /// (not persisted), toggled by the View menu and cleared by the palette.
     @Published var paletteMode: PaletteMode?
 
+    /// Whether the focused pane is zoomed to fill the terminal area (⌘⇧↩,
+    /// tmux/iTerm2 style). Transient and not persisted; the zoom always targets
+    /// the *selected* pane, so navigating focus while zoomed moves the full-size
+    /// pane. `TerminalPane` honours it only while a split is on screen.
+    @Published var isPaneZoomed = false
+
     /// When each project was last active — the moment one of its agents last reported
     /// work, or the user last switched to one of its sessions. Drives the sidebar's
     /// "Recent Activity" sort (see `orderedProjects`). In-memory and `@Published` so a

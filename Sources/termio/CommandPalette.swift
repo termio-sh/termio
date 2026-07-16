@@ -210,35 +210,42 @@ struct CommandPaletteView: View {
     /// pane verbs need a pane), so the list never advertises dead rows.
     private var availableActions: [PaletteAction] {
         var actions: [PaletteAction] = []
+        let keys = KeybindingStore.shared
         if store.selectedSessionID != nil {
             actions.append(.init(id: "split-right", title: "Split Right",
-                                 symbol: "rectangle.split.2x1", shortcut: "⌘D") {
+                                 symbol: "rectangle.split.2x1", shortcut: keys.display(for: .splitRight)) {
                 $0.splitSelectedPane(.horizontal)
             })
             actions.append(.init(id: "split-down", title: "Split Down",
-                                 symbol: "rectangle.split.1x2", shortcut: "⇧⌘D") {
+                                 symbol: "rectangle.split.1x2", shortcut: keys.display(for: .splitDown)) {
                 $0.splitSelectedPane(.vertical)
             })
         }
         if store.splitRoot != nil {
+            actions.append(.init(id: "zoom-split", title: "Zoom Split",
+                                 symbol: "arrow.up.left.and.arrow.down.right",
+                                 shortcut: keys.display(for: .splitZoom)) {
+                $0.toggleSelectedPaneZoom()
+            })
             actions.append(.init(id: "close-pane", title: "Close Pane",
-                                 symbol: "rectangle", shortcut: "⌥⌘W") {
+                                 symbol: "rectangle", shortcut: keys.display(for: .closePane)) {
                 $0.closeSelectedPane()
             })
-            for (id, title, arrow, selector) in [
-                ("focus-left", "Focus Pane Left", "←", #selector(AppDelegate.focusPaneLeft(_:))),
-                ("focus-right", "Focus Pane Right", "→", #selector(AppDelegate.focusPaneRight(_:))),
-                ("focus-up", "Focus Pane Up", "↑", #selector(AppDelegate.focusPaneUp(_:))),
-                ("focus-down", "Focus Pane Down", "↓", #selector(AppDelegate.focusPaneDown(_:))),
+            for (id, command, selector) in [
+                ("focus-left", KeyCommandID.focusPaneLeft, #selector(AppDelegate.focusPaneLeft(_:))),
+                ("focus-right", .focusPaneRight, #selector(AppDelegate.focusPaneRight(_:))),
+                ("focus-up", .focusPaneUp, #selector(AppDelegate.focusPaneUp(_:))),
+                ("focus-down", .focusPaneDown, #selector(AppDelegate.focusPaneDown(_:))),
             ] {
-                actions.append(.init(id: id, title: title,
-                                     symbol: "arrow.left.and.right.square", shortcut: "⌥⌘\(arrow)") { _ in
+                actions.append(.init(id: id, title: KeyCommandCatalog.info(command).title,
+                                     symbol: "arrow.left.and.right.square",
+                                     shortcut: keys.display(for: command)) { _ in
                     NSApp.sendAction(selector, to: nil, from: nil)
                 })
             }
         }
         actions.append(.init(id: "new-terminal", title: "New Terminal",
-                             symbol: "plus.rectangle", shortcut: "⌘T") {
+                             symbol: "plus.rectangle", shortcut: keys.display(for: .newTerminal)) {
             $0.addScratchTerminal()
         })
         // One "New … Session" verb per enabled agent — in the selected
@@ -256,15 +263,28 @@ struct CommandPaletteView: View {
             })
         }
         actions.append(.init(id: "open-project", title: "Open Project…",
-                             symbol: "folder", shortcut: "⌘O") {
+                             symbol: "folder", shortcut: keys.display(for: .openProject)) {
             $0.presentOpenProjectPanel()
         })
+        for (id, title, symbol, command, selector) in [
+            ("font-increase", "Increase Font Size", "textformat.size.larger",
+             KeyCommandID.increaseFontSize, #selector(AppDelegate.increaseFontSize(_:))),
+            ("font-decrease", "Decrease Font Size", "textformat.size.smaller",
+             .decreaseFontSize, #selector(AppDelegate.decreaseFontSize(_:))),
+            ("font-reset", "Reset Font Size", "textformat.size",
+             .resetFontSize, #selector(AppDelegate.resetFontSize(_:))),
+        ] {
+            actions.append(.init(id: id, title: title, symbol: symbol,
+                                 shortcut: keys.display(for: command)) { _ in
+                NSApp.sendAction(selector, to: nil, from: nil)
+            })
+        }
         actions.append(.init(id: "toggle-sidebar", title: "Toggle Sidebar",
                              symbol: "sidebar.leading", shortcut: nil) { _ in
             NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
         })
         actions.append(.init(id: "toggle-files", title: "Toggle Project Files",
-                             symbol: "sidebar.trailing", shortcut: "⌥⌘0") { _ in
+                             symbol: "sidebar.trailing", shortcut: keys.display(for: .toggleProjectFiles)) { _ in
             NSApp.sendAction(#selector(AppDelegate.toggleFilesInspector(_:)), to: nil, from: nil)
         })
         actions.append(.init(id: "settings", title: "Settings…",

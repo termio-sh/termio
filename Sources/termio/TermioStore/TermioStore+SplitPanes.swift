@@ -53,6 +53,7 @@ extension TermioStore {
         // The new pane takes focus; it is a member of the (possibly new) group,
         // so the derived `splitRoot` keeps showing this layout.
         selectedSessionID = newSession.id
+        isPaneZoomed = false
     }
 
     /// Splits the focused pane with a **browser pane** — the "terminal left,
@@ -99,6 +100,15 @@ extension TermioStore {
         let neighbor = neighborPane(of: focusedID, in: splitGroups[group])
         setGroup(at: group, to: splitGroups[group].removing(leaf: focusedID))
         if let neighbor { selectedSessionID = neighbor }
+        isPaneZoomed = false
+    }
+
+    /// Toggles zoom on the focused pane (⌘⇧↩) — maximise it to fill the terminal
+    /// area, or restore the split. A no-op with no split on screen, matching
+    /// tmux/iTerm2 where zoom only means something inside a group.
+    func toggleSelectedPaneZoom() {
+        guard splitRoot != nil else { return }
+        isPaneZoomed.toggle()
     }
 
     /// Moves pane focus directionally (⌥⌘ arrows), scored on the visible

@@ -33,6 +33,7 @@ struct SettingsView: View {
                 case .appearance: AppearanceSettingsTab(settings: settings)
                 case .interface: InterfaceSettingsTab(settings: settings)
                 case .terminal: TerminalSettingsTab(settings: settings)
+                case .keyboard: KeybindingsSettingsTab()
                 case .agents: AgentSettingsTab(settings: settings)
                 case .usage: UsageSettingsTab(settings: settings, usage: usage)
                 case .mobile: MobileSettingsTab()
@@ -40,6 +41,8 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 580, height: 520)
+        // Wide enough for the seven-tab bar (7 × 84 + spacing/padding) and the
+        // Keyboard pane's shortcut column.
+        .frame(width: 660, height: 540)
     }
 }
