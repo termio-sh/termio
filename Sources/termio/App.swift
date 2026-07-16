@@ -29,9 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// elsewhere in the app (`TerminalPane` filters key-window notifications with it,
     /// so the settings window never triggers the terminal refocus rescue).
     static let mainWindowFrameAutosaveName = "TermioMainWindow"
-    private var window: NSWindow!
-    private let settings = AppSettings()
-    private lazy var store = TermioStore.restored(settings: settings)
+    var window: NSWindow! // SPIKE: relaxed from private so NativeTabsSpike.swift can opt it into tabbing.
+    let settings = AppSettings() // SPIKE: relaxed from private for NativeTabsSpike.swift.
+    lazy var store = TermioStore.restored(settings: settings) // SPIKE: relaxed from private.
     private lazy var usageMonitor = UsageMonitor(settings: settings)
     private var menuBar: MenuBarController?
     private var companionServer: CompanionServer?
@@ -78,6 +78,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // The window's real toolbar delegate (must be retained); it carries the native
     // sidebar toggle (see `installToolbar`).
     private var toolbarDelegate: MainToolbarDelegate?
+    // SPIKE (spike/native-window-tabs): extra tabbed windows + their toolbar delegates, held
+    // for the app's lifetime so they aren't deallocated. See `NativeTabsSpike.swift`.
+    var spikeWindows: [NSWindow] = []
+    var spikeToolbarDelegates: [MainToolbarDelegate] = []
     // Keeps the native window title (path) and subtitle (git branch) in step with the
     // selected session — NetNewsWire's approach, no custom title-bar views.
     private var titleObserver: AnyCancellable?
@@ -147,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         applyWindowTransparency()
         applyChromeAppearance()
         installToolbar()
+        enableNativeSessionTabbing() // SPIKE: opt this window into native NSWindow tabbing.
         // Empty the sidebar's toolbar region (sort + new-terminal) whenever the navigator collapses
         // and restore it when it reopens — the sidebar's own buttons ride with the sidebar, the way
         // Finder/Xcode drop theirs. KVO catches every collapse path (toolbar toggle, View menu,
@@ -476,7 +481,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// effective appearance. `AppSettings.terminalBackgroundColor` is a dynamic color that picks
     /// light/dark per drawing context; the window (and especially its fullscreen title-bar
     /// overlay) needs a fixed color so it can't resolve to the wrong side.
-    private func resolvedTerminalBackground() -> NSColor {
+    func resolvedTerminalBackground() -> NSColor {
         let dynamic = settings.terminalBackgroundColor
         // Resolve against the appearance the window is pinned to (not its current
         // `effectiveAppearance`, which can lag `applyChromeAppearance` depending on call order).
@@ -934,7 +939,7 @@ private final class KeyBorderlessPanel: NSPanel {
 /// divider), the custom branch-picker title item, and a trailing inspector toggle. The store and
 /// settings drive the branch picker.
 @MainActor
-private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDelegate {
+final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDelegate {
     private let store: TermioStore
     private let settings: AppSettings
     /// Used to build the inspector tracking separator, which pins the pane switch to the
@@ -1331,9 +1336,12 @@ private func buildMainMenu() -> NSMenu {
     // Keeps the `+` new-terminal action reachable when the navigator is collapsed and its toolbar
     // button is hidden (see `setNavigatorItemsVisible`). ⌘T is safe: TUI programs drive off Ctrl,
     // never Cmd, so it can't shadow a key a terminal app wants.
+    // SPIKE (spike/native-window-tabs): ⌘T opens a NEW native tab (a separate NSWindow grouped
+    // via addTabbedWindow), so macOS draws its own tab bar — the Ghostty model. Repointed from
+    // `newScratchTerminal` for this spike so the native tab bar is easy to exercise.
     fileMenu.addItem(
-        withTitle: "New Terminal",
-        action: #selector(AppDelegate.newScratchTerminal(_:)),
+        withTitle: "New Tab",
+        action: #selector(AppDelegate.newWindowForTab(_:)),
         keyEquivalent: "t"
     )
     fileMenu.addItem(.separator())
