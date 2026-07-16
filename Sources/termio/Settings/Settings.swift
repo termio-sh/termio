@@ -306,6 +306,21 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(claudeKeychainDeclined, forKey: Key.claudeKeychainDeclined) }
     }
 
+    // MARK: Config file
+
+    /// True while values read from the config file are being applied, so the property
+    /// `didSet`s that fire don't turn around and rewrite the file we just read (which
+    /// would fight a hand-edit, and could loop). See `applyConfig` / `scheduleConfigWrite`.
+    var isApplyingConfig = false
+    /// The exact text termio last wrote to (or read from) the config file. The writer
+    /// skips a no-op disk write when the render matches this, and the watcher ignores a
+    /// change whose contents match it — that's how a GUI edit's own write-back doesn't
+    /// read back as an external edit. See `writeConfigFile` / `reloadConfigFromDisk`.
+    var lastConfigContents: String?
+    /// Debounced file writer, so dragging a slider coalesces into a single write.
+    var configWriteItem: DispatchWorkItem?
+    var configWatcher: ConfigFileWatcher?
+    private var configCancellable: AnyCancellable?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -380,6 +395,14 @@ final class AppSettings: ObservableObject {
         projectSortOrder = defaults.string(forKey: Key.projectSortOrder).flatMap(ProjectSortOrder.init) ?? .recentActivity
         recentProjects = defaults.data(forKey: Key.recentProjects)
             .flatMap { try? JSONDecoder().decode([RecentProject].self, from: $0) } ?? []
+
+        // The config file is the canonical store: adopt it if present (a hand edit wins
+        // over the UserDefaults cache read above), otherwise seed a documented file from
+        // these values so a fresh install has something to edit. Then watch it, and
+        // mirror later GUI edits back into it. Subscribed *after* the reads above so
+        // seeding these properties isn't mistaken for a user edit.
+        bootstrapConfigFile()
+        configCancellable = objectWillChange.sink { [weak self] in self?.scheduleConfigWrite() }
     }
 
     /// Effective command for an agent: the user's override if it's non-empty,
@@ -430,5 +453,252 @@ final class AppSettings: ObservableObject {
         } else {
             disabledAgents.insert(agent.rawValue)
         }
+    }
+}
+
+// MARK: - Config file mapping
+
+extension AppSettings {
+    /// One editable key in the config file: its Ghostty-style name, the section and
+    /// one-line doc used when seeding a fresh file, and the get/set that bridge the text
+    /// value to the typed setting. `set` is defensive — an unparseable or out-of-range
+    /// value is ignored, so a typo in the file can't crash or blank a setting.
+    fileprivate struct ConfigEntry {
+        let key: String
+        let section: String
+        let doc: String
+        let get: (AppSettings) -> String
+        let set: (AppSettings, String) -> Void
+    }
+
+    /// The managed keys, in file order. Scalars only: appearance, terminal, and
+    /// interface options plus the two agent toggles. Collection-valued agent settings
+    /// (per-agent command overrides, the disabled/bypass sets) and pure app state
+    /// (recent projects, usage/keychain consent) are intentionally excluded.
+    fileprivate static let configEntries: [ConfigEntry] = [
+        ConfigEntry(key: "appearance", section: "Appearance",
+                    doc: "Light/dark: system, light, or dark.",
+                    get: { $0.appearanceMode.rawValue },
+                    set: { s, v in if let m = AppearanceMode(rawValue: v) { s.appearanceMode = m } }),
+        ConfigEntry(key: "theme", section: "Appearance",
+                    doc: "Terminal theme. One name, or light:Name,dark:Name. Empty = termio's own canvas.",
+                    get: { $0.renderThemeValue() },
+                    set: { s, v in s.applyThemeValue(v) }),
+
+        ConfigEntry(key: "font-family", section: "Font",
+                    doc: "Terminal font. Empty = system monospace.",
+                    get: { $0.fontFamily },
+                    set: { s, v in s.fontFamily = v }),
+        ConfigEntry(key: "font-size", section: "Font",
+                    doc: "Terminal font size, in points (8–32).",
+                    get: { AppSettings.number($0.fontSize) },
+                    set: { s, v in if let d = Double(v), (8...32).contains(d) { s.fontSize = d } }),
+        ConfigEntry(key: "font-thicken", section: "Font",
+                    doc: "Synthesize a slightly heavier weight (true/false).",
+                    get: { AppSettings.boolString($0.fontThicken) },
+                    set: { s, v in s.fontThicken = AppSettings.parseBool(v) }),
+
+        ConfigEntry(key: "cursor-style", section: "Cursor",
+                    doc: "Cursor shape: block, bar, or underline.",
+                    get: { $0.cursorStyle.rawValue },
+                    set: { s, v in if let c = CursorStyle(rawValue: v) { s.cursorStyle = c } }),
+        ConfigEntry(key: "cursor-style-blink", section: "Cursor",
+                    doc: "Blink the cursor (true/false).",
+                    get: { AppSettings.boolString($0.cursorBlink) },
+                    set: { s, v in s.cursorBlink = AppSettings.parseBool(v) }),
+
+        ConfigEntry(key: "window-padding", section: "Window",
+                    doc: "Inset between the terminal grid and the window edge, in points (0–40).",
+                    get: { String($0.windowPadding) },
+                    set: { s, v in if let i = Int(v), (0...40).contains(i) { s.windowPadding = i } }),
+        ConfigEntry(key: "background-opacity", section: "Window",
+                    doc: "Terminal background alpha, 0.2–1.0. Below 1.0 the desktop shows through.",
+                    get: { AppSettings.number($0.backgroundOpacity) },
+                    set: { s, v in if let d = Double(v), (0.2...1.0).contains(d) { s.backgroundOpacity = d } }),
+        ConfigEntry(key: "background-blur", section: "Window",
+                    doc: "Blur radius behind a translucent background, 0–60. Only visible below full opacity.",
+                    get: { String($0.backgroundBlur) },
+                    set: { s, v in if let i = Int(v), (0...60).contains(i) { s.backgroundBlur = i } }),
+
+        ConfigEntry(key: "scrollback-megabytes", section: "Terminal",
+                    doc: "Scrollback buffer size, in megabytes.",
+                    get: { String($0.scrollbackMegabytes) },
+                    set: { s, v in if let i = Int(v), i > 0 { s.scrollbackMegabytes = i } }),
+        ConfigEntry(key: "copy-on-select", section: "Terminal",
+                    doc: "Copy selected text to the clipboard automatically (true/false).",
+                    get: { AppSettings.boolString($0.copyOnSelect) },
+                    set: { s, v in s.copyOnSelect = AppSettings.parseBool(v) }),
+
+        ConfigEntry(key: "interface-font-family", section: "Interface",
+                    doc: "Sidebar/chrome font. Empty = system UI font.",
+                    get: { $0.interfaceFontFamily },
+                    set: { s, v in s.interfaceFontFamily = v }),
+        ConfigEntry(key: "interface-font-size", section: "Interface",
+                    doc: "Sidebar/chrome font size, in points (8–24).",
+                    get: { AppSettings.number($0.interfaceFontSize) },
+                    set: { s, v in if let d = Double(v), (8...24).contains(d) { s.interfaceFontSize = d } }),
+        ConfigEntry(key: "interface-row-padding", section: "Interface",
+                    doc: "Extra vertical padding on each sidebar row, in points (0–12).",
+                    get: { AppSettings.number($0.interfaceRowPadding) },
+                    set: { s, v in if let d = Double(v), (0...12).contains(d) { s.interfaceRowPadding = d } }),
+        ConfigEntry(key: "project-sort-order", section: "Interface",
+                    doc: "Sidebar project order: recentActivity or name.",
+                    get: { $0.projectSortOrder.rawValue },
+                    set: { s, v in if let o = ProjectSortOrder(rawValue: v) { s.projectSortOrder = o } }),
+
+        ConfigEntry(key: "agent-hooks", section: "Agents",
+                    doc: "Install Claude Code lifecycle hooks for precise agent status (true/false).",
+                    get: { AppSettings.boolString($0.agentHooksEnabled) },
+                    set: { s, v in s.agentHooksEnabled = AppSettings.parseBool(v) }),
+        ConfigEntry(key: "session-control", section: "Agents",
+                    doc: "Run the local control socket so agents can drive their siblings (true/false).",
+                    get: { AppSettings.boolString($0.sessionControlEnabled) },
+                    set: { s, v in s.sessionControlEnabled = AppSettings.parseBool(v) }),
+    ]
+
+    fileprivate static var orderedConfigKeys: [String] { configEntries.map(\.key) }
+
+    /// Current value of every managed key, for seeding and write-back.
+    fileprivate func currentConfigValues() -> [String: String] {
+        var values: [String: String] = [:]
+        for entry in Self.configEntries { values[entry.key] = entry.get(self) }
+        return values
+    }
+
+    /// Applies parsed `key = value` pairs to the matching settings. Unknown keys are
+    /// ignored (so the file may carry keys a different termio version doesn't manage),
+    /// and each `set` ignores an unparseable value.
+    fileprivate func applyConfig(_ values: [String: String]) {
+        for entry in Self.configEntries where values[entry.key] != nil {
+            entry.set(self, values[entry.key]!)
+        }
+    }
+
+    // MARK: Theme <-> `theme` key
+
+    /// Renders the light/dark theme pair as a `theme` value: one name when both slots
+    /// match (the common case), otherwise `light:Name,dark:Name`.
+    fileprivate func renderThemeValue() -> String {
+        lightThemeName == darkThemeName ? lightThemeName : "light:\(lightThemeName),dark:\(darkThemeName)"
+    }
+
+    /// Parses a `theme` value into the light/dark slots. A bare name sets both; the
+    /// `light:…,dark:…` form sets each (a missing side clears to the default canvas).
+    fileprivate func applyThemeValue(_ value: String) {
+        guard value.contains("light:") || value.contains("dark:") else {
+            lightThemeName = value
+            darkThemeName = value
+            return
+        }
+        var light = "", dark = ""
+        for part in value.split(separator: ",") {
+            let piece = part.trimmingCharacters(in: .whitespaces)
+            if piece.hasPrefix("light:") {
+                light = String(piece.dropFirst("light:".count)).trimmingCharacters(in: .whitespaces)
+            } else if piece.hasPrefix("dark:") {
+                dark = String(piece.dropFirst("dark:".count)).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        lightThemeName = light
+        darkThemeName = dark
+    }
+
+    // MARK: Load / seed / write / watch
+
+    /// Adopts the config file if it exists (it wins over the UserDefaults cache),
+    /// otherwise seeds a documented file from the current values, then starts watching.
+    func bootstrapConfigFile() {
+        if let text = try? String(contentsOf: ConfigFile.url, encoding: .utf8) {
+            isApplyingConfig = true
+            applyConfig(ConfigFile.parse(text))
+            isApplyingConfig = false
+            lastConfigContents = text
+        } else {
+            writeConfigFile(seeding: true)
+        }
+        let watcher = ConfigFileWatcher { [weak self] in self?.reloadConfigFromDisk() }
+        watcher.start(directory: ConfigFile.directory)
+        configWatcher = watcher
+    }
+
+    /// Re-reads the file after an external edit and applies it. Skips termio's own
+    /// write-back (contents equal to what it last wrote) so a GUI edit doesn't loop.
+    private func reloadConfigFromDisk() {
+        guard let text = try? String(contentsOf: ConfigFile.url, encoding: .utf8),
+              text != lastConfigContents else { return }
+        isApplyingConfig = true
+        applyConfig(ConfigFile.parse(text))
+        isApplyingConfig = false
+        lastConfigContents = text
+    }
+
+    /// Debounced write-back, invoked from `objectWillChange`. A no-op while applying a
+    /// file read (that would fight the edit being read).
+    fileprivate func scheduleConfigWrite() {
+        guard !isApplyingConfig else { return }
+        configWriteItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.writeConfigFile() }
+        configWriteItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: item)
+    }
+
+    /// Renders the managed keys into the file and writes it if changed. When `seeding`,
+    /// starts from a documented template; otherwise it surgically updates the existing
+    /// file, preserving its comments, unknown keys, and layout. The disk write hops off
+    /// the main actor.
+    func writeConfigFile(seeding: Bool = false) {
+        let base = seeding
+            ? Self.seedTemplate()
+            : ((try? String(contentsOf: ConfigFile.url, encoding: .utf8)) ?? Self.seedTemplate())
+        let text = ConfigFile.rewrite(base, values: currentConfigValues(), order: Self.orderedConfigKeys)
+        guard text != lastConfigContents else { return }
+        lastConfigContents = text
+        let url = ConfigFile.url
+        let directory = ConfigFile.directory
+        DispatchQueue.global(qos: .utility).async {
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// A documented, empty-valued template (values are filled in by `rewrite`). Grouped
+    /// by section with a one-line doc above each key, so a freshly seeded file reads as
+    /// its own reference.
+    fileprivate static func seedTemplate() -> String {
+        var lines = [
+            "# termio configuration",
+            "#",
+            "# Edit this file and termio applies changes live — no relaunch. The Settings",
+            "# window edits the common options here; every option below can also be set by",
+            "# hand, and hand edits win. Format: key = value. Lines starting with # are",
+            "# comments and are preserved across edits.",
+            "",
+        ]
+        var section = ""
+        for entry in configEntries {
+            if entry.section != section {
+                if !section.isEmpty { lines.append("") }
+                lines.append("# ── \(entry.section) ──")
+                section = entry.section
+            }
+            lines.append("# \(entry.doc)")
+            lines.append("\(entry.key) =")
+        }
+        lines.append("")
+        return lines.joined(separator: "\n")
+    }
+
+    // MARK: Value formatting
+
+    /// Formats a Double without a trailing `.0`, so `13.0` writes as `13` while `0.95`
+    /// stays `0.95`.
+    fileprivate static func number(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(value)
+    }
+
+    fileprivate static func boolString(_ value: Bool) -> String { value ? "true" : "false" }
+
+    fileprivate static func parseBool(_ value: String) -> Bool {
+        ["true", "1", "yes", "on"].contains(value.lowercased())
     }
 }

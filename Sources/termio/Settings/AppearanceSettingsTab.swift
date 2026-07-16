@@ -91,6 +91,22 @@ struct AppearanceSettingsTab: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section {
+                HStack {
+                    Button("Open Config File…", action: openConfigFile)
+                    Spacer()
+                    Text(verbatim: "~/.config/termio/config")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            } header: {
+                SectionHeaderLabel(title: "Config File")
+            } footer: {
+                Text("Every setting is stored in a plain-text config file you can edit directly (or with `termio config edit`). termio applies changes live; the options above are the common subset, but the file exposes more.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .onAppear(perform: reloadUserThemes)
@@ -98,6 +114,18 @@ struct AppearanceSettingsTab: View {
 
     private func openThemesFolder() {
         NSWorkspace.shared.open(ThemeLibrary.ensureDirectoryExists())
+    }
+
+    /// Opens the config file in the user's default editor for text files. It always
+    /// exists by the time Settings can be shown (`AppSettings` seeds it at launch), but
+    /// guard anyway so a missing file just no-ops rather than opening a blank Finder.
+    private func openConfigFile() {
+        let url = ConfigFile.url
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.open(ConfigFile.directory)
+        }
     }
 
     /// Re-reads the Themes folder and republishes settings so any newly loaded or

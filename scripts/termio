@@ -9,6 +9,8 @@
 #   termio sessions answer <id> <text> # answer a sibling's menu/prompt
 #   termio sessions start <agent>      # start a new session (claude/codex/…)
 #   termio sessions stop  <id>         # stop a session
+#   termio config path                 # print the config file path
+#   termio config edit                 # open the config file in $EDITOR
 #
 # Add --json to any `sessions` command for machine-readable output.
 #
@@ -24,6 +26,10 @@ SUPPORT_DIR_NAME="termio"
 BUNDLE_ID="sh.termio.app"
 
 SOCKET="$HOME/Library/Application Support/$SUPPORT_DIR_NAME/session-control.sock"
+# The user-editable config file (canonical store; the app also edits it from Settings).
+# XDG path, mirroring AppChannel: `~/.config/termio` for release, `~/.config/termio-dev`
+# for the dev channel (SUPPORT_DIR_NAME already carries the `-dev` suffix).
+CONFIG_FILE="$HOME/.config/$SUPPORT_DIR_NAME/config"
 
 # JSON-escape a string for embedding in a request: backslashes, double quotes, and
 # newlines (which would otherwise break the single-line JSON object).
@@ -75,9 +81,32 @@ sessions() {
     printf '%s' "$request" | nc -U "$SOCKET"
 }
 
+config() {
+    op="${1:-path}"
+    case "$op" in
+        path)
+            printf '%s\n' "$CONFIG_FILE"
+            ;;
+        edit)
+            mkdir -p "$(dirname "$CONFIG_FILE")"
+            exec "${EDITOR:-vi}" "$CONFIG_FILE"
+            ;;
+        *)
+            echo "termio config: unknown command '$op' (use: path | edit)" >&2
+            exit 1
+            ;;
+    esac
+}
+
 if [ "${1:-}" = "sessions" ]; then
     shift
     sessions "$@"
+    exit 0
+fi
+
+if [ "${1:-}" = "config" ]; then
+    shift
+    config "$@"
     exit 0
 fi
 
