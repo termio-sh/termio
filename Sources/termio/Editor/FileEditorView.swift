@@ -135,10 +135,9 @@ struct FileEditorView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            // The file's real language/tool logo (a Devicon mark) when bundled, else a
-            // tinted SF Symbol — sized to match the diff header's leading status badge
-            // (12–13pt in a 16-wide slot) so the editor and diff headers are the same height.
-            FileIconView(url: url, size: 15, symbolSize: 13)
+            // Shares the Files sidebar's Hugeicons stroke language, sized to match the
+            // diff header's leading status badge in its 16-point slot.
+            FileIconView(url: url, size: 15)
                 .frame(width: 16)
             // The repo-relative path already ends in the file name, so showing the bare name
             // alongside it just repeats the same word — keep only the path as the header label.
