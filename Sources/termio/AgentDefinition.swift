@@ -190,39 +190,54 @@ extension AgentDefinition: Codable {
 // MARK: - Built-ins
 
 extension AgentDefinition {
+    /// Resolves a shipped image by resource name without encoding the agent in an
+    /// enum. A packaging mistake degrades to the same visible fallback as a bad user
+    /// icon and is logged; it never traps the catalog during launch.
+    private static func bundledIcon(
+        named resourceName: String, fileExtension: String
+    ) -> AgentIcon {
+        guard let url = Bundle.termioResources.url(
+            forResource: resourceName, withExtension: fileExtension
+        ) else {
+            AgentCatalog.log("missing bundled icon \(resourceName).\(fileExtension)")
+            return .symbol("questionmark.app")
+        }
+        return .image(url)
+    }
+
     static let terminal = AgentDefinition(
         id: "terminal", displayName: "Terminal", command: nil,
         permissionBypassFlag: nil, resumeStyle: .none,
-        icon: .hugeIcon(.terminal), tint: .monochromeInk, installURL: nil, wireName: "terminal")
+        icon: .terminalGlyph, tint: .monochromeInk, installURL: nil, wireName: "terminal")
 
     static let claudeCode = AgentDefinition(
         id: "claudeCode", displayName: "Claude Code", command: "claude",
         permissionBypassFlag: "--dangerously-skip-permissions",
-        resumeStyle: .claudeStyle, icon: .brand(.claude), tint: BrandLogo.claude.tint,
+        resumeStyle: .claudeStyle, icon: .vector(.claude), tint: BrandLogo.claude.tint,
         installURL: URL(string: "https://claude.com/claude-code"), wireName: "claude")
 
     static let codex = AgentDefinition(
         id: "codex", displayName: "Codex", command: "codex",
         permissionBypassFlag: "--dangerously-bypass-approvals-and-sandbox",
-        resumeStyle: .codexStyle, icon: .brand(.codex), tint: BrandLogo.codex.tint,
+        resumeStyle: .codexStyle, icon: .vector(.codex), tint: BrandLogo.codex.tint,
         installURL: URL(string: "https://developers.openai.com/codex/cli"), wireName: "codex")
 
     static let opencode = AgentDefinition(
         id: "opencode", displayName: "OpenCode", command: "opencode",
         permissionBypassFlag: nil, resumeStyle: .openCodeStyle,
-        icon: .brandImage(.openCode), tint: .monochromeInk,
+        icon: bundledIcon(named: "opencode-favicon", fileExtension: "png"), tint: .monochromeInk,
         installURL: URL(string: "https://opencode.ai"), wireName: "opencode")
 
     static let pi = AgentDefinition(
         id: "pi", displayName: "Pi", command: "pi",
         permissionBypassFlag: nil, resumeStyle: .piStyle,
-        icon: .brandImage(.pi), tint: .monochromeInk,
+        icon: bundledIcon(named: "pi-favicon", fileExtension: "svg"), tint: .monochromeInk,
         installURL: URL(string: "https://pi.dev"), wireName: "pi")
 
     static let amp = AgentDefinition(
         id: "amp", displayName: "Amp", command: "amp",
         permissionBypassFlag: nil, resumeStyle: .none,
-        icon: .brandImage(.amp), tint: .monochromeInk,
+        icon: bundledIcon(named: "amp-favicon", fileExtension: "png"), tint: .monochromeInk,
         installURL: URL(string: "https://ampcode.com/manual"), wireName: "amp")
 
     static let cursor = AgentDefinition(
@@ -230,25 +245,25 @@ extension AgentDefinition {
         // GUI launcher, so name it explicitly.
         id: "cursor", displayName: "Cursor", command: "cursor-agent",
         permissionBypassFlag: nil, resumeStyle: .none,
-        icon: .brandImage(.cursor), tint: .monochromeInk,
+        icon: bundledIcon(named: "cursor-favicon", fileExtension: "svg"), tint: .monochromeInk,
         installURL: URL(string: "https://cursor.com/docs/cli"), wireName: "cursor")
 
     static let kimi = AgentDefinition(
         id: "kimi", displayName: "Kimi", command: "kimi",
         permissionBypassFlag: nil, resumeStyle: .none,
-        icon: .brandImage(.kimi), tint: .monochromeInk,
+        icon: bundledIcon(named: "kimi-favicon", fileExtension: "png"), tint: .monochromeInk,
         installURL: URL(string: "https://moonshotai.github.io/kimi-code"), wireName: "kimi")
 
     static let antigravity = AgentDefinition(
         id: "antigravity", displayName: "Antigravity", command: "agy",
         permissionBypassFlag: nil, resumeStyle: .none,
-        icon: .brandImage(.antigravity), tint: .monochromeInk,
+        icon: bundledIcon(named: "antigravity-favicon", fileExtension: "png"), tint: .monochromeInk,
         installURL: URL(string: "https://antigravity.google/product/antigravity-cli"), wireName: "antigravity")
 
     static let hermes = AgentDefinition(
         id: "hermes", displayName: "Hermes", command: "hermes",
         permissionBypassFlag: nil, resumeStyle: .none,
-        icon: .brandImage(.hermes), tint: .monochromeInk,
+        icon: bundledIcon(named: "hermes-favicon", fileExtension: "png"), tint: .monochromeInk,
         installURL: URL(string: "https://hermes-agent.nousresearch.com/#downloads"), wireName: "hermes")
 
     static let grok = AgentDefinition(
@@ -258,7 +273,8 @@ extension AgentDefinition {
         // documented auto-approve flag.
         id: "grok", displayName: "Grok", command: "grok",
         permissionBypassFlag: "--yolo",
-        resumeStyle: .claudeStyle, icon: .brandImage(.grok), tint: .monochromeInk,
+        resumeStyle: .claudeStyle,
+        icon: bundledIcon(named: "grok-favicon", fileExtension: "png"), tint: .monochromeInk,
         installURL: URL(string: "https://x.ai/cli"), wireName: "grok")
 
     /// The agents termio ships, in the order they appear in the picker. User agents
@@ -275,7 +291,7 @@ extension AgentDefinition {
         AgentDefinition(
             id: id, displayName: id, command: nil, permissionBypassFlag: nil,
             resumeStyle: .none,
-            icon: .systemSymbol("questionmark.app"), tint: .monochromeInk,
+            icon: .symbol("questionmark.app"), tint: .monochromeInk,
             installURL: nil, wireName: id)
     }
 }
@@ -618,9 +634,9 @@ struct UserAgentManifest: Decodable {
             let url = path.hasPrefix("/")
                 ? URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
                 : directory.appendingPathComponent(path)
-            resolvedIcon = .imageFile(url)
+            resolvedIcon = .image(url)
         } else {
-            resolvedIcon = .systemSymbol(icon?.symbol ?? "terminal")
+            resolvedIcon = .symbol(icon?.symbol ?? "terminal")
         }
         // Hooks are the status authority when declared: skip screen-scrape so a pane
         // never has two competing sources of truth (herdr's "one authority per pane").

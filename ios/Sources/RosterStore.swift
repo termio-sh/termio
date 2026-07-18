@@ -96,7 +96,10 @@ final class RosterStore {
                RosterAgent(id: "terminal", name: "Terminal")]
             : enabledAgents
         return agents.map { agent in
-            UIAction(title: agent.name, image: AgentKind(wire: agent.id).menuIcon()) { [weak self] _ in
+            UIAction(
+                title: agent.name,
+                image: AgentKind(wire: agent.id).iconRef.menuIcon()
+            ) { [weak self] _ in
                 self?.startSession(agent: agent.id, in: project)
             }
         }

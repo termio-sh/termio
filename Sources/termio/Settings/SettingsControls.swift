@@ -8,7 +8,7 @@ struct IconBadge: View {
     let icon: AgentIcon
 
     init(_ icon: AgentIcon) { self.icon = icon }
-    init(symbol: String) { self.icon = .systemSymbol(symbol) }
+    init(symbol: String) { self.icon = .symbol(symbol) }
 
     var body: some View {
         glyph
@@ -18,20 +18,18 @@ struct IconBadge: View {
     @ViewBuilder
     private var glyph: some View {
         switch icon {
-        case .systemSymbol(let name):
+        case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
-        case .hugeIcon(let hugeIcon):
-            HugeIconView(icon: hugeIcon, size: 14, color: .secondary)
-        case .brand(let logo):
+        case .terminalGlyph:
+            HugeIconView(icon: .terminal, size: 14, color: .secondary)
+        case .vector(let logo):
             BrandLogoShape(logo: logo)
                 .fill(logo.tint, style: FillStyle(eoFill: logo.usesEvenOddFill))
                 .frame(width: 13, height: 13)
-        case .brandImage(let asset):
-            BrandImageView(asset: asset, size: 18)
-        case .imageFile(let url):
-            UserAgentIconView(url: url, size: 18)
+        case .image(let url):
+            AgentImageView(url: url, size: 18)
         }
     }
 }
@@ -72,7 +70,7 @@ struct SettingsLabel: View {
 
     /// Convenience for the common SF Symbol case, mirroring `IconBadge(symbol:)`.
     init(symbol: String, title: String, subtext: String? = nil, titleFont: Font = .headline) {
-        self.init(.systemSymbol(symbol), title: title, subtext: subtext, titleFont: titleFont)
+        self.init(.symbol(symbol), title: title, subtext: subtext, titleFont: titleFont)
     }
 
     /// Icon-less row, for a nested sub-option that hangs under an icon-led row.

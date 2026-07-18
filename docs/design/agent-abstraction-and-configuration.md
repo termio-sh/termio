@@ -27,6 +27,14 @@ related:
 > dedicated `~/.grok/hooks/termio-status.json` file. The sandbox schema field was
 > already removed by the completed sandbox-removal work, so §6 required no code change.
 
+> **As built (2026-07-18, Cut 2 landed):** macOS now has one closed `AgentIcon`
+> primitive model (`image(URL)`, `vector`, `symbol`, or `terminalGlyph`), and Shared
+> carries the wire-ready, data-shaped `IconRef` (`asset`, inline `png`, `vector`, or
+> `symbol`). Both `BrandImageAsset` enums and their agent-specific resource switches
+> are gone; resource names and file paths resolve through the same generic image
+> renderers. iOS already renders `IconRef`, with `AgentKind` retained only as a temporary
+> compatibility adapter until Cut 5 moves the catalog onto the wire and deletes it.
+
 ## Where this sits
 
 [`agent-extensibility.md`](./agent-extensibility.md) (RFC, as-built through Cut 1–2)

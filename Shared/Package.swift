@@ -32,9 +32,9 @@ let package = Package(
             dependencies: [
                 .product(name: "Highlightr", package: "Highlightr", condition: .when(platforms: [.iOS])),
             ],
-            // Vendor favicon tiles for the agents whose marks aren't vector paths
-            // (see BrandImageAsset). All PNG: iOS's UIImage can't decode SVG files,
-            // so Pi's and Cursor's vector favicons are pre-rasterized at 256px.
+            // Vendor favicon tiles selected by `IconRef.asset`. All PNG: iOS's
+            // UIImage can't decode SVG files, so Pi's and Cursor's vector favicons
+            // are pre-rasterized at 256px.
             resources: [.process("Resources")]
         ),
     ]

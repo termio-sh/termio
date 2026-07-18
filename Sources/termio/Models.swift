@@ -102,62 +102,14 @@ extension Project {
 /// The agent model — `AgentDefinition` (aliased `AgentPreset`) plus the built-in
 /// roster and the user-agent catalog — lives in `AgentDefinition.swift`.
 
-/// How an agent's glyph is drawn: a built-in SF Symbol, a Hugeicons stroke mark,
-/// a vector brand logo, or a vendor's real favicon image. SF Symbols ships no
-/// Claude/OpenAI mark, so those are carried as vector path data and rendered by
-/// `BrandLogoShape`; the Hugeicons marks are stroked by `HugeIconShape`. Pi and
-/// OpenCode use their actual favicon files (see `BrandImageAsset`) because their
-/// marks carry detail — Pi's adaptive monochrome glyph, OpenCode's two-tone box —
-/// that a single-fill vector path can't reproduce.
+/// The closed set of ways termio renders an agent icon. Agent identities stay out
+/// of this enum: adding a raster-backed agent supplies a resource/path URL, while
+/// only the two vector marks remain a closed rendering primitive.
 enum AgentIcon: Hashable {
-    case systemSymbol(String)
-    case hugeIcon(HugeIcon)
-    case brand(BrandLogo)
-    case brandImage(BrandImageAsset)
-    /// A user agent's own icon file (PNG/SVG) on disk, from its `agent.json`. Loaded
-    /// by `AgentIconView` as an `NSImage`; a missing file degrades to blank space.
-    case imageFile(URL)
-}
-
-/// A vendor brand mark carried as its real favicon image, bundled under
-/// `Resources` and rendered by `BrandImageView`. Downloaded from each vendor's
-/// site: Pi from `pi.dev/favicon.svg`, OpenCode from `opencode.ai`'s favicon,
-/// Cursor from `cursor.com/favicon.svg`, Amp from its WorkOS-hosted brand icon,
-/// Kimi from `kimi.com/favicon.ico`. Pi, Cursor, OpenCode, and Kimi are opaque
-/// dark app-icon tiles; Amp's mark is its red chevrons on a transparent field, so
-/// the rounded-tile clip simply leaves the corners bare.
-enum BrandImageAsset: Hashable {
-    case pi
-    case openCode
-    case amp
-    case cursor
-    case kimi
-    case antigravity
-    case hermes
-    case grok
-
-    /// Base name of the bundled resource file (without extension).
-    var resourceName: String {
-        switch self {
-        case .pi: return "pi-favicon"
-        case .openCode: return "opencode-favicon"
-        case .amp: return "amp-favicon"
-        case .cursor: return "cursor-favicon"
-        case .kimi: return "kimi-favicon"
-        case .antigravity: return "antigravity-favicon"
-        case .hermes: return "hermes-favicon"
-        case .grok: return "grok-favicon"
-        }
-    }
-
-    /// File extension of the bundled resource: Pi and Cursor ship as vector SVGs,
-    /// OpenCode, Amp, and Kimi only publish raster favicons.
-    var fileExtension: String {
-        switch self {
-        case .pi, .cursor: return "svg"
-        case .openCode, .amp, .kimi, .antigravity, .hermes, .grok: return "png"
-        }
-    }
+    case image(URL)
+    case vector(BrandLogo)
+    case symbol(String)
+    case terminalGlyph
 }
 
 /// A Hugeicons stroke glyph, stored as its source SVG path data on a 24×24
@@ -199,7 +151,7 @@ enum HugeIcon: Hashable {
 /// A vendor brand mark, stored as its official SVG path so it renders crisp at any
 /// size without shipping binary image assets. Rendered in the vendor's brand color
 /// by `BrandLogoShape`; see `BrandLogo.tint`. Pi and OpenCode are not here — their
-/// marks ship as real favicon images via `BrandImageAsset`.
+/// marks ship as image files selected by resource name or user path.
 enum BrandLogo: Hashable {
     case claude
     case codex

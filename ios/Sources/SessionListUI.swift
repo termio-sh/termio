@@ -30,7 +30,11 @@ struct SessionRow: View {
                 if session.status == .working {
                     WorkingIndicator(tint: session.agent.tintColor)
                 } else {
-                    AgentIconView(agent: session.agent, size: 14)
+                    AgentIconView(
+                        ref: session.agent.iconRef,
+                        size: 14,
+                        tint: session.agent.tintColor
+                    )
                 }
             }
             .frame(width: 16, height: 18)

@@ -51,7 +51,7 @@ let package = Package(
             // a build input, so exclude it rather than let SwiftPM flag it as unhandled.
             exclude: ["Editor/Highlightr/README.md"],
             resources: [
-                // Vendor favicons rendered as agent brand marks; see BrandImageAsset.
+                // Vendor favicons resolved by resource name into `AgentIcon.image`.
                 .process("Resources"),
                 // Devicon language/tool logos (one SVG per file type), loaded by name
                 // for the file tree; see LangIconCatalog / LangIconView. Kept as a

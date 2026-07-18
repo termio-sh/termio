@@ -14,61 +14,35 @@ struct AgentIconView: View {
 
     var body: some View {
         switch agent.icon {
-        case .systemSymbol(let name):
+        case .symbol(let name):
             // No built-in uses an SF Symbol (the terminal uses a Hugeicons mark), so
             // this is the user-agent / fallback path: paint it in the agent's own tint
             // rather than a fixed grey, matching how its spinner reads.
             Image(systemName: name)
                 .font(.system(size: size, weight: weight))
                 .foregroundStyle(agent.tintColor)
-        case .imageFile(let url):
-            UserAgentIconView(url: url, size: size)
-        case .hugeIcon(let icon):
+        case .image(let url):
+            AgentImageView(url: url, size: size)
+        case .terminalGlyph:
             // A thin stroke already reads lighter than the filled brand tiles, so
             // paint it at full label strength (`.primary`) — anything less looks
             // washed out next to the row text and the opaque vendor marks.
-            HugeIconView(icon: icon, size: size, color: .primary)
-        case .brand(let logo):
+            HugeIconView(icon: .terminal, size: size, color: .primary)
+        case .vector(let logo):
             // A brand mark fills its whole box, where an SF Symbol's glyph sits
             // inside cap height with breathing room; shrinking the box a touch
             // makes the two read at the same optical size side by side.
             BrandLogoShape(logo: logo)
                 .fill(logo.tint, style: FillStyle(eoFill: logo.usesEvenOddFill))
                 .frame(width: size * 0.82, height: size * 0.82)
-        case .brandImage(let asset):
-            BrandImageView(asset: asset, size: size)
         }
     }
 }
 
-/// Renders a vendor's real favicon image (bundled under `Resources`) as a small
-/// rounded tile. Used for marks whose detail a single-fill `BrandLogo` path can't
-/// carry. Falls back to empty space if the resource can't be loaded rather than
-/// trapping — a missing icon should never crash the sidebar.
-struct BrandImageView: View {
-    let asset: BrandImageAsset
-    var size: CGFloat
-
-    var body: some View {
-        if let image = asset.loadImage() {
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: size, height: size)
-                // The favicons carry their own dark backgrounds; clip to a rounded
-                // tile so they read like the app icons they are at sidebar sizes.
-                .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
-        } else {
-            Color.clear.frame(width: size, height: size)
-        }
-    }
-}
-
-/// Renders a user agent's own icon file (from its `agent.json` `icon.path`) as a
-/// small rounded tile, mirroring `BrandImageView` but reading from an arbitrary path
-/// on disk instead of the bundle. Falls back to blank space if the file can't be
-/// loaded rather than trapping — a bad path should never crash the sidebar.
-struct UserAgentIconView: View {
+/// Renders any raster/vector image URL as the same rounded icon tile. Bundled
+/// favicons and user PNG/SVG paths deliberately share this code path; resource
+/// names are resolved before they enter the runtime icon model.
+struct AgentImageView: View {
     let url: URL
     var size: CGFloat
 
@@ -82,16 +56,6 @@ struct UserAgentIconView: View {
         } else {
             Color.clear.frame(width: size, height: size)
         }
-    }
-}
-
-extension BrandImageAsset {
-    /// Loads the bundled favicon as an `NSImage`, or `nil` if it is missing.
-    /// `NSImage` renders both the SVG (Pi) and PNG (OpenCode) sources natively.
-    func loadImage() -> NSImage? {
-        guard let url = Bundle.termioResources.url(forResource: resourceName, withExtension: fileExtension)
-        else { return nil }
-        return NSImage(contentsOf: url)
     }
 }
 

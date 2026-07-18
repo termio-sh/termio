@@ -4,12 +4,37 @@
 // Ported from the desktop app's BrandIcons.swift; the desktop still carries
 // its own copy until it migrates onto this package.
 
+import Foundation
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
 import AppKit
 #endif
+
+// MARK: - Icon reference
+
+/// The data-shaped icon description shared by manifests and the companion wire.
+/// Every field is optional so older peers decode additions and an empty reference
+/// naturally falls back to the terminal glyph.
+public struct IconRef: Codable, Sendable, Equatable {
+    public var vector: String?
+    public var asset: String?
+    public var png: String?
+    public var symbol: String?
+
+    public init(
+        vector: String? = nil,
+        asset: String? = nil,
+        png: String? = nil,
+        symbol: String? = nil
+    ) {
+        self.vector = vector
+        self.asset = asset
+        self.png = png
+        self.symbol = symbol
+    }
+}
 
 // MARK: - Agent kinds
 
@@ -36,19 +61,21 @@ public enum AgentKind: String, Sendable {
         }
     }
 
-    /// The agent's real favicon tile, for the kinds whose marks aren't carried
-    /// as vector paths — nil for the vector-drawn kinds and the plain terminal.
-    public var brandImage: BrandImageAsset? {
+    /// Temporary iOS catalog mapping. Rendering consumes only `IconRef`; Cut 5
+    /// removes this agent enum when the Mac starts sending the same refs on wire.
+    public var iconRef: IconRef {
         switch self {
-        case .opencode: .openCode
-        case .pi: .pi
-        case .amp: .amp
-        case .cursor: .cursor
-        case .kimi: .kimi
-        case .antigravity: .antigravity
-        case .hermes: .hermes
-        case .grok: .grok
-        case .claude, .codex, .terminal: nil
+        case .claude: IconRef(vector: "claude")
+        case .codex: IconRef(vector: "codex")
+        case .opencode: IconRef(asset: "opencode-favicon")
+        case .pi: IconRef(asset: "pi-favicon")
+        case .amp: IconRef(asset: "amp-favicon")
+        case .cursor: IconRef(asset: "cursor-favicon")
+        case .kimi: IconRef(asset: "kimi-favicon")
+        case .antigravity: IconRef(asset: "antigravity-favicon")
+        case .hermes: IconRef(asset: "hermes-favicon")
+        case .grok: IconRef(asset: "grok-favicon")
+        case .terminal: IconRef()
         }
     }
 }
@@ -75,29 +102,54 @@ public extension Color {
 /// A session's leading mark at rest: the vendor logo (the working spinner is
 /// composed by the row, not here).
 public struct AgentIconView: View {
-    let agent: AgentKind
+    let ref: IconRef
     let size: CGFloat
+    let tint: Color
 
-    public init(agent: AgentKind, size: CGFloat = 13) {
-        self.agent = agent
+    public init(ref: IconRef, size: CGFloat = 13, tint: Color = .monochromeInk) {
+        self.ref = ref
         self.size = size
+        self.tint = tint
     }
 
+    @ViewBuilder
     public var body: some View {
-        switch agent {
-        case .claude:
-            BrandLogoShape(logo: .claude)
-                .fill(BrandLogo.claude.tint)
+        if let png = ref.png, let image = Self.image(base64: png) {
+            imageTile(image)
+        } else if let vector = ref.vector, let logo = BrandLogo(reference: vector) {
+            BrandLogoShape(logo: logo)
+                .fill(logo.tint, style: FillStyle(eoFill: logo.usesEvenOddFill))
                 .frame(width: size, height: size)
-        case .codex:
-            BrandLogoShape(logo: .codex)
-                .fill(BrandLogo.codex.tint, style: FillStyle(eoFill: true))
-                .frame(width: size, height: size)
-        case .opencode, .pi, .amp, .cursor, .kimi, .antigravity, .hermes, .grok:
-            BrandImageView(asset: agent.brandImage!, size: size)
-        case .terminal:
+        } else if let asset = ref.asset, !asset.isEmpty {
+            BrandImageView(resourceName: asset, size: size)
+        } else if let symbol = ref.symbol, !symbol.isEmpty {
+            Image(systemName: symbol)
+                .font(.system(size: size))
+                .foregroundStyle(tint)
+        } else {
             HugeIconView(icon: .terminal, size: size, color: .monochromeInk)
         }
+    }
+
+    private func imageTile(_ image: Image) -> some View {
+        image
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+    }
+
+    private static func image(base64: String) -> Image? {
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        #if canImport(UIKit)
+        guard let image = UIImage(data: data) else { return nil }
+        return Image(uiImage: image)
+        #elseif canImport(AppKit)
+        guard let image = NSImage(data: data) else { return nil }
+        return Image(nsImage: image)
+        #else
+        return nil
+        #endif
     }
 }
 
@@ -106,51 +158,19 @@ public struct AgentIconView: View {
 /// A vendor brand mark carried as its real favicon image (the marks whose
 /// detail — Pi's monochrome glyph, OpenCode's two-tone box, Cursor's shaded
 /// cube — a single-fill vector path can't reproduce), bundled under this
-/// package's `Resources`. All PNG: iOS's `UIImage` can't decode SVG files, so
-/// Pi's and Cursor's vector favicons are pre-rasterized at 256px. The desktop
-/// app still renders its own copies from its app bundle (see the macOS
-/// `BrandImageAsset`); these exist so the iOS session list shows the same
-/// marks as the macOS sidebar.
-public enum BrandImageAsset: Hashable, Sendable {
-    case pi
-    case openCode
-    case amp
-    case cursor
-    case kimi
-    case antigravity
-    case hermes
-    case grok
-
-    /// Base name of the bundled resource file (without extension).
-    var resourceName: String {
-        switch self {
-        case .pi: "pi-favicon"
-        case .openCode: "opencode-favicon"
-        case .amp: "amp-favicon"
-        case .cursor: "cursor-favicon"
-        case .kimi: "kimi-favicon"
-        case .antigravity: "antigravity-favicon"
-        case .hermes: "hermes-favicon"
-        case .grok: "grok-favicon"
-        }
-    }
-}
-
-/// Renders a vendor's favicon as a small rounded tile — the favicons carry
-/// their own dark backgrounds, so the rounded clip makes them read like the
-/// app icons they are at list sizes. Falls back to empty space if the
-/// resource can't be loaded rather than trapping.
+/// package's `Resources`. The resource name arrives as data instead of an enum,
+/// so adding an agent never adds an icon switch.
 public struct BrandImageView: View {
-    let asset: BrandImageAsset
+    let resourceName: String
     let size: CGFloat
 
-    public init(asset: BrandImageAsset, size: CGFloat) {
-        self.asset = asset
+    public init(resourceName: String, size: CGFloat) {
+        self.resourceName = resourceName
         self.size = size
     }
 
     public var body: some View {
-        if let image = asset.loadImage() {
+        if let image = loadImage() {
             image
                 .resizable()
                 .interpolation(.high)
@@ -160,9 +180,7 @@ public struct BrandImageView: View {
             Color.clear.frame(width: size, height: size)
         }
     }
-}
 
-extension BrandImageAsset {
     /// Loads the bundled favicon, or `nil` if it is missing.
     ///
     /// iOS-ONLY on purpose: `Bundle.module` is safe there because the app is
@@ -172,7 +190,7 @@ extension BrandImageAsset {
     /// build-machine path and fatalErrors in a packaged release (the v0.2.4
     /// crash) — so the desktop must never reach this and keeps loading its own
     /// favicon copies from `Bundle.termioResources`.
-    func loadImage() -> Image? {
+    private func loadImage() -> Image? {
         #if canImport(UIKit)
         guard let url = Bundle.module.url(forResource: resourceName, withExtension: "png"),
               let image = UIImage(contentsOfFile: url.path)
@@ -215,6 +233,14 @@ public enum HugeIcon: Hashable, Sendable {
 public enum BrandLogo: Hashable, Sendable {
     case claude
     case codex
+
+    public init?(reference: String) {
+        switch reference.lowercased() {
+        case "claude": self = .claude
+        case "codex": self = .codex
+        default: return nil
+        }
+    }
 
     /// Side length of the source SVG's square viewBox (both marks use 24).
     public var viewBox: CGFloat { 24 }
