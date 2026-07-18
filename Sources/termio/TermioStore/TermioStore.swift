@@ -177,6 +177,11 @@ final class TermioStore: ObservableObject {
     let branchModel = BranchModel()
 
     var surfaces: [Session.ID: TerminalViewState] = [:]
+    /// The in-memory session behind each terminal surface, cached alongside `surfaces` so the
+    /// cmd-click path detector can read a surface's viewport text. `TerminalViewState` doesn't
+    /// expose its backend's `InMemoryTerminalSession` (it's internal to the wrapper's
+    /// `TerminalSurfaceOptions`), so we keep our own handle from creation time.
+    var surfaceSessions: [Session.ID: InMemoryTerminalSession] = [:]
     /// The live WKWebView behind each browser-pane session (see `browserPane(for:)`),
     /// cached like `surfaces` so revisiting the pane never reloads the page.
     var browserPanes: [Session.ID: BrowserPaneModel] = [:]
@@ -322,11 +327,18 @@ final class TermioStore: ObservableObject {
         // that link in *both* shells and agent TUIs. Returning nil consumes the event so the click
         // isn't also delivered to the terminal/app underneath.
         linkClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
-            guard let self,
-                  event.modifierFlags.contains(.command),
-                  let url = TerminalLinkState.hoveredURL else { return event }
-            self.openTerminalLink(url, surfaceWorkingDirectory: nil)
-            return nil
+            guard let self, event.modifierFlags.contains(.command) else { return event }
+            // Plain-shell / OSC 8 path: ghostty detected a link under the mouse and reported it.
+            if let url = TerminalLinkState.hoveredURL {
+                self.openTerminalLink(url, surfaceWorkingDirectory: nil)
+                return nil
+            }
+            // Fallback for a mouse-capturing TUI (Claude Code): ghostty stops firing its hover-link
+            // action once the app grabs the mouse, so `hoveredURL` is nil even over a real path.
+            // Detect the path ourselves from the grid text under the click. Only consume the event
+            // when we actually opened something, so an ordinary cmd-click still passes through.
+            if self.openFilePathUnderTerminalClick(event) { return nil }
+            return event
         }
         syncWatchedFolders()
 

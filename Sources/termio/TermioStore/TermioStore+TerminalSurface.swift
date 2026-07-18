@@ -307,6 +307,7 @@ extension TermioStore {
 
         state.configuration = TerminalSurfaceOptions(backend: .inMemory(inMemory))
         surfaces[session.id] = state
+        surfaceSessions[session.id] = inMemory
         monitor(state, for: session.id)
         warmUpRendering(state)
         // Record that this session has now launched (and its pinned resume id) so the

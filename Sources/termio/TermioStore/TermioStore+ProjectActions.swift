@@ -487,6 +487,7 @@ extension TermioStore {
             ptyProcesses[sessionID]?.terminate()
             ptyProcesses[sessionID] = nil
             surfaces[sessionID] = nil
+            surfaceSessions[sessionID] = nil
             browserPanes[sessionID] = nil
             monitors[sessionID] = nil
             statuses[sessionID] = nil
@@ -548,6 +549,7 @@ extension TermioStore {
         ptyProcesses[id]?.terminate()
         ptyProcesses[id] = nil
         surfaces[id] = nil
+        surfaceSessions[id] = nil
         browserPanes[id] = nil
         monitors[id] = nil
         statuses[id] = nil
