@@ -127,6 +127,9 @@ struct FileBrowserView: View {
     /// this handler, so a second click on the *same* folder (to collapse it) would go
     /// unseen — resetting to nil makes every click on a folder register. Folders thus
     /// don't hold a persistent highlight; files (which stay selected/open) are untouched.
+    /// Also updates `expandedFolderURLs` directly here so the icon flips before the
+    /// notification roundtrip; the observer (which covers disclosure-triangle clicks)
+    /// will be a no-op since the URL is already in the right state.
     private func toggleSelectedFolder(attempt: Int = 0) {
         guard let outline = browserState.outlineView else { return }
         let row = outline.selectedRow
@@ -141,8 +144,10 @@ struct FileBrowserView: View {
         guard outline.isExpandable(item) else { return }
         if outline.isItemExpanded(item) {
             outline.animator().collapseItem(item)
+            if let url = browserState.selection { browserState.expandedFolderURLs.remove(url) }
         } else {
             outline.animator().expandItem(item)
+            if let url = browserState.selection { browserState.expandedFolderURLs.insert(url) }
         }
         browserState.selection = nil
     }
@@ -163,7 +168,10 @@ struct FileBrowserView: View {
                 onDrop: { sources, destination in receive(sources, into: destination) },
                 rootURL: root.url,
                 actions: treeActions,
-                captureOutline: { browserState.outlineView = $0 }
+                captureOutline: { outline, item, url in
+                    browserState.register(outline: outline, item: item, url: url)
+                },
+                expandedFolderURLs: browserState.expandedFolderURLs
             )
             .onKeyPress(.space) {
                 guard browserState.selection != nil else { return .ignored }

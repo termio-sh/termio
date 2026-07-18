@@ -15,10 +15,12 @@ struct FileTreeList: View {
     let rootURL: URL
     /// Open / create / delete actions, forwarded to each row.
     let actions: FileTreeActions
-    /// Hands the hosting `NSOutlineView` up to `FileBrowserView` so it can expand a
-    /// folder programmatically when its row is selected — a click can't be observed
-    /// any other way (the outline view swallows primary-click recognizers).
-    let captureOutline: (NSOutlineView?) -> Void
+    /// Registers each row's private outline item with its URL and exposes the hosting
+    /// outline view to `FileBrowserView` for programmatic folder toggles.
+    let captureOutline: (NSOutlineView?, NSObject?, URL) -> Void
+    /// URLs of currently expanded folders, so `FileRow` can use the sidebar's
+    /// closed/open Hugeicons folder pair.
+    let expandedFolderURLs: Set<URL>
 
     var body: some View {
         // Keep List's native `selection:` binding — it drives selection at the AppKit
@@ -28,7 +30,7 @@ struct FileTreeList: View {
         // outline view's `selectionHighlightStyle = .none` (see `FileRow`), leaving our
         // own `SidebarRowHighlight` as the sole, left-sidebar-matching selection cue.
         List(nodes, children: \.children, selection: $selection) { node in
-            FileRow(node: node, font: font, isSelected: selection == node.url, onDrop: onDrop, actions: actions, captureOutline: captureOutline)
+            FileRow(node: node, font: font, isSelected: selection == node.url, onDrop: onDrop, actions: actions, captureOutline: captureOutline, expandedFolderURLs: expandedFolderURLs)
                 .listRowSeparator(.hidden)
         }
         .listStyle(.plain)
@@ -58,24 +60,37 @@ private struct FileRow: View {
     let isSelected: Bool
     let onDrop: (_ sources: [URL], _ destination: URL) -> Bool
     let actions: FileTreeActions
-    /// Reports the hosting outline view up to `FileBrowserView` (see `FileTreeList`).
-    let captureOutline: (NSOutlineView?) -> Void
+    /// Registers this row's private outline item with `FileBrowserState`.
+    let captureOutline: (NSOutlineView?, NSObject?, URL) -> Void
+    /// URLs of currently expanded folders — a folder is "open" when its URL is in
+    /// this set, driving the sidebar's `.folder` → `.folderOpen` icon toggle.
+    let expandedFolderURLs: Set<URL>
 
     @State private var isHovering = false
     /// True while a drag hovers this folder, lighting its background the way the VS
     /// Code explorer marks the folder a drop would land in.
     @State private var isTargeted = false
 
+    /// Computed from the shared expansion set — a folder is "open" exactly when its
+    /// URL is in the set.
+    private var isExpanded: Bool { expandedFolderURLs.contains(node.url) }
+
     private var chrome: ChromeTheme? { settings.chromeTheme(for: colorScheme) }
 
     var body: some View {
         // One explicit HStack for both kinds (not `Label`, whose internal insets shift
-        // the title): a folder is just its name pulled flush to the disclosure chevron
-        // (VS Code, no glyph — cleaner without a folder icon); a file leads with its
-        // type icon. Because both start at the HStack's leading edge, a folder's name
-        // lines up exactly under the file icons below it.
+        // the title): a folder uses the exact closed/open Hugeicons pair from the left
+        // sidebar; a file leads with its type icon. Because both start at the HStack's
+        // leading edge, a folder's icon lines up in the same column as file icons.
         let row = HStack(spacing: 5) {
-            if !node.isDirectory {
+            if node.isDirectory {
+                HugeIconView(
+                    icon: isExpanded ? .folderOpen : .folder,
+                    size: 15,
+                    color: chrome?.foreground ?? .primary
+                )
+                    .frame(width: 16, alignment: .leading)
+            } else {
                 // The file's real language/tool logo (a Devicon mark) when bundled,
                 // else a tinted SF Symbol — see `FileIconView`.
                 FileIconView(url: node.url, size: 15, symbolSize: 13)
@@ -105,7 +120,7 @@ private struct FileRow: View {
         .background(OutlineSelectionStyleStripper())
         // Capture that same outline view (a row is the one place the walk-up reaches
         // it) so `FileBrowserView` can expand this folder on the click that selected it.
-        .background(OutlineViewCapture(onFound: captureOutline))
+        .background(OutlineViewCapture(nodeURL: node.url, onFound: captureOutline))
         // Drag a row out as its file URL. The terminal pane catches the drop and
         // inserts the shell-quoted path at the prompt (see `TerminalPane.sendPaths`);
         // a folder row catches it to move the file into that folder. Selection is the
@@ -362,16 +377,32 @@ private struct EmptyAreaContextMenu: NSViewRepresentable {
 /// superview chain — a `.background` on the List sits in a sibling subtree and can't
 /// reach it.
 private struct OutlineViewCapture: NSViewRepresentable {
-    let onFound: (NSOutlineView?) -> Void
+    let nodeURL: URL
+    let onFound: (NSOutlineView?, NSObject?, URL) -> Void
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
-        DispatchQueue.main.async { onFound(Self.outlineView(above: view)) }
+        DispatchQueue.main.async { report(from: view) }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { onFound(Self.outlineView(above: nsView)) }
+        DispatchQueue.main.async { report(from: nsView) }
+    }
+
+    private func report(from view: NSView) {
+        guard let outline = Self.outlineView(above: view) else {
+            onFound(nil, nil, nodeURL)
+            return
+        }
+        let item: NSObject?
+        if let rowView = Self.rowView(above: view) {
+            let row = outline.row(for: rowView)
+            item = row >= 0 ? outline.item(atRow: row) as? NSObject : nil
+        } else {
+            item = nil
+        }
+        onFound(outline, item, nodeURL)
     }
 
     /// Walk up to the enclosing outline view (an `NSTableView` subclass).
@@ -379,6 +410,15 @@ private struct OutlineViewCapture: NSViewRepresentable {
         var ancestor = view.superview
         while let current = ancestor {
             if let outline = current as? NSOutlineView { return outline }
+            ancestor = current.superview
+        }
+        return nil
+    }
+
+    private static func rowView(above view: NSView) -> NSTableRowView? {
+        var ancestor = view.superview
+        while let current = ancestor {
+            if let row = current as? NSTableRowView { return row }
             ancestor = current.superview
         }
         return nil
