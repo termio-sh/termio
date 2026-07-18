@@ -1,0 +1,18 @@
+{
+  "id": "amp",
+  "name": "Amp",
+  "wire": "amp",
+  "command": "amp",
+  "resume": "none",
+  "icon": { "asset": "amp-favicon" },
+  "install": "https://ampcode.com/manual",
+  "hooks": {
+    "type": "plugin",
+    "dir": "~/.config/amp/plugins",
+    "dialect": "amp",
+    "events": [
+      { "on": "agent.start", "state": "working" },
+      { "on": "agent.end", "state": "done" }
+    ]
+  }
+}

@@ -207,32 +207,38 @@ enum AgentStatusHooks {
 
     /// Re-applies every agent's integration (or removes them all) to match `enabled`.
     static func sync(enabled: Bool) {
-        for installer in installers {
-            if enabled { installer.install() } else { installer.uninstall() }
+        if enabled {
+            // A full user override may intentionally remove/redirect a shipped hook.
+            // Remove that old managed wiring before installing the merged catalog.
+            for installer in staleBundledInstallers { installer.uninstall() }
+            for installer in installers { installer.install() }
+        } else {
+            for installer in allKnownInstallers { installer.uninstall() }
         }
     }
 
     private static var installers: [AgentStatusInstaller] {
-        var installers: [AgentStatusInstaller] = [
-            JSONHookFile.claude,
-            JSONHookFile.codex,
-            JSONHookFile.cursor,
-            JSONHookFile.grok,
-            TOMLHookBlock.kimi,
-            PluginFile.openCode,
-            PluginFile.pi,
-            PluginFile.amp,
-        ]
-        // User agents that declared a JSON-hook-file integration in `agent.json` get
-        // the exact same installer as the built-ins — the config supplies only the file
-        // path and event→state map, and termio writes the report commands. Plugin-API
-        // agents can't be expressed this way and simply carry no `hookSpec`.
-        for agent in AgentCatalog.shared.all {
-            if let spec = agent.hookSpec {
-                installers.append(JSONHookFile.userAgent(id: agent.id, spec: spec))
-            }
+        AgentCatalog.shared.all.compactMap { agent in
+            agent.hookSpec.flatMap { installer(id: agent.id, spec: $0) }
         }
-        return installers
+    }
+
+    private static var staleBundledInstallers: [AgentStatusInstaller] {
+        AgentCatalog.shared.staleBundledHookSpecs.compactMap { installer(id: "bundled", spec: $0) }
+    }
+
+    private static var allKnownInstallers: [AgentStatusInstaller] {
+        let specs = AgentCatalog.shared.bundled.compactMap(\.hookSpec)
+            + AgentCatalog.shared.all.compactMap(\.hookSpec)
+        return Set(specs).compactMap { installer(id: "catalog", spec: $0) }
+    }
+
+    private static func installer(id: String, spec: AgentHookSpec) -> AgentStatusInstaller? {
+        switch spec.type {
+        case .json: return JSONHookFile.manifest(id: id, spec: spec)
+        case .toml: return TOMLHookBlock.manifest(id: id, spec: spec)
+        case .plugin: return PluginFile.manifest(id: id, spec: spec)
+        }
     }
 
     /// The shell command a hook runs: invoke the public `termio agent report <state>`
@@ -289,7 +295,7 @@ private protocol AgentStatusInstaller {
 
 /// The on-disk shape of a JSON hook file. Agents that configure hooks via a JSON
 /// file still disagree on structure, so the installer branches on this.
-enum HookDialect {
+enum HookDialect: Hashable {
     /// Claude Code / Codex: `{ "hooks": { "<Event>": [ { "matcher"?, "hooks": [ {type,command} ] } ] } }`,
     /// and the agent ignores the hook's stdout.
     case claudeNested
@@ -297,6 +303,13 @@ enum HookDialect {
     /// required top-level `version`, flat one-key entries, and the hook's stdout is
     /// read back as its JSON reply (so the report prints a clean empty object).
     case cursorFlat
+    /// Kimi's marker-delimited TOML array-of-tables block.
+    case kimiTOML
+    /// Shipped plugin templates. Each names a closed host API; manifests provide
+    /// only the destination directory and event→state data.
+    case openCodePlugin
+    case piPlugin
+    case ampPlugin
 }
 
 /// Installs hooks for agents whose config is a JSON file with the Claude-Code
@@ -308,7 +321,7 @@ private struct JSONHookFile: AgentStatusInstaller {
     /// `(event name, normalized state, matcher)`. `matcher` is `"*"` for Claude's
     /// tool events (the shape it expects) and `nil` everywhere else — Codex treats
     /// a missing matcher as "match every occurrence".
-    let events: [(name: String, state: String, matcher: String?)]
+    let events: [AgentHookEvent]
     let label: String
     /// Whether this agent's hooks pass a JSON payload on stdin we can mine for the
     /// session's `transcript_path`. Only Claude Code is known to (and to always
@@ -318,105 +331,17 @@ private struct JSONHookFile: AgentStatusInstaller {
     /// Codex also uses; Cursor overrides it.
     var dialect: HookDialect = .claudeNested
 
-    static var claude: JSONHookFile {
-        JSONHookFile(
-            url: home(".claude", "settings.json"),
-            events: [
-                ("UserPromptSubmit", "working", nil),
-                ("PreToolUse", "working", "*"),
-                ("PostToolUse", "working", "*"),
-                // Only an explicit permission prompt is "attention"; Claude's
-                // generic `Notification` also fires for idle waiting, which would
-                // wrongly turn a just-finished (`done`) turn orange. The zero-config
-                // bell/OSC layer still catches any notification the agent raises, so
-                // dropping it here loses no real "needs you" signal.
-                ("PermissionRequest", "attention", "*"),
-                ("Stop", "done", nil),
-                // A subagent finishing means the parent turn is still in flight.
-                ("SubagentStop", "working", nil),
-            ],
-            label: "claude",
-            capturesTranscript: true)
-    }
-
-    static var codex: JSONHookFile {
-        JSONHookFile(
-            url: home(".codex", "hooks.json"),
-            events: [
-                ("UserPromptSubmit", "working", nil),
-                ("PreToolUse", "working", nil),
-                ("PostToolUse", "working", nil),
-                ("PermissionRequest", "attention", nil),
-                ("Stop", "done", nil),
-                ("SubagentStop", "working", nil),
-            ],
-            label: "codex")
-    }
-
-    /// Cursor's agent hooks live in `~/.cursor/hooks.json`. Only the informational
-    /// lifecycle events are mapped: a prompt/tool starting is `working`, `stop` is
-    /// `done`. Cursor's permission gating happens through a hook's *return value*
-    /// (a `beforeShellExecution` returning `"ask"`), not a lifecycle event, so there
-    /// is no `attention` mapping — and termio deliberately does not hook the gating
-    /// events, to avoid interfering with Cursor's own approval flow. The zero-config
-    /// bell/OSC layer still catches any "needs you" the agent raises.
-    static var cursor: JSONHookFile {
-        JSONHookFile(
-            url: home(".cursor", "hooks.json"),
-            events: [
-                ("beforeSubmitPrompt", "working", nil),
-                ("preToolUse", "working", nil),
-                ("postToolUse", "working", nil),
-                ("subagentStop", "working", nil),
-                ("stop", "done", nil),
-            ],
-            label: "cursor",
-            dialect: .cursorFlat)
-    }
-
-    /// Grok Build discovers hooks from every `*.json` under `~/.grok/hooks/`, each in
-    /// the Claude-nested shape, so termio drops its own dedicated file there rather
-    /// than merging into a shared one — nothing user-owned to preserve, and Grok
-    /// merges it with the user's other hook files. (Grok also reads
-    /// `~/.claude/settings.json` for Claude compatibility, so it already sees termio's
-    /// Claude hook; this explicit file makes the integration independent of whether
-    /// Claude Code is installed.) Grok compiles a `matcher` as a tool-name regex —
-    /// a bare `"*"` would fail to compile — so the tool events omit the matcher, which
-    /// Grok treats as "match every tool". No `attention` mapping: Grok gates via a
-    /// PreToolUse hook's return value (like Cursor), not a lifecycle event, and the
-    /// zero-config bell/OSC layer still catches any "needs you" it raises.
-    static var grok: JSONHookFile {
-        JSONHookFile(
-            url: home(".grok", "hooks", "termio-status.json"),
-            events: [
-                ("UserPromptSubmit", "working", nil),
-                ("PreToolUse", "working", nil),
-                ("PostToolUse", "working", nil),
-                ("Stop", "done", nil),
-                ("SubagentStop", "working", nil),
-            ],
-            label: "grok")
-    }
-
-    /// Builds an installer from a user agent's declarative `hooks` block. Same shape
-    /// as the built-ins — only the file path, events, and dialect vary, exactly the
-    /// per-agent knowledge the config carries. Never captures a transcript (only Claude
-    /// reliably provides one on stdin), so a user agent's hooks just report state. A
-    /// `static func` (not an `init`) so the memberwise initializer the built-in
-    /// factories rely on is preserved.
-    static func userAgent(id: String, spec: AgentHookSpec) -> JSONHookFile {
-        JSONHookFile(
-            url: URL(fileURLWithPath: (spec.file as NSString).expandingTildeInPath),
+    static func manifest(id: String, spec: AgentHookSpec) -> JSONHookFile? {
+        guard spec.type == .json, let file = spec.file else {
+            AgentStatusHooks.log("\(id): incomplete JSON hook manifest")
+            return nil
+        }
+        return JSONHookFile(
+            url: URL(fileURLWithPath: (file as NSString).expandingTildeInPath),
             events: spec.events,
             label: id,
-            capturesTranscript: false,
+            capturesTranscript: spec.capturesTranscript,
             dialect: spec.dialect)
-    }
-
-    private static func home(_ components: String...) -> URL {
-        components.reduce(FileManager.default.homeDirectoryForCurrentUser) {
-            $0.appendingPathComponent($1)
-        }
     }
 
     private enum FileState {
@@ -543,22 +468,31 @@ private struct PluginFile: AgentStatusInstaller {
     let url: URL
     let contents: String
 
-    static var openCode: PluginFile {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/opencode/plugin/termio-status.js")
-        return PluginFile(url: url, contents: openCodeSource)
-    }
-
-    static var pi: PluginFile {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".pi/agent/extensions/termio-status.js")
-        return PluginFile(url: url, contents: piSource)
-    }
-
-    static var amp: PluginFile {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/amp/plugins/termio-status.ts")
-        return PluginFile(url: url, contents: ampSource)
+    static func manifest(id: String, spec: AgentHookSpec) -> PluginFile? {
+        guard spec.type == .plugin, let directory = spec.directory else {
+            AgentStatusHooks.log("\(id): incomplete plugin hook manifest")
+            return nil
+        }
+        let filename: String
+        let contents: String
+        switch spec.dialect {
+        case .openCodePlugin:
+            filename = "termio-status.js"
+            contents = openCodeSource(events: spec.events)
+        case .piPlugin:
+            filename = "termio-status.js"
+            contents = piSource(events: spec.events)
+        case .ampPlugin:
+            filename = "termio-status.ts"
+            contents = ampSource(events: spec.events)
+        default:
+            AgentStatusHooks.log("\(id): hook dialect is not a plugin template")
+            return nil
+        }
+        let expanded = (directory as NSString).expandingTildeInPath
+        let url = URL(fileURLWithPath: expanded, isDirectory: true)
+            .appendingPathComponent(filename)
+        return PluginFile(url: url, contents: contents)
     }
 
     func install() {
@@ -588,8 +522,16 @@ private struct PluginFile: AgentStatusInstaller {
     /// when the turn ends; `permission.updated` means it's waiting on the user. Each
     /// maps to the public report contract shelled out via Bun's `$`. The session id
     /// comes from `TERMIO_SESSION`, which the PTY carries into the in-process plugin.
-    private static var openCodeSource: String {
-        """
+    private static func openCodeSource(events: [AgentHookEvent]) -> String {
+        let branches = events.map { event in
+            let eventName = jsString(event.name)
+            let state = jsString(event.state)
+            if let matcher = event.matcher {
+                return "      if (event.type === \(eventName) && event.properties?.status?.type === \(jsString(matcher))) return report(\(state));"
+            }
+            return "      if (event.type === \(eventName)) return report(\(state));"
+        }.joined(separator: "\n")
+        return """
         // termio agent status — reports OpenCode session lifecycle to termio.
         // Socket marker: \(AgentStatusHooks.marker)
         export const TermioStatus = async ({ $ }) => {
@@ -599,11 +541,7 @@ private struct PluginFile: AgentStatusInstaller {
           };
           return {
             event: async ({ event }) => {
-              if (event.type === "session.status" && event.properties?.status?.type === "busy") {
-                return report("working");
-              }
-              if (event.type === "session.idle") return report("done");
-              if (event.type === "permission.updated") return report("attention");
+        \(branches)
             },
           };
         };
@@ -613,15 +551,16 @@ private struct PluginFile: AgentStatusInstaller {
     /// Pi extension: `agent_start` fires when a turn begins, `agent_end` when it
     /// returns to the user. Pi has no shell-hook config, so the extension itself
     /// shells out via `pi.exec`; the session id rides in on `TERMIO_SESSION`.
-    private static var piSource: String {
-        let working = AgentStatusHooks.reportCommand(state: "working")
-        let done = AgentStatusHooks.reportCommand(state: "done")
+    private static func piSource(events: [AgentHookEvent]) -> String {
+        let listeners = events.map { event in
+            let command = AgentStatusHooks.reportCommand(state: event.state)
+            return "  pi.on(\(jsString(event.name)), () => pi.exec(\"sh\", [\"-c\", \(jsString(command))]));"
+        }.joined(separator: "\n")
         return """
         // termio agent status — reports Pi turn lifecycle to termio.
         // Socket marker: \(AgentStatusHooks.marker)
         export default (pi) => {
-          pi.on("agent_start", () => pi.exec("sh", ["-c", \(jsString(working))]));
-          pi.on("agent_end", () => pi.exec("sh", ["-c", \(jsString(done))]));
+        \(listeners)
         };
         """
     }
@@ -632,8 +571,11 @@ private struct PluginFile: AgentStatusInstaller {
     /// API), runs on Bun, and exposes Bun's `$` shell as `amp.$`; the session id
     /// rides in on `TERMIO_SESSION` from the PTY. `.quiet().nothrow()` keeps it a
     /// silent no-op when termio isn't listening.
-    private static var ampSource: String {
-        """
+    private static func ampSource(events: [AgentHookEvent]) -> String {
+        let listeners = events.map { event in
+            "  amp.on(\(jsString(event.name)), () => report(\(jsString(event.state))));"
+        }.joined(separator: "\n")
+        return """
         // termio agent status — reports Amp turn lifecycle to termio.
         // Socket marker: \(AgentStatusHooks.marker)
         export default (amp) => {
@@ -641,8 +583,7 @@ private struct PluginFile: AgentStatusInstaller {
           const report = (state) => {
             return amp.$`${cli} agent report ${state}`.quiet().nothrow();
           };
-          amp.on("agent.start", () => report("working"));
-          amp.on("agent.end", () => report("done"));
+        \(listeners)
         };
         """
     }
@@ -668,23 +609,19 @@ private struct PluginFile: AgentStatusInstaller {
 /// Kimi's blockable events — no clean-stdout handling is required.
 private struct TOMLHookBlock: AgentStatusInstaller {
     let url: URL
-    let events: [(name: String, state: String, matcher: String?)]
+    let events: [AgentHookEvent]
 
     private static let blockBegin = "# >>> termio agent-status hooks (managed — do not edit) >>>"
     private static let blockEnd = "# <<< termio agent-status hooks <<<"
 
-    /// Kimi Code hooks in `~/.kimi/config.toml`. `UserPromptSubmit` opens a turn,
-    /// `Stop` closes it, and `Interrupt` (Esc) closes an aborted one so the spinner
-    /// doesn't stick. All three are non-tool events, so none needs a `matcher`.
-    static var kimi: TOMLHookBlock {
-        TOMLHookBlock(
-            url: FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".kimi/config.toml"),
-            events: [
-                ("UserPromptSubmit", "working", nil),
-                ("Stop", "done", nil),
-                ("Interrupt", "done", nil),
-            ])
+    static func manifest(id: String, spec: AgentHookSpec) -> TOMLHookBlock? {
+        guard spec.type == .toml, spec.dialect == .kimiTOML, let file = spec.file else {
+            AgentStatusHooks.log("\(id): incomplete TOML hook manifest")
+            return nil
+        }
+        return TOMLHookBlock(
+            url: URL(fileURLWithPath: (file as NSString).expandingTildeInPath),
+            events: spec.events)
     }
 
     func install() {
@@ -705,7 +642,7 @@ private struct TOMLHookBlock: AgentStatusInstaller {
     /// event. The command is embedded as a TOML multi-line literal string (`'''…'''`)
     /// so the shell one-liner's single and double quotes need no escaping — it never
     /// contains three consecutive single quotes.
-    private static func render(events: [(name: String, state: String, matcher: String?)]) -> String {
+    private static func render(events: [AgentHookEvent]) -> String {
         var lines = [blockBegin]
         for event in events {
             let command = AgentStatusHooks.reportCommand(state: event.state)

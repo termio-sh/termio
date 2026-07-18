@@ -51,8 +51,11 @@ let package = Package(
             // a build input, so exclude it rather than let SwiftPM flag it as unhandled.
             exclude: ["Editor/Highlightr/README.md"],
             resources: [
-                // Vendor favicons resolved by resource name into `AgentIcon.image`.
-                .process("Resources"),
+                // Process app assets into the resource-bundle root so existing
+                // name-based lookups stay stable. Agent manifests are copied as a
+                // directory because the catalog intentionally enumerates only it.
+                .process("Resources/assets"),
+                .copy("Resources/agents"),
                 // Devicon language/tool logos (one SVG per file type), loaded by name
                 // for the file tree; see LangIconCatalog / LangIconView. Kept as a
                 // folder copy (not `.process`) so the lookup subdirectory survives.

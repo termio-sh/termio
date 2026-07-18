@@ -1,10 +1,9 @@
 import SwiftUI
 
 /// What a new session launches: a plain login shell, or a coding agent CLI.
-/// Formerly a closed `enum AgentPreset`; now a value type so the built-in agents
-/// and any the user drops into `~/.termio/agents/` flow through the same shape.
-/// Built-ins are the static array below (keeping their real vector brand marks);
-/// user agents are loaded and merged by `AgentCatalog`. Equality and persistence
+/// Formerly a closed `enum AgentPreset`; now a value type so bundled manifests and
+/// any the user drops into `~/.termio/agents/` flow through the same shape and decode
+/// path. `AgentCatalog` resolves both sources once at launch. Equality and persistence
 /// are by `id` alone — the same stable slug the old enum used as its `rawValue`
 /// (`claudeCode` / `codex` / …), so existing `state.json` files deserialize with
 /// no migration.
@@ -42,12 +41,11 @@ struct AgentDefinition: Identifiable {
     /// no `status` block (or that declared `hooks`, which take authority). See
     /// `AgentStatusRules`.
     let statusRules: AgentStatusRules?
-    /// A user agent's declarative JSON-hook-file integration (Claude/Codex/Cursor
-    /// shape): the path to the agent's own hook file plus its event→state mapping.
+    /// A manifest's declarative hook integration: the destination owned by the agent,
+    /// a closed installer/dialect, and its event→state mapping.
     /// When present it is installed by `AgentStatusHooks` and becomes the session's
     /// status authority — so `statusRules` is left `nil` and screen-scrape is skipped,
-    /// keeping one source of truth per pane. `nil` for built-ins (installed in code)
-    /// and for user agents that declared no `hooks` block. See `AgentHookSpec`.
+    /// keeping one source of truth per pane. See `AgentHookSpec`.
     let hookSpec: AgentHookSpec?
 
     /// All fields after `wireName` are optional so the built-in roster and the
@@ -187,102 +185,9 @@ extension AgentDefinition: Codable {
     }
 }
 
-// MARK: - Built-ins
+// MARK: - Fallback
 
 extension AgentDefinition {
-    /// Resolves a shipped image by resource name without encoding the agent in an
-    /// enum. A packaging mistake degrades to the same visible fallback as a bad user
-    /// icon and is logged; it never traps the catalog during launch.
-    private static func bundledIcon(
-        named resourceName: String, fileExtension: String
-    ) -> AgentIcon {
-        guard let url = Bundle.termioResources.url(
-            forResource: resourceName, withExtension: fileExtension
-        ) else {
-            AgentCatalog.log("missing bundled icon \(resourceName).\(fileExtension)")
-            return .symbol("questionmark.app")
-        }
-        return .image(url)
-    }
-
-    static let terminal = AgentDefinition(
-        id: "terminal", displayName: "Terminal", command: nil,
-        permissionBypassFlag: nil, resumeStyle: .none,
-        icon: .terminalGlyph, tint: .monochromeInk, installURL: nil, wireName: "terminal")
-
-    static let claudeCode = AgentDefinition(
-        id: "claudeCode", displayName: "Claude Code", command: "claude",
-        permissionBypassFlag: "--dangerously-skip-permissions",
-        resumeStyle: .claudeStyle, icon: .vector(.claude), tint: BrandLogo.claude.tint,
-        installURL: URL(string: "https://claude.com/claude-code"), wireName: "claude")
-
-    static let codex = AgentDefinition(
-        id: "codex", displayName: "Codex", command: "codex",
-        permissionBypassFlag: "--dangerously-bypass-approvals-and-sandbox",
-        resumeStyle: .codexStyle, icon: .vector(.codex), tint: BrandLogo.codex.tint,
-        installURL: URL(string: "https://developers.openai.com/codex/cli"), wireName: "codex")
-
-    static let opencode = AgentDefinition(
-        id: "opencode", displayName: "OpenCode", command: "opencode",
-        permissionBypassFlag: nil, resumeStyle: .openCodeStyle,
-        icon: bundledIcon(named: "opencode-favicon", fileExtension: "png"), tint: .monochromeInk,
-        installURL: URL(string: "https://opencode.ai"), wireName: "opencode")
-
-    static let pi = AgentDefinition(
-        id: "pi", displayName: "Pi", command: "pi",
-        permissionBypassFlag: nil, resumeStyle: .piStyle,
-        icon: bundledIcon(named: "pi-favicon", fileExtension: "svg"), tint: .monochromeInk,
-        installURL: URL(string: "https://pi.dev"), wireName: "pi")
-
-    static let amp = AgentDefinition(
-        id: "amp", displayName: "Amp", command: "amp",
-        permissionBypassFlag: nil, resumeStyle: .none,
-        icon: bundledIcon(named: "amp-favicon", fileExtension: "png"), tint: .monochromeInk,
-        installURL: URL(string: "https://ampcode.com/manual"), wireName: "amp")
-
-    static let cursor = AgentDefinition(
-        // Cursor's headless CLI binary is `cursor-agent`, distinct from the `cursor`
-        // GUI launcher, so name it explicitly.
-        id: "cursor", displayName: "Cursor", command: "cursor-agent",
-        permissionBypassFlag: nil, resumeStyle: .none,
-        icon: bundledIcon(named: "cursor-favicon", fileExtension: "svg"), tint: .monochromeInk,
-        installURL: URL(string: "https://cursor.com/docs/cli"), wireName: "cursor")
-
-    static let kimi = AgentDefinition(
-        id: "kimi", displayName: "Kimi", command: "kimi",
-        permissionBypassFlag: nil, resumeStyle: .none,
-        icon: bundledIcon(named: "kimi-favicon", fileExtension: "png"), tint: .monochromeInk,
-        installURL: URL(string: "https://moonshotai.github.io/kimi-code"), wireName: "kimi")
-
-    static let antigravity = AgentDefinition(
-        id: "antigravity", displayName: "Antigravity", command: "agy",
-        permissionBypassFlag: nil, resumeStyle: .none,
-        icon: bundledIcon(named: "antigravity-favicon", fileExtension: "png"), tint: .monochromeInk,
-        installURL: URL(string: "https://antigravity.google/product/antigravity-cli"), wireName: "antigravity")
-
-    static let hermes = AgentDefinition(
-        id: "hermes", displayName: "Hermes", command: "hermes",
-        permissionBypassFlag: nil, resumeStyle: .none,
-        icon: bundledIcon(named: "hermes-favicon", fileExtension: "png"), tint: .monochromeInk,
-        installURL: URL(string: "https://hermes-agent.nousresearch.com/#downloads"), wireName: "hermes")
-
-    static let grok = AgentDefinition(
-        // xAI's Grok Build. The binary builds as `xai-grok-pager` but installs as `grok`.
-        // Resume is Claude-shaped: `--session-id <uuid>` creates a session with our id and
-        // `--resume <id>` reloads it, so `.claudeStyle` fits verbatim. `--yolo` is the
-        // documented auto-approve flag.
-        id: "grok", displayName: "Grok", command: "grok",
-        permissionBypassFlag: "--yolo",
-        resumeStyle: .claudeStyle,
-        icon: bundledIcon(named: "grok-favicon", fileExtension: "png"), tint: .monochromeInk,
-        installURL: URL(string: "https://x.ai/cli"), wireName: "grok")
-
-    /// The agents termio ships, in the order they appear in the picker. User agents
-    /// are appended after these by `AgentCatalog`.
-    static let builtins: [AgentDefinition] = [
-        terminal, claudeCode, codex, opencode, pi, amp, cursor, kimi, antigravity, hermes, grok,
-    ]
-
     /// A stand-in for a session that references an agent id no longer present (a user
     /// agent whose folder was deleted). It degrades to a plain shell but keeps the id
     /// and shows it as the title, so the session survives rather than being dropped —
@@ -303,6 +208,21 @@ extension AgentDefinition {
     /// old `AgentPreset.allCases`; the pickers, the roster, and name resolution all
     /// read from here, so user agents appear everywhere built-ins do.
     static var allCases: [AgentDefinition] { AgentCatalog.shared.all }
+
+    // Compatibility conveniences for enum-shaped call sites. These are catalog
+    // lookups, not definitions: every fact still comes from the corresponding JSON
+    // manifest, and a newly added agent needs no Swift member.
+    static var terminal: AgentDefinition { AgentCatalog.shared.definition(for: "terminal") }
+    static var claudeCode: AgentDefinition { AgentCatalog.shared.definition(for: "claudeCode") }
+    static var codex: AgentDefinition { AgentCatalog.shared.definition(for: "codex") }
+    static var opencode: AgentDefinition { AgentCatalog.shared.definition(for: "opencode") }
+    static var pi: AgentDefinition { AgentCatalog.shared.definition(for: "pi") }
+    static var amp: AgentDefinition { AgentCatalog.shared.definition(for: "amp") }
+    static var cursor: AgentDefinition { AgentCatalog.shared.definition(for: "cursor") }
+    static var kimi: AgentDefinition { AgentCatalog.shared.definition(for: "kimi") }
+    static var antigravity: AgentDefinition { AgentCatalog.shared.definition(for: "antigravity") }
+    static var hermes: AgentDefinition { AgentCatalog.shared.definition(for: "hermes") }
+    static var grok: AgentDefinition { AgentCatalog.shared.definition(for: "grok") }
 
     init?(rawValue: String) {
         guard let definition = AgentCatalog.shared.find(id: rawValue) else { return nil }
@@ -412,52 +332,59 @@ struct AgentStatusRules {
     }
 }
 
-// MARK: - JSON-hook-file integration (config-driven, no plugin code)
+// MARK: - Hook integration (config-driven, no agent-provided code)
 
-/// A user agent's declarative hook integration for the Claude/Codex/Cursor family:
-/// agents whose status hooks are just a JSON file mapping lifecycle events to shell
-/// commands. termio writes the report commands itself (`AgentStatusHooks.reportCommand`),
-/// so the user supplies only *data* — the file path and which event means what — never
-/// any code. Installed/removed by `AgentStatusHooks` alongside the built-ins. Agents
-/// with a different (plugin-API) hook mechanism can't be expressed here; they either
-/// post to the socket from their own plugin or fall back to screen-scrape `status`.
-struct AgentHookSpec {
-    /// The agent's own hook file, e.g. `~/.myagent/settings.json`. `~` is expanded.
-    let file: String
-    /// The file's structural shape — `.claudeNested` (Claude/Codex) or `.cursorFlat`
-    /// (Cursor's flat, stdout-as-reply dialect). See `HookDialect`.
-    let dialect: HookDialect
-    /// `(event name, normalized state, optional matcher)`, in the agent's own event
-    /// vocabulary. State is `working` / `attention` / `done` / `idle`.
-    let events: [(name: String, state: String, matcher: String?)]
+/// The closed installer shape a manifest may select. Config describes where and
+/// when to invoke termio's report contract; it never supplies executable contents.
+enum AgentHookType: String, Hashable {
+    case json
+    case toml
+    case plugin
 }
 
-// MARK: - Catalog (built-ins + user agents from disk)
+struct AgentHookEvent: Hashable {
+    let name: String
+    let state: String
+    let matcher: String?
+}
 
-/// Owns the merged set of agent definitions for the running app: the built-ins plus
-/// any the user dropped into `~/.termio/agents/<id>/agent.json`. Loaded once, lazily,
-/// on first access — which happens the moment the first session's agent is decoded,
-/// so user agents are always resolvable by the time `state.json` loads. Read-only
-/// after construction; agents are picked up on the next launch, not hot-reloaded.
+struct AgentHookSpec: Hashable {
+    let type: AgentHookType
+    /// Exact destination for JSON/TOML, e.g. `~/.claude/settings.json`.
+    let file: String?
+    /// Plugin directory for dialect-owned shipped templates. The dialect chooses
+    /// the fixed filename and source shape; the manifest cannot inject code.
+    let directory: String?
+    let dialect: HookDialect
+    let capturesTranscript: Bool
+    let events: [AgentHookEvent]
+}
+
+// MARK: - Catalog (bundled + user manifests)
+
+/// Owns the merged set of agent definitions. Both sources decode through
+/// `AgentManifest`; only their directory layout differs until Cut 4 migrates the
+/// legacy user folders. Loaded once, with no hot reload.
 final class AgentCatalog {
     static let shared = AgentCatalog()
 
     let all: [AgentDefinition]
-    /// Leaf command name → definition, e.g. `claude`, `codex`, `cursor-agent`.
-    /// Built once from the catalog so user agents participate too; the plain
-    /// terminal (no `command`) is absent, so a bare shell is never "detected".
-    /// A stored `let` (not `lazy`): `agent(forForegroundArguments:)` reads it from a
-    /// background poll, so it must be race-free the moment the singleton exists.
+    /// Retained so a user override that removes or redirects a shipped hook can
+    /// clean the old managed entry before installing its replacement.
+    let bundled: [AgentDefinition]
     private let commandIndex: [String: AgentDefinition]
 
     private init() {
-        let all = AgentDefinition.builtins + AgentCatalog.loadUserAgents()
+        let bundled = Self.loadBundledAgents()
+        let user = Self.loadLegacyUserAgents()
+        let all = Self.merge(bundled, overriddenBy: user)
+        self.bundled = bundled
         self.all = all
         var index: [String: AgentDefinition] = [:]
         for definition in all {
             guard let command = definition.command else { continue }
             let firstToken = command.split(separator: " ").first.map(String.init) ?? command
-            index[AgentCatalog.leafName(firstToken)] = definition
+            index[Self.leafName(firstToken)] = definition
         }
         commandIndex = index
     }
@@ -531,43 +458,85 @@ final class AgentCatalog {
         find(id: id) ?? AgentDefinition.fallback(id: id)
     }
 
-    /// Where users drop agents: one folder per agent under `~/.termio/agents/`, each
-    /// holding an `agent.json`. Mirrors the home-dir `~/.termio/worktrees` layout so
-    /// the whole termio-owned tree is discoverable in one place.
-    private static var agentsDirectory: URL {
+    /// Bundled hook specs removed or redirected by full user overrides.
+    var staleBundledHookSpecs: [AgentHookSpec] {
+        bundled.compactMap { definition in
+            guard let bundledSpec = definition.hookSpec,
+                  find(id: definition.id)?.hookSpec != bundledSpec else { return nil }
+            return bundledSpec
+        }
+    }
+
+    private static var legacyAgentsDirectory: URL {
         AppChannel.homeConfigDirectory.appendingPathComponent("agents", isDirectory: true)
     }
 
-    /// Scans the agents directory and returns the user definitions, skipping any that
-    /// collide with a built-in id (built-ins win, to protect the shipped brands) and
-    /// logging — rather than failing — an unparseable `agent.json` so one bad folder
-    /// can't take down the rest.
-    private static func loadUserAgents() -> [AgentDefinition] {
-        let directory = agentsDirectory
+    private static func loadBundledAgents() -> [AgentDefinition] {
+        guard let resourceURL = Bundle.termioResources.resourceURL else {
+            log("bundled resource directory is unavailable")
+            return []
+        }
+        let directory = resourceURL.appendingPathComponent("agents", isDirectory: true)
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil)
+        else {
+            log("bundled agents directory is unavailable: \(directory.path)")
+            return []
+        }
+        let manifests = entries
+            .filter { $0.pathExtension.lowercased() == "json" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        return load(manifests: manifests, resolvingRelativeTo: directory)
+    }
+
+    /// Cut 3 deliberately keeps reading the folder-per-agent layout. Cut 4 moves
+    /// and migrates it; JSON decoding and resolution are already shared.
+    private static func loadLegacyUserAgents() -> [AgentDefinition] {
+        let directory = legacyAgentsDirectory
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.isDirectoryKey])
         else { return [] }
+        let manifests = entries
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .map { $0.appendingPathComponent("agent.json") }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        return manifests.compactMap { manifestURL in
+            decode(manifest: manifestURL, resolvingRelativeTo: manifestURL.deletingLastPathComponent())
+        }
+    }
 
-        let builtinIDs = Set(AgentDefinition.builtins.map(\.id))
-        var loaded: [AgentDefinition] = []
-        var seen = builtinIDs
-        for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            let manifestURL = entry.appendingPathComponent("agent.json")
-            guard FileManager.default.fileExists(atPath: manifestURL.path) else { continue }
-            guard let data = try? Data(contentsOf: manifestURL) else { continue }
-            do {
-                let manifest = try JSONDecoder().decode(UserAgentManifest.self, from: manifestURL, data: data)
-                guard !seen.contains(manifest.id) else {
-                    log("skipping \(manifestURL.path): id '\(manifest.id)' already exists")
-                    continue
-                }
-                seen.insert(manifest.id)
-                loaded.append(manifest.definition(directory: entry))
-            } catch {
-                log("ignoring unparseable \(manifestURL.path): \(error)")
+    private static func load(manifests: [URL], resolvingRelativeTo directory: URL) -> [AgentDefinition] {
+        manifests.compactMap { decode(manifest: $0, resolvingRelativeTo: directory) }
+    }
+
+    private static func decode(manifest url: URL, resolvingRelativeTo directory: URL) -> AgentDefinition? {
+        do {
+            let data = try Data(contentsOf: url)
+            let manifest = try JSONDecoder().decode(AgentManifest.self, from: data)
+            return try manifest.definition(directory: directory, resourceBundle: Bundle.termioResources)
+        } catch {
+            log("ignoring unparseable \(url.path): \(error)")
+            return nil
+        }
+    }
+
+    /// Preserve a bundled picker's position when it is overridden, then append new
+    /// user ids. Source iteration is filename-sorted, so duplicate overrides are
+    /// deterministic and last-one-wins.
+    private static func merge(
+        _ bundled: [AgentDefinition], overriddenBy user: [AgentDefinition]
+    ) -> [AgentDefinition] {
+        var merged = bundled
+        var positions = Dictionary(uniqueKeysWithValues: bundled.enumerated().map { ($1.id, $0) })
+        for definition in user {
+            if let position = positions[definition.id] {
+                merged[position] = definition
+            } else {
+                positions[definition.id] = merged.count
+                merged.append(definition)
             }
         }
-        return loaded
+        return merged
     }
 
     static func log(_ message: String) {
@@ -575,24 +544,26 @@ final class AgentCatalog {
     }
 }
 
-/// The on-disk `agent.json` shape a user writes to add an agent. A separate, fully
-/// declarative DTO — distinct from `AgentDefinition`'s id-only session Codable — so
-/// the file is plain data (VSCode-theme-shaped: data, not code). A user agent has no
-/// hook installer; live status comes from the optional `status` screen-scrape rules
-/// (or degrades to the zero-config bell/OSC "done" signal when none are given).
-struct UserAgentManifest: Decodable {
+/// The single on-disk shape for both bundled and user agents. It is deliberately a
+/// DTO, separate from `AgentDefinition`'s id-only persistence Codable: manifests are
+/// data that select closed termio behaviors, never code termio executes.
+struct AgentManifest: Decodable {
     let id: String
     let name: String
+    var wire: String?
     var command: String?
     var permissionBypassFlag: String?
+    var resume: String?
+    var install: String?
+    /// Accepted while Cut 4 migrates manifests written against the earlier RFC.
     var installURL: String?
     var icon: IconSpec?
     var status: StatusSpec?
     var hooks: HookSpec?
 
-    /// Either an SF Symbol (with an optional tint hex) or a path to an image file on
-    /// disk (PNG/SVG, absolute or relative to the agent's folder).
     struct IconSpec: Decodable {
+        var vector: String?
+        var asset: String?
         var symbol: String?
         var tint: String?
         var path: String?
@@ -606,58 +577,152 @@ struct UserAgentManifest: Decodable {
         var attention: [String]?
     }
 
-    /// A JSON-hook-file integration (Claude/Codex/Cursor shape) — the precise,
-    /// no-code alternative to `status` screen-scrape for agents that ship such a file.
-    /// When present it wins: it becomes the status authority and `status` is ignored.
     struct HookSpec: Decodable {
-        var file: String
+        var type: String?
+        var file: String?
+        var dir: String?
         var dialect: String?
+        var capturesTranscript: Bool?
         var events: [Event]
         struct Event: Decodable {
-            var event: String
+            var on: String?
+            /// Accepted for manifests written against the earlier user-agent RFC.
+            var event: String?
             var state: String
             var matcher: String?
         }
     }
 
-    private func resolvedHookSpec() -> AgentHookSpec? {
-        guard let hooks else { return nil }
-        let dialect: HookDialect = hooks.dialect?.lowercased() == "cursor" ? .cursorFlat : .claudeNested
-        let events = hooks.events.map { (name: $0.event, state: $0.state, matcher: $0.matcher) }
-        return AgentHookSpec(file: hooks.file, dialect: dialect, events: events)
+    private enum ManifestError: LocalizedError {
+        case invalid(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalid(let message): return message
+            }
+        }
     }
 
-    func definition(directory: URL) -> AgentDefinition {
-        let resolvedTint = icon?.tint.flatMap(Color.init(hex:)) ?? .monochromeInk
-        let resolvedIcon: AgentIcon
-        if let path = icon?.path, !path.isEmpty {
-            let url = path.hasPrefix("/")
-                ? URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-                : directory.appendingPathComponent(path)
-            resolvedIcon = .image(url)
-        } else {
-            resolvedIcon = .symbol(icon?.symbol ?? "terminal")
+    private func resolvedHookSpec() throws -> AgentHookSpec? {
+        guard let hooks else { return nil }
+        let typeName = hooks.type?.lowercased() ?? "json"
+        guard let type = AgentHookType(rawValue: typeName) else {
+            throw ManifestError.invalid("\(id): unknown hook type '\(typeName)'")
         }
-        // Hooks are the status authority when declared: skip screen-scrape so a pane
-        // never has two competing sources of truth (herdr's "one authority per pane").
-        let hookSpec = resolvedHookSpec()
+        let dialectName = hooks.dialect?.lowercased()
+        let dialect: HookDialect
+        switch (type, dialectName) {
+        case (.json, nil), (.json, "claude"), (.json, "codex"), (.json, "grok"):
+            dialect = .claudeNested
+        case (.json, "cursor"):
+            dialect = .cursorFlat
+        case (.toml, nil), (.toml, "kimi"):
+            dialect = .kimiTOML
+        case (.plugin, "opencode"):
+            dialect = .openCodePlugin
+        case (.plugin, "pi"):
+            dialect = .piPlugin
+        case (.plugin, "amp"):
+            dialect = .ampPlugin
+        default:
+            throw ManifestError.invalid(
+                "\(id): hook dialect '\(dialectName ?? "")' does not match type '\(typeName)'")
+        }
+
+        if type == .plugin, hooks.dir?.isEmpty != false {
+            throw ManifestError.invalid("\(id): plugin hooks require 'dir'")
+        }
+        if type != .plugin, hooks.file?.isEmpty != false {
+            throw ManifestError.invalid("\(id): \(typeName) hooks require 'file'")
+        }
+
+        let validStates: Set<String> = ["working", "attention", "done", "idle"]
+        let events = try hooks.events.map { event -> AgentHookEvent in
+            guard let name = event.on ?? event.event, !name.isEmpty else {
+                throw ManifestError.invalid("\(id): hook event is missing 'on'")
+            }
+            guard validStates.contains(event.state) else {
+                throw ManifestError.invalid("\(id): invalid hook state '\(event.state)'")
+            }
+            return AgentHookEvent(name: name, state: event.state, matcher: event.matcher)
+        }
+        return AgentHookSpec(
+            type: type,
+            file: hooks.file,
+            directory: hooks.dir,
+            dialect: dialect,
+            capturesTranscript: hooks.capturesTranscript ?? false,
+            events: events)
+    }
+
+    func definition(directory: URL, resourceBundle: Bundle) throws -> AgentDefinition {
+        guard !id.isEmpty else { throw ManifestError.invalid("agent id is empty") }
+        guard !name.isEmpty else { throw ManifestError.invalid("\(id): name is empty") }
+
+        let resolvedIcon: AgentIcon
+        if let vector = icon?.vector, !vector.isEmpty {
+            switch vector.lowercased() {
+            case "claude": resolvedIcon = .vector(.claude)
+            case "codex": resolvedIcon = .vector(.codex)
+            default: throw ManifestError.invalid("\(id): unknown icon vector '\(vector)'")
+            }
+        } else if let asset = icon?.asset, !asset.isEmpty {
+            guard let url = Self.bundledAsset(named: asset, in: resourceBundle) else {
+                throw ManifestError.invalid("\(id): bundled icon asset '\(asset)' is missing")
+            }
+            resolvedIcon = .image(url)
+        } else if let path = icon?.path, !path.isEmpty {
+            let expanded = (path as NSString).expandingTildeInPath
+            let url = expanded.hasPrefix("/")
+                ? URL(fileURLWithPath: expanded)
+                : directory.appendingPathComponent(path)
+            resolvedIcon = .image(url.standardizedFileURL)
+        } else if let symbol = icon?.symbol, !symbol.isEmpty {
+            resolvedIcon = .symbol(symbol)
+        } else {
+            resolvedIcon = .terminalGlyph
+        }
+
+        let defaultTint: Color
+        if case .vector(let logo) = resolvedIcon {
+            defaultTint = logo.tint
+        } else {
+            defaultTint = .monochromeInk
+        }
+        let resolvedTint = icon?.tint.flatMap(Color.init(hex:)) ?? defaultTint
+        let hookSpec = try resolvedHookSpec()
         let statusRules = hookSpec == nil
             ? AgentStatusRules.from(working: status?.working, attention: status?.attention, label: id)
             : nil
+
+        let resumeStyle: AgentDefinition.ResumeStyle
+        switch resume?.lowercased() ?? "none" {
+        case "none": resumeStyle = .none
+        case "claude": resumeStyle = .claudeStyle
+        case "codex": resumeStyle = .codexStyle
+        case "opencode": resumeStyle = .openCodeStyle
+        case "pi": resumeStyle = .piStyle
+        case let value: throw ManifestError.invalid("\(id): unknown resume strategy '\(value)'")
+        }
+
         return AgentDefinition(
             id: id, displayName: name, command: command,
             permissionBypassFlag: permissionBypassFlag,
-            resumeStyle: .none, icon: resolvedIcon, tint: resolvedTint,
-            installURL: installURL.flatMap(URL.init(string:)), wireName: id,
+            resumeStyle: resumeStyle, icon: resolvedIcon, tint: resolvedTint,
+            installURL: (install ?? installURL).flatMap(URL.init(string:)), wireName: wire ?? id,
             statusRules: statusRules, hookSpec: hookSpec)
     }
-}
 
-private extension JSONDecoder {
-    /// Decodes from data already read, threading the file's own bytes through — a
-    /// tiny convenience so the caller reads the file once and reports errors with the
-    /// path already in hand.
-    func decode<T: Decodable>(_ type: T.Type, from _: URL, data: Data) throws -> T {
-        try decode(type, from: data)
+    private static func bundledAsset(named name: String, in bundle: Bundle) -> URL? {
+        let pathExtension = (name as NSString).pathExtension
+        if !pathExtension.isEmpty {
+            return bundle.url(
+                forResource: (name as NSString).deletingPathExtension,
+                withExtension: pathExtension)
+        }
+        for pathExtension in ["png", "svg"] {
+            if let url = bundle.url(forResource: name, withExtension: pathExtension) { return url }
+        }
+        return nil
     }
 }

@@ -1,0 +1,19 @@
+{
+  "id": "kimi",
+  "name": "Kimi",
+  "wire": "kimi",
+  "command": "kimi",
+  "resume": "none",
+  "icon": { "asset": "kimi-favicon" },
+  "install": "https://moonshotai.github.io/kimi-code",
+  "hooks": {
+    "type": "toml",
+    "file": "~/.kimi/config.toml",
+    "dialect": "kimi",
+    "events": [
+      { "on": "UserPromptSubmit", "state": "working" },
+      { "on": "Stop", "state": "done" },
+      { "on": "Interrupt", "state": "done" }
+    ]
+  }
+}

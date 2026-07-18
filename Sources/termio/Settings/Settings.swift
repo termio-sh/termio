@@ -347,7 +347,7 @@ final class AppSettings: ObservableObject {
         // overrides a returning user's own choices.
         if defaults.object(forKey: Key.disabledAgents) == nil {
             let enabledByDefault: Set<String> = ["terminal", "claudeCode", "codex"]
-            let hidden = AgentDefinition.builtins.map(\.id).filter { !enabledByDefault.contains($0) }
+            let hidden = AgentCatalog.shared.bundled.map(\.id).filter { !enabledByDefault.contains($0) }
             defaults.set(hidden, forKey: Key.disabledAgents)
         }
 

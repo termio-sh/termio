@@ -1,0 +1,19 @@
+{
+  "id": "opencode",
+  "name": "OpenCode",
+  "wire": "opencode",
+  "command": "opencode",
+  "resume": "opencode",
+  "icon": { "asset": "opencode-favicon" },
+  "install": "https://opencode.ai",
+  "hooks": {
+    "type": "plugin",
+    "dir": "~/.config/opencode/plugin",
+    "dialect": "opencode",
+    "events": [
+      { "on": "session.status", "state": "working", "matcher": "busy" },
+      { "on": "session.idle", "state": "done" },
+      { "on": "permission.updated", "state": "attention" }
+    ]
+  }
+}

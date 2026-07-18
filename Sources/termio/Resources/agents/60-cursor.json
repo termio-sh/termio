@@ -1,0 +1,21 @@
+{
+  "id": "cursor",
+  "name": "Cursor",
+  "wire": "cursor",
+  "command": "cursor-agent",
+  "resume": "none",
+  "icon": { "asset": "cursor-favicon" },
+  "install": "https://cursor.com/docs/cli",
+  "hooks": {
+    "type": "json",
+    "file": "~/.cursor/hooks.json",
+    "dialect": "cursor",
+    "events": [
+      { "on": "beforeSubmitPrompt", "state": "working" },
+      { "on": "preToolUse", "state": "working" },
+      { "on": "postToolUse", "state": "working" },
+      { "on": "subagentStop", "state": "working" },
+      { "on": "stop", "state": "done" }
+    ]
+  }
+}

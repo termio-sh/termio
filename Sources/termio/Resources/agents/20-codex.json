@@ -1,0 +1,23 @@
+{
+  "id": "codex",
+  "name": "Codex",
+  "wire": "codex",
+  "command": "codex",
+  "permissionBypassFlag": "--dangerously-bypass-approvals-and-sandbox",
+  "resume": "codex",
+  "icon": { "vector": "codex" },
+  "install": "https://developers.openai.com/codex/cli",
+  "hooks": {
+    "type": "json",
+    "file": "~/.codex/hooks.json",
+    "dialect": "codex",
+    "events": [
+      { "on": "UserPromptSubmit", "state": "working" },
+      { "on": "PreToolUse", "state": "working" },
+      { "on": "PostToolUse", "state": "working" },
+      { "on": "PermissionRequest", "state": "attention" },
+      { "on": "Stop", "state": "done" },
+      { "on": "SubagentStop", "state": "working" }
+    ]
+  }
+}

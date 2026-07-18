@@ -1,0 +1,22 @@
+{
+  "id": "grok",
+  "name": "Grok",
+  "wire": "grok",
+  "command": "grok",
+  "permissionBypassFlag": "--yolo",
+  "resume": "claude",
+  "icon": { "asset": "grok-favicon" },
+  "install": "https://x.ai/cli",
+  "hooks": {
+    "type": "json",
+    "file": "~/.grok/hooks/termio-status.json",
+    "dialect": "grok",
+    "events": [
+      { "on": "UserPromptSubmit", "state": "working" },
+      { "on": "PreToolUse", "state": "working" },
+      { "on": "PostToolUse", "state": "working" },
+      { "on": "Stop", "state": "done" },
+      { "on": "SubagentStop", "state": "working" }
+    ]
+  }
+}

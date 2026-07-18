@@ -1,0 +1,24 @@
+{
+  "id": "claudeCode",
+  "name": "Claude Code",
+  "wire": "claude",
+  "command": "claude",
+  "permissionBypassFlag": "--dangerously-skip-permissions",
+  "resume": "claude",
+  "icon": { "vector": "claude" },
+  "install": "https://claude.com/claude-code",
+  "hooks": {
+    "type": "json",
+    "file": "~/.claude/settings.json",
+    "dialect": "claude",
+    "capturesTranscript": true,
+    "events": [
+      { "on": "UserPromptSubmit", "state": "working" },
+      { "on": "PreToolUse", "state": "working", "matcher": "*" },
+      { "on": "PostToolUse", "state": "working", "matcher": "*" },
+      { "on": "PermissionRequest", "state": "attention", "matcher": "*" },
+      { "on": "Stop", "state": "done" },
+      { "on": "SubagentStop", "state": "working" }
+    ]
+  }
+}
