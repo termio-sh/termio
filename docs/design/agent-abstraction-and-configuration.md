@@ -47,6 +47,16 @@ related:
 > not include those prefixes. Existing assets moved under `Resources/assets/` so SwiftPM
 > can process that directory generically while copying `Resources/agents/` intact.
 
+> **As built (2026-07-18, Cut 4 landed):** user manifests load from the channel-scoped
+> flat directory `~/.termio[-dev]/config/agents/*.json`, with full user-over-bundled
+> replacement by `id`. On first load, each legacy `agents/<folder>/agent.json` is copied
+> to `<id>.json`; an in-folder relative icon becomes the collision-resistant sibling
+> `<id>.<ext>` and the copied JSON path is rewritten. The destination manifest is
+> published atomically only after its icon, no existing destination is overwritten,
+> and source files are removed only after the flat copy is complete. A collision or
+> migration failure is logged and the remaining legacy manifest is still loaded, so a
+> failed migration cannot hide an agent. Absolute/tilde icon paths remain untouched.
+
 ## Where this sits
 
 [`agent-extensibility.md`](./agent-extensibility.md) (RFC, as-built through Cut 1–2)

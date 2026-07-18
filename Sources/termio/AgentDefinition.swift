@@ -2,8 +2,8 @@ import SwiftUI
 
 /// What a new session launches: a plain login shell, or a coding agent CLI.
 /// Formerly a closed `enum AgentPreset`; now a value type so bundled manifests and
-/// any the user drops into `~/.termio/agents/` flow through the same shape and decode
-/// path. `AgentCatalog` resolves both sources once at launch. Equality and persistence
+/// any the user drops into `~/.termio/config/agents/` flow through the same shape and
+/// decode path. `AgentCatalog` resolves both sources once at launch. Equality and persistence
 /// are by `id` alone — the same stable slug the old enum used as its `rawValue`
 /// (`claudeCode` / `codex` / …), so existing `state.json` files deserialize with
 /// no migration.
@@ -376,7 +376,11 @@ final class AgentCatalog {
 
     private init() {
         let bundled = Self.loadBundledAgents()
-        let user = Self.loadLegacyUserAgents()
+        Self.migrateLegacyUserAgents()
+        // A failed/colliding migration remains readable in its old location; flat
+        // config wins when both sources intentionally carry the same id.
+        let legacy = Self.loadLegacyUserAgents()
+        let user = Self.merge(legacy, overriddenBy: Self.loadUserAgents())
         let all = Self.merge(bundled, overriddenBy: user)
         self.bundled = bundled
         self.all = all
@@ -471,6 +475,13 @@ final class AgentCatalog {
         AppChannel.homeConfigDirectory.appendingPathComponent("agents", isDirectory: true)
     }
 
+    /// The channel-scoped flat manifest directory (`~/.termio[-dev]/config/agents`).
+    private static var userAgentsDirectory: URL {
+        AppChannel.homeConfigDirectory
+            .appendingPathComponent("config", isDirectory: true)
+            .appendingPathComponent("agents", isDirectory: true)
+    }
+
     private static func loadBundledAgents() -> [AgentDefinition] {
         guard let resourceURL = Bundle.termioResources.resourceURL else {
             log("bundled resource directory is unavailable")
@@ -483,6 +494,17 @@ final class AgentCatalog {
             log("bundled agents directory is unavailable: \(directory.path)")
             return []
         }
+        let manifests = entries
+            .filter { $0.pathExtension.lowercased() == "json" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        return load(manifests: manifests, resolvingRelativeTo: directory)
+    }
+
+    private static func loadUserAgents() -> [AgentDefinition] {
+        let directory = userAgentsDirectory
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil)
+        else { return [] }
         let manifests = entries
             .filter { $0.pathExtension.lowercased() == "json" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -505,6 +527,122 @@ final class AgentCatalog {
         }
     }
 
+    /// Flattens an earlier RFC's `agents/<folder>/agent.json` into
+    /// `config/agents/<id>.json`. A relative icon is copied to `<id>.<ext>` and the
+    /// copied JSON is updated to that sibling name. Destination collisions never
+    /// overwrite; sources are removed only after both destination files are durable.
+    private static func migrateLegacyUserAgents() {
+        let sourceRoot = legacyAgentsDirectory
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: sourceRoot, includingPropertiesForKeys: [.isDirectoryKey])
+        else { return }
+
+        for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            let sourceManifest = entry.appendingPathComponent("agent.json")
+            guard FileManager.default.fileExists(atPath: sourceManifest.path) else { continue }
+            migrateLegacyAgent(manifest: sourceManifest, directory: entry)
+        }
+    }
+
+    private static func migrateLegacyAgent(manifest sourceManifest: URL, directory: URL) {
+        do {
+            let originalData = try Data(contentsOf: sourceManifest)
+            let manifest = try JSONDecoder().decode(AgentManifest.self, from: originalData)
+            guard isSafeFilename(manifest.id) else {
+                log("not migrating \(sourceManifest.path): id '\(manifest.id)' is not a safe filename")
+                return
+            }
+
+            let destinationDirectory = userAgentsDirectory
+            let destinationManifest = destinationDirectory.appendingPathComponent("\(manifest.id).json")
+            guard !FileManager.default.fileExists(atPath: destinationManifest.path) else {
+                log("not overwriting existing \(destinationManifest.path) during migration")
+                return
+            }
+
+            var migratedData = originalData
+            var sourceIcon: URL?
+            var destinationIcon: URL?
+            var shouldCopyIcon = false
+            if let relativePath = manifest.icon?.path,
+               !relativePath.isEmpty,
+               !(relativePath as NSString).expandingTildeInPath.hasPrefix("/") {
+                let candidate = directory.appendingPathComponent(relativePath).standardizedFileURL
+                let sourcePrefix = directory.standardizedFileURL.path + "/"
+                guard candidate.path.hasPrefix(sourcePrefix) else {
+                    log("not migrating \(sourceManifest.path): relative icon escapes its agent folder")
+                    return
+                }
+                if FileManager.default.fileExists(atPath: candidate.path) {
+                    let pathExtension = candidate.pathExtension
+                    let filename = pathExtension.isEmpty
+                        ? "\(manifest.id)-icon"
+                        : "\(manifest.id).\(pathExtension)"
+                    let destination = destinationDirectory.appendingPathComponent(filename)
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        // Resume safely after an interruption that copied the icon but
+                        // had not yet published the manifest. A different file is a
+                        // real collision and remains untouched.
+                        guard try Data(contentsOf: candidate) == Data(contentsOf: destination) else {
+                            log("not overwriting existing \(destination.path) during migration")
+                            return
+                        }
+                    } else {
+                        shouldCopyIcon = true
+                    }
+                    sourceIcon = candidate
+                    destinationIcon = destination
+                    migratedData = try replacingIconPath(in: originalData, with: filename)
+                }
+            }
+
+            try FileManager.default.createDirectory(
+                at: destinationDirectory, withIntermediateDirectories: true)
+            if shouldCopyIcon, let sourceIcon, let destinationIcon {
+                try FileManager.default.copyItem(at: sourceIcon, to: destinationIcon)
+            }
+            do {
+                // `Data.write` traps (rather than throws) when `.atomic` and
+                // `.withoutOverwriting` are combined. The explicit collision guard
+                // above protects user files; keep the actual publication atomic.
+                try migratedData.write(to: destinationManifest, options: .atomic)
+            } catch {
+                if shouldCopyIcon, let destinationIcon {
+                    try? FileManager.default.removeItem(at: destinationIcon)
+                }
+                throw error
+            }
+
+            // The flat copy is complete. Remove only the source files we copied;
+            // unknown files in the old folder remain for the user to inspect.
+            try FileManager.default.removeItem(at: sourceManifest)
+            if let sourceIcon { try FileManager.default.removeItem(at: sourceIcon) }
+            if (try? FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty) == true {
+                try FileManager.default.removeItem(at: directory)
+            }
+            log("migrated \(manifest.id) to \(destinationManifest.path)")
+        } catch {
+            log("could not migrate \(sourceManifest.path): \(error)")
+        }
+    }
+
+    private static func replacingIconPath(in data: Data, with filename: String) throws -> Data {
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var icon = object["icon"] as? [String: Any]
+        else { return data }
+        icon["path"] = filename
+        object["icon"] = icon
+        return try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+    }
+
+    private static func isSafeFilename(_ id: String) -> Bool {
+        guard !id.isEmpty, id != ".", id != ".." else { return false }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        return id.unicodeScalars.allSatisfy(allowed.contains)
+    }
+
     private static func load(manifests: [URL], resolvingRelativeTo directory: URL) -> [AgentDefinition] {
         manifests.compactMap { decode(manifest: $0, resolvingRelativeTo: directory) }
     }
@@ -524,10 +662,19 @@ final class AgentCatalog {
     /// user ids. Source iteration is filename-sorted, so duplicate overrides are
     /// deterministic and last-one-wins.
     private static func merge(
-        _ bundled: [AgentDefinition], overriddenBy user: [AgentDefinition]
+        _ base: [AgentDefinition], overriddenBy user: [AgentDefinition]
     ) -> [AgentDefinition] {
-        var merged = bundled
-        var positions = Dictionary(uniqueKeysWithValues: bundled.enumerated().map { ($1.id, $0) })
+        var merged: [AgentDefinition] = []
+        var positions: [String: Int] = [:]
+        for definition in base {
+            if let position = positions[definition.id] {
+                log("duplicate base id '\(definition.id)'; later manifest wins")
+                merged[position] = definition
+            } else {
+                positions[definition.id] = merged.count
+                merged.append(definition)
+            }
+        }
         for definition in user {
             if let position = positions[definition.id] {
                 merged[position] = definition
