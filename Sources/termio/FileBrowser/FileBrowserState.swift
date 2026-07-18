@@ -24,6 +24,13 @@ final class FileBrowserState: NSObject, ObservableObject {
     private var urlsByOutlineItem: [ObjectIdentifier: URL] = [:]
     private weak var observedOutline: NSOutlineView?
 
+    /// Clears view-specific expansion state before replacing the tree (a root switch
+    /// or Collapse All). The next row registration repopulates the item mapping.
+    func resetExpansionState() {
+        expandedFolderURLs.removeAll()
+        urlsByOutlineItem.removeAll()
+    }
+
     /// Called from a representable mounted inside every row, where both the enclosing
     /// outline view and that row's private outline item are reachable.
     func register(outline: NSOutlineView?, item: NSObject?, url: URL) {
@@ -31,7 +38,7 @@ final class FileBrowserState: NSObject, ObservableObject {
         outlineView = outline
         if observedOutline !== outline {
             detachExpansionObserver()
-            expandedFolderURLs.removeAll()
+            resetExpansionState()
             observedOutline = outline
             NotificationCenter.default.addObserver(
                 self,

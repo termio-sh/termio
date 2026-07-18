@@ -98,6 +98,7 @@ struct FileBrowserView: View {
         }
         .onAppear { refresh(); seedChangeCount() }
         .onChange(of: projectPath) {
+            browserState.resetExpansionState()
             refresh()
             seedChangeCount()
         }
@@ -217,6 +218,7 @@ struct FileBrowserView: View {
                 refresh()
             }
             TreeHeaderButton(codicon: .collapseAll, help: "Collapse All") {
+                browserState.resetExpansionState()
                 treeGeneration += 1
             }
         }
