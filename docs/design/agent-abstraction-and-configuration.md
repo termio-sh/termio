@@ -24,8 +24,11 @@ related:
 > the channel-specific `/usr/local/bin` path only as the bare-build fallback, so dev and
 > release hooks cannot cross sockets through `PATH`. Reinstall strips both the new
 > `agent report` marker and legacy `agent-status.sock` entries. Grok still installs its
-> dedicated `~/.grok/hooks/termio-status.json` file. The sandbox schema field was
-> already removed by the completed sandbox-removal work, so §6 required no code change.
+> dedicated `~/.grok/hooks/termio.json` file. Termio-owned plugin files likewise use
+> the concise `termio.js` / `termio.ts` names; installers remove recognized legacy
+> `termio-status.*` files during upgrades so agents never load duplicate hooks. The
+> sandbox schema field was already removed by the completed sandbox-removal work, so §6
+> required no code change.
 
 > **As built (2026-07-18, Cut 2 landed):** macOS now has one closed `AgentIcon`
 > primitive model (`image(URL)`, `vector`, `symbol`, or `terminalGlyph`), and Shared

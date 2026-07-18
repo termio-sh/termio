@@ -9,7 +9,7 @@
   "install": "https://x.ai/cli",
   "hooks": {
     "type": "json",
-    "file": "~/.grok/hooks/termio-status.json",
+    "file": "~/.grok/hooks/termio.json",
     "dialect": "grok",
     "events": [
       { "on": "UserPromptSubmit", "state": "working" },
