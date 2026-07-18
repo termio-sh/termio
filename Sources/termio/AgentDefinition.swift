@@ -251,10 +251,20 @@ extension AgentDefinition {
         icon: .brandImage(.hermes), tint: .monochromeInk,
         installURL: URL(string: "https://hermes-agent.nousresearch.com/#downloads"), wireName: "hermes")
 
+    static let grok = AgentDefinition(
+        // xAI's Grok Build. The binary builds as `xai-grok-pager` but installs as `grok`.
+        // Resume is Claude-shaped: `--session-id <uuid>` creates a session with our id and
+        // `--resume <id>` reloads it, so `.claudeStyle` fits verbatim. `--yolo` is the
+        // documented auto-approve flag.
+        id: "grok", displayName: "Grok", command: "grok",
+        permissionBypassFlag: "--yolo",
+        resumeStyle: .claudeStyle, icon: .brandImage(.grok), tint: .monochromeInk,
+        installURL: URL(string: "https://x.ai/cli"), wireName: "grok")
+
     /// The agents termio ships, in the order they appear in the picker. User agents
     /// are appended after these by `AgentCatalog`.
     static let builtins: [AgentDefinition] = [
-        terminal, claudeCode, codex, opencode, pi, amp, cursor, kimi, antigravity, hermes,
+        terminal, claudeCode, codex, opencode, pi, amp, cursor, kimi, antigravity, hermes, grok,
     ]
 
     /// A stand-in for a session that references an agent id no longer present (a user

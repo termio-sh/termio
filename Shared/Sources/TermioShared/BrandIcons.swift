@@ -23,6 +23,7 @@ public enum AgentKind: String, Sendable {
     case kimi
     case antigravity
     case hermes
+    case grok
     case terminal
 
     /// The agent's representative color — tints the "working" spinner so a busy
@@ -31,7 +32,7 @@ public enum AgentKind: String, Sendable {
         switch self {
         case .claude: BrandLogo.claude.tint
         case .codex: BrandLogo.codex.tint
-        case .opencode, .pi, .amp, .cursor, .kimi, .antigravity, .hermes, .terminal: .monochromeInk
+        case .opencode, .pi, .amp, .cursor, .kimi, .antigravity, .hermes, .grok, .terminal: .monochromeInk
         }
     }
 
@@ -46,6 +47,7 @@ public enum AgentKind: String, Sendable {
         case .kimi: .kimi
         case .antigravity: .antigravity
         case .hermes: .hermes
+        case .grok: .grok
         case .claude, .codex, .terminal: nil
         }
     }
@@ -91,7 +93,7 @@ public struct AgentIconView: View {
             BrandLogoShape(logo: .codex)
                 .fill(BrandLogo.codex.tint, style: FillStyle(eoFill: true))
                 .frame(width: size, height: size)
-        case .opencode, .pi, .amp, .cursor, .kimi, .antigravity, .hermes:
+        case .opencode, .pi, .amp, .cursor, .kimi, .antigravity, .hermes, .grok:
             BrandImageView(asset: agent.brandImage!, size: size)
         case .terminal:
             HugeIconView(icon: .terminal, size: size, color: .monochromeInk)
@@ -117,6 +119,7 @@ public enum BrandImageAsset: Hashable, Sendable {
     case kimi
     case antigravity
     case hermes
+    case grok
 
     /// Base name of the bundled resource file (without extension).
     var resourceName: String {
@@ -128,6 +131,7 @@ public enum BrandImageAsset: Hashable, Sendable {
         case .kimi: "kimi-favicon"
         case .antigravity: "antigravity-favicon"
         case .hermes: "hermes-favicon"
+        case .grok: "grok-favicon"
         }
     }
 }

@@ -88,6 +88,7 @@ extension AgentKind {
         case "kimi": self = .kimi
         case "antigravity": self = .antigravity
         case "hermes": self = .hermes
+        case "grok": self = .grok
         default: self = .terminal
         }
     }
@@ -111,7 +112,7 @@ extension AgentKind {
         case .codex:
             mark = AnyView(BrandLogoShape(logo: .codex).fill(.black, style: FillStyle(eoFill: true)))
             isTemplate = true
-        case .opencode, .pi, .amp, .cursor, .kimi, .antigravity, .hermes:
+        case .opencode, .pi, .amp, .cursor, .kimi, .antigravity, .hermes, .grok:
             mark = AnyView(BrandImageView(asset: brandImage!, size: pointSize))
             isTemplate = false
         case .terminal:

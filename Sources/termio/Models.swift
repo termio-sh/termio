@@ -134,6 +134,7 @@ enum BrandImageAsset: Hashable {
     case kimi
     case antigravity
     case hermes
+    case grok
 
     /// Base name of the bundled resource file (without extension).
     var resourceName: String {
@@ -145,6 +146,7 @@ enum BrandImageAsset: Hashable {
         case .kimi: return "kimi-favicon"
         case .antigravity: return "antigravity-favicon"
         case .hermes: return "hermes-favicon"
+        case .grok: return "grok-favicon"
         }
     }
 
@@ -153,7 +155,7 @@ enum BrandImageAsset: Hashable {
     var fileExtension: String {
         switch self {
         case .pi, .cursor: return "svg"
-        case .openCode, .amp, .kimi, .antigravity, .hermes: return "png"
+        case .openCode, .amp, .kimi, .antigravity, .hermes, .grok: return "png"
         }
     }
 }

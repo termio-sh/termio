@@ -209,6 +209,7 @@ enum AgentStatusHooks {
             JSONHookFile.claude,
             JSONHookFile.codex,
             JSONHookFile.cursor,
+            JSONHookFile.grok,
             TOMLHookBlock.kimi,
             PluginFile.openCode,
             PluginFile.pi,
@@ -357,6 +358,30 @@ private struct JSONHookFile: AgentStatusInstaller {
             ],
             label: "cursor",
             dialect: .cursorFlat)
+    }
+
+    /// Grok Build discovers hooks from every `*.json` under `~/.grok/hooks/`, each in
+    /// the Claude-nested shape, so termio drops its own dedicated file there rather
+    /// than merging into a shared one — nothing user-owned to preserve, and Grok
+    /// merges it with the user's other hook files. (Grok also reads
+    /// `~/.claude/settings.json` for Claude compatibility, so it already sees termio's
+    /// Claude hook; this explicit file makes the integration independent of whether
+    /// Claude Code is installed.) Grok compiles a `matcher` as a tool-name regex —
+    /// a bare `"*"` would fail to compile — so the tool events omit the matcher, which
+    /// Grok treats as "match every tool". No `attention` mapping: Grok gates via a
+    /// PreToolUse hook's return value (like Cursor), not a lifecycle event, and the
+    /// zero-config bell/OSC layer still catches any "needs you" it raises.
+    static var grok: JSONHookFile {
+        JSONHookFile(
+            url: home(".grok", "hooks", "termio-status.json"),
+            events: [
+                ("UserPromptSubmit", "working", nil),
+                ("PreToolUse", "working", nil),
+                ("PostToolUse", "working", nil),
+                ("Stop", "done", nil),
+                ("SubagentStop", "working", nil),
+            ],
+            label: "grok")
     }
 
     /// Builds an installer from a user agent's declarative `hooks` block. Same shape
