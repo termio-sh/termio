@@ -9,12 +9,16 @@
 #   termio sessions answer <id> <text> # answer a sibling's menu/prompt
 #   termio sessions start <agent>      # start a new session (claude/codex/…)
 #   termio sessions stop  <id>         # stop a session
+#   termio agent report <state>        # report this agent's activity to termio
 #
 # Add --json to any `sessions` command for machine-readable output.
 #
 # `sessions` talks to the running app over its local control socket, scoped to the
 # project the calling shell is in (via $TERMIO_SESSION, or the current directory).
-# The plain `termio [DIR]` form routes a folder to the app via LaunchServices.
+# `agent report` is the public hook contract: an agent's own status hook calls it to
+# tell termio the session is working / waiting / done, replacing the raw `printf | nc`
+# termio used to bake into every hook file. The plain `termio [DIR]` form routes a
+# folder to the app via LaunchServices.
 set -eu
 
 # Channel binding. These two lines are the release defaults; `build-app.sh` rewrites
@@ -24,6 +28,9 @@ SUPPORT_DIR_NAME="termio"
 BUNDLE_ID="sh.termio.app"
 
 SOCKET="$HOME/Library/Application Support/$SUPPORT_DIR_NAME/session-control.sock"
+# The agent-status socket `HookListener` binds — same channel-scoped directory as the
+# control socket, so a dev app's hooks report into the dev app, not the release one.
+STATUS_SOCKET="$HOME/Library/Application Support/$SUPPORT_DIR_NAME/agent-status.sock"
 
 # JSON-escape a string for embedding in a request: backslashes, double quotes, and
 # newlines (which would otherwise break the single-line JSON object).
@@ -75,9 +82,74 @@ sessions() {
     printf '%s' "$request" | nc -U "$SOCKET"
 }
 
+# The public hook contract: `termio agent report <state> [--transcript] [--reply]`.
+# An agent's status hook runs this instead of a hand-rolled `printf | nc`; termio
+# stamps the absolute path to this script into the hook file at install time. It reads
+# the session id from $TERMIO_SESSION (which the PTY carries) and the cwd from $PWD,
+# then writes the normalized `{termio_session,state,cwd}` report to the status socket.
+# A missing socket (app not running) is a silent no-op — hooks fire constantly.
+#   --transcript  slurp stdin (Claude feeds hooks a JSON blob) and forward its
+#                 transcript_path so termio can address the raw Q&A log.
+#   --reply       stay silent on stdout and print `{}` at the end, for agents (Cursor)
+#                 that read the hook's stdout as its JSON reply.
+agent() {
+    op="${1:-}"
+    [ $# -gt 0 ] && shift || true
+    if [ "$op" != "report" ]; then
+        echo "termio: unknown agent command '${op:-}'" >&2
+        echo "usage: termio agent report <working|attention|done|idle> [--transcript] [--reply]" >&2
+        exit 1
+    fi
+
+    state=""
+    with_transcript=0
+    reply=0
+    for arg in "$@"; do
+        case "$arg" in
+            --transcript) with_transcript=1 ;;
+            --reply) reply=1 ;;
+            working|attention|done|idle) state="$arg" ;;
+            *) echo "termio: unknown agent report argument '$arg'" >&2; exit 1 ;;
+        esac
+    done
+    if [ -z "$state" ]; then
+        echo "termio: agent report needs a state (working|attention|done|idle)" >&2
+        exit 1
+    fi
+
+    session=$(json_escape "${TERMIO_SESSION:-}")
+    cwd=$(json_escape "$PWD")
+
+    if [ "$with_transcript" -eq 1 ]; then
+        # Mirror the old hook: mine transcript_path out of the JSON on stdin, jq-free.
+        # `head -1` closes the pipe so the pipeline's exit status is sed's (0), keeping
+        # `set -e` happy even when grep matches nothing.
+        input=$(cat)
+        tp=$(printf '%s' "$input" | grep -o '"transcript_path":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')
+        payload=$(printf '{"termio_session":"%s","state":"%s","cwd":"%s","transcript_path":"%s"}' \
+            "$session" "$state" "$cwd" "$(json_escape "$tp")")
+    else
+        payload=$(printf '{"termio_session":"%s","state":"%s","cwd":"%s"}' \
+            "$session" "$state" "$cwd")
+    fi
+
+    if [ "$reply" -eq 1 ]; then
+        printf '%s' "$payload" | nc -w 1 -U "$STATUS_SOCKET" >/dev/null 2>&1 || true
+        printf '{}'
+    else
+        printf '%s' "$payload" | nc -w 1 -U "$STATUS_SOCKET" 2>/dev/null || true
+    fi
+}
+
 if [ "${1:-}" = "sessions" ]; then
     shift
     sessions "$@"
+    exit 0
+fi
+
+if [ "${1:-}" = "agent" ]; then
+    shift
+    agent "$@"
     exit 0
 fi
 

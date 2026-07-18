@@ -193,9 +193,17 @@ final class HookListener {
 /// config, only ever adds/removes entries it recognizes as its own (their command
 /// contains the socket filename), and refuses to overwrite a file it can't parse.
 enum AgentStatusHooks {
-    /// The substring that identifies an entry as termio's, used to find and strip
-    /// our own without disturbing the user's.
+    /// The substring that identifies a *legacy* raw-socket entry as termio's — the
+    /// `printf … | nc -U …/agent-status.sock` hooks older builds installed, and the
+    /// `// Socket marker: …` comment still embedded in the plugin files. Kept so a new
+    /// build strips any leftover raw-nc hooks before writing its CLI-based ones.
     static let marker = "agent-status.sock"
+
+    /// The substring that identifies a current, CLI-based hook as termio's: every hook
+    /// termio now installs invokes the public `termio agent report <state>` contract, so
+    /// the ` agent report ` fragment is our fingerprint. Strip logic matches either this
+    /// or the legacy `marker`, so upgrades cleanly replace old hooks with new ones.
+    static let cliMarker = "agent report"
 
     /// Re-applies every agent's integration (or removes them all) to match `enabled`.
     static func sync(enabled: Bool) {
@@ -227,40 +235,46 @@ enum AgentStatusHooks {
         return installers
     }
 
-    /// The shell command a hook runs: emit the normalized report (stamped with the
-    /// session id the PTY carries and the agent's `$PWD` as a fallback) and pipe it
-    /// into the socket. `nc` and `printf` both ship with macOS. Used by the
-    /// shell-hook agents; the plugin agents emit the same JSON from JavaScript.
+    /// The shell command a hook runs: invoke the public `termio agent report <state>`
+    /// contract, which reads the session id ($TERMIO_SESSION the PTY carries) and cwd
+    /// ($PWD), then writes the normalized report to the status socket. This replaces the
+    /// per-dialect `printf … | nc` termio used to bake into every hook file; the socket
+    /// path and JSON shaping now live behind the one documented command (see
+    /// `scripts/termio`, and the design doc §4). Used by the shell-hook agents and
+    /// stamped into the plugin agents' JavaScript too, so every installer converges on
+    /// the same contract.
+    ///
+    /// The CLI path is *stamped absolute* so the hook resolves to this exact channel's
+    /// binary — a dev app's hooks call `termio-dev` (its own socket), a release app's
+    /// call `termio` — mirroring how the PTY stamps TERMIO_SESSION. Getting this wrong
+    /// would make dev hooks report into the release app or vice versa.
     static func reportCommand(
         state: String, withTranscript: Bool = false, dialect: HookDialect = .claudeNested
     ) -> String {
-        let socket = HookListener.socketURL.path
-        // Cursor spawns each hook as a process and reads its stdout as the hook's
-        // JSON reply, so the report must reach the socket silently and then print a
-        // benign empty object — any stray byte on stdout is parsed as a malformed
-        // reply. (Claude/Codex ignore hook stdout, so they don't need this.)
-        if dialect == .cursorFlat {
-            let json = #"{"termio_session":"%s","state":"\#(state)","cwd":"%s"}"#
-            return "printf '\(json)' \"$TERMIO_SESSION\" \"$PWD\" | nc -w 1 -U \"\(socket)\" >/dev/null 2>&1; printf '{}'"
-        }
-        // `|| true` and `2>/dev/null` keep the hook a silent no-op when termio
-        // isn't running to accept the connection — otherwise `nc`'s exit 1 surfaces
-        // in the agent as a "hook failed (non-blocking)" error on every tool call.
-        // `-w 1` bounds the connect so a wedged socket can't stall the agent.
-        guard withTranscript else {
-            let json = #"{"termio_session":"%s","state":"\#(state)","cwd":"%s"}"#
-            return "printf '\(json)' \"$TERMIO_SESSION\" \"$PWD\" | nc -w 1 -U \"\(socket)\" 2>/dev/null || true"
-        }
-        // Claude Code feeds each hook a JSON object on stdin that includes
-        // `transcript_path` — the session's full Q&A log. Capture it and forward it so
-        // termio can map this session to its transcript (the address a caller records
-        // and reads, instead of scraping the terminal). `grep -o`/`sed` keep this
-        // jq-free; an absent field just yields an empty path. Only enabled for agents
-        // whose hook reliably provides stdin, so the `cat` can't block.
-        let json = #"{"termio_session":"%s","state":"\#(state)","cwd":"%s","transcript_path":"%s"}"#
-        let extract = #"grep -o '"transcript_path":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//'"#
-        return "input=$(cat); tp=$(printf '%s' \"$input\" | \(extract)); "
-            + "printf '\(json)' \"$TERMIO_SESSION\" \"$PWD\" \"$tp\" | nc -w 1 -U \"\(socket)\" 2>/dev/null || true"
+        var command = "\(shellQuote(cliPath)) agent report \(state)"
+        // Claude feeds each hook a JSON blob on stdin carrying `transcript_path`; the
+        // CLI mines it out (jq-free) so termio can address the raw Q&A log. Only enabled
+        // for agents that reliably provide stdin, so the CLI's `cat` can't block.
+        if withTranscript { command += " --transcript" }
+        // Cursor reads the hook's stdout as its JSON reply, so the CLI must stay silent
+        // and print a benign `{}`. (Claude/Codex ignore hook stdout, so they don't.)
+        if dialect == .cursorFlat { command += " --reply" }
+        return command
+    }
+
+    /// Absolute path to *this channel's* bundled `termio`/`termio-dev` CLI, stamped into
+    /// each hook command so it drives the right app+socket regardless of PATH or whether
+    /// the user installed the `/usr/local/bin` symlink. A plain SwiftPM binary has no
+    /// bundled tool, so use the channel-specific install location; it remains absolute
+    /// and surfaces a missing CLI as a normal hook command failure.
+    static var cliPath: String {
+        CommandLineTool.bundledURL?.path ?? CommandLineTool.installURL.path
+    }
+
+    /// Single-quotes a path for safe embedding in a hook shell command (the bundle path
+    /// can contain spaces, e.g. under `/Applications/termio dev.app`).
+    static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     static func log(_ message: String) {
@@ -479,12 +493,16 @@ private struct JSONHookFile: AgentStatusInstaller {
     }
 
     private func isTermioGroup(_ group: [String: Any]) -> Bool {
-        // Cursor's flat entry carries the command directly; Claude/Codex nest it.
-        if let command = group["command"] as? String {
-            return command.contains(AgentStatusHooks.marker)
+        // Recognize both the current CLI-based hook (` agent report `) and any legacy
+        // raw-socket hook (`…/agent-status.sock`) an older build left, so an upgrade
+        // strips the old before writing the new instead of doubling up. Cursor's flat
+        // entry carries the command directly; Claude/Codex nest it.
+        func isOurs(_ command: String) -> Bool {
+            command.contains(AgentStatusHooks.cliMarker) || command.contains(AgentStatusHooks.marker)
         }
+        if let command = group["command"] as? String { return isOurs(command) }
         guard let hooks = group["hooks"] as? [[String: Any]] else { return false }
-        return hooks.contains { ($0["command"] as? String)?.contains(AgentStatusHooks.marker) == true }
+        return hooks.contains { ($0["command"] as? String).map(isOurs) == true }
     }
 
     private func readState() -> FileState {
@@ -564,23 +582,20 @@ private struct PluginFile: AgentStatusInstaller {
         try? FileManager.default.removeItem(at: url)
     }
 
-    private static var socketPath: String { HookListener.socketURL.path }
+    private static var cliPath: String { AgentStatusHooks.cliPath }
 
     /// OpenCode plugin: a session is `busy` while working and emits `session.idle`
     /// when the turn ends; `permission.updated` means it's waiting on the user. Each
-    /// maps to a normalized report shelled out via Bun's `$` to the socket. The
-    /// session id comes from `TERMIO_SESSION`, which the PTY carries into the
-    /// in-process plugin.
+    /// maps to the public report contract shelled out via Bun's `$`. The session id
+    /// comes from `TERMIO_SESSION`, which the PTY carries into the in-process plugin.
     private static var openCodeSource: String {
         """
         // termio agent status — reports OpenCode session lifecycle to termio.
         // Socket marker: \(AgentStatusHooks.marker)
         export const TermioStatus = async ({ $ }) => {
-          const socket = \(jsString(socketPath));
+          const cli = \(jsString(cliPath));
           const report = (state) => {
-            const id = process.env.TERMIO_SESSION || "";
-            const payload = JSON.stringify({ termio_session: id, state });
-            return $`printf %s ${payload} | nc -w 1 -U ${socket}`.quiet().nothrow();
+            return $`${cli} agent report ${state}`.quiet().nothrow();
           };
           return {
             event: async ({ event }) => {
@@ -622,11 +637,9 @@ private struct PluginFile: AgentStatusInstaller {
         // termio agent status — reports Amp turn lifecycle to termio.
         // Socket marker: \(AgentStatusHooks.marker)
         export default (amp) => {
-          const socket = \(jsString(socketPath));
+          const cli = \(jsString(cliPath));
           const report = (state) => {
-            const id = process.env.TERMIO_SESSION || "";
-            const payload = JSON.stringify({ termio_session: id, state });
-            return amp.$`printf %s ${payload} | nc -w 1 -U ${socket}`.quiet().nothrow();
+            return amp.$`${cli} agent report ${state}`.quiet().nothrow();
           };
           amp.on("agent.start", () => report("working"));
           amp.on("agent.end", () => report("done"));
