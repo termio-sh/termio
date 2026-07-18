@@ -103,7 +103,7 @@ final class TerminalViewController: UIViewController {
     init(companionURL: URL, session: MockSession? = nil) {
         self.session = session ?? MockSession(
             title: companionURL.host ?? "companion",
-            project: "companion", agent: .terminal, status: .idle,
+            project: "companion", agent: RosterAgent.terminal, status: .idle,
             subtitle: "", time: ""
         )
         backend = .companion(companionURL)
@@ -227,7 +227,7 @@ final class TerminalViewController: UIViewController {
         statusLabel.font = .preferredFont(forTextStyle: .caption2)
         statusLabel.textColor = .secondaryLabel
         statusLabel.text = switch backend {
-        case .demoShell: "\(session.agent.rawValue) · \(session.time)"
+        case .demoShell: "\(session.agent.name) · \(session.time)"
         case .companion: "Connecting…"
         }
         contextLabel.isHidden = contextLabel.text?.isEmpty ?? true

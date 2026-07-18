@@ -344,9 +344,9 @@ public struct WireFile: Codable, Sendable, Equatable {
 
 // MARK: - Roster (server → client)
 
-/// One session as it appears in the phone's tree. `agent` and `status` are the
-/// raw values of `AgentKind` / `SessionStatus` so the wire stays string-stable
-/// and decoupled from either app's internal enums.
+/// One session as it appears in the phone's tree. `agent` is the stable id into
+/// the roster catalog and `status` is a string token, keeping both apps decoupled
+/// from internal runtime types.
 public struct RosterSession: Codable, Sendable, Equatable {
     public let id: String
     public let title: String
@@ -388,14 +388,19 @@ public struct RosterProject: Codable, Sendable, Equatable {
 
 /// One agent the phone may start a new session with — mirrors an entry the user
 /// has left enabled in the Mac's Settings ▸ Agents page. `id` is the wire string
-/// echoed back in a `start` request; `name` is the menu label.
+/// echoed back in a `start` request; `name` is the menu label. Visual metadata is
+/// optional so old clients ignore it and new clients still decode an older Mac.
 public struct RosterAgent: Codable, Sendable, Equatable {
     public let id: String
     public let name: String
+    public let tintHex: String?
+    public let icon: IconRef?
 
-    public init(id: String, name: String) {
+    public init(id: String, name: String, tintHex: String? = nil, icon: IconRef? = nil) {
         self.id = id
         self.name = name
+        self.tintHex = tintHex
+        self.icon = icon
     }
 }
 

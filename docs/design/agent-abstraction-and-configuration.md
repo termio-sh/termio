@@ -1,6 +1,6 @@
 ---
 title: Agent Abstraction & Configuration
-status: in-progress
+status: done
 type: design
 created: 2026-07-18
 updated: 2026-07-18
@@ -56,6 +56,17 @@ related:
 > and source files are removed only after the flat copy is complete. A collision or
 > migration failure is logged and the remaining legacy manifest is still loaded, so a
 > failed migration cannot hide an agent. Absolute/tilde icon paths remain untouched.
+
+> **As built (2026-07-18, Cut 5 landed):** `RosterAgent` now carries optional
+> `tintHex` and `IconRef` fields, preserving decode compatibility with an older Mac and
+> wire compatibility with an older iOS client. The Mac resolves that portable metadata
+> beside each runtime `AgentIcon`: bundled assets remain resource-name references,
+> vector marks and SF Symbols remain primitive references, and user image paths are
+> rasterized once at catalog load into inline PNG data. iOS builds its session and launch
+> menus from the roster catalog, with a small Claude/Codex/Terminal fallback only while
+> paired to an older Mac. `AgentKind` and every agent-specific iOS mapping are deleted;
+> unknown or disabled session ids degrade to a generic terminal glyph without changing
+> the persisted `Session.agent` id or the roster session wire shape.
 
 ## Where this sits
 

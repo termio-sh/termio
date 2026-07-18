@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import TermioShared
 
 /// What a new session launches: a plain login shell, or a coding agent CLI.
 /// Formerly a closed `enum AgentPreset`; now a value type so bundled manifests and
@@ -24,10 +26,15 @@ struct AgentDefinition: Identifiable {
     /// How (and whether) a relaunch resumes this agent's prior conversation.
     let resumeStyle: ResumeStyle
     let icon: AgentIcon
+    /// Portable form sent to the companion. Bundled assets stay name references;
+    /// user image paths are rasterized once at catalog load into inline PNG bytes.
+    let iconRef: TermioShared.IconRef
     /// The agent's representative color, used to tint the "working" spinner so a
     /// busy session pulses in its own brand color. Marks without a single brand
     /// color (and the plain terminal) fall back to adaptive ink.
     let tint: Color
+    /// Portable six-digit sRGB tint. `nil` means adaptive monochrome ink.
+    let tintHex: String?
     /// The vendor's install page, opened from the Settings row when the binary
     /// isn't found on `PATH`. `nil` for the plain shell and user agents.
     let installURL: URL?
@@ -53,7 +60,7 @@ struct AgentDefinition: Identifiable {
     init(
         id: String, displayName: String, command: String?, permissionBypassFlag: String?,
         resumeStyle: ResumeStyle, icon: AgentIcon,
-        tint: Color, installURL: URL?, wireName: String,
+        iconRef: TermioShared.IconRef, tint: Color, tintHex: String?, installURL: URL?, wireName: String,
         statusRules: AgentStatusRules? = nil, hookSpec: AgentHookSpec? = nil
     ) {
         self.id = id
@@ -62,7 +69,9 @@ struct AgentDefinition: Identifiable {
         self.permissionBypassFlag = permissionBypassFlag
         self.resumeStyle = resumeStyle
         self.icon = icon
+        self.iconRef = iconRef
         self.tint = tint
+        self.tintHex = tintHex
         self.installURL = installURL
         self.wireName = wireName
         self.statusRules = statusRules
@@ -196,7 +205,9 @@ extension AgentDefinition {
         AgentDefinition(
             id: id, displayName: id, command: nil, permissionBypassFlag: nil,
             resumeStyle: .none,
-            icon: .symbol("questionmark.app"), tint: .monochromeInk,
+            icon: .symbol("questionmark.app"),
+            iconRef: TermioShared.IconRef(symbol: "questionmark.app"),
+            tint: .monochromeInk, tintHex: nil,
             installURL: nil, wireName: id)
     }
 }
@@ -807,10 +818,15 @@ struct AgentManifest: Decodable {
         guard !name.isEmpty else { throw ManifestError.invalid("\(id): name is empty") }
 
         let resolvedIcon: AgentIcon
+        let resolvedIconRef: TermioShared.IconRef
         if let vector = icon?.vector, !vector.isEmpty {
             switch vector.lowercased() {
-            case "claude": resolvedIcon = .vector(.claude)
-            case "codex": resolvedIcon = .vector(.codex)
+            case "claude":
+                resolvedIcon = .vector(.claude)
+                resolvedIconRef = TermioShared.IconRef(vector: "claude")
+            case "codex":
+                resolvedIcon = .vector(.codex)
+                resolvedIconRef = TermioShared.IconRef(vector: "codex")
             default: throw ManifestError.invalid("\(id): unknown icon vector '\(vector)'")
             }
         } else if let asset = icon?.asset, !asset.isEmpty {
@@ -818,16 +834,20 @@ struct AgentManifest: Decodable {
                 throw ManifestError.invalid("\(id): bundled icon asset '\(asset)' is missing")
             }
             resolvedIcon = .image(url)
+            resolvedIconRef = TermioShared.IconRef(asset: asset)
         } else if let path = icon?.path, !path.isEmpty {
             let expanded = (path as NSString).expandingTildeInPath
             let url = expanded.hasPrefix("/")
                 ? URL(fileURLWithPath: expanded)
                 : directory.appendingPathComponent(path)
             resolvedIcon = .image(url.standardizedFileURL)
+            resolvedIconRef = Self.inlineImageReference(at: url.standardizedFileURL)
         } else if let symbol = icon?.symbol, !symbol.isEmpty {
             resolvedIcon = .symbol(symbol)
+            resolvedIconRef = TermioShared.IconRef(symbol: symbol)
         } else {
             resolvedIcon = .terminalGlyph
+            resolvedIconRef = TermioShared.IconRef()
         }
 
         let defaultTint: Color
@@ -836,7 +856,17 @@ struct AgentManifest: Decodable {
         } else {
             defaultTint = .monochromeInk
         }
-        let resolvedTint = icon?.tint.flatMap(Color.init(hex:)) ?? defaultTint
+        let explicitTint = icon?.tint.flatMap { raw in Color(hex: raw).map { (raw, $0) } }
+        let resolvedTint = explicitTint?.1 ?? defaultTint
+        let resolvedTintHex: String?
+        if let raw = explicitTint?.0 {
+            let value = raw.hasPrefix("#") ? String(raw.dropFirst()) : raw
+            resolvedTintHex = "#" + value.uppercased()
+        } else if case .vector(.claude) = resolvedIcon {
+            resolvedTintHex = "#D97757"
+        } else {
+            resolvedTintHex = nil
+        }
         let hookSpec = try resolvedHookSpec()
         let statusRules = hookSpec == nil
             ? AgentStatusRules.from(working: status?.working, attention: status?.attention, label: id)
@@ -855,7 +885,8 @@ struct AgentManifest: Decodable {
         return AgentDefinition(
             id: id, displayName: name, command: command,
             permissionBypassFlag: permissionBypassFlag,
-            resumeStyle: resumeStyle, icon: resolvedIcon, tint: resolvedTint,
+            resumeStyle: resumeStyle, icon: resolvedIcon, iconRef: resolvedIconRef,
+            tint: resolvedTint, tintHex: resolvedTintHex,
             installURL: (install ?? installURL).flatMap(URL.init(string:)), wireName: wire ?? id,
             statusRules: statusRules, hookSpec: hookSpec)
     }
@@ -871,5 +902,17 @@ struct AgentManifest: Decodable {
             if let url = bundle.url(forResource: name, withExtension: pathExtension) { return url }
         }
         return nil
+    }
+
+    /// UIKit cannot decode arbitrary SVG paths from the Mac, so user image files
+    /// cross the wire as real PNG bytes regardless of their source format. Failure
+    /// degrades to the same visible question-mark fallback as a missing local icon.
+    private static func inlineImageReference(at url: URL) -> TermioShared.IconRef {
+        guard let image = NSImage(contentsOf: url),
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+        else { return TermioShared.IconRef(symbol: "questionmark.app") }
+        return TermioShared.IconRef(png: png.base64EncodedString())
     }
 }

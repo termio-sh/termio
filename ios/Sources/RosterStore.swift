@@ -35,7 +35,7 @@ final class RosterStore {
     private var client: CompanionClient?
     /// The project+agent of an in-flight `start`, so the `.started` reply
     /// knows what to open.
-    private var pendingStart: (project: MockProject, agent: String)?
+    private var pendingStart: (project: MockProject, agent: RosterAgent)?
     private var pairingObserver: NSObjectProtocol?
 
     /// Every session currently blocked on the user, across all projects, in
@@ -90,25 +90,21 @@ final class RosterStore {
     /// enabled — driving the ＋ menus. Falls back to a built-in list until the
     /// roster's agent list arrives (or when paired to an older Mac).
     func newSessionActions(in project: MockProject) -> [UIAction] {
-        let agents = enabledAgents.isEmpty
-            ? [RosterAgent(id: "claude", name: "Claude Code"),
-               RosterAgent(id: "codex", name: "Codex"),
-               RosterAgent(id: "terminal", name: "Terminal")]
-            : enabledAgents
+        let agents = enabledAgents.isEmpty ? RosterAgent.legacyDefaults : enabledAgents
         return agents.map { agent in
             UIAction(
                 title: agent.name,
-                image: AgentKind(wire: agent.id).iconRef.menuIcon()
+                image: agent.iconRef.menuIcon()
             ) { [weak self] _ in
-                self?.startSession(agent: agent.id, in: project)
+                self?.startSession(agent: agent, in: project)
             }
         }
     }
 
-    func startSession(agent: String, in project: MockProject) {
+    func startSession(agent: RosterAgent, in project: MockProject) {
         guard let projectID = project.rosterID else { return }
         pendingStart = (project, agent)
-        client?.send(.start(projectID: projectID, agent: agent))
+        client?.send(.start(projectID: projectID, agent: agent.id))
     }
 
     /// Close on the Mac; the next roster push drops the row everywhere.
@@ -151,8 +147,13 @@ final class RosterStore {
         }
         client.onRoster = { [weak self] roster in
             guard let self else { return }
-            projects = roster.projects.map(MockProject.init(roster:))
             enabledAgents = roster.agents
+            let agentsByID = Dictionary(
+                roster.agents.map { ($0.id, $0) },
+                uniquingKeysWith: { _, latest in latest })
+            projects = roster.projects.map {
+                MockProject(roster: $0, agentsByID: agentsByID)
+            }
             NotificationCenter.default.post(name: Self.didChange, object: nil)
             // Open terminals track their session's live status from here —
             // the roster socket is the app's only status feed.
@@ -186,6 +187,7 @@ final class RosterStore {
         companionURL = nil
         CompanionLink.state = .unpaired
         projects = []
+        enabledAgents = []
         NotificationCenter.default.post(name: Self.didChange, object: nil)
     }
 
@@ -193,15 +195,10 @@ final class RosterStore {
     private func openStartedSession(_ sessionID: String) {
         guard let pending = pendingStart else { return }
         pendingStart = nil
-        let title = switch pending.agent {
-        case "claude": "Claude Code"
-        case "codex": "Codex"
-        default: "Terminal"
-        }
         let session = MockSession(
-            title: title,
+            title: pending.agent.name,
             project: pending.project.name,
-            agent: AgentKind(wire: pending.agent),
+            agent: pending.agent,
             status: .idle,
             subtitle: "", time: "",
             rosterID: sessionID,

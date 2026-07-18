@@ -1020,7 +1020,13 @@ extension TermioStore {
         // in preset order — the same filter the sidebar's quick-add row uses.
         let agents = AgentPreset.allCases
             .filter(settings.isAgentEnabled)
-            .map { RosterAgent(id: Self.wireAgent($0), name: $0.displayName) }
+            .map {
+                RosterAgent(
+                    id: Self.wireAgent($0),
+                    name: $0.displayName,
+                    tintHex: $0.tintHex,
+                    icon: $0.iconRef)
+            }
         return CompanionRoster(projects: projects, agents: agents)
     }
 

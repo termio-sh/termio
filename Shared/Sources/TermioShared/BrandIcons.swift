@@ -36,50 +36,6 @@ public struct IconRef: Codable, Sendable, Equatable {
     }
 }
 
-// MARK: - Agent kinds
-
-public enum AgentKind: String, Sendable {
-    case claude
-    case codex
-    case opencode
-    case pi
-    case amp
-    case cursor
-    case kimi
-    case antigravity
-    case hermes
-    case grok
-    case terminal
-
-    /// The agent's representative color — tints the "working" spinner so a busy
-    /// session pulses in its own brand color rather than a neutral grey.
-    public var tintColor: Color {
-        switch self {
-        case .claude: BrandLogo.claude.tint
-        case .codex: BrandLogo.codex.tint
-        case .opencode, .pi, .amp, .cursor, .kimi, .antigravity, .hermes, .grok, .terminal: .monochromeInk
-        }
-    }
-
-    /// Temporary iOS catalog mapping. Rendering consumes only `IconRef`; Cut 5
-    /// removes this agent enum when the Mac starts sending the same refs on wire.
-    public var iconRef: IconRef {
-        switch self {
-        case .claude: IconRef(vector: "claude")
-        case .codex: IconRef(vector: "codex")
-        case .opencode: IconRef(asset: "opencode-favicon")
-        case .pi: IconRef(asset: "pi-favicon")
-        case .amp: IconRef(asset: "amp-favicon")
-        case .cursor: IconRef(asset: "cursor-favicon")
-        case .kimi: IconRef(asset: "kimi-favicon")
-        case .antigravity: IconRef(asset: "antigravity-favicon")
-        case .hermes: IconRef(asset: "hermes-favicon")
-        case .grok: IconRef(asset: "grok-favicon")
-        case .terminal: IconRef()
-        }
-    }
-}
-
 public extension Color {
     /// Pure black in light mode, pure white in dark mode, at full opacity —
     /// keeps a monochrome brand mark at original strength (unlike `.primary`,

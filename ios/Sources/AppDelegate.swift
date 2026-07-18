@@ -44,7 +44,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
                 MockSession(
                     title: url.host ?? "companion",
                     project: Self.argument("-companion-project", in: args) ?? "",
-                    agent: Self.argument("-companion-agent", in: args).map(AgentKind.init(wire:)) ?? .terminal,
+                    agent: Self.argument("-companion-agent", in: args)
+                        .map(RosterAgent.fallback(wire:)) ?? .terminal,
                     status: .idle,
                     subtitle: "", time: "", rosterID: rosterID,
                     projectRosterID: Self.argument("-companion-projectid", in: args),

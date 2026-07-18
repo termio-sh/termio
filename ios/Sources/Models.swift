@@ -6,7 +6,7 @@ struct MockSession: Identifiable {
     let id = UUID()
     let title: String
     let project: String
-    let agent: AgentKind
+    let agent: RosterAgent
     let status: SessionStatus
     let subtitle: String
     let time: String
@@ -23,15 +23,15 @@ struct MockSession: Identifiable {
     var branch: String?
 
     static let samples: [MockSession] = [
-        .init(title: "fix-sidebar", project: "termio", agent: .claude,
+        .init(title: "fix-sidebar", project: "termio", agent: .sampleClaude,
               status: .needsAttention, subtitle: "Allow running npm install?", time: "2m"),
-        .init(title: "landing-hero", project: "termio", agent: .claude,
+        .init(title: "landing-hero", project: "termio", agent: .sampleClaude,
               status: .working, subtitle: "Editing hero.tsx…", time: "5m"),
-        .init(title: "info-pane", project: "termio", agent: .codex,
+        .init(title: "info-pane", project: "termio", agent: .sampleCodex,
               status: .done, subtitle: "Done · 3 files changed", time: "1h"),
-        .init(title: "kanban-drag", project: "vibewizard", agent: .claude,
+        .init(title: "kanban-drag", project: "vibewizard", agent: .sampleClaude,
               status: .working, subtitle: "Running swift build…", time: "12m"),
-        .init(title: "release-notes", project: "termio", agent: .opencode,
+        .init(title: "release-notes", project: "termio", agent: .sampleOpenCode,
               status: .idle, subtitle: "Waiting for input", time: "3h"),
     ]
 }
@@ -61,7 +61,7 @@ struct MockProject: Identifiable {
             MockProject(
                 name: name,
                 path: "~/Documents/GitHub/\(name)",
-                sessions: byProject[name]!.sorted { $0.status.rank < $1.status.rank }
+                sessions: byProject[name, default: []].sorted { $0.status.rank < $1.status.rank }
             )
         }
     }()
@@ -75,22 +75,34 @@ extension MockSession {
 
 // MARK: - Roster → model mapping
 
-extension AgentKind {
-    /// Map a wire agent string (`RosterSession.agent`) to an icon kind.
-    init(wire: String) {
-        switch wire {
-        case "claude": self = .claude
-        case "codex": self = .codex
-        case "opencode": self = .opencode
-        case "pi": self = .pi
-        case "amp": self = .amp
-        case "cursor": self = .cursor
-        case "kimi": self = .kimi
-        case "antigravity": self = .antigravity
-        case "hermes": self = .hermes
-        case "grok": self = .grok
-        default: self = .terminal
+extension RosterAgent {
+    /// Transitional defaults used only before an older Mac supplies an agent
+    /// catalog. Live rows and menus otherwise render the metadata on the wire.
+    static let legacyDefaults: [RosterAgent] = [.sampleClaude, .sampleCodex, .terminal]
+    static let terminal = RosterAgent(id: "terminal", name: "Terminal", icon: IconRef())
+    static let sampleClaude = RosterAgent(
+        id: "claude", name: "Claude Code", tintHex: "#D97757",
+        icon: IconRef(vector: "claude"))
+    static let sampleCodex = RosterAgent(
+        id: "codex", name: "Codex", icon: IconRef(vector: "codex"))
+    static let sampleOpenCode = RosterAgent(
+        id: "opencode", name: "OpenCode", icon: IconRef(asset: "opencode-favicon"))
+
+    static func fallback(wire: String) -> RosterAgent {
+        legacyDefaults.first { $0.id == wire }
+            ?? RosterAgent(id: wire, name: wire, icon: IconRef())
+    }
+
+    var iconRef: IconRef { icon ?? IconRef() }
+
+    var tintColor: Color {
+        if let tintHex, let color = UIColor(ghosttyHex: tintHex) {
+            return Color(uiColor: color)
         }
+        if let vector = iconRef.vector, let logo = BrandLogo(reference: vector) {
+            return logo.tint
+        }
+        return .monochromeInk
     }
 }
 
@@ -125,13 +137,13 @@ extension SessionStatus {
 }
 
 extension MockSession {
-    init(roster: RosterSession, project: RosterProject) {
+    init(roster: RosterSession, project: RosterProject, agentsByID: [String: RosterAgent]) {
         // "—" is the desktop's placeholder for "no branch"; drop it here.
         let branch = project.branch.flatMap { $0 == "—" || $0.isEmpty ? nil : $0 }
         self.init(
             title: roster.title,
             project: project.name,
-            agent: AgentKind(wire: roster.agent),
+            agent: agentsByID[roster.agent] ?? RosterAgent.fallback(wire: roster.agent),
             status: SessionStatus(wire: roster.status),
             subtitle: roster.subtitle ?? "",
             time: "",
@@ -144,13 +156,15 @@ extension MockSession {
 }
 
 extension MockProject {
-    init(roster: RosterProject) {
+    init(roster: RosterProject, agentsByID: [String: RosterAgent]) {
         self.init(
             name: roster.name,
             path: roster.path,
             rosterID: roster.id,
             branch: roster.branch.flatMap { $0 == "—" || $0.isEmpty ? nil : $0 },
-            sessions: roster.sessions.map { MockSession(roster: $0, project: roster) }
+            sessions: roster.sessions.map {
+                MockSession(roster: $0, project: roster, agentsByID: agentsByID)
+            }
         )
     }
 }
