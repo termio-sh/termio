@@ -53,6 +53,9 @@ let package = Package(
             resources: [
                 // Vendor favicons rendered as agent brand marks; see BrandImageAsset.
                 .process("Resources"),
+                // Devicon language and tool logos loaded by `LangIconLoader`. Keep the
+                // directory intact so the runtime lookup subdirectory survives.
+                .copy("LangIcons"),
             ],
             swiftSettings: [
                 // Relax strict concurrency for the AppKit/SwiftUI glue; the app is
