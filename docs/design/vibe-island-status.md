@@ -1,8 +1,8 @@
 ---
 title: Vibe Island 式 Agent 状态层（Claude Code hooks）
-status: draft
+status: done
 type: design
-updated: 2026-07-07
+updated: 2026-07-18
 ---
 
 # 设计：Vibe Island 式 Agent 状态层（Claude Code hooks）
@@ -56,22 +56,30 @@ TermioStore.applyHookEvent(_:)  (reducer)  ──写──▶  statuses[id]
 既有 UI：SidebarView.StatusDot / MenuBarController（无需改）
 ```
 
-> **更新（as-built，多 agent）**：下面 §1 的 cwd 方案已被 **env-id 注入**取代为主关联键，
-> 并从单一 Claude 扩展到 **Claude / Codex / OpenCode / Pi 四家**。要点：
+> **更新（2026-07-18，final as-built，多 agent）**：下面 §1 的 cwd 方案已被
+> **env-id 注入**取代为主关联键，并从单一 Claude 扩展到声明 hooks 的全部内置 agent。要点：
 > - **注入**：`TermioStore.surface` 给每个 PTY 设 `builder.withCustom("env", "TERMIO_SESSION=<session.id>")`
 >   （已实测 Ghostty 的 `env` 键对 `.exec` 生效，shell 里 `$TERMIO_SESSION` 正确展开）。
-> - **统一线格式**：每家 agent 的 hook 都往 socket 发同一个归一化 JSON
->   `{"termio_session","state":"working|attention|done","cwd"}`；"哪个事件=什么 state" 在**安装时**
->   写死进命令，Swift 端零按-agent 解析（`StatusReport` + `applyStatusReport`）。
+> - **公共上报契约**：每家 agent 的 hook 都调用 channel-correct 的绝对路径
+>   `termio[-dev] agent report <working|attention|done|idle>`。CLI 读取 `TERMIO_SESSION` / `PWD`，
+>   再向对应 channel 的 socket 写同一个归一化 JSON
+>   `{"termio_session","state","cwd"}`；raw `printf | nc` 已成为 CLI 后面的实现细节。
+>   "哪个事件=什么 state" 在**安装时**写死，Swift 端零按-agent 解析
+>   （`StatusReport` + `applyStatusReport`）。
 > - **关联**：`sessionID(for:)` 先按 `termio_session`（UUID 精确命中），cwd 仅作兜底。同目录多会话
 >   不再有歧义，Claude-narrowing 启发式已删。
-> - **四家安装器**（`AgentStatusHooks.sync`）：
->   - Claude `~/.claude/settings.json`、Codex `~/.codex/hooks.json` —— **同一套 JSON-hooks 结构**
->     （`JSONHookFile` 复用）；Codex 需用户在 TUI 里 `/hooks` 信任一次（或 `--dangerously-bypass-hook-trust`）。
->   - OpenCode `~/.config/opencode/plugin/termio-status.js`、Pi `~/.pi/agent/extensions/termio-status.js`
->     —— 各放一个**插件/扩展文件**（`PluginFile`），进程内读 `process.env.TERMIO_SESSION` 发同样的 JSON。
+> - **manifest 驱动安装器**（`AgentStatusHooks.sync`）：
+>   - Claude `~/.claude/settings.json`、Codex `~/.codex/hooks.json`、Cursor
+>     `~/.cursor/hooks.json` —— `JSONHookFile` 合并 termio 自己的条目，保留用户配置。
+>   - Kimi `~/.kimi/config.toml` —— `TOMLHookBlock` 维护 marker 包围的 termio block。
+>   - Grok `~/.grok/hooks/termio.json` —— Grok 自动发现的 termio 专属 JSON 文件。
+>   - OpenCode `~/.config/opencode/plugin/termio.js`、Pi `~/.pi/agent/extensions/termio.js`、
+>     Amp `~/.config/amp/plugins/termio.ts` —— `PluginFile` 写入 termio 自带模板。
+>   - 升级时只删除内容可确认为 termio 所有的旧 `termio-status.*` 文件；若简洁新文件名已被
+>     用户文件占用则拒绝覆盖，避免重复 hook 或破坏用户配置。
 > - **实测**：Claude 全链路（spinner+env-id 命中）已验；Codex `codex exec` 实跑确认 hooks 触发
->   （`hook: UserPromptSubmit` / `hook: Stop`）；OpenCode/Pi 文件已正确生成，待真实跑一轮确认插件加载。
+>   （`hook: UserPromptSubmit` / `hook: Stop`）；全部 JSON/TOML/plugin 文件已生成并通过语法检查，
+>   Grok/OpenCode/Pi/Amp 的旧文件名迁移也已由 dev app 实跑确认。
 >
 > **更新（best-design，对标 open-vibe-island + cmux 调研）**：状态模型从 3 态扩成 4 态
 > `idle / working / done / needsAttention`——**完成 ≠ 需要你**：`Stop`→`.done`（绿点"轮到你了"，
