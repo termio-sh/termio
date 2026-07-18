@@ -43,6 +43,7 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
 /// sort ahead of the rest (see `TermioStore.orderedProjects`); this decides the order
 /// within each group.
 enum ProjectSortOrder: String, CaseIterable, Identifiable {
+    case fixed
     /// Most recently active project first — a project rises whenever one of its
     /// agents reports work (or the user switches to one of its sessions).
     case recentActivity
@@ -53,6 +54,7 @@ enum ProjectSortOrder: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .fixed: return "Fixed"
         case .recentActivity: return "Recent Activity"
         case .name: return "Name"
         }
@@ -370,7 +372,7 @@ final class AppSettings: ObservableObject {
             Key.interfaceRowPadding: 2.0,
             Key.agentHooksEnabled: false,
             Key.sessionControlEnabled: false,
-            Key.projectSortOrder: "recentActivity",
+            Key.projectSortOrder: "fixed",
         ])
 
         fontFamily = defaults.string(forKey: Key.fontFamily) ?? ""
@@ -396,7 +398,7 @@ final class AppSettings: ObservableObject {
         sessionControlEnabled = defaults.bool(forKey: Key.sessionControlEnabled)
         usageAuthorizedAgents = Set(defaults.stringArray(forKey: Key.usageAuthorizedAgents) ?? [])
         claudeKeychainDeclined = defaults.bool(forKey: Key.claudeKeychainDeclined)
-        projectSortOrder = defaults.string(forKey: Key.projectSortOrder).flatMap(ProjectSortOrder.init) ?? .recentActivity
+        projectSortOrder = defaults.string(forKey: Key.projectSortOrder).flatMap(ProjectSortOrder.init) ?? .fixed
         recentProjects = defaults.data(forKey: Key.recentProjects)
             .flatMap { try? JSONDecoder().decode([RecentProject].self, from: $0) } ?? []
         lastChatAgentID = defaults.string(forKey: Key.lastChatAgent)

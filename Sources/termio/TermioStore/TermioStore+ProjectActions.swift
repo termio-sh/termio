@@ -397,6 +397,8 @@ extension TermioStore {
             // Pinned projects always float to the top, whichever sort is active.
             if a.pinned != b.pinned { return a.pinned }
             switch order {
+            case .fixed:
+                return false
             case .name:
                 return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
             case .recentActivity:

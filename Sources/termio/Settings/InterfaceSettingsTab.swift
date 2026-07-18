@@ -41,6 +41,19 @@ struct InterfaceSettingsTab: View {
             } header: {
                 SectionHeaderLabel(title: "Density")
             }
+            Section {
+                Picker("Sort", selection: $settings.projectSortOrder) {
+                    ForEach(ProjectSortOrder.allCases) { order in
+                        Text(order.displayName).tag(order)
+                    }
+                }
+            } header: {
+                SectionHeaderLabel(title: "Project order")
+            } footer: {
+                Text("How the sidebar orders projects (pinned always first). Fixed holds the order you added them; Recent Activity floats the active project to the top.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }
