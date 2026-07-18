@@ -98,7 +98,6 @@ struct FileBrowserView: View {
         }
         .onAppear { refresh(); seedChangeCount() }
         .onChange(of: projectPath) {
-            browserState.resetExpansionState()
             refresh()
             seedChangeCount()
         }
@@ -240,6 +239,7 @@ struct FileBrowserView: View {
     /// Rebuilds the tree from the current project path. Called on appear, whenever
     /// the selected session moves to a different project, and after a drop.
     private func refresh() {
+        browserState.resetExpansionState()
         guard let projectPath else {
             root = nil
             return

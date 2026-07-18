@@ -38,7 +38,6 @@ final class FileBrowserState: NSObject, ObservableObject {
         outlineView = outline
         if observedOutline !== outline {
             detachExpansionObserver()
-            resetExpansionState()
             observedOutline = outline
             NotificationCenter.default.addObserver(
                 self,
@@ -57,13 +56,12 @@ final class FileBrowserState: NSObject, ObservableObject {
     }
 
     private func detachExpansionObserver() {
-        guard let observedOutline else { return }
         NotificationCenter.default.removeObserver(
-            self, name: NSOutlineView.itemDidExpandNotification, object: observedOutline)
+            self, name: NSOutlineView.itemDidExpandNotification, object: nil)
         NotificationCenter.default.removeObserver(
-            self, name: NSOutlineView.itemDidCollapseNotification, object: observedOutline)
+            self, name: NSOutlineView.itemDidCollapseNotification, object: nil)
         self.observedOutline = nil
-        urlsByOutlineItem.removeAll()
+        resetExpansionState()
     }
 
     @objc private func itemDidExpand(_ notification: Notification) {

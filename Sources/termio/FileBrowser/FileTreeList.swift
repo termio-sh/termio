@@ -118,9 +118,7 @@ private struct FileRow: View {
         // selection cue is our `SidebarRowHighlight` below. Lives in a row so it can
         // walk up to the enclosing outline view.
         .background(OutlineSelectionStyleStripper())
-        // Capture that same outline view (a row is the one place the walk-up reaches
-        // it) so `FileBrowserView` can expand this folder on the click that selected it.
-        .background(OutlineViewCapture(nodeURL: node.url, onFound: captureOutline))
+
         // Drag a row out as its file URL. The terminal pane catches the drop and
         // inserts the shell-quoted path at the prompt (see `TerminalPane.sendPaths`);
         // a folder row catches it to move the file into that folder. Selection is the
@@ -162,13 +160,28 @@ private struct FileRow: View {
         // A single click opens a file via the List's native selection (see
         // `FileBrowserView.onChange(of: selection)`), so no per-row open handler here.
         if node.isDirectory {
-            row.dropDestination(for: URL.self) { urls, _ in
-                onDrop(urls, node.url)
-            } isTargeted: { isTargeted = $0 }
+            row
+                // A row is the one place the walk-up reaches the outline view. Only
+                // folders need it: they are the expandable items whose icon state is
+                // tracked, and the only rows `FileBrowserView` toggles programmatically.
+                .background(OutlineViewCapture(nodeURL: node.url, onFound: captureOutline))
+                .dropDestination(for: URL.self) { urls, _ in
+                    onDrop(urls, node.url)
+                } isTargeted: { isTargeted = $0 }
         } else {
             row
         }
     }
+}
+
+/// Finds the table row containing a representable mounted inside a list row.
+private func tableRowView(above view: NSView) -> NSTableRowView? {
+    var ancestor = view.superview
+    while let current = ancestor {
+        if let row = current as? NSTableRowView { return row }
+        ancestor = current.superview
+    }
+    return nil
 }
 
 /// The per-row right-click menu, via AppKit `NSMenu` rather than SwiftUI's
@@ -218,7 +231,7 @@ private struct RowContextMenu: NSViewRepresentable {
         func attach() {
             DispatchQueue.main.async { [weak self] in
                 guard let self, let owner = self.owner else { return }
-                guard let host = Self.rowView(above: owner) else { return }
+                guard let host = tableRowView(above: owner) else { return }
                 if hostView === host, recognizer != nil { return }
                 detach()
                 let recognizer = NSClickGestureRecognizer(target: self, action: #selector(self.showMenu(_:)))
@@ -257,14 +270,7 @@ private struct RowContextMenu: NSViewRepresentable {
         @objc private func newFolder() { actions?.newFolder(target) }
         @objc private func deleteItem() { actions?.delete(target) }
 
-        private static func rowView(above view: NSView) -> NSView? {
-            var ancestor = view.superview
-            while let current = ancestor {
-                if current is NSTableRowView { return current }
-                ancestor = current.superview
-            }
-            return nil
-        }
+
     }
 }
 
@@ -396,7 +402,7 @@ private struct OutlineViewCapture: NSViewRepresentable {
             return
         }
         let item: NSObject?
-        if let rowView = Self.rowView(above: view) {
+        if let rowView = tableRowView(above: view) {
             let row = outline.row(for: rowView)
             item = row >= 0 ? outline.item(atRow: row) as? NSObject : nil
         } else {
@@ -415,14 +421,6 @@ private struct OutlineViewCapture: NSViewRepresentable {
         return nil
     }
 
-    private static func rowView(above view: NSView) -> NSTableRowView? {
-        var ancestor = view.superview
-        while let current = ancestor {
-            if let row = current as? NSTableRowView { return row }
-            ancestor = current.superview
-        }
-        return nil
-    }
 }
 
 /// A zero-size helper that finds the `NSOutlineView` hosting the file tree (by
