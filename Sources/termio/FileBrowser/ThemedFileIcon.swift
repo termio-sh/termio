@@ -14,10 +14,14 @@ enum ThemedFileIcon {
         }
 
         switch ext {
-        case "swift", "js", "mjs", "cjs", "ts", "mts", "cts", "jsx", "tsx", "py", "pyw", "pyi",
-             "rb", "go", "rs", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "m", "mm",
-             "java", "kt", "kts", "cs", "php", "dart", "vue", "svelte", "html", "htm", "xhtml",
-             "css", "scss", "sass", "less", "lua", "pl", "pm", "r", "scala", "hs", "lhs", "ex",
+        case "ts", "mts", "cts": return .typeScript
+        case "py", "pyw", "pyi": return .python
+        case "js", "mjs", "cjs": return .javaScript
+        case "html", "htm", "xhtml": return .html
+        case "css", "scss", "sass", "less": return .css
+        case "sql": return .sql
+        case "swift", "jsx", "tsx", "rb", "go", "rs", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "m", "mm",
+             "java", "kt", "kts", "cs", "php", "dart", "vue", "svelte", "lua", "pl", "pm", "r", "scala", "hs", "lhs", "ex",
              "exs", "erl", "hrl", "clj", "cljs", "elm", "ml", "mli", "fs", "fsx", "groovy", "jl",
              "nim", "cr", "zig", "sol", "coffee", "purs", "hx", "f", "f90", "f95", "cob", "cbl",
              "tex", "ltx", "mat", "vb", "vbs", "pug", "hbs", "wasm", "wat", "graphql", "gql":
@@ -27,7 +31,7 @@ enum ThemedFileIcon {
         case "json", "jsonc", "json5", "yml", "yaml", "toml", "ini", "conf", "cfg", "properties",
              "env", "xcconfig", "plist", "lock", "xml", "xsl", "xslt", "xsd", "entitlements":
             return .settings
-        case "sql", "sqlite", "sqlite3", "db":
+        case "sqlite", "sqlite3", "db":
             return .database
         case "md", "markdown", "mdx", "txt", "rst", "rtf", "strings":
             return .file
