@@ -494,6 +494,7 @@ extension TermioStore {
             liveTitles[sessionID] = nil
             detectedAgents[sessionID] = nil
             lastWorkingAt[sessionID] = nil
+            promotionStreaks[sessionID] = nil
         }
         projects.remove(at: projectIndex)
 
@@ -555,6 +556,7 @@ extension TermioStore {
         liveTitles[id] = nil
         detectedAgents[id] = nil
         lastWorkingAt[id] = nil
+        promotionStreaks[id] = nil
 
         // If the session held a split pane, collapse that pane; when it was also
         // the focused pane the prune moves the selection to its layout neighbor,

@@ -249,6 +249,11 @@ final class TermioStore: ObservableObject {
     /// Refreshed both by working hooks and by a *changed* rendered screen
     /// (`noteOutputActivity`).
     var lastWorkingAt: [Session.ID: Date] = [:]
+    /// Consecutive changed-screen pokes seen for an agent session that is *not*
+    /// `.working` — the evidence meter behind hook-miss promotion (see
+    /// `noteOutputActivity`). Reset the moment the run of pokes breaks, so only
+    /// a genuinely sustained repaint can flip a session back to `.working`.
+    var promotionStreaks: [Session.ID: (count: Int, last: Date)] = [:]
     /// The last activity a screen-scrape-configured agent's viewport was classified
     /// into (see `AgentStatusRules` / `applyScreenDetectedActivity`), so status is only
     /// re-driven on a transition — not re-emitted every tick the screen sits idle.

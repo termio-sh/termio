@@ -120,22 +120,71 @@ extension TermioStore {
     private func clearWorking(_ id: Session.ID) {
         currentTool[id] = nil
         lastWorkingAt[id] = nil
+        promotionStreaks[id] = nil
     }
 
-    /// Refreshes a working session's activity timestamp when the rendered screen
-    /// changed. A genuinely working agent repaints changing content (its ticking
-    /// spinner, streaming tokens) every second, so a changing viewport means the
-    /// turn is still live; the moment the screen goes static (the agent is back at
-    /// its prompt), the timestamp stops advancing and `sweepStaleWorking` can clear
-    /// the spinner. Keying on the *screen* rather than raw bytes is what closes the
+    /// How many consecutive changed-screen pokes (at the tap's ~1s cadence) an
+    /// un-working agent session must show before it is promoted back to
+    /// `.working`, and how large a gap between pokes breaks the run. Three
+    /// pokes ≈ 3s of sustained repaint — long enough to skip one-off redraws
+    /// (a resize, a settled prompt), short enough that a missed hook shows a
+    /// spinner within a few seconds of real streaming.
+    private var promotionStreakThreshold: Int { 3 }
+    private var promotionStreakMaxGap: TimeInterval { 5 }
+
+    /// Judges a session's liveness — and, when the evidence is sustained, its
+    /// working-ness — from the rendered screen. Two directions share this tap:
+    ///
+    /// **Sustain** — while `.working`, a changing viewport keeps `lastWorkingAt`
+    /// fresh; the moment the screen goes static (the agent is back at its
+    /// prompt), the timestamp stops advancing and `sweepStaleWorking` clears the
+    /// spinner. Keying on the *screen* rather than raw bytes is what closes the
     /// gap for a finished agent that keeps dribbling output at an idle prompt (a
-    /// redraw, a blinking cursor) — the stuck-spinner failure. No-op unless the
-    /// session is actually spinning, so idle sessions cost nothing. Fed by a
-    /// throttled tap on the PTY stream (see `surface(for:in:)`).
-    func noteOutputActivity(_ id: Session.ID, screenChanged: Bool) {
-        guard statuses[id] == .working else { return }
-        guard screenChanged else { return }
-        lastWorkingAt[id] = Date()
+    /// redraw, a blinking cursor) — the stuck-spinner failure.
+    ///
+    /// **Promote** — hooks are the primary working authority, but a single
+    /// missed `working` report (a failed hook script, an early `Stop` on a
+    /// continued turn) used to pin the row calm forever while output streamed:
+    /// this tap could only sustain, never start, a spinner. A sustained run of
+    /// changed-screen pokes now flips an agent row back to `.working`, behind
+    /// four guards: only agent sessions (a bare terminal never spins), never
+    /// while `needsAttention` is asserted (a blocked prompt repaints too — the
+    /// hook keeps sole authority over attention), never within the input-echo
+    /// window (typing a prompt repaints the composer sub-second), and only
+    /// after `promotionStreakThreshold` consecutive pokes (a one-off redraw is
+    /// not a turn). Downgrades still come only from hooks and the stale sweep,
+    /// so hooks remain the one authority for attention/done.
+    ///
+    /// Fed by a throttled tap on the PTY stream (see `surface(for:in:)`);
+    /// `inputRecently` derives from `PTYProcess.lastInputAt`, which both the
+    /// Mac and phone input paths stamp.
+    func noteOutputActivity(_ id: Session.ID, screenChanged: Bool, inputRecently: Bool) {
+        if statuses[id] == .working {
+            promotionStreaks[id] = nil
+            guard screenChanged else { return }
+            lastWorkingAt[id] = Date()
+            return
+        }
+        guard screenChanged, !inputRecently else {
+            promotionStreaks[id] = nil
+            return
+        }
+        guard statuses[id] != .needsAttention else { return }
+        guard let session = session(id), effectiveAgent(for: session) != .terminal else { return }
+        let now = Date()
+        var streak = promotionStreaks[id] ?? (count: 0, last: now)
+        if now.timeIntervalSince(streak.last) > promotionStreakMaxGap {
+            streak = (count: 0, last: now)
+        }
+        streak = (count: streak.count + 1, last: now)
+        guard streak.count >= promotionStreakThreshold else {
+            promotionStreaks[id] = streak
+            return
+        }
+        promotionStreaks[id] = nil
+        statuses[id] = .working
+        lastWorkingAt[id] = now
+        if let pid = project(for: id)?.id { liveActivity[pid] = now }
     }
 
     /// Drives status from an agent's own screen when it ships no hook system — the path

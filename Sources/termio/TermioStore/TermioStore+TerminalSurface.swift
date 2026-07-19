@@ -202,10 +202,15 @@ extension TermioStore {
             let statusTrace = ProcessInfo.processInfo.environment["TERMIO_STATUS_TRACE"] != nil
             var lastPoke = Date.distantPast
             var lastScreenSignature: Int?
-            pty.addSink { [weak self, weak inMemory] _ in
+            pty.addSink { [weak self, weak inMemory, weak pty] _ in
                 let now = Date()
                 guard now.timeIntervalSince(lastPoke) >= 1 else { return }
                 lastPoke = now
+                // Freshly-typed input repaints the composer too; the promotion
+                // path in `noteOutputActivity` must not read that echo as a
+                // working turn. 1.5s outlasts the echo of the final keystroke
+                // while barely delaying promotion once real streaming starts.
+                let inputRecently = now.timeIntervalSince(pty?.lastInputAt ?? .distantPast) < 1.5
                 let text = inMemory?.readViewportText()
                 let screenChanged: Bool
                 if let text {
@@ -229,7 +234,8 @@ extension TermioStore {
                     detected = nil
                 }
                 DispatchQueue.main.async {
-                    self?.noteOutputActivity(session.id, screenChanged: screenChanged)
+                    self?.noteOutputActivity(
+                        session.id, screenChanged: screenChanged, inputRecently: inputRecently)
                     if let detected {
                         self?.applyScreenDetectedActivity(detected, for: session.id)
                     }
