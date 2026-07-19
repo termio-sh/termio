@@ -14,13 +14,13 @@ enum ThemedFileIcon {
         }
 
         switch ext {
-        case "ts", "mts", "cts": return .typeScript
+        case "ts", "mts", "cts", "tsx": return .typeScript
         case "py", "pyw", "pyi": return .python
-        case "js", "mjs", "cjs": return .javaScript
+        case "js", "mjs", "cjs", "jsx": return .javaScript
         case "html", "htm", "xhtml": return .html
         case "css", "scss", "sass", "less": return .css
         case "sql": return .sql
-        case "swift", "jsx", "tsx", "rb", "go", "rs", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "m", "mm",
+        case "swift", "rb", "go", "rs", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "m", "mm",
              "java", "kt", "kts", "cs", "php", "dart", "vue", "svelte", "lua", "pl", "pm", "r", "scala", "hs", "lhs", "ex",
              "exs", "erl", "hrl", "clj", "cljs", "elm", "ml", "mli", "fs", "fsx", "groovy", "jl",
              "nim", "cr", "zig", "sol", "coffee", "purs", "hx", "f", "f90", "f95", "cob", "cbl",
