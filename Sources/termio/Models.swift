@@ -163,7 +163,7 @@ enum BrandImageAsset: Hashable {
 /// rounded *stroke* by `HugeIconShape`, matching Hugeicons' 1.5px line style.
 /// Multiple `<path>` elements from the source are concatenated into one data
 /// string — each starts with `M`, so the parser treats them as separate subpaths.
-enum HugeIcon: Hashable {
+enum HugeIcon: Hashable, CaseIterable {
     case terminal
     case folder
     case folderOpen

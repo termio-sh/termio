@@ -167,18 +167,32 @@ struct HugeIconShape: Shape {
         // mark's ink width to a fixed fraction of the box — the terminal mark's own
         // 18/24 fill — keeps the terminal identical while pulling the wider folder
         // marks in to match it, so same-`size` HugeIcons line up.
-        let glyph = SVGPath(icon.pathData).cgPath
-        let ink = glyph.boundingBoxOfPath
-        guard ink.width > 0, ink.height > 0 else { return Path(glyph) }
+        let glyph = HugeIconGlyph.cache[icon]!
+        guard glyph.ink.width > 0, glyph.ink.height > 0 else { return Path(glyph.path) }
         let targetWidth = rect.width * (18.0 / 24.0)
-        let scale = min(targetWidth / ink.width, rect.height / ink.height)
+        let scale = min(targetWidth / glyph.ink.width, rect.height / glyph.ink.height)
         var transform = CGAffineTransform(
-            translationX: rect.midX - scale * ink.midX,
-            y: rect.midY - scale * ink.midY
+            translationX: rect.midX - scale * glyph.ink.midX,
+            y: rect.midY - scale * glyph.ink.midY
         )
         .scaledBy(x: scale, y: scale)
-        return Path(glyph.copy(using: &transform) ?? glyph)
+        return Path(glyph.path.copy(using: &transform) ?? glyph.path)
     }
+}
+
+/// Immutable parse results for the embedded Hugeicons paths. SwiftUI may ask a `Shape`
+/// for its path repeatedly while a file list scrolls; parsing the same SVG string on each
+/// layout is unnecessary work.
+private struct HugeIconGlyph {
+    let path: CGPath
+    let ink: CGRect
+
+    static let cache: [HugeIcon: HugeIconGlyph] = Dictionary(
+        uniqueKeysWithValues: HugeIcon.allCases.map { icon in
+            let path = SVGPath(icon.pathData).cgPath
+            return (icon, HugeIconGlyph(path: path, ink: path.boundingBoxOfPath))
+        }
+    )
 }
 
 /// VS Code's "codicon" glyphs, used for the file-explorer header actions so termio's

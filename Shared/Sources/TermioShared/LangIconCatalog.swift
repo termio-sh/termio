@@ -371,7 +371,7 @@ public enum LangIconCatalog {
 public extension LangIconCatalog {
     /// The bundled logo for a file, by exact name first (so `vite.config.ts`
     /// beats a bare `ts`) then by extension; `nil` when none is bundled and
-    /// the caller should fall back to an SF Symbol via `FileTypeIcon`.
+    /// the caller should render its platform-specific fallback.
     static func resource(forFileName fileName: String) -> (name: String, monochrome: Bool)? {
         let lowered = fileName.lowercased()
         let ext = (lowered as NSString).pathExtension
