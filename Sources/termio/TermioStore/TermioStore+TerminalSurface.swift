@@ -31,6 +31,29 @@ enum ClaudeConversation {
     }
 }
 
+/// Looks up whether Grok has a saved conversation for a given session id. Grok stores
+/// each conversation as a directory named by its session UUID at
+/// `~/.grok/sessions/<url-encoded-cwd>/<id>/`; we glob the cwd folders for a directory
+/// named `<id>` rather than reconstruct Grok's percent-encoding. Grok shares Claude's
+/// resume flag shape — `--session-id` creates (and errors if the id already exists),
+/// `--resume` continues — so termio uses this to switch from create to resume once
+/// Grok has persisted the session, avoiding the "Session ID … is already in use" error.
+enum GrokConversation {
+    static func exists(id: String) -> Bool {
+        let sessions = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".grok/sessions", isDirectory: true)
+        guard let folders = try? FileManager.default.contentsOfDirectory(
+            at: sessions, includingPropertiesForKeys: nil) else { return false }
+        for folder in folders {
+            let candidate = folder.appendingPathComponent(id, isDirectory: true)
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+               isDirectory.boolValue { return true }
+        }
+        return false
+    }
+}
+
 /// Pre-creates Pi's on-disk session file for a pinned id, so `--session-id` always
 /// resolves to an existing session. Pi looks the id up in its session store at
 /// startup and prints a yellow "No project session found … creating a new session"
@@ -440,11 +463,22 @@ extension TermioStore {
         } else {
             resumeID = nil
         }
+        // Claude and Grok share the create-vs-resume flag shape (`--session-id` errors
+        // if the id already exists, `--resume` if it doesn't), so termio must know
+        // whether the agent already saved this conversation — each keeps it in its own
+        // store (`~/.claude/projects` vs `~/.grok/sessions`).
+        let pinnedConversationExists: Bool
+        if agent == .claudeCode {
+            pinnedConversationExists = resumeID.map(ClaudeConversation.exists) == true
+        } else if agent.id == "grok" {
+            pinnedConversationExists = resumeID.map(GrokConversation.exists) == true
+        } else {
+            pinnedConversationExists = false
+        }
         let context = AgentPreset.ResumeContext(
             resumeID: resumeID ?? "",
             launchedBefore: session.launched,
-            pinnedConversationExists: agent == .claudeCode
-                && resumeID.map(ClaudeConversation.exists) == true
+            pinnedConversationExists: pinnedConversationExists
         )
         guard let arguments = agent.resumeArguments(context) else {
             return (base, resumeID)

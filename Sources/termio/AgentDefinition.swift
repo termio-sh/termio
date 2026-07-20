@@ -165,9 +165,9 @@ struct AgentDefinition: Identifiable {
         var resumeID: String
         /// Whether this session's agent has been launched in a prior app run.
         var launchedBefore: Bool
-        /// Whether Claude Code already has a saved conversation under `resumeID`.
-        /// Resuming one that doesn't exist errors, so a pinned-but-never-used session
-        /// is (re)created with `--session-id` instead.
+        /// Whether the agent already has a saved conversation under `resumeID` (Claude
+        /// Code, Grok). Resuming one that doesn't exist errors, so a pinned-but-never-used
+        /// session is (re)created with `--session-id` instead.
         var pinnedConversationExists: Bool
     }
 
