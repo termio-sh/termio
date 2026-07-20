@@ -2,7 +2,10 @@ import { markdownUrl, orderedDocPages, siteUrl } from "@/lib/docs-llms";
 
 // /llms.txt — the llmstxt.org index for agents: what Termio is, plus every doc
 // page linked in its raw-Markdown form so an agent never has to parse the HTML
-// shell. Statically generated at build time.
+// shell. Must render at build time: route handlers are dynamic by default, and
+// at request time the content/docs sources aren't in the serverless bundle.
+export const dynamic = "force-static";
+
 export function GET() {
   const docLines = orderedDocPages().map((page) => {
     const description = page.data.description

@@ -7,7 +7,10 @@ import {
 
 // /llms-full.txt — the entire docs corpus as one Markdown document, in sidebar
 // order. Small enough to fit any model's context, so a single fetch gives an
-// agent the complete picture. Statically generated at build time.
+// agent the complete picture. Must render at build time: getText("raw") reads
+// the content/docs sources from disk, which aren't in the serverless bundle.
+export const dynamic = "force-static";
+
 export async function GET() {
   const sections = await Promise.all(
     orderedDocPages().map(async (page) => {
