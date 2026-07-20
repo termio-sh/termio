@@ -1,0 +1,59 @@
+---
+title: Keyboard shortcuts
+description: A reference for Termio's default shortcuts — sessions, panes, navigation, and view — every one of them rebindable under Settings ▸ Keyboard.
+---
+
+Termio is built to run from the keyboard. Here are the defaults, grouped by what
+they do. Every one is rebindable — see [Customizing](#customizing) below.
+
+## Sessions
+
+| Action | Shortcut |
+| --- | --- |
+| New Terminal | `⌘T` |
+| New Chat | `⌘N` |
+| Open Project | `⌘O` |
+| Open Quickly (jump to session / project / file) | `⌘⇧O` |
+| Command Palette | `⌘⇧P` |
+
+## Panes
+
+| Action | Shortcut |
+| --- | --- |
+| Split Right | `⌘D` |
+| Split Down | `⌘⇧D` |
+| Zoom pane (fill the window) | `⌘⇧↩` |
+| Close pane | `⌘W` |
+| Focus left / right / up / down | `⌘⌥←` · `⌘⌥→` · `⌘⌥↑` · `⌘⌥↓` |
+
+## View
+
+| Action | Shortcut |
+| --- | --- |
+| Increase font size | `⌘=` |
+| Decrease font size | `⌘-` |
+| Reset font size | `⌘0` |
+| Toggle project files (inspector) | `⌘⌥0` |
+| Settings | `⌘,` |
+
+The system shortcuts you'd expect also work as usual — `⌘C` / `⌘V` to copy and
+paste, `⌘A` to select all, `⌘Q` to quit.
+
+## Customizing
+
+Open **Settings ▸ Keyboard** to rebind any command. The editor lists every action
+with its current binding and flags conflicts as you assign them. Your overrides are
+saved to:
+
+```
+~/.termio/keybindings.json
+```
+
+Only the shortcuts you change are written there — the defaults ship with the app,
+so the file stays small and easy to read.
+
+<Callout type="tip">
+  Not sure what a command is called? Open the [Command
+  Palette](/docs/navigation) (`⌘⇧P`) — it lists every action alongside its current
+  shortcut, so you can find and run things before you commit them to muscle memory.
+</Callout>

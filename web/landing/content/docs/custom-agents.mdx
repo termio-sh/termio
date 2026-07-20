@@ -1,0 +1,96 @@
+---
+title: Custom agents
+description: Teach Termio about any CLI by dropping a small JSON manifest in ~/.termio/config/agents — give it a name, an icon, and live status detection, and it becomes a first-class agent alongside the built-ins.
+---
+
+Termio ships with the common coding agents built in, but the catalog is open: any
+command-line tool can become a first-class agent. You describe it in a small JSON
+manifest, and from then on it appears in the new-session menu, the Settings ▸
+Agents list, and the sidebar with its own name, icon, and live status — exactly
+like Claude Code or Codex.
+
+<Callout type="note">
+  You don't *need* a manifest to run an arbitrary CLI — you can always launch a
+  plain shell and run it there. A manifest is what promotes it to a real agent
+  with an icon and status detection.
+</Callout>
+
+## Add an agent
+
+Drop a JSON file into your config folder, named after the agent's `id`:
+
+```
+~/.termio/config/agents/<id>.json
+```
+
+A minimal manifest needs only an `id`, a `name`, and the `command` to launch:
+
+```json
+{
+  "id": "myagent",
+  "name": "My Agent",
+  "command": "myagent --fancy"
+}
+```
+
+Termio reads the folder **once at launch**, so restart the app after adding or
+editing a manifest. The agent then shows up wherever you start a session; enable,
+reorder, or tweak its command from **Settings ▸ Agents** like any other.
+
+<Callout type="tip">
+  Use a built-in's `id` (for example `claudeCode`) as your filename to **override**
+  it — handy for launching Claude Code through a wrapper script while keeping its
+  icon and hooks.
+</Callout>
+
+## Manifest fields
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `id` | ✓ | Stable slug and persistence key (letters, digits, `-`, `_`, `.`). |
+| `name` | ✓ | Display name in menus and the sidebar. |
+| `command` | | The program and arguments to launch. Omit it to open your login shell. The binary must be on your `PATH`. |
+| `icon` | | An icon — see below. Defaults to a generic glyph. |
+| `status` | | Screen-scrape rules for live status — see below. |
+| `resume` | | Resume strategy: `"none"` (default), `"claude"`, `"codex"`, `"pi"`, or `"opencode"`. |
+| `permissionBypassFlag` | | A flag appended when you toggle "skip permission prompts" for this agent. |
+| `tint` | | A hex color (e.g. `"#14B8A6"`) used to tint the "working" spinner. |
+
+### Icon
+
+Point at an SF Symbol, or an image dropped alongside the manifest:
+
+```json
+"icon": { "symbol": "sparkles" }
+```
+
+```json
+"icon": { "path": "myagent.png" }
+```
+
+For `path`, put the image file next to the `.json` in the same folder.
+
+### Live status
+
+If your agent doesn't ship a hook system, Termio can still read its status by
+matching regular expressions against the terminal screen. List patterns that mean
+"busy" under `working` and patterns that mean "waiting on you" under `attention`:
+
+```json
+"status": {
+  "working": ["thinking", "Running"],
+  "attention": ["approve\\?", "Continue\\? \\(y/n\\)"]
+}
+```
+
+A line matching `attention` flips the session to the **attention** state (it wins
+over `working`, since a prompt can sit under a still-spinning header); a line
+matching `working` marks it **working**. See the [sidebar status
+reference](/docs/sidebar#status) for what each state means.
+
+<Callout type="note">
+  Agents that ship their own hook system (like the built-ins) get more precise
+  status through hooks instead of screen-scraping. That path is covered under
+  [Session control](/docs/session-control) — for a custom agent, the `status`
+  regex above is the simplest route.
+</Callout>

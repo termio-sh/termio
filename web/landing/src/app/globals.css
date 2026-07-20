@@ -373,4 +373,86 @@
   .prose-legal a {
     @apply text-foreground underline decoration-muted-foreground/50 underline-offset-4 transition-colors hover:decoration-foreground;
   }
+
+  /* Docs prose — the same reading-column voice as the legal pages, extended for
+     technical content: anchored headings, inline + block code, tables, blockquotes
+     and rules. System SF throughout (no web font), 15px body at 1.7 leading. */
+  .prose-docs {
+    @apply text-[15px] leading-[1.7] text-foreground/80;
+  }
+  .prose-docs > :first-child {
+    @apply mt-0;
+  }
+  .prose-docs h2 {
+    @apply mt-12 scroll-mt-28 text-xl font-semibold leading-tight tracking-tight text-foreground;
+  }
+  .prose-docs h3 {
+    @apply mt-9 scroll-mt-28 text-base font-semibold leading-snug tracking-tight text-foreground;
+  }
+  .prose-docs h4 {
+    @apply mt-7 scroll-mt-28 text-[15px] font-semibold text-foreground;
+  }
+  .prose-docs p {
+    @apply mt-4 text-[15px] leading-[1.7] text-foreground/80;
+  }
+  .prose-docs ul {
+    @apply mt-4 space-y-2.5;
+  }
+  .prose-docs ol {
+    @apply mt-4 list-decimal space-y-2.5 pl-5 marker:text-muted-foreground;
+  }
+  .prose-docs ul > li {
+    @apply relative pl-6 text-[15px] leading-[1.7] text-foreground/80;
+  }
+  /* The site's dash bullet — a short hairline instead of a dot. */
+  .prose-docs ul > li::before {
+    content: "";
+    @apply absolute left-0 top-[0.82em] h-px w-3 bg-muted-foreground/70;
+  }
+  .prose-docs ol > li {
+    @apply pl-1 text-[15px] leading-[1.7] text-foreground/80;
+  }
+  .prose-docs li > ul,
+  .prose-docs li > ol {
+    @apply mt-2.5;
+  }
+  .prose-docs strong {
+    @apply font-semibold text-foreground;
+  }
+  .prose-docs a {
+    @apply font-medium text-foreground underline decoration-muted-foreground/40 underline-offset-4 transition-colors hover:decoration-brand-teal;
+  }
+  /* Inline code — a quiet monospace chip. The :not(pre code) guard keeps block
+     code inside <pre> unchipped. */
+  .prose-docs :not(pre) > code {
+    @apply rounded-md border border-border bg-secondary px-1.5 py-0.5 font-mono text-[0.85em] text-foreground;
+  }
+  .prose-docs pre {
+    @apply mt-5 overflow-x-auto rounded-lg border border-border bg-[#0c0c0f] p-4 text-[13px] leading-[1.6];
+  }
+  .prose-docs pre code {
+    @apply font-mono text-foreground/90;
+  }
+  .prose-docs blockquote {
+    @apply mt-5 border-l-2 border-brand-teal/60 pl-4 text-foreground/70 italic;
+  }
+  .prose-docs hr {
+    @apply my-10 border-border;
+  }
+  .prose-docs img {
+    @apply mt-5 rounded-2xl border border-border;
+  }
+  /* Tables — a compact hairline grid matching the site's borders. */
+  .prose-docs table {
+    @apply mt-6 w-full border-collapse overflow-hidden text-[14px];
+  }
+  .prose-docs th {
+    @apply border-b border-border px-3 py-2 text-left font-semibold text-foreground;
+  }
+  .prose-docs td {
+    @apply border-b border-border px-3 py-2 align-top text-foreground/80;
+  }
+  .prose-docs tbody tr:last-child td {
+    @apply border-b-0;
+  }
 }

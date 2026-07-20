@@ -1,0 +1,62 @@
+---
+title: The sidebar
+description: The sidebar is Termio's control surface — Terminals, Chats, and Projects grouped in one list, each session reporting a live status so you always know which agent needs you.
+---
+
+Everything you run in Termio lives in the sidebar on the left. It's one scrollable
+list, grouped into sections, where every row is a live session reporting what it's
+doing right now. Click a row to bring it forward; the rest keep running in the
+background.
+
+## Sections
+
+The sidebar groups your sessions by what they are:
+
+- **Terminals** — standalone shells and agents you start with `⌘T`, not tied to a
+  project. Your scratchpad.
+- **Chats** — throwaway agent sessions for quick questions (see below).
+- **Projects** — the folders you've opened. Each project expands to the sessions
+  running inside it, and any git worktrees nest one level deeper, giving a
+  three-level tree: project → worktree → session. See [Git
+  worktrees](/docs/worktrees).
+
+Empty sections stay hidden, so the list only shows what you're actually using.
+
+## Status
+
+Every session row carries a status dot that updates live. There are four states:
+
+| Status | Meaning |
+| --- | --- |
+| **working** | The agent is actively producing output. |
+| **idle** | Waiting for you — nothing pending. |
+| **attention** | Blocked on a question or a permission prompt. Go back. |
+| **done** | Finished a task while you were on another session — a calm "ready" cue, so you notice a completed run without it shouting for attention. |
+
+The distinction between **attention** and **done** is the point: *attention* means
+an agent is stuck and can't proceed without you; *done* means it finished on its
+own and is just letting you know. Termio derives these from the agent's own hooks
+where it exposes them and from terminal output otherwise — [Session
+control](/docs/session-control) covers the opt-in hooks that make them sharpest.
+
+<Callout type="tip">
+  Start a long run, switch away, and let the status dots do the watching. When a
+  row flips to **attention** you know to jump back; when it flips to **done** the
+  work landed while you were elsewhere.
+</Callout>
+
+## Chats
+
+The **Chats** section holds scratch agent sessions — for when you want to ask an
+agent something without opening a project. Press `⌘N` for a **New Chat** and it
+starts in a shared scratch directory (`~/.termio/chats`), never in whatever folder
+you happen to be in. Close them individually, or clear the lot from the section's
+menu. Treat them as disposable: quick questions, throwaway experiments, nothing
+you need to keep.
+
+## Switching without losing your place
+
+Because each session is a real process, an agent doesn't pause when it's
+off-screen. Click between rows freely, or — once you have more than a handful —
+jump straight to any session by name with `⌘⇧O`. See
+[Navigation](/docs/navigation).

@@ -1,0 +1,42 @@
+---
+title: The inspector
+description: Browse files, edit them with syntax highlighting, read the git diff, and search the project — a full side panel that never pulls you out of the terminal.
+---
+
+The inspector is Termio's side panel for everything *around* the terminal:
+files, changes, and search. It sits beside your sessions so you can glance at
+code without switching apps.
+
+## Files
+
+The file tree mirrors the working directory. Single-click a file to open it in a
+built-in editor with syntax highlighting, soft-wrap, and a live line/column
+readout. Edits auto-save — there's no save button. Images, PDFs, and HTML open
+in a Quick Look preview instead.
+
+## Changes
+
+The git pane has two read-only tabs:
+
+- **Changes** — the current diff, rendered as a clean unified view.
+- **History** — recent commits with author avatars, expandable file lists, and
+  per-commit diffs.
+
+It's deliberately read-only: writing to git (commit, push, PR) stays in the
+terminal, where the agent and your own commands already live.
+
+## Search
+
+The inspector's **Search** tab runs a content search across the project (backed
+by `git grep`) and jumps you straight to the matching line in the editor — it
+searches inside files, not just filenames. This is the "find in files" you know
+from an editor.
+
+Looking for a file *by name* instead? That's [Open Quickly](/docs/navigation)
+(`⌘⇧O`), which also jumps between sessions and recent projects.
+
+## Opening files from the terminal
+
+Cmd-click a file path in terminal output — even inside an agent's TUI — and
+Termio opens it in the editor. Cmd-click a URL to open it in your browser, or a
+`file://` link for a read-only preview overlay.

@@ -1,0 +1,45 @@
+---
+title: Command palette & Open Quickly
+description: Two keyboard panels drive Termio without the mouse — the Command Palette runs any action, and Open Quickly jumps to any session, project, or file.
+---
+
+Termio has two overlay panels that keep your hands on the keyboard. One runs
+*actions*, the other jumps to *things*. Both are fuzzy-matched, so you type a few
+characters and pick from the narrowed list.
+
+## Command Palette — `⌘⇧P`
+
+Press `⌘⇧P` to open the Command Palette: a searchable list of every action in the
+app, each showing its own keyboard shortcut. Type to filter, arrow to a command,
+and press Return to run it — splitting a pane, opening Settings, toggling the
+inspector, starting an agent, whatever the app can do.
+
+<Callout type="tip">
+  Hold `⌘` while pressing Return (`⌘↩`) to run a command **and keep the palette
+  open**, so you can fire several actions in a row without reopening it.
+</Callout>
+
+It doubles as a way to *learn* the shortcuts: every command lists its key
+equivalent right there, so the palette you reach for today teaches you the
+binding you'll reach for tomorrow.
+
+## Open Quickly — `⌘⇧O`
+
+Press `⌘⇧O` to jump somewhere. Open Quickly searches across three kinds of target
+at once, grouped under headers:
+
+- **Sessions** — every running session, by title. The fastest way to switch when
+  the sidebar is full.
+- **Recent** — projects and folders you've opened before, to reopen in a keystroke.
+- **Files** — once you start typing, the current project's files (from `git
+  ls-files`, so ignored paths stay out), opened straight into the editor.
+
+It's the "jump to anything" companion to the Command Palette's "do anything." For
+searching *inside* files rather than by name, use the inspector's [Search
+tab](/docs/inspector#search).
+
+## Everything is rebindable
+
+`⌘⇧P` and `⌘⇧O` are the defaults, but like every shortcut in Termio they can be
+changed under **Settings ▸ Keyboard**. See [Keyboard
+shortcuts](/docs/keyboard).

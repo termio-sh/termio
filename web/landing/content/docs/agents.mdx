@@ -1,0 +1,46 @@
+---
+title: Running multiple agents
+description: Keep a fleet of agents side by side, read their live status at a glance, and let Termio's hooks tell you the moment one needs you.
+---
+
+Termio is built for running more than one agent at once. The sidebar is your
+control surface: every session is a row, and every row reports what its agent is
+doing right now.
+
+## Built-in agents
+
+Termio recognizes the common coding agents out of the box:
+
+| Agent | CLI |
+| --- | --- |
+| Claude Code | `claude` |
+| Codex | `codex` |
+| Gemini | `gemini` |
+| Amp | `amp` |
+| Pi | `pi` |
+| OpenCode | `opencode` |
+| Copilot | `copilot` |
+| Cursor | `cursor-agent` |
+
+Any of these that's installed on your `PATH` appears as a launch option. A plain
+shell is always available too. Running something else? Any CLI can become a
+first-class agent — see [Custom agents](/docs/custom-agents).
+
+## Reading status at a glance
+
+Every session row carries a live status dot — **working**, **idle**,
+**attention**, or **done**. Termio derives these from a mix of signals: the
+agent's own hooks where it exposes them, and the terminal's output otherwise, so
+the sidebar stays honest even for agents that don't emit structured events. The
+[sidebar guide](/docs/sidebar#status) explains what each state means, and
+[Session control](/docs/session-control) covers the opt-in hooks that make them
+sharpest.
+
+## Switching without losing your place
+
+Clicking a session brings it forward instantly; the others keep running in the
+background. Because each session is a real process, an agent doesn't pause when
+it's off-screen — you can kick off a long run in one, switch to another, and come
+back when the first raises its hand. When you have more than a handful of
+sessions, `⌘⇧O` jumps straight to any of them by name — see
+[Navigation](/docs/navigation).

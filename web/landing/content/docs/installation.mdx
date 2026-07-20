@@ -1,0 +1,59 @@
+---
+title: Installation
+description: Download Termio for macOS, drag it to Applications, and let Sparkle keep it up to date — no account or license key required.
+---
+
+Termio runs on Apple Silicon Macs. Installation is a normal drag-to-Applications
+— there's no account to create and no license key to enter.
+
+<Callout type="note" title="Before you begin">
+  Termio is an Apple Silicon (M-series) Mac app running macOS 14 or later. It
+  hosts the agent CLIs you already have installed — it doesn't bundle them.
+</Callout>
+
+## Download and install
+
+1. Download the latest build from
+   [downloads.termio.sh](https://downloads.termio.sh/termio.dmg). The link
+   always serves the newest notarized release.
+2. Open the `.dmg` and drag **Termio** into your **Applications** folder.
+3. Launch it from Applications. Because the app is notarized by Apple, it opens
+   without a Gatekeeper warning.
+
+## Staying up to date
+
+Termio updates itself through Sparkle. It periodically checks the download
+server for a newer version and offers to install it in place. The check carries
+no account or device identifier — the server sees only an IP address and the
+version being asked about.
+
+You can trigger a check any time from **Termio ▸ Check for Updates**.
+
+## Bring your own agents
+
+Termio doesn't bundle the coding agents — it hosts the ones you already have on
+your Mac. Install whichever CLIs you use (for example `claude`, `codex`, or
+`gemini`) and make sure they're on your `PATH`. Termio launches each one in a
+login shell, so anything your shell profile sets up will be available.
+
+Once an agent is installed, it shows up as a launchable option when you start a
+session.
+
+## The `termio` command (optional)
+
+Termio ships a small command-line tool. Open **Settings ▸ General** and click
+**Install Command-Line Tool** to symlink `termio` onto your `PATH`. From then on
+`termio` in any directory opens it as a project, and `termio sessions …` lets your
+agents coordinate with each other. It's entirely optional — see
+[Session control & the CLI](/docs/session-control).
+
+## Next steps
+
+<Cards>
+  <Card href="/docs/first-session" title="Your first session">
+    Open a project and launch your first agent in a real terminal.
+  </Card>
+  <Card href="/docs/agents" title="Running multiple agents">
+    See which agents Termio recognizes out of the box.
+  </Card>
+</Cards>

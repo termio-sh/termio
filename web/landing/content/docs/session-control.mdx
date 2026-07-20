@@ -1,0 +1,67 @@
+---
+title: Session control & the CLI
+description: Turn on session control to let your agents report status and coordinate with each other, and use the termio command-line tool to open projects and drive sessions from the shell.
+---
+
+Two related, opt-in features sit behind the live statuses you see in the sidebar:
+**status hooks** that let agents report what they're doing, and the **`termio`
+command-line tool** that lets you — or another agent — drive sessions from the
+shell. Neither is required to use Termio; both make a fleet of agents easier to
+run.
+
+## Session control
+
+Termio can install small **status hooks** into your agents' own config files
+(Claude Code, Codex, Cursor, and the plugin-based agents). When an agent starts
+working, finishes, or stops to ask a question, the hook reports that to Termio, so
+the sidebar's [status dots](/docs/sidebar#status) reflect exactly what's happening
+instead of being guessed from output.
+
+Turn it on from **Settings ▸ Agents** (Termio also offers it once on first
+launch). Toggling it off removes the hooks again, leaving any hooks you added
+yourself untouched.
+
+<Callout type="note">
+  Session control only writes the status hooks into agent configs on your Mac.
+  Nothing leaves your machine — the reports travel over a local socket to the
+  Termio app, and nowhere else.
+</Callout>
+
+## The `termio` command-line tool
+
+Install the CLI from **Settings ▸ General ▸ Install Command-Line Tool**. It
+symlinks a `termio` command onto your `PATH` (at `/usr/local/bin/termio`; macOS
+asks for permission once).
+
+### Open a project
+
+```bash
+termio                 # open the current directory as a project
+termio ~/code/myapp    # open a specific folder
+```
+
+Run it in any directory and Termio brings that folder into the sidebar — the
+shell equivalent of **Open Project**.
+
+### Drive sessions
+
+The `termio sessions` family lets one agent see and steer its siblings in the same
+project — the machinery behind multi-agent workflows. Add `--json` to any command
+for machine-readable output.
+
+| Command | What it does |
+| --- | --- |
+| `termio sessions list` | List the sessions in this project with their live status. |
+| `termio sessions send <id> "<text>"` | Type a prompt into a session and submit it. |
+| `termio sessions answer <id> "<text>"` | Answer a session's menu or permission prompt. |
+| `termio sessions start <agent>` | Start a new session with the named agent. |
+| `termio sessions stop <id>` | Close a session. |
+
+`<id>` is the short id from `list` (a session title also works). Commands are
+scoped to the current project automatically.
+
+<Callout type="tip">
+  This is what lets one agent hand work to another — kick off a task in a sibling
+  session, then poll `termio sessions list` until it reports **done** and read the
+  result. An agent orchestrating other agents, all on your own machine.
+</Callout>

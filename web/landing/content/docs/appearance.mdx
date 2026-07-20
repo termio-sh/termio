@@ -1,0 +1,50 @@
+---
+title: Appearance
+description: Set your terminal theme and font, tune the cursor and window, and find the rest of Termio's settings — all in a familiar macOS settings window.
+---
+
+Open **Settings** with `⌘,`. It's a standard macOS settings window with a sidebar
+of tabs; **Appearance** is where the terminal's look lives.
+
+## Theme
+
+Termio uses Ghostty-format themes, so anything from the wider Ghostty theme
+ecosystem works. Pick a light and a dark theme from **Settings ▸ Appearance** and
+Termio follows the system between them.
+
+To add your own, drop a Ghostty `.toml` theme file into:
+
+```
+~/Library/Application Support/termio/Themes/
+```
+
+The **Open Themes Folder** button takes you straight there, and **Reload** picks
+up new files without a restart.
+
+## Font
+
+Choose any monospaced font installed on your Mac, set its size, and toggle
+**Thicken glyphs** if you like a heavier weight. Font size also has live shortcuts
+while you work — `⌘=` to grow, `⌘-` to shrink, `⌘0` to reset.
+
+## Cursor & window
+
+The same tab tunes the cursor (block, bar, or underline; steady or blinking) and
+the window itself — padding around the terminal, and background opacity and blur
+for a translucent window over your desktop.
+
+## The rest of Settings
+
+The other tabs cover the rest of the app:
+
+- **General** — install the [`termio` command-line tool](/docs/session-control).
+- **Interface** — sidebar font and density.
+- **Terminal** — scrollback history and text selection.
+- **Keyboard** — rebind any shortcut; see [Keyboard shortcuts](/docs/keyboard).
+- **Agents** — enable agents and turn on [session
+  control](/docs/session-control).
+- **Usage** — token usage for agents you sign in to (Claude Code, Codex). Termio
+  reuses each CLI's own credentials to show you where you stand against your
+  limits; it stores nothing of its own.
+- **Mobile** — pairing and remote access for the [iPhone
+  companion](/docs/iphone).

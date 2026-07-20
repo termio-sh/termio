@@ -40,6 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# fumadocs-mdx — generated from content/docs on dev/build (postinstall)
+/.source/
+
 # agent skills (installed via `npx skills add`, not part of the site)
 /.agents/
 /skills-lock.json
