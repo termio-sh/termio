@@ -171,7 +171,7 @@ struct TerminalPane: View {
                 GitDiffView(request: request, settings: settings, onClose: {
                     store.openDiff = nil
                     requestSelectedTerminalFocus(reason: .overlayClosed)
-                })
+                }, onNavigate: { store.openDiff = $0 })
                 .id(request)
                 .transition(.opacity)
             }
