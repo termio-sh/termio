@@ -69,7 +69,7 @@ extension BrandLogo {
     var tint: Color {
         switch self {
         case .claude: return Color(red: 0.851, green: 0.467, blue: 0.341)   // #D97757
-        case .codex: return .monochromeInk
+        case .codex, .grok: return .monochromeInk
         }
     }
 }

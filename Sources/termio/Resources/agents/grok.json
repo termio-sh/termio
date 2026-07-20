@@ -6,7 +6,7 @@
   "command": "grok",
   "permissionBypassFlag": "--yolo",
   "resume": "claude",
-  "icon": { "asset": "grok-favicon" },
+  "icon": { "vector": "grok" },
   "install": "https://x.ai/cli",
   "titleStatus": {
     "attention": ["Action Required"]

@@ -894,6 +894,9 @@ struct AgentManifest: Decodable {
             case "codex":
                 resolvedIcon = .vector(.codex)
                 resolvedIconRef = TermioShared.IconRef(vector: "codex")
+            case "grok":
+                resolvedIcon = .vector(.grok)
+                resolvedIconRef = TermioShared.IconRef(vector: "grok")
             default: throw ManifestError.invalid("\(id): unknown icon vector '\(vector)'")
             }
         } else if let asset = icon?.asset, !asset.isEmpty {
