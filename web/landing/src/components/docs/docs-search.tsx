@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDocsSearch } from "fumadocs-core/search/client";
 import { fetchClient } from "fumadocs-core/search/client/fetch";
@@ -92,7 +92,13 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
               Searching…
             </p>
           )}
+          {!query.isLoading && query.error && (
+            <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
+              Search isn’t available right now — try again in a moment.
+            </p>
+          )}
           {!query.isLoading &&
+            !query.error &&
             search.length > 0 &&
             results.length === 0 && (
               <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
@@ -111,7 +117,12 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
             >
               {item.type !== "page" && item.breadcrumbs?.length ? (
                 <span className="block text-[11px] text-muted-foreground/70">
-                  {item.breadcrumbs.join(" › ")}
+                  {item.breadcrumbs.map((crumb, i) => (
+                    <Fragment key={i}>
+                      {i > 0 && " › "}
+                      <Highlighted text={crumb} />
+                    </Fragment>
+                  ))}
                 </span>
               ) : null}
               <span
@@ -122,7 +133,7 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
                     : "text-foreground/80",
                 )}
               >
-                {item.content}
+                <Highlighted text={item.content} />
               </span>
             </button>
           ))}
@@ -130,6 +141,33 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+// Result content arrives as a Markdown string with the matched terms wrapped in
+// `<mark>` tags (fumadocs SortedResult). Render the marks as real highlights and
+// strip the inline-code/bold markers that read as noise in a one-line result.
+function Highlighted({ text }: { text: string }) {
+  const parts = text.split(/<mark>([\s\S]*?)<\/mark>/g);
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <mark
+            key={i}
+            className="rounded-[3px] bg-primary/25 px-px text-foreground"
+          >
+            {stripInlineMarkdown(part)}
+          </mark>
+        ) : (
+          <Fragment key={i}>{stripInlineMarkdown(part)}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
+function stripInlineMarkdown(text: string) {
+  return text.replace(/\*\*|[`]/g, "");
 }
 
 function SearchIcon({ className }: { className?: string }) {
