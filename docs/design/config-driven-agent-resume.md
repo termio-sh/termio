@@ -62,12 +62,38 @@ Rules, all inferred from which fields are present — no `kind`/`style` tag:
   with `create` the first time and `resume` on every relaunch. The switch is driven
   by probing the store (below), because the create flag errors on a duplicate id.
 - **`discover` present ⇒ the id is minted by the agent and recovered afterward.**
-  Used before the id is known: `continueLast`; once discovered: `resume`. `create`
-  and `discover` are mutually exclusive.
+  `create` and `discover` are mutually exclusive.
 - **Neither ⇒ the agent doesn't resume** (omit `resume` entirely, or `"none"`).
 
 `{id}` is the only placeholder; the rendered fragment is appended to the base
 command.
+
+### The discovered-id lifecycle (and why `continueLast` exists)
+
+For a discovered-id agent the tab↔conversation connection is *established once,
+then saved* — after which resume is exactly as precise as the pinned family:
+
+1. **First launch** — no id exists yet, so the session launches fresh and termio
+   stamps `Session.launchedAt`. The agent mints its own id internally.
+2. **Discovery** — on the next resolve, `AgentSessionStore` scans the agent's
+   store for the session record born at that launch (cwd + creation-time match)
+   and `recordLaunch` persists the found id into `Session.resumeID`. Discovery
+   runs at most once per session; from here on the saved id wins.
+3. **Every later relaunch** — `resume {id}` with the saved id. Exact.
+
+`continueLast` covers only the failure window in step 2: discovery is inference
+(the agent wrote its record late; the match was ambiguous because two sessions
+share a directory; the app quit before a scan ran), and when it misses there is
+no saved id to resume. The alternatives in that state are silently starting a
+*new* conversation — data loss from the user's perspective — or continuing the
+most-recent conversation in this directory via the agent's own flag. The
+`launchedBefore` guard keeps this honest: a tab that never ran launches fresh
+rather than hijacking some unrelated recent session.
+
+Pinned agents never consult `continueLast` — their connection is guaranteed at
+mint time, so they are always exact. If a discovered-id agent ever grows a
+`--session-id`-style flag, it moves to the pinned family and its `continueLast`
+falls away.
 
 ### The store descriptor
 
