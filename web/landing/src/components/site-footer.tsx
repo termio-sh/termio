@@ -1,5 +1,6 @@
 const footerLinks: { label: string; href: string }[] = [
   { label: "Changelog", href: "/changelog" },
+  { label: "Docs", href: "/docs/atp" },
   { label: "Privacy", href: "/privacy" },
   { label: "Terms", href: "/terms" },
 ];

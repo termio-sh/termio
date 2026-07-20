@@ -19,6 +19,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.7,
     },
     {
+      url: "https://www.termio.sh/docs/atp",
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
       url: "https://www.termio.sh/privacy",
       changeFrequency: "yearly",
       priority: 0.3,
