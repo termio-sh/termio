@@ -23,6 +23,13 @@ enum SessionTraceRenderer {
     /// Reads the JSONL at `jsonlPath` and returns a full HTML document string, themed
     /// with `theme`. The caller hands the string to a `WKWebView`.
     static func html(jsonlPath: String, title: String, theme: TraceTheme) throws -> String {
+        // A conversation rotation (Claude Code's `/clear`) advances the transcript
+        // pointer before the agent writes the new file — it appears on the first
+        // message. Until then an absent file means "new conversation", not an error.
+        guard FileManager.default.fileExists(atPath: jsonlPath) else {
+            return placeholder(message: "New conversation — no messages yet.",
+                               theme: theme, title: title)
+        }
         guard let data = FileManager.default.contents(atPath: jsonlPath),
               let text = String(data: data, encoding: .utf8) else {
             throw RenderError.unreadable(jsonlPath)
@@ -49,9 +56,9 @@ enum SessionTraceRenderer {
     /// A themed one-line page for when there is nothing to render yet — used by
     /// the companion server so a trace request always returns a valid document
     /// (never a fatal `.error` on the PTY-bridge socket).
-    static func placeholder(message: String, theme: TraceTheme) -> String {
+    static func placeholder(message: String, theme: TraceTheme, title: String = "Trace") -> String {
         let body = "<div class=\"turn\"><div class=\"text\">\(escaped(message))</div></div>"
-        return document(title: "Trace", stats: Stats(), body: body, theme: theme)
+        return document(title: title, stats: Stats(), body: body, theme: theme)
     }
 
     // MARK: Stats

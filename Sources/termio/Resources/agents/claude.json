@@ -22,6 +22,7 @@
     "dialect": "claude",
     "capturesTranscript": true,
     "events": [
+      { "on": "SessionStart", "state": "idle", "matcher": "clear" },
       { "on": "UserPromptSubmit", "state": "working" },
       { "on": "PreToolUse", "state": "working", "matcher": "*" },
       { "on": "PostToolUse", "state": "working", "matcher": "*" },

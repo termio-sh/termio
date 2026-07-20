@@ -42,6 +42,7 @@ from the real front matter).
 | approved | design | [会话历史 · 搜索 · 恢复（Session History / Search / Resume）](design/session-history-search-resume.md) |
 | approved | design | [Agent Resume Identity — keeping the resume pin on the live conversation](design/agent-resume-identity.md) |
 | approved | design | [Git worktree creation & lifecycle (Codex-aligned)](design/worktree-creation-lifecycle.md) |
+| approved | design | [Refresh session identity when Claude Code /clear rotates the conversation](design/clear-conversation-rotation.md) |
 | approved | design | [Worktree information architecture](design/worktree-information-architecture.md) |
 | archived | design | [iOS scroll-draw coalescing (vsync-capped surface draws)](design/ios-scroll-renderer-health.md) |
 | archived | design | [Sandbox VM —— 原生 per-project 容器（Apple Containerization）](design/sandbox-vm.md) |
