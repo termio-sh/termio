@@ -491,7 +491,6 @@ extension TermioStore {
         }
         let context = AgentPreset.ResumeContext(
             resumeID: resumeID ?? "",
-            launchedBefore: session.launched,
             pinnedConversationExists: pinnedConversationExists
         )
         guard let arguments = agent.resumeArguments(context) else {

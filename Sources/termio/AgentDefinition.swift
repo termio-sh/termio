@@ -136,9 +136,6 @@ struct AgentDefinition: Identifiable {
         var create: String?
         /// Template to continue a known conversation id (e.g. `--resume {id}`).
         var resume: String?
-        /// Template to continue the most-recent conversation when no id is known yet —
-        /// discovered-id agents, before the first discovery (e.g. `--continue`).
-        var continueLast: String?
         /// The agent's on-disk session store. Lets termio tell an already-saved
         /// conversation (→ `resume`) from a brand-new one (→ `create`), since a create
         /// flag errors on a duplicate id; also backs the Info-pane transcript fallback
@@ -183,10 +180,10 @@ struct AgentDefinition: Identifiable {
                 return context.pinnedConversationExists ? fill(resume) : fill(create)
             }
             if discoversID {
-                // Resume the exact session once its id has been discovered; until then
-                // continue the most recent recorded session in this directory.
-                if !context.resumeID.isEmpty { return fill(resume) }
-                return context.launchedBefore ? continueLast : nil
+                // Resume the exact session once its id has been discovered and saved
+                // (`Session.resumeID`); until then launch fresh — no approximate
+                // "continue whatever is most recent" fallback.
+                return context.resumeID.isEmpty ? nil : fill(resume)
             }
             return nil
         }
@@ -209,8 +206,6 @@ struct AgentDefinition: Identifiable {
         /// The stable id termio pinned for this session (meaningful only when
         /// `usesPinnedResumeID`).
         var resumeID: String
-        /// Whether this session's agent has been launched in a prior app run.
-        var launchedBefore: Bool
         /// Whether the agent already has a saved conversation under `resumeID`. Resuming
         /// one that doesn't exist errors, so a pinned-but-never-used session is
         /// (re)created with the `create` flag instead.
@@ -828,7 +823,6 @@ struct AgentManifest: Decodable {
         struct Fields: Decodable {
             var create: String?
             var resume: String?
-            var continueLast: String?
             /// Tilde-expandable root of the agent's on-disk session store.
             var storeRoot: String?
             /// `dir:<pattern>` or `file:<pattern>`, where `<pattern>` contains `{id}` and
@@ -889,9 +883,9 @@ struct AgentManifest: Decodable {
                              store: .init(root: "~/.pi/agent/sessions", isDirectory: false,
                                           name: "*_{id}.jsonl"), seed: "pi")
             case "codex":
-                return .init(resume: "resume {id}", continueLast: "resume --last", discover: "codex")
+                return .init(resume: "resume {id}", discover: "codex")
             case "opencode":
-                return .init(resume: "--session {id}", continueLast: "--continue", discover: "opencode")
+                return .init(resume: "--session {id}", discover: "opencode")
             case let other:
                 throw ManifestError.invalid("\(id): unknown resume preset '\(other)'")
             }
@@ -932,7 +926,7 @@ struct AgentManifest: Decodable {
                     "\(id): resume 'create' (pinned id) and 'discover' (found id) are mutually exclusive")
             }
             return .init(
-                create: fields.create, resume: fields.resume, continueLast: fields.continueLast,
+                create: fields.create, resume: fields.resume,
                 store: store, discover: fields.discover, seed: fields.seed)
         }
     }

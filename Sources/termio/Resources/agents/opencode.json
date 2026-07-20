@@ -6,7 +6,6 @@
   "command": "opencode",
   "resume": {
     "resume": "--session {id}",
-    "continueLast": "--continue",
     "discover": "opencode"
   },
   "icon": { "asset": "opencode-favicon" },

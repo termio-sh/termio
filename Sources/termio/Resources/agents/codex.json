@@ -7,7 +7,6 @@
   "permissionBypassFlag": "--dangerously-bypass-approvals-and-sandbox",
   "resume": {
     "resume": "resume {id}",
-    "continueLast": "resume --last",
     "discover": "codex"
   },
   "icon": { "vector": "codex" },

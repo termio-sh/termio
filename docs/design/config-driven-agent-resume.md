@@ -46,13 +46,12 @@ pinned family needs is data:
 
 ```jsonc
 "resume": {
-  "create":       "--session-id {id}",   // launch fresh with a termio-pinned id
-  "resume":       "--resume {id}",        // continue a known conversation id
-  "continueLast": "--continue",           // continue most-recent when id unknown
-  "storeRoot":    "~/.grok/sessions",     // root of the agent's on-disk store
-  "storeMatch":   "dir:{id}",             // how a conversation is named on disk
-  "discover":     "codex",                // named strategy: recover an agent-minted id
-  "seed":         "pi"                    // named strategy: pre-create the session file
+  "create":     "--session-id {id}",   // launch fresh with a termio-pinned id
+  "resume":     "--resume {id}",        // continue a known conversation id
+  "storeRoot":  "~/.grok/sessions",     // root of the agent's on-disk store
+  "storeMatch": "dir:{id}",             // how a conversation is named on disk
+  "discover":   "codex",                // named strategy: recover an agent-minted id
+  "seed":       "pi"                    // named strategy: pre-create the session file
 }
 ```
 
@@ -68,7 +67,7 @@ Rules, all inferred from which fields are present — no `kind`/`style` tag:
 `{id}` is the only placeholder; the rendered fragment is appended to the base
 command.
 
-### The discovered-id lifecycle (and why `continueLast` exists)
+### The discovered-id lifecycle
 
 For a discovered-id agent the tab↔conversation connection is *established once,
 then saved* — after which resume is exactly as precise as the pinned family:
@@ -81,19 +80,13 @@ then saved* — after which resume is exactly as precise as the pinned family:
    runs at most once per session; from here on the saved id wins.
 3. **Every later relaunch** — `resume {id}` with the saved id. Exact.
 
-`continueLast` covers only the failure window in step 2: discovery is inference
-(the agent wrote its record late; the match was ambiguous because two sessions
-share a directory; the app quit before a scan ran), and when it misses there is
-no saved id to resume. The alternatives in that state are silently starting a
-*new* conversation — data loss from the user's perspective — or continuing the
-most-recent conversation in this directory via the agent's own flag. The
-`launchedBefore` guard keeps this honest: a tab that never ran launches fresh
-rather than hijacking some unrelated recent session.
-
-Pinned agents never consult `continueLast` — their connection is guaranteed at
-mint time, so they are always exact. If a discovered-id agent ever grows a
-`--session-id`-style flag, it moves to the pinned family and its `continueLast`
-falls away.
+Resume is deliberately exact-or-nothing: if discovery misses (no saved id), the
+session launches fresh rather than approximately continuing "whatever is most
+recent in this directory" — the prior conversation stays reachable in the
+agent's own session picker. An earlier draft carried a `continueLast` fallback
+flag for that window; it was cut as surplus. If a discovered-id agent ever grows
+a `--session-id`-style flag, it moves to the pinned family and discovery falls
+away entirely.
 
 ### The store descriptor
 
@@ -137,17 +130,19 @@ their implementation is code — the wiring stays visible in the manifest.
 
 ## What each built-in declares
 
-| Agent | create | resume | continueLast | store | discover | seed |
-| --- | --- | --- | --- | --- | --- | --- |
-| Claude | `--session-id {id}` | `--resume {id}` | — | `file:{id}.jsonl` | — | — |
-| Grok | `--session-id {id}` | `--resume {id}` | — | `dir:{id}` | — | — |
-| Pi | `--session-id {id}` | `--session-id {id}` | — | `file:*_{id}.jsonl` | — | `pi` |
-| Codex | — | `resume {id}` | `resume --last` | — | `codex` | — |
-| OpenCode | — | `--session {id}` | `--continue` | — | `opencode` | — |
-| Amp, Cursor, Kimi, Antigravity, Hermes | *(no `resume` field)* | | | | | |
+| Agent | create | resume | store | discover | seed |
+| --- | --- | --- | --- | --- | --- |
+| Claude | `--session-id {id}` | `--resume {id}` | `file:{id}.jsonl` | — | — |
+| Grok | `--session-id {id}` | `--resume {id}` | `dir:{id}` | — | — |
+| Pi | `--session-id {id}` | `--session-id {id}` | `file:*_{id}.jsonl` | — | `pi` |
+| Codex | — | `resume {id}` | — | `codex` | — |
+| OpenCode | — | `--session {id}` | — | `opencode` | — |
+| Amp, Cursor, Kimi, Antigravity, Hermes | *(no `resume` field)* | | | | |
 
 The five migrated agents produce byte-identical launch arguments to the old
-`ResumeStyle`, verified case-by-case.
+`ResumeStyle`, verified case-by-case — with one deliberate exception: the old
+`resume --last` / `--continue` fallback (Codex/OpenCode with no discovered id)
+now launches fresh instead of approximately continuing.
 
 ## Why this shape
 
