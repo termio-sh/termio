@@ -543,10 +543,12 @@ extension TermioStore {
     func adoptConversationID(_ conversationID: String, for id: Session.ID) -> Bool {
         guard let location = locate(id) else { return false }
         var session = projects[location.project].sessions[location.session]
-        // Only a session whose declared agent can resume by id has a pin to keep
-        // honest. A plain terminal that merely *runs* an agent (cwd-correlated
-        // report) relaunches as a shell, so adopting an id there is pure noise.
-        guard session.agent.resumeSpec.resume != nil else { return false }
+        // Only a session whose declared agent participates in conversation identity
+        // (a pinned, discovered, or resumable id) has a pin to keep honest. A plain
+        // terminal that merely *runs* an agent relaunches as a shell, so adopting an
+        // id there is pure noise.
+        let spec = session.agent.resumeSpec
+        guard spec.pinsID || spec.discoversID || spec.resume != nil else { return false }
         guard conversationID != session.resumeID else { return false }
         // A genuine rotation (the pin already named a conversation and it changed —
         // not the first-report adoption of an unpinned session) also orphans the
@@ -584,11 +586,11 @@ extension TermioStore {
         // same directory, newer — is exactly the false match this scan must not
         // adopt. Re-discovery is only for manifests with no identity channel.
         guard session.agent.hookSpec?.conversation == nil else { return }
-        guard soleAgentSession(session.agent, in: directory, is: id) else { return }
         // Bound the scan to this app run's process, not the persisted first-ever
         // `launchedAt` — a resumed tab's window would otherwise span days and swallow
         // records the agent minted in runs (or outside termio) in between.
         guard let spawnedAt = processSpawnedAt[id] else { return }
+        guard soleAgentSession(session.agent, in: directory, is: id) else { return }
         guard let found = AgentSessionStore.rediscover(
             agent: session.agent, directory: directory, after: spawnedAt)
         else { return }
@@ -598,21 +600,21 @@ extension TermioStore {
     }
 
     /// Whether `id` is the only session of this agent working in `directory` — the
-    /// precondition for attributing a store record to it without guessing.
+    /// precondition for attributing a store record to it without guessing. Paths are
+    /// compared symlink-resolved, matching how the store scan canonicalizes the
+    /// agent's recorded cwd (`/tmp` vs `/private/tmp` must count as the same place).
     private func soleAgentSession(_ agent: AgentDefinition, in directory: String,
                                   is id: Session.ID) -> Bool {
-        let target = URL(fileURLWithPath: directory).standardizedFileURL.path
-        var count = 0
+        func canonical(_ path: String) -> String {
+            URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+        }
+        let target = canonical(directory)
         for project in projects {
-            for peer in project.sessions where peer.agent == agent {
-                let peerDirectory = peer.worktreePath ?? project.path
-                guard URL(fileURLWithPath: peerDirectory).standardizedFileURL.path == target
-                else { continue }
-                if peer.id != id { return false }
-                count += 1
+            for peer in project.sessions where peer.agent == agent && peer.id != id {
+                if canonical(peer.worktreePath ?? project.path) == target { return false }
             }
         }
-        return count == 1
+        return true
     }
 
     /// The position of a session in the project tree, for an in-place edit.

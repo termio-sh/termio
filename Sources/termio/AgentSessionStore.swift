@@ -31,6 +31,28 @@ enum AgentSessionStore {
         return match(agent: agent, directory: directory, after: launchedAt)?.url.path
     }
 
+    /// The transcript for a *known* conversation id: the record whose id field matches,
+    /// regardless of creation time — once a session's pin is established (or rotated),
+    /// the trace must follow that exact conversation, not whichever record a time-based
+    /// match happens to find. Returns the first hit (ids are unique in every agent's
+    /// store), and only for `jsonl` records, which double as the transcript.
+    static func transcript(agent: AgentPreset, id: String) -> String? {
+        guard let spec = agent.resumeSpec.discover, spec.format == .jsonl else { return nil }
+        let root = URL(fileURLWithPath: (spec.root as NSString).expandingTildeInPath)
+        let keys: [URLResourceKey] = [.isRegularFileKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: keys) else { return nil }
+        for case let url as URL in enumerator {
+            guard url.pathExtension == spec.format.fileExtension,
+                  (try? url.resourceValues(forKeys: Set(keys)))?.isRegularFile == true,
+                  let object = record(at: url, format: spec.format),
+                  value(at: spec.id, in: object) == id
+            else { continue }
+            return url.path
+        }
+        return nil
+    }
+
     /// Re-discovery at a turn boundary: the *newest* record born in this directory
     /// since launch is the conversation the agent is writing right now. Where
     /// `discover` binds to the record created at launch (earliest match), this

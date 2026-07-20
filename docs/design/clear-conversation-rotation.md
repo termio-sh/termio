@@ -175,6 +175,19 @@ dialect-interpreted, mechanism-named, never agent-named:
 | opencode plugin | dot key path in the event object | `properties.sessionID` |
 | pi plugin | the `context` mechanism — the extension context's session manager | `context` |
 
+Identity adoption is deliberately narrower than status adoption. It requires an
+*exactly-stamped* report (`TERMIO_SESSION` echoed back — the hook files are
+global, so a same-directory agent run outside termio also reports, and a
+cwd-guessed match must never re-pin a tab), fires only at a **turn boundary**
+(`state != working` — a working-state payload embeds prompt/tool content on
+stdin, where a colliding field name could be mined as the id; SessionStart/Stop
+payloads are the agent's own minimal envelope), and accepts only bare-token ids
+(the shell miner reads an arbitrary blob; anything that isn't UUID-shaped is
+treated as no identity). On rotation, the transcript follows the *pinned id
+exactly*: `resolveTranscriptPath` looks a discovered-id conversation up by its
+id in the store rather than by launch-time file matching, which would drift
+back to the rotated-away record.
+
 ### Mechanism 2 — turn-boundary re-discovery
 
 For a discovered-id agent whose reports carry no identity, discovery no longer

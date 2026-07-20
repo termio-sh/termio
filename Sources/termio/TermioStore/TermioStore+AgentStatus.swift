@@ -69,24 +69,37 @@ extension TermioStore {
         let carriedTranscript = report.transcriptPath.flatMap { $0.isEmpty ? nil : $0 }
         if let path = carriedTranscript {
             transcriptPaths[id] = path
-            // A hook-carried path can name a *new* conversation id in its filename
-            // (after `/clear`), so advance the resume pin to match — a no-op unless it
-            // actually rotated. See docs/design/agent-resume-identity.md.
-            reconcileResumeID(id, transcriptPath: path)
         }
-        if let conversation = report.conversationID, !conversation.isEmpty {
-            // An identity-bearing report names the live conversation outright — the
-            // rotation signal for agents whose hook host exposes the id (the
-            // manifest's `hooks.conversation`). On a rotation without a hook-carried
-            // transcript, re-resolve it from the agent's store; nil clears a stale
-            // path that described the discarded conversation.
-            if adoptConversationID(conversation, for: id), carriedTranscript == nil {
-                transcriptPaths[id] = resolveTranscriptPath(for: id)
+        // Conversation identity may only move on an *exactly-stamped* report — the
+        // hook files are global, so every same-agent process on the machine reports
+        // here, and a cwd-guessed match must never re-pin this tab to an outside
+        // run's conversation. And only at a turn boundary: a working-state payload
+        // embeds prompt/tool content on stdin, where a colliding field name could be
+        // mined as the id by mistake; SessionStart/Stop payloads are the agent's own
+        // minimal envelope. (`sessionID(for:)` already validated the stamp maps to a
+        // session this app owns.)
+        let stamped = report.termioSession.map { !$0.isEmpty } ?? false
+        if stamped, report.state != "working" {
+            if let path = carriedTranscript {
+                // A hook-carried path can name a *new* conversation id in its filename
+                // (after `/clear`), so advance the resume pin to match — a no-op unless
+                // it actually rotated. See docs/design/agent-resume-identity.md.
+                reconcileResumeID(id, transcriptPath: path)
             }
-        } else if report.state == "done" {
-            // Identity-blind turn end: for a discovered-id agent, re-scan its store in
-            // case the conversation rotated in-process (`/new`) since discovery.
-            rediscoverConversation(for: id)
+            if let conversation = conversationToken(report.conversationID) {
+                // An identity-bearing report names the live conversation outright — the
+                // rotation signal for agents whose hook host exposes the id (the
+                // manifest's `hooks.conversation`). On a rotation without a hook-carried
+                // transcript, drop the stale path that described the discarded
+                // conversation; the shared resolve below re-learns it against the new pin.
+                if adoptConversationID(conversation, for: id), carriedTranscript == nil {
+                    transcriptPaths[id] = nil
+                }
+            } else if report.state == "done" {
+                // Identity-blind turn end: for a discovered-id agent, re-scan its store
+                // in case the conversation rotated in-process (`/new`) since discovery.
+                rediscoverConversation(for: id)
+            }
         }
         if transcriptPaths[id] == nil, let path = resolveTranscriptPath(for: id) {
             // The hook didn't carry a path (a pre-hook Claude session never will), so
@@ -136,6 +149,17 @@ extension TermioStore {
         default:
             break
         }
+    }
+
+    /// A reported conversation id, accepted only when it is a bare token — the ids
+    /// every agent mints (UUIDs, `ses_…`) always are. The shell-hook path mines the
+    /// value out of an arbitrary stdin blob, so anything else (pasted JSON, a path,
+    /// whitespace) is treated as no identity rather than adopted into the pin.
+    private func conversationToken(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty, raw.count <= 128,
+              raw.allSatisfy({ $0.isLetter || $0.isNumber || "._-".contains($0) })
+        else { return nil }
+        return raw
     }
 
     private func clearWorking(_ id: Session.ID) {
@@ -307,15 +331,20 @@ extension TermioStore {
     /// Resolves a session's transcript file from disk when its hook hasn't handed
     /// termio one — the source of truth for the Info pane's trace when no hook fired.
     /// A pinned-id agent whose store is a file-per-conversation (Claude Code) names its
-    /// transcript by the id termio pinned (`Session.resumeID`), so it's located directly;
-    /// Codex/OpenCode fall back to the launch-time file match (`AgentSessionStore`). `nil`
-    /// until a matching transcript exists on disk.
+    /// transcript by the id termio pinned (`Session.resumeID`), so it's located directly.
+    /// A discovered-id agent with a known pin is likewise looked up by that exact id —
+    /// the launch-time earliest-match below would drift back to a rotated-away record —
+    /// and only an unpinned session falls back to the launch-time file match
+    /// (`AgentSessionStore`). `nil` until a matching transcript exists on disk.
     func resolveTranscriptPath(for id: Session.ID) -> String? {
         guard let session = session(id), session.launched else { return nil }
         if let store = session.agent.resumeSpec.store, !store.isDirectory,
            let resumeID = session.resumeID,
            let path = SessionStore.locate(store, id: resumeID) {
             return path
+        }
+        if session.agent.resumeSpec.discover != nil, let resumeID = session.resumeID {
+            return AgentSessionStore.transcript(agent: session.agent, id: resumeID)
         }
         guard let directory = session.worktreePath ?? project(for: id)?.path else { return nil }
         return AgentSessionStore.discoverTranscript(

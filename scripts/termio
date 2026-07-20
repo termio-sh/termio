@@ -37,6 +37,16 @@ json_escape() {
         | awk 'BEGIN { ORS = "" } { if (NR > 1) printf "\\n"; printf "%s", $0 }'
 }
 
+# Mine a string field out of a JSON blob, jq-free: the first `"field":"value"`
+# occurrence, whitespace-tolerant around the colon. `head -1` closes the pipe so
+# the pipeline's exit status is sed's (0), keeping `set -e` happy even when grep
+# matches nothing.
+mine_field() {
+    printf '%s' "$2" \
+        | grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 \
+        | sed 's/^"[^"]*"[[:space:]]*:[[:space:]]*"//;s/"$//'
+}
+
 sessions() {
     if [ ! -S "$SOCKET" ]; then
         echo "termio: app is not running (no control socket at $SOCKET)" >&2
@@ -136,23 +146,21 @@ agent() {
     session=$(json_escape "${TERMIO_SESSION:-}")
     cwd=$(json_escape "$PWD")
 
-    # Read stdin once when any flag mines it. `head -1` closes the pipe so the
-    # pipeline's exit status is sed's (0), keeping `set -e` happy even when grep
-    # matches nothing.
+    # Read stdin once when any flag mines it — but never from a tty: an agent that
+    # ran the hook without piping its payload would leave `cat` waiting on the
+    # terminal forever, while a closed/absent stdin still reads instantly as empty.
     input=""
     if [ "$with_transcript" -eq 1 ] || [ -n "$conversation_from" ]; then
-        input=$(cat)
+        if [ ! -t 0 ]; then input=$(cat); fi
     fi
     if [ -z "$conversation" ] && [ -n "$conversation_from" ]; then
-        conversation=$(printf '%s' "$input" \
-            | grep -o "\"$conversation_from\":\"[^\"]*\"" | head -1 | sed 's/.*:"//;s/"$//')
+        conversation=$(mine_field "$conversation_from" "$input")
     fi
 
     payload=$(printf '{"termio_session":"%s","state":"%s","cwd":"%s"' \
         "$session" "$state" "$cwd")
     if [ "$with_transcript" -eq 1 ]; then
-        # Mirror the old hook: mine transcript_path out of the JSON on stdin, jq-free.
-        tp=$(printf '%s' "$input" | grep -o '"transcript_path":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')
+        tp=$(mine_field transcript_path "$input")
         payload=$(printf '%s,"transcript_path":"%s"' "$payload" "$(json_escape "$tp")")
     fi
     if [ -n "$conversation" ]; then

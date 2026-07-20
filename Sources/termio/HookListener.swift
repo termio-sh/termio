@@ -655,6 +655,7 @@ private struct PluginFile: AgentStatusInstaller {
         """
         let identityBranches = conversationExpression == nil ? "" : """
               if (event.type === "session.created" || event.type === "session.updated") return note(event.properties?.info);
+              if (event.type === "session.deleted") return roots.delete(event.properties?.info?.id);
 
         """
         let reportBody = conversationExpression == nil ? """
