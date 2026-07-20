@@ -246,7 +246,7 @@ struct Session: Identifiable, Hashable, Codable {
 
     /// The stable id termio hands the agent so a relaunch resumes *this exact*
     /// conversation rather than starting a new one. Assigned on first launch for
-    /// agents that can pin their session id (Claude Code, Pi — see
+    /// agents that can pin their session id (Claude Code, Grok, Pi — see
     /// `AgentPreset.usesPinnedResumeID`) and `nil` otherwise; Codex/OpenCode resume the
     /// most recent session in the directory and never need one. Persisted, so it
     /// survives the app quitting.

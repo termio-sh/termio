@@ -5,7 +5,12 @@
   "wire": "claude",
   "command": "claude",
   "permissionBypassFlag": "--dangerously-skip-permissions",
-  "resume": "claude",
+  "resume": {
+    "create": "--session-id {id}",
+    "resume": "--resume {id}",
+    "storeRoot": "~/.claude/projects",
+    "storeMatch": "file:{id}.jsonl"
+  },
   "icon": { "vector": "claude" },
   "install": "https://claude.com/claude-code",
   "titleStatus": {

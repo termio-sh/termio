@@ -4,7 +4,6 @@
   "name": "Amp",
   "wire": "amp",
   "command": "amp",
-  "resume": "none",
   "icon": { "asset": "amp-favicon" },
   "install": "https://ampcode.com/manual",
   "hooks": {

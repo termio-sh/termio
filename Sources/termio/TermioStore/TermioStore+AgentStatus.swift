@@ -290,13 +290,16 @@ extension TermioStore {
 
     /// Resolves a session's transcript file from disk when its hook hasn't handed
     /// termio one — the source of truth for the Info pane's trace when no hook fired.
-    /// Claude Code names its transcript by the id termio pinned (`Session.resumeID`),
-    /// so it's located directly; Codex/OpenCode fall back to the launch-time file
-    /// match (`AgentSessionStore`). `nil` until a matching transcript exists on disk.
+    /// A pinned-id agent whose store is a file-per-conversation (Claude Code) names its
+    /// transcript by the id termio pinned (`Session.resumeID`), so it's located directly;
+    /// Codex/OpenCode fall back to the launch-time file match (`AgentSessionStore`). `nil`
+    /// until a matching transcript exists on disk.
     func resolveTranscriptPath(for id: Session.ID) -> String? {
         guard let session = session(id), session.launched else { return nil }
-        if session.agent == .claudeCode {
-            return session.resumeID.flatMap(ClaudeConversation.transcriptPath)
+        if let store = session.agent.resumeSpec.store, !store.isDirectory,
+           let resumeID = session.resumeID,
+           let path = SessionStore.locate(store, id: resumeID) {
+            return path
         }
         guard let directory = session.worktreePath ?? project(for: id)?.path else { return nil }
         return AgentSessionStore.discoverTranscript(

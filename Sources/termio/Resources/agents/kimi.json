@@ -4,7 +4,6 @@
   "name": "Kimi",
   "wire": "kimi",
   "command": "kimi",
-  "resume": "none",
   "icon": { "asset": "kimi-favicon" },
   "install": "https://moonshotai.github.io/kimi-code",
   "hooks": {

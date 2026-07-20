@@ -5,7 +5,11 @@
   "wire": "codex",
   "command": "codex",
   "permissionBypassFlag": "--dangerously-bypass-approvals-and-sandbox",
-  "resume": "codex",
+  "resume": {
+    "resume": "resume {id}",
+    "continueLast": "resume --last",
+    "discover": "codex"
+  },
   "icon": { "vector": "codex" },
   "install": "https://developers.openai.com/codex/cli",
   "titleStatus": {

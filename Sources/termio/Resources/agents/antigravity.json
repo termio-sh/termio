@@ -4,7 +4,6 @@
   "name": "Antigravity",
   "wire": "antigravity",
   "command": "agy",
-  "resume": "none",
   "icon": { "asset": "antigravity-favicon" },
   "install": "https://antigravity.google/product/antigravity-cli"
 }

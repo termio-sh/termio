@@ -28,23 +28,24 @@ enum AgentSessionStore {
     /// or `nil` when none matches (yet) or the agent has no readable transcript.
     /// Only Codex is supported: OpenCode's session record is metadata, not a transcript.
     static func discoverTranscript(agent: AgentPreset, directory: String, after launchedAt: Date?) -> String? {
-        guard agent == .codex else { return nil }
+        // Only Codex's store record is itself the transcript; OpenCode's is metadata.
+        guard agent.resumeSpec.discover == "codex" else { return nil }
         return match(agent: agent, directory: directory, after: launchedAt)?.url.path
     }
 
     /// The session file for this agent — its URL (the transcript) and the session id
     /// parsed from it. Both `discover` (id, for resume) and `discoverTranscript` (path,
-    /// for the trace viewer) read from the same scan.
+    /// for the trace viewer) read from the same scan. Keyed on the manifest's declared
+    /// `resume.discover` strategy rather than agent identity, so the matcher a new agent
+    /// reuses is named in its config.
     private static func match(agent: AgentPreset, directory: String, after launchedAt: Date?)
         -> (url: URL, id: String)? {
         guard let launchedAt else { return nil }
-        if agent == .codex {
-            return matchCodex(directory: directory, after: launchedAt)
+        switch agent.resumeSpec.discover {
+        case "codex": return matchCodex(directory: directory, after: launchedAt)
+        case "opencode": return matchOpenCode(directory: directory, after: launchedAt)
+        default: return nil
         }
-        if agent == .opencode {
-            return matchOpenCode(directory: directory, after: launchedAt)
-        }
-        return nil
     }
 
     /// A small negative tolerance: the agent writes its record just after we launch it,

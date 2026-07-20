@@ -4,7 +4,6 @@
   "name": "Cursor",
   "wire": "cursor",
   "command": "cursor-agent",
-  "resume": "none",
   "icon": { "asset": "cursor-favicon" },
   "install": "https://cursor.com/docs/cli",
   "hooks": {

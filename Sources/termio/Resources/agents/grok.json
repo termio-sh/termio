@@ -5,7 +5,12 @@
   "wire": "grok",
   "command": "grok",
   "permissionBypassFlag": "--yolo",
-  "resume": "claude",
+  "resume": {
+    "create": "--session-id {id}",
+    "resume": "--resume {id}",
+    "storeRoot": "~/.grok/sessions",
+    "storeMatch": "dir:{id}"
+  },
   "icon": { "vector": "grok" },
   "install": "https://x.ai/cli",
   "titleStatus": {

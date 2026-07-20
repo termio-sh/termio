@@ -29,7 +29,7 @@ struct AgentDefinition: Identifiable {
     /// still accepts any flag). Composed on by `AppSettings.command(for:)`.
     let permissionBypassFlag: String?
     /// How (and whether) a relaunch resumes this agent's prior conversation.
-    let resumeStyle: ResumeStyle
+    let resumeSpec: ResumeSpec
     let icon: AgentIcon
     /// Portable form sent to the companion. Bundled assets stay name references;
     /// user image paths are rasterized once at catalog load into inline PNG bytes.
@@ -73,7 +73,7 @@ struct AgentDefinition: Identifiable {
     init(
         id: String, order: Int = Self.unorderedRank, displayName: String, command: String?,
         permissionBypassFlag: String?,
-        resumeStyle: ResumeStyle, icon: AgentIcon,
+        resumeSpec: ResumeSpec, icon: AgentIcon,
         iconRef: TermioShared.IconRef, tint: Color, tintHex: String?, installURL: URL?, wireName: String,
         statusRules: AgentStatusRules? = nil, titleRules: AgentStatusRules? = nil,
         hookSpec: AgentHookSpec? = nil
@@ -83,7 +83,7 @@ struct AgentDefinition: Identifiable {
         self.displayName = displayName
         self.command = command
         self.permissionBypassFlag = permissionBypassFlag
-        self.resumeStyle = resumeStyle
+        self.resumeSpec = resumeSpec
         self.icon = icon
         self.iconRef = iconRef
         self.tint = tint
@@ -114,47 +114,93 @@ struct AgentDefinition: Identifiable {
     var tintColor: Color { tint }
 
     /// Whether this agent lets termio pin its conversation id up front so a relaunch
-    /// resumes the exact prior session (Claude Code, Pi).
-    var usesPinnedResumeID: Bool { resumeStyle == .claudeStyle || resumeStyle == .piStyle }
+    /// resumes the exact prior session (Claude Code, Grok, Pi).
+    var usesPinnedResumeID: Bool { resumeSpec.pinsID }
 
     /// Whether this agent's id can't be set up front but *can* be discovered from its
     /// own session store afterward and resumed by id (Codex, OpenCode).
-    var usesDiscoveredResumeID: Bool { resumeStyle == .codexStyle || resumeStyle == .openCodeStyle }
+    var usesDiscoveredResumeID: Bool { resumeSpec.discoversID }
 
-    /// How a relaunch continues (or doesn't) this agent's prior conversation.
-    enum ResumeStyle: Hashable {
-        case none
-        case claudeStyle
-        case piStyle
-        case codexStyle
-        case openCodeStyle
+    /// How a relaunch continues (or doesn't) this agent's prior conversation, parsed
+    /// straight from the manifest's `resume` object. Everything here is data — argument
+    /// templates with an `{id}` placeholder plus a description of the agent's on-disk
+    /// session store — so a new agent in the common "pin an id, create-then-resume"
+    /// family needs no Swift at all. The two things that can't be data (recovering an
+    /// id the agent minted itself, and pre-seeding a session file so a pinned id
+    /// resolves quietly) name a built-in strategy instead of inlining the agent's
+    /// private file format. See docs/design/agent-resume-identity.md.
+    struct ResumeSpec: Hashable, Sendable {
+        /// Launch template for a fresh, termio-pinned id (e.g. `--session-id {id}`). Its
+        /// presence means the id is pinned up front; its absence means the id is
+        /// discovered after launch, or the agent doesn't resume.
+        var create: String?
+        /// Template to continue a known conversation id (e.g. `--resume {id}`).
+        var resume: String?
+        /// Template to continue the most-recent conversation when no id is known yet —
+        /// discovered-id agents, before the first discovery (e.g. `--continue`).
+        var continueLast: String?
+        /// The agent's on-disk session store. Lets termio tell an already-saved
+        /// conversation (→ `resume`) from a brand-new one (→ `create`), since a create
+        /// flag errors on a duplicate id; also backs the Info-pane transcript fallback
+        /// and `/clear` id-rotation for file-per-conversation stores.
+        var store: Store?
+        /// Names the built-in matcher that reads this agent's own store to recover an
+        /// id it minted itself (`codex`, `opencode`). Set iff `create` is nil.
+        var discover: String?
+        /// Names the built-in that pre-creates the session file so a pinned id resolves
+        /// silently on first launch (`pi`).
+        var seed: String?
 
-        /// The agent's conversation id read from its live transcript *path*, for
-        /// styles whose filename encodes the id. termio uses this to advance a
-        /// session's pinned `resumeID` after the agent rotates its conversation
-        /// mid-session — Claude Code's `/clear` mints a new id and transcript and
-        /// orphans the old file, which the once-pinned id would otherwise keep
-        /// resuming. Returns nil when the id is not in the filename (Codex/OpenCode
-        /// carry it *inside* the file, so advancing those is re-discovery's job, not
-        /// path parsing) or the style does not resume. See
-        /// docs/design/agent-resume-identity.md.
-        func conversationID(fromTranscriptPath path: String) -> String? {
-            switch self {
-            case .claudeStyle:
-                // Claude names the transcript exactly `<conversation-id>.jsonl`; strip
-                // the suffix directly rather than via `deletingPathExtension`, which
-                // mishandles a leading-dot name (a stray `.jsonl` would survive as an id).
-                let file = (path as NSString).lastPathComponent
-                guard file.hasSuffix(".jsonl") else { return nil }
-                let id = String(file.dropLast(".jsonl".count))
-                return id.isEmpty ? nil : id
-            case .piStyle, .codexStyle, .openCodeStyle, .none:
-                // Pi encodes the id in the filename too (`<timestamp>_<id>.jsonl`),
-                // but its transcript discovery isn't wired yet; Codex/OpenCode keep
-                // the id inside the file. All advance via re-discovery (Phase 3),
-                // not here — see the design doc.
-                return nil
+        /// A declarative description of where an agent keeps its conversations on disk.
+        struct Store: Hashable, Sendable {
+            /// Tilde-expandable root, e.g. `~/.grok/sessions`.
+            var root: String
+            /// Whether a conversation is a directory (Grok) or a file (Claude, Pi).
+            var isDirectory: Bool
+            /// The entry name with `{id}` substituted — `{id}` (dir), `{id}.jsonl`, or
+            /// `*_{id}.jsonl` (a `*` globs). Sessions bucket per working directory under
+            /// `root`; termio searches across the buckets rather than reconstruct each
+            /// agent's private cwd encoding.
+            var name: String
+        }
+
+        static let none = ResumeSpec()
+
+        var pinsID: Bool { create != nil }
+        var discoversID: Bool { discover != nil }
+
+        /// The argument fragment to append to the base command so this session continues
+        /// its prior conversation on relaunch, or `nil` to launch fresh.
+        func arguments(_ context: ResumeContext) -> String? {
+            func fill(_ template: String?) -> String? {
+                template?.replacingOccurrences(of: "{id}", with: context.resumeID)
             }
+            if pinsID {
+                // The create flag errors if the id already exists and the resume flag
+                // errors if it doesn't, so create until the agent has saved a
+                // conversation and resume once it has. (When both templates are equal —
+                // Pi — the branch is a no-op either way.)
+                return context.pinnedConversationExists ? fill(resume) : fill(create)
+            }
+            if discoversID {
+                // Resume the exact session once its id has been discovered; until then
+                // continue the most recent recorded session in this directory.
+                if !context.resumeID.isEmpty { return fill(resume) }
+                return context.launchedBefore ? continueLast : nil
+            }
+            return nil
+        }
+
+        /// The conversation id encoded in a transcript *path*, for a file-per-conversation
+        /// store whose filename carries the id. termio uses this to advance a session's
+        /// pinned `resumeID` after the agent rotates its conversation mid-session (Claude
+        /// Code's `/clear` mints a new id and transcript and orphans the old file, which
+        /// the once-pinned id would otherwise keep resuming). Nil for directory stores,
+        /// discovered-id agents (the id lives inside the file), or no declared store.
+        func conversationID(fromTranscriptPath path: String) -> String? {
+            guard let store, !store.isDirectory else { return nil }
+            return SessionStore.id(fromEntryName: (path as NSString).lastPathComponent,
+                                   pattern: store.name)
         }
     }
 
@@ -165,38 +211,16 @@ struct AgentDefinition: Identifiable {
         var resumeID: String
         /// Whether this session's agent has been launched in a prior app run.
         var launchedBefore: Bool
-        /// Whether Claude Code already has a saved conversation under `resumeID`.
-        /// Resuming one that doesn't exist errors, so a pinned-but-never-used session
-        /// is (re)created with `--session-id` instead.
+        /// Whether the agent already has a saved conversation under `resumeID`. Resuming
+        /// one that doesn't exist errors, so a pinned-but-never-used session is
+        /// (re)created with the `create` flag instead.
         var pinnedConversationExists: Bool
     }
 
     /// The argument fragment to append to the resolved base command so this session
     /// continues its prior conversation on relaunch, or `nil` to launch fresh.
     func resumeArguments(_ context: ResumeContext) -> String? {
-        switch resumeStyle {
-        case .none:
-            return nil
-        case .claudeStyle:
-            // `--session-id` creates a session with our id (and errors if it already
-            // exists); `--resume` resumes it (and errors if it doesn't). So create
-            // until a conversation has been saved, and resume once one exists.
-            return context.pinnedConversationExists
-                ? "--resume \(context.resumeID)"
-                : "--session-id \(context.resumeID)"
-        case .piStyle:
-            // Pi's `--session-id` creates the session when missing and resumes it
-            // otherwise, so the same flag is correct on every launch.
-            return "--session-id \(context.resumeID)"
-        case .codexStyle:
-            // Resume the exact session once its id has been discovered; until then
-            // continue the most recent recorded session in this directory.
-            if !context.resumeID.isEmpty { return "resume \(context.resumeID)" }
-            return context.launchedBefore ? "resume --last" : nil
-        case .openCodeStyle:
-            if !context.resumeID.isEmpty { return "--session \(context.resumeID)" }
-            return context.launchedBefore ? "--continue" : nil
-        }
+        resumeSpec.arguments(context)
     }
 }
 
@@ -231,7 +255,7 @@ extension AgentDefinition {
     static func fallback(id: String) -> AgentDefinition {
         AgentDefinition(
             id: id, displayName: id, command: nil, permissionBypassFlag: nil,
-            resumeStyle: .none,
+            resumeSpec: .none,
             icon: .symbol("questionmark.app"),
             iconRef: TermioShared.IconRef(symbol: "questionmark.app"),
             tint: .monochromeInk, tintHex: nil,
@@ -773,7 +797,7 @@ struct AgentManifest: Decodable {
     var wire: String?
     var command: String?
     var permissionBypassFlag: String?
-    var resume: String?
+    var resume: ResumeConfig?
     var install: String?
     /// Accepted while Cut 4 migrates manifests written against the earlier RFC.
     var installURL: String?
@@ -792,6 +816,35 @@ struct AgentManifest: Decodable {
         var symbol: String?
         var tint: String?
         var path: String?
+    }
+
+    /// The manifest's `resume`. The flat object is the interface; a bare string is
+    /// accepted only as backward-compatibility for manifests written against the older
+    /// preset names (`"claude"`, `"codex"`, `"pi"`, `"opencode"`, `"none"`).
+    enum ResumeConfig: Decodable {
+        case legacyPreset(String)
+        case spec(Fields)
+
+        struct Fields: Decodable {
+            var create: String?
+            var resume: String?
+            var continueLast: String?
+            /// Tilde-expandable root of the agent's on-disk session store.
+            var storeRoot: String?
+            /// `dir:<pattern>` or `file:<pattern>`, where `<pattern>` contains `{id}` and
+            /// may contain a `*` glob (e.g. `dir:{id}`, `file:{id}.jsonl`, `file:*_{id}.jsonl`).
+            var storeMatch: String?
+            var discover: String?
+            var seed: String?
+        }
+
+        init(from decoder: Decoder) throws {
+            if let preset = try? decoder.singleValueContainer().decode(String.self) {
+                self = .legacyPreset(preset)
+            } else {
+                self = .spec(try Fields(from: decoder))
+            }
+        }
     }
 
     /// Regex lists that classify the agent's rendered screen. `working` → the spinner
@@ -815,6 +868,72 @@ struct AgentManifest: Decodable {
             var event: String?
             var state: String
             var matcher: String?
+        }
+    }
+
+    /// Turns the manifest's `resume` into the runtime `ResumeSpec`, validating the store
+    /// descriptor and the named strategies. The legacy preset strings map onto the same
+    /// objects the bundled manifests now declare, so old user manifests keep working.
+    private func resolvedResumeSpec() throws -> AgentDefinition.ResumeSpec {
+        guard let resume else { return .none }
+        switch resume {
+        case .legacyPreset(let preset):
+            switch preset.lowercased() {
+            case "none": return .none
+            case "claude":
+                return .init(create: "--session-id {id}", resume: "--resume {id}",
+                             store: .init(root: "~/.claude/projects", isDirectory: false,
+                                          name: "{id}.jsonl"))
+            case "pi":
+                return .init(create: "--session-id {id}", resume: "--session-id {id}",
+                             store: .init(root: "~/.pi/agent/sessions", isDirectory: false,
+                                          name: "*_{id}.jsonl"), seed: "pi")
+            case "codex":
+                return .init(resume: "resume {id}", continueLast: "resume --last", discover: "codex")
+            case "opencode":
+                return .init(resume: "--session {id}", continueLast: "--continue", discover: "opencode")
+            case let other:
+                throw ManifestError.invalid("\(id): unknown resume preset '\(other)'")
+            }
+        case .spec(let fields):
+            var store: AgentDefinition.ResumeSpec.Store?
+            switch (fields.storeRoot, fields.storeMatch) {
+            case (nil, nil):
+                store = nil
+            case let (root?, match?):
+                let parts = match.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+                guard parts.count == 2, !parts[1].isEmpty else {
+                    throw ManifestError.invalid(
+                        "\(id): storeMatch must be 'dir:<pattern>' or 'file:<pattern>'")
+                }
+                let isDirectory: Bool
+                switch parts[0] {
+                case "dir": isDirectory = true
+                case "file": isDirectory = false
+                default:
+                    throw ManifestError.invalid(
+                        "\(id): storeMatch must start with 'dir:' or 'file:'")
+                }
+                guard parts[1].contains("{id}") else {
+                    throw ManifestError.invalid("\(id): storeMatch pattern must contain '{id}'")
+                }
+                store = .init(root: root, isDirectory: isDirectory, name: String(parts[1]))
+            default:
+                throw ManifestError.invalid("\(id): storeRoot and storeMatch must be set together")
+            }
+            if let discover = fields.discover, !["codex", "opencode"].contains(discover) {
+                throw ManifestError.invalid("\(id): unknown resume discover strategy '\(discover)'")
+            }
+            if let seed = fields.seed, seed != "pi" {
+                throw ManifestError.invalid("\(id): unknown resume seed strategy '\(seed)'")
+            }
+            if fields.create != nil, fields.discover != nil {
+                throw ManifestError.invalid(
+                    "\(id): resume 'create' (pinned id) and 'discover' (found id) are mutually exclusive")
+            }
+            return .init(
+                create: fields.create, resume: fields.resume, continueLast: fields.continueLast,
+                store: store, discover: fields.discover, seed: fields.seed)
         }
     }
 
@@ -945,21 +1064,13 @@ struct AgentManifest: Decodable {
             working: titleStatus?.working, attention: titleStatus?.attention,
             label: "\(id).title")
 
-        let resumeStyle: AgentDefinition.ResumeStyle
-        switch resume?.lowercased() ?? "none" {
-        case "none": resumeStyle = .none
-        case "claude": resumeStyle = .claudeStyle
-        case "codex": resumeStyle = .codexStyle
-        case "opencode": resumeStyle = .openCodeStyle
-        case "pi": resumeStyle = .piStyle
-        case let value: throw ManifestError.invalid("\(id): unknown resume strategy '\(value)'")
-        }
+        let resumeSpec = try resolvedResumeSpec()
 
         return AgentDefinition(
             id: id, order: order ?? AgentDefinition.unorderedRank,
             displayName: name, command: command,
             permissionBypassFlag: permissionBypassFlag,
-            resumeStyle: resumeStyle, icon: resolvedIcon, iconRef: resolvedIconRef,
+            resumeSpec: resumeSpec, icon: resolvedIcon, iconRef: resolvedIconRef,
             tint: resolvedTint, tintHex: resolvedTintHex,
             installURL: (install ?? installURL).flatMap(URL.init(string:)), wireName: wire ?? id,
             statusRules: statusRules, titleRules: titleRules, hookSpec: hookSpec)

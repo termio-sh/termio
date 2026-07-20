@@ -3,31 +3,69 @@ import Foundation
 import GhosttyTerminal
 import GhosttyTheme
 
-/// Looks up whether Claude Code has a saved conversation for a given session id.
-/// Claude stores each conversation at `~/.claude/projects/<encoded-cwd>/<id>.jsonl`;
-/// we glob across the project folders by id rather than reconstruct Claude's cwd
-/// encoding (which is its private detail). Used to decide between `--session-id`
-/// (create) and `--resume` (resume) — resuming an id with no saved conversation errors.
-enum ClaudeConversation {
-    static func exists(id: String) -> Bool { transcriptPath(id: id) != nil }
+/// Resolves an agent's on-disk conversation entries from the declarative store
+/// descriptor its manifest supplies (`ResumeSpec.Store`) — one probe for every agent,
+/// replacing the per-agent lookups. Agents bucket sessions per working directory under
+/// `root`; termio globs the immediate buckets for the entry whose name matches the
+/// pattern (`{id}` the session id, `*` a wildcard) rather than reconstruct each agent's
+/// private cwd encoding. Used to decide create-vs-resume (a create flag errors on a
+/// duplicate id), to back the Info-pane transcript fallback, and to follow a `/clear`
+/// that rotates the id mid-session.
+enum SessionStore {
+    static func exists(_ store: AgentDefinition.ResumeSpec.Store, id: String) -> Bool {
+        locate(store, id: id) != nil
+    }
 
-    /// The transcript file for a saved conversation `id`, or `nil` if none exists.
-    /// Globs the project folders for `<id>.jsonl` rather than reconstructing Claude's
-    /// cwd encoding. Because termio pins Claude's id (`Session.resumeID`) up front, this
-    /// resolves a session's transcript directly — the fallback the Info pane uses when
-    /// the hook never delivered a `transcript_path` (a session started before the
-    /// transcript-capturing hook was installed; Claude reads hooks only at startup).
-    static func transcriptPath(id: String) -> String? {
-        let projects = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/projects", isDirectory: true)
-        guard let folders = try? FileManager.default.contentsOfDirectory(
-            at: projects, includingPropertiesForKeys: nil) else { return nil }
-        let transcript = "\(id).jsonl"
-        for folder in folders {
-            let candidate = folder.appendingPathComponent(transcript)
-            if FileManager.default.fileExists(atPath: candidate.path) { return candidate.path }
+    /// The path of the on-disk entry for `id`, or `nil` if the agent hasn't saved it yet.
+    static func locate(_ store: AgentDefinition.ResumeSpec.Store, id: String) -> String? {
+        let root = URL(fileURLWithPath: (store.root as NSString).expandingTildeInPath)
+        guard let buckets = try? FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil) else { return nil }
+        let target = store.name.replacingOccurrences(of: "{id}", with: id)
+        let fileManager = FileManager.default
+        for bucket in buckets {
+            if !target.contains("*") {
+                // Exact name (the common case) — a direct existence check, kind-matched
+                // so a file store never matches a stray directory and vice versa.
+                let candidate = bucket.appendingPathComponent(target)
+                var isDirectory: ObjCBool = false
+                if fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+                   isDirectory.boolValue == store.isDirectory { return candidate.path }
+            } else if let entries = try? fileManager.contentsOfDirectory(atPath: bucket.path),
+                      let hit = entries.first(where: { glob(target, matches: $0) }) {
+                return bucket.appendingPathComponent(hit).path
+            }
         }
         return nil
+    }
+
+    /// Recovers `{id}` from a concrete entry name given the store's `{id}`/`*` pattern —
+    /// e.g. `<uuid>.jsonl` against `{id}.jsonl`, or `170_<uuid>.jsonl` against `*_{id}.jsonl`.
+    static func id(fromEntryName name: String, pattern: String) -> String? {
+        guard let idRange = pattern.range(of: "{id}") else { return nil }
+        let prefix = pattern[..<idRange.lowerBound].replacingOccurrences(of: "*", with: "")
+        let suffix = pattern[idRange.upperBound...].replacingOccurrences(of: "*", with: "")
+        var core = Substring(name)
+        if !suffix.isEmpty {
+            guard core.hasSuffix(suffix) else { return nil }
+            core = core.dropLast(suffix.count)
+        }
+        if !prefix.isEmpty, let r = core.range(of: prefix) { core = core[r.upperBound...] }
+        return core.isEmpty ? nil : String(core)
+    }
+
+    /// A minimal `*`-only glob: the non-empty fragments must appear in order, anchored at
+    /// both ends. (Enough for the session-file patterns; not a full shell glob.)
+    private static func glob(_ pattern: String, matches name: String) -> Bool {
+        let fragments = pattern.components(separatedBy: "*")
+        var cursor = name.startIndex
+        for (index, fragment) in fragments.enumerated() where !fragment.isEmpty {
+            guard let range = name.range(of: fragment, range: cursor..<name.endIndex) else { return false }
+            if index == 0, range.lowerBound != name.startIndex { return false }
+            cursor = range.upperBound
+        }
+        if let last = fragments.last, !last.isEmpty { return name.hasSuffix(last) }
+        return true
     }
 }
 
@@ -110,7 +148,8 @@ extension TermioStore {
 
         // Pi checks the pinned `--session-id` against its session store at startup
         // and warns when no file exists yet; pre-creating it keeps the launch silent.
-        if session.agent == .pi, let pinnedID = launch.resumeID {
+        // The manifest opts in via `resume.seed`, so no agent is named here.
+        if session.agent.resumeSpec.seed == "pi", let pinnedID = launch.resumeID {
             PiSession.ensureExists(id: pinnedID, cwd: workspacePath)
         }
 
@@ -440,11 +479,20 @@ extension TermioStore {
         } else {
             resumeID = nil
         }
+        // Does the agent already have a saved conversation under this id? Probe its
+        // declared store — the create flag errors on a duplicate id, so we switch to the
+        // resume flag once the agent has persisted it. Fully manifest-driven: no agent is
+        // named here.
+        let pinnedConversationExists: Bool
+        if let store = agent.resumeSpec.store, let id = resumeID {
+            pinnedConversationExists = SessionStore.exists(store, id: id)
+        } else {
+            pinnedConversationExists = false
+        }
         let context = AgentPreset.ResumeContext(
             resumeID: resumeID ?? "",
             launchedBefore: session.launched,
-            pinnedConversationExists: agent == .claudeCode
-                && resumeID.map(ClaudeConversation.exists) == true
+            pinnedConversationExists: pinnedConversationExists
         )
         guard let arguments = agent.resumeArguments(context) else {
             return (base, resumeID)
@@ -483,7 +531,7 @@ extension TermioStore {
     func reconcileResumeID(_ id: Session.ID, transcriptPath: String) {
         guard let location = locate(id) else { return }
         var session = projects[location.project].sessions[location.session]
-        guard let liveID = session.agent.resumeStyle.conversationID(fromTranscriptPath: transcriptPath),
+        guard let liveID = session.agent.resumeSpec.conversationID(fromTranscriptPath: transcriptPath),
               liveID != session.resumeID
         else { return }
         session.resumeID = liveID

@@ -4,7 +4,11 @@
   "name": "OpenCode",
   "wire": "opencode",
   "command": "opencode",
-  "resume": "opencode",
+  "resume": {
+    "resume": "--session {id}",
+    "continueLast": "--continue",
+    "discover": "opencode"
+  },
   "icon": { "asset": "opencode-favicon" },
   "install": "https://opencode.ai",
   "hooks": {
