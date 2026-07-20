@@ -76,7 +76,8 @@ struct GitHistoryView: View {
                         chrome: chrome,
                         isSelected: store.openDiff?.commit == commit.sha && store.openDiff?.change.path == file.path
                     ) {
-                        store.openDiff = GitDiffRequest(repoRoot: repoRoot, change: file, commit: commit.sha)
+                        store.openDiff = GitDiffRequest(repoRoot: repoRoot, change: file,
+                                                        commit: commit.sha, siblings: files)
                     }
                 }
             }

@@ -111,6 +111,9 @@ struct GitDiffRequest: Hashable, Sendable {
     /// (`git show <sha>`) rather than the working-tree diff — the History tab's
     /// file rows carry the commit they belong to.
     var commit: String? = nil
+    /// The ordered set the overlay walks with ← / → — the whole Changes list, or
+    /// the files of the commit being read. Also feeds the header's "n of m".
+    var siblings: [GitChange] = []
 
     var name: String { change.name }
 }
@@ -125,4 +128,9 @@ struct DiffRow: Identifiable, Sendable {
     let text: String
     let oldLine: Int?
     let newLine: Int?
+    /// The changed span within a paired deletion/addition line, in `Character`
+    /// offsets — rendered with a stronger background so a one-word edit in a long
+    /// line reads at a glance. `nil` when the line has no counterpart or the two
+    /// sides share too little for a span to mean anything.
+    var emphasis: Range<Int>? = nil
 }

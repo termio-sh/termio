@@ -13,6 +13,10 @@ struct GitDiffView: View {
     let request: GitDiffRequest
     @ObservedObject var settings: AppSettings
     let onClose: () -> Void
+    /// Replaces the overlay's request in place — ← / → walk through `request.siblings`
+    /// without dropping back to the list (Quick Look's arrow-key walk; ↑ ↓ stay with
+    /// scrolling, and the same keys in the focused Changes list walk via selection).
+    var onNavigate: ((GitDiffRequest) -> Void)? = nil
 
     @State private var rows: [DiffRow] = []
     @State private var isLoading = true
@@ -24,8 +28,37 @@ struct GitDiffView: View {
             content
         }
         .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
+        .focusable()
+        .focusEffectDisabled()
+        .onKeyPress(.leftArrow) { walk(-1) ? .handled : .ignored }
+        .onKeyPress(.rightArrow) { walk(+1) ? .handled : .ignored }
         .onExitCommand(perform: onClose)
         .task(id: request) { await load() }
+    }
+
+    // MARK: Walking
+
+    private var walkIndex: Int? {
+        request.siblings.firstIndex { $0.path == request.change.path }
+    }
+
+    /// Steps to the previous/next sibling that has a textual diff, skipping the
+    /// image/PDF kind the preview overlay owns. Returns false at either end so the
+    /// key press falls through instead of pretending to act.
+    private func walk(_ delta: Int) -> Bool {
+        guard let onNavigate, let index = walkIndex else { return false }
+        var next = index + delta
+        while next >= 0, next < request.siblings.count {
+            let candidate = request.siblings[next]
+            let url = URL(fileURLWithPath: request.repoRoot).appendingPathComponent(candidate.path)
+            if !FileActivation.previewsRatherThanDiff(url) {
+                onNavigate(GitDiffRequest(repoRoot: request.repoRoot, change: candidate,
+                                          commit: request.commit, siblings: request.siblings))
+                return true
+            }
+            next += delta
+        }
+        return false
     }
 
     private var header: some View {
@@ -47,6 +80,13 @@ struct GitDiffView: View {
                     .truncationMode(.head)
             }
             Spacer(minLength: 8)
+            // "n of m" (Mail's message-walk wording) whenever there is a set to walk.
+            if request.siblings.count > 1, let index = walkIndex {
+                Text("\(index + 1) of \(request.siblings.count)")
+                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.trailing, 2)
+            }
             // For a history diff, tag the header with the commit it belongs to.
             if let commit = request.commit {
                 Text("@ \(commit.prefix(7))")
@@ -151,7 +191,7 @@ private struct DiffLineRow: View {
                     .font(font)
                     .foregroundStyle(signColor)
                     .frame(width: 16)
-                Text(row.text.isEmpty ? " " : row.text)
+                codeText
                     .font(font)
                     .foregroundStyle(.primary)
                     .textSelection(.enabled)
@@ -163,6 +203,25 @@ private struct DiffLineRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(background)
         }
+    }
+
+    /// The code line, with the intraline changed span (if any) on a deeper tint of
+    /// the row's own color — the second, stronger shade Xcode's comparison view uses.
+    private var codeText: Text {
+        guard let emphasis = row.emphasis, !emphasis.isEmpty, !row.text.isEmpty else {
+            return Text(row.text.isEmpty ? " " : row.text)
+        }
+        var attributed = AttributedString(row.text)
+        let characters = attributed.characters
+        if let start = characters.index(characters.startIndex, offsetBy: emphasis.lowerBound,
+                                        limitedBy: characters.endIndex),
+           let end = characters.index(characters.startIndex, offsetBy: emphasis.upperBound,
+                                      limitedBy: characters.endIndex),
+           start < end {
+            attributed[start..<end].backgroundColor =
+                row.kind == .addition ? Color.green.opacity(0.28) : Color.red.opacity(0.28)
+        }
+        return Text(attributed)
     }
 
     private func gutter(_ number: Int?) -> some View {
