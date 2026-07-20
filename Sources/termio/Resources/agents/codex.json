@@ -7,7 +7,12 @@
   "permissionBypassFlag": "--dangerously-bypass-approvals-and-sandbox",
   "resume": {
     "resume": "resume {id}",
-    "discover": "codex"
+    "discover": {
+      "root": "~/.codex/sessions",
+      "format": "jsonl",
+      "id": "payload.id",
+      "cwd": "payload.cwd"
+    }
   },
   "icon": { "vector": "codex" },
   "install": "https://developers.openai.com/codex/cli",

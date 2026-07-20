@@ -6,7 +6,12 @@
   "command": "opencode",
   "resume": {
     "resume": "--session {id}",
-    "discover": "opencode"
+    "discover": {
+      "root": "~/.local/share/opencode/storage/session",
+      "format": "json",
+      "id": "id",
+      "cwd": "directory"
+    }
   },
   "icon": { "asset": "opencode-favicon" },
   "install": "https://opencode.ai",

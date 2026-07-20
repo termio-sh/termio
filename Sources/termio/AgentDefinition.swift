@@ -123,12 +123,10 @@ struct AgentDefinition: Identifiable {
 
     /// How a relaunch continues (or doesn't) this agent's prior conversation, parsed
     /// straight from the manifest's `resume` object. Everything here is data — argument
-    /// templates with an `{id}` placeholder plus a description of the agent's on-disk
-    /// session store — so a new agent in the common "pin an id, create-then-resume"
-    /// family needs no Swift at all. The two things that can't be data (recovering an
-    /// id the agent minted itself, and pre-seeding a session file so a pinned id
-    /// resolves quietly) name a built-in strategy instead of inlining the agent's
-    /// private file format. See docs/design/agent-resume-identity.md.
+    /// templates with an `{id}` placeholder plus descriptions of the agent's on-disk
+    /// session store — so a new agent needs no Swift at all. Strategies describe
+    /// *mechanisms* (file formats, field paths), never agent identities. See
+    /// docs/design/agent-resume-identity.md.
     struct ResumeSpec: Hashable, Sendable {
         /// Launch template for a fresh, termio-pinned id (e.g. `--session-id {id}`). Its
         /// presence means the id is pinned up front; its absence means the id is
@@ -141,11 +139,11 @@ struct AgentDefinition: Identifiable {
         /// flag errors on a duplicate id; also backs the Info-pane transcript fallback
         /// and `/clear` id-rotation for file-per-conversation stores.
         var store: Store?
-        /// Names the built-in matcher that reads this agent's own store to recover an
-        /// id it minted itself (`codex`, `opencode`). Set iff `create` is nil.
-        var discover: String?
-        /// Names the built-in that pre-creates the session file so a pinned id resolves
-        /// silently on first launch (`pi`).
+        /// How to read the id out of the agent's own session records after launch, for
+        /// agents that mint the id themselves. Set iff `create` is nil.
+        var discover: Discover?
+        /// Names the built-in mechanism that pre-creates the session file so a pinned id
+        /// resolves silently on first launch (`session-file`).
         var seed: String?
 
         /// A declarative description of where an agent keeps its conversations on disk.
@@ -159,6 +157,31 @@ struct AgentDefinition: Identifiable {
             /// `root`; termio searches across the buckets rather than reconstruct each
             /// agent's private cwd encoding.
             var name: String
+        }
+
+        /// A declarative description of how to recover an agent-minted session id from
+        /// the agent's own records: where they live, how a record is read, and which
+        /// fields carry the id and the working directory. All mechanism, no agent names —
+        /// `AgentSessionStore` interprets this generically.
+        struct Discover: Hashable, Sendable {
+            /// Tilde-expandable root the records live under, e.g. `~/.codex/sessions`.
+            var root: String
+            /// How a record file is read.
+            var format: Format
+            /// Dot-separated key path to the session id, e.g. `payload.id`.
+            var id: String
+            /// Dot-separated key path to the recorded working directory, e.g. `payload.cwd`.
+            var cwd: String
+
+            enum Format: String, Hashable, Sendable {
+                /// A `.jsonl` log whose first line is a JSON header — the log itself is
+                /// the conversation transcript.
+                case jsonl
+                /// A standalone `.json` metadata record (not a transcript).
+                case json
+
+                var fileExtension: String { rawValue }
+            }
         }
 
         static let none = ResumeSpec()
@@ -828,8 +851,19 @@ struct AgentManifest: Decodable {
             /// `dir:<pattern>` or `file:<pattern>`, where `<pattern>` contains `{id}` and
             /// may contain a `*` glob (e.g. `dir:{id}`, `file:{id}.jsonl`, `file:*_{id}.jsonl`).
             var storeMatch: String?
-            var discover: String?
+            var discover: DiscoverFields?
             var seed: String?
+
+            /// Mechanism description for recovering an agent-minted id — a record
+            /// location plus field paths, never an agent name.
+            struct DiscoverFields: Decodable {
+                var root: String
+                /// `jsonl` (first line of a `.jsonl` log is the record; the log is the
+                /// transcript) or `json` (a standalone `.json` metadata record).
+                var format: String
+                var id: String
+                var cwd: String
+            }
         }
 
         init(from decoder: Decoder) throws {
@@ -881,11 +915,15 @@ struct AgentManifest: Decodable {
             case "pi":
                 return .init(create: "--session-id {id}", resume: "--session-id {id}",
                              store: .init(root: "~/.pi/agent/sessions", isDirectory: false,
-                                          name: "*_{id}.jsonl"), seed: "pi")
+                                          name: "*_{id}.jsonl"), seed: "session-file")
             case "codex":
-                return .init(resume: "resume {id}", discover: "codex")
+                return .init(resume: "resume {id}",
+                             discover: .init(root: "~/.codex/sessions", format: .jsonl,
+                                             id: "payload.id", cwd: "payload.cwd"))
             case "opencode":
-                return .init(resume: "--session {id}", discover: "opencode")
+                return .init(resume: "--session {id}",
+                             discover: .init(root: "~/.local/share/opencode/storage/session",
+                                             format: .json, id: "id", cwd: "directory"))
             case let other:
                 throw ManifestError.invalid("\(id): unknown resume preset '\(other)'")
             }
@@ -915,19 +953,28 @@ struct AgentManifest: Decodable {
             default:
                 throw ManifestError.invalid("\(id): storeRoot and storeMatch must be set together")
             }
-            if let discover = fields.discover, !["codex", "opencode"].contains(discover) {
-                throw ManifestError.invalid("\(id): unknown resume discover strategy '\(discover)'")
+            var discover: AgentDefinition.ResumeSpec.Discover?
+            if let fields = fields.discover {
+                guard let format = AgentDefinition.ResumeSpec.Discover.Format(
+                    rawValue: fields.format.lowercased()) else {
+                    throw ManifestError.invalid(
+                        "\(id): discover format must be 'jsonl' or 'json', not '\(fields.format)'")
+                }
+                guard !fields.root.isEmpty, !fields.id.isEmpty, !fields.cwd.isEmpty else {
+                    throw ManifestError.invalid("\(id): discover requires root, format, id, cwd")
+                }
+                discover = .init(root: fields.root, format: format, id: fields.id, cwd: fields.cwd)
             }
-            if let seed = fields.seed, seed != "pi" {
-                throw ManifestError.invalid("\(id): unknown resume seed strategy '\(seed)'")
+            if let seed = fields.seed, seed != "session-file" {
+                throw ManifestError.invalid("\(id): unknown resume seed mechanism '\(seed)'")
             }
-            if fields.create != nil, fields.discover != nil {
+            if fields.create != nil, discover != nil {
                 throw ManifestError.invalid(
                     "\(id): resume 'create' (pinned id) and 'discover' (found id) are mutually exclusive")
             }
             return .init(
                 create: fields.create, resume: fields.resume,
-                store: store, discover: fields.discover, seed: fields.seed)
+                store: store, discover: discover, seed: fields.seed)
         }
     }
 

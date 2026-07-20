@@ -149,7 +149,7 @@ extension TermioStore {
         // Pi checks the pinned `--session-id` against its session store at startup
         // and warns when no file exists yet; pre-creating it keeps the launch silent.
         // The manifest opts in via `resume.seed`, so no agent is named here.
-        if session.agent.resumeSpec.seed == "pi", let pinnedID = launch.resumeID {
+        if session.agent.resumeSpec.seed == "session-file", let pinnedID = launch.resumeID {
             PiSession.ensureExists(id: pinnedID, cwd: workspacePath)
         }
 

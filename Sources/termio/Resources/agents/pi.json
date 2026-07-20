@@ -9,7 +9,7 @@
     "resume": "--session-id {id}",
     "storeRoot": "~/.pi/agent/sessions",
     "storeMatch": "file:*_{id}.jsonl",
-    "seed": "pi"
+    "seed": "session-file"
   },
   "icon": { "asset": "pi-favicon" },
   "install": "https://pi.dev",

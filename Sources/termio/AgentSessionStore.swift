@@ -11,40 +11,41 @@ import Foundation
 /// `launchedAt`, and (unlike modification time) it doesn't move as the conversation
 /// grows — so the record created right when we launched is the one we bind to.
 ///
-/// This reads each agent's *private* on-disk layout (Codex's `~/.codex/sessions`
-/// rollout files, OpenCode's `~/.local/share/opencode/storage/session` records), which
-/// is undocumented and can change between agent versions. Every read is therefore
-/// best-effort: any miss returns `nil`, and the caller falls back to continuing the
-/// most recent session in the directory.
+/// The record locations and field paths come from the manifest's `resume.discover`
+/// descriptor — pure mechanism (a root, a format, two key paths), interpreted
+/// generically here with no agent identities. The layouts described are each agent's
+/// *private* on-disk format, undocumented and free to change between agent versions,
+/// so every read is best-effort: any miss returns `nil` and the session launches fresh.
 enum AgentSessionStore {
     static func discover(agent: AgentPreset, directory: String, after launchedAt: Date?) -> String? {
         match(agent: agent, directory: directory, after: launchedAt)?.id
     }
 
     /// The on-disk conversation transcript for an agent that doesn't hand termio a
-    /// transcript path through its hooks the way Claude Code does. Codex writes a
-    /// rollout JSONL per session under `~/.codex/sessions`; that file *is* the
-    /// transcript, so the Info pane can render a trace from it. Returns the file path,
-    /// or `nil` when none matches (yet) or the agent has no readable transcript.
-    /// Only Codex is supported: OpenCode's session record is metadata, not a transcript.
+    /// transcript path through its hooks the way Claude Code does. A `jsonl` record is
+    /// the agent's session log itself (Codex's rollout file), so the Info pane can
+    /// render a trace from it; a `json` record is metadata only (OpenCode). Returns the
+    /// file path, or `nil` when none matches (yet) or the record isn't a transcript.
     static func discoverTranscript(agent: AgentPreset, directory: String, after launchedAt: Date?) -> String? {
-        // Only Codex's store record is itself the transcript; OpenCode's is metadata.
-        guard agent.resumeSpec.discover == "codex" else { return nil }
+        guard agent.resumeSpec.discover?.format == .jsonl else { return nil }
         return match(agent: agent, directory: directory, after: launchedAt)?.url.path
     }
 
-    /// The session file for this agent — its URL (the transcript) and the session id
-    /// parsed from it. Both `discover` (id, for resume) and `discoverTranscript` (path,
-    /// for the trace viewer) read from the same scan. Keyed on the manifest's declared
-    /// `resume.discover` strategy rather than agent identity, so the matcher a new agent
-    /// reuses is named in its config.
+    /// The session record for this agent — its URL and the session id parsed from it.
+    /// Both `discover` (id, for resume) and `discoverTranscript` (path, for the trace
+    /// viewer) read from the same scan.
     private static func match(agent: AgentPreset, directory: String, after launchedAt: Date?)
         -> (url: URL, id: String)? {
-        guard let launchedAt else { return nil }
-        switch agent.resumeSpec.discover {
-        case "codex": return matchCodex(directory: directory, after: launchedAt)
-        case "opencode": return matchOpenCode(directory: directory, after: launchedAt)
-        default: return nil
+        guard let launchedAt, let spec = agent.resumeSpec.discover else { return nil }
+        let root = URL(fileURLWithPath: (spec.root as NSString).expandingTildeInPath)
+        let target = canonical(directory)
+        return bestMatch(in: root, ext: spec.format.fileExtension, after: launchedAt) { url in
+            guard let object = record(at: url, format: spec.format),
+                  let id = value(at: spec.id, in: object),
+                  let cwd = value(at: spec.cwd, in: object),
+                  canonical(cwd) == target
+            else { return nil }
+            return id
         }
     }
 
@@ -52,41 +53,28 @@ enum AgentSessionStore {
     /// so its creation time should be ≥ `launchedAt`, but allow for clock granularity.
     private static let tolerance: TimeInterval = 2
 
-    /// Codex writes one rollout file per session at `~/.codex/sessions/YYYY/MM/DD/`,
-    /// whose first line is a `session_meta` event carrying the session `id` and `cwd`.
-    private static func matchCodex(directory: String, after launchedAt: Date) -> (url: URL, id: String)? {
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/sessions", isDirectory: true)
-        let target = canonical(directory)
-        return bestMatch(in: root, ext: "jsonl", after: launchedAt) { url in
-            guard let line = firstLine(of: url),
-                  let object = json(line),
-                  object["type"] as? String == "session_meta",
-                  let payload = object["payload"] as? [String: Any],
-                  let id = payload["id"] as? String,
-                  let cwd = payload["cwd"] as? String,
-                  canonical(cwd) == target
-            else { return nil }
-            return id
+    /// One session record as a JSON object: for `jsonl`, the log's first line (the
+    /// header event); for `json`, the whole file.
+    private static func record(at url: URL,
+                               format: AgentDefinition.ResumeSpec.Discover.Format) -> [String: Any]? {
+        switch format {
+        case .jsonl:
+            return firstLine(of: url).flatMap(json)
+        case .json:
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         }
     }
 
-    /// OpenCode stores one JSON record per session under
-    /// `~/.local/share/opencode/storage/session/<projectID>/<id>.json`, carrying the
-    /// `id` and the absolute `directory` the session ran in.
-    private static func matchOpenCode(directory: String, after launchedAt: Date) -> (url: URL, id: String)? {
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/share/opencode/storage/session", isDirectory: true)
-        let target = canonical(directory)
-        return bestMatch(in: root, ext: "json", after: launchedAt) { url in
-            guard let data = try? Data(contentsOf: url),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let id = object["id"] as? String,
-                  let dir = object["directory"] as? String,
-                  canonical(dir) == target
-            else { return nil }
-            return id
+    /// The string at a dot-separated key path (e.g. `payload.id`) in a JSON object.
+    private static func value(at keyPath: String, in object: [String: Any]) -> String? {
+        var current: Any = object
+        for key in keyPath.split(separator: ".") {
+            guard let dictionary = current as? [String: Any],
+                  let next = dictionary[String(key)] else { return nil }
+            current = next
         }
+        return current as? String
     }
 
     /// Walks `root` for `ext` files created at/after `launchedAt`, runs `identify` (which

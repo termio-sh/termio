@@ -50,8 +50,13 @@ pinned family needs is data:
   "resume":     "--resume {id}",        // continue a known conversation id
   "storeRoot":  "~/.grok/sessions",     // root of the agent's on-disk store
   "storeMatch": "dir:{id}",             // how a conversation is named on disk
-  "discover":   "codex",                // named strategy: recover an agent-minted id
-  "seed":       "pi"                    // named strategy: pre-create the session file
+  "discover": {                          // how to recover an agent-minted id
+    "root":   "~/.codex/sessions",       //   where the agent's records live
+    "format": "jsonl",                   //   jsonl (header line) | json (whole file)
+    "id":     "payload.id",              //   key path to the session id
+    "cwd":    "payload.cwd"              //   key path to the working directory
+  },
+  "seed":       "session-file"          // pre-create the session file at launch
 }
 ```
 
@@ -113,20 +118,25 @@ encoding. The same descriptor backs three consumers:
    transcript filename to re-pin the live conversation (see
    [agent-resume-identity.md](agent-resume-identity.md)).
 
-### The two named strategies
+### The discover descriptor
 
-Some behavior genuinely can't be data, because it requires parsing or writing an
-agent's private file format. Rather than inline that, the config *names* a
-built-in strategy:
+For agents that mint the id themselves, the id lives *inside* their session
+records. `discover` describes how to read it — pure mechanism, no agent names:
+`root` (where records live), `format` (`jsonl`: the first line of a `.jsonl` log
+is the record and the log itself is the transcript; `json`: a standalone
+metadata file), and two dot-separated key paths (`id`, `cwd`). One generic
+reader in `AgentSessionStore` walks `root` for records created at this session's
+launch whose `cwd` matches, and extracts the id — a new record shape is new
+config, not new code. The `format` also answers whether the matched file can
+feed the Info-pane trace (`jsonl` yes, `json` no).
 
-- **`discover`** (`codex`, `opencode`) — the id lives *inside* the session file
-  (Codex's `session_meta.payload.id`, OpenCode's record), so recovering it means
-  reading that format. `AgentSessionStore` holds the matchers, keyed on this name.
-- **`seed`** (`pi`) — Pi warns on first launch unless its session file already
-  exists, so termio pre-writes pi's exact header. `PiSession` holds the writer.
+### The seed mechanism
 
-These are the only two escape hatches, and they're declared in config even though
-their implementation is code — the wiring stays visible in the manifest.
+`seed: "session-file"` names the one behavior that stays code: pre-creating the
+agent's session file so a pinned id resolves silently on first launch (Pi warns
+otherwise). It can't be data because it must write the agent's private header
+format and cwd encoding. It's still declared in the manifest so the wiring is
+visible; strategies are named for what they *do*, never for an agent.
 
 ## What each built-in declares
 
@@ -134,9 +144,9 @@ their implementation is code — the wiring stays visible in the manifest.
 | --- | --- | --- | --- | --- | --- |
 | Claude | `--session-id {id}` | `--resume {id}` | `file:{id}.jsonl` | — | — |
 | Grok | `--session-id {id}` | `--resume {id}` | `dir:{id}` | — | — |
-| Pi | `--session-id {id}` | `--session-id {id}` | `file:*_{id}.jsonl` | — | `pi` |
-| Codex | — | `resume {id}` | — | `codex` | — |
-| OpenCode | — | `--session {id}` | — | `opencode` | — |
+| Pi | `--session-id {id}` | `--session-id {id}` | `file:*_{id}.jsonl` | — | `session-file` |
+| Codex | — | `resume {id}` | — | `jsonl` · `payload.id` | — |
+| OpenCode | — | `--session {id}` | — | `json` · `id` | — |
 | Amp, Cursor, Kimi, Antigravity, Hermes | *(no `resume` field)* | | | | |
 
 The five migrated agents produce byte-identical launch arguments to the old
@@ -147,12 +157,13 @@ now launches fresh instead of approximately continuing.
 ## Why this shape
 
 - **No presets, no inheritance.** Each agent's config is self-contained and
-  explicit; there are no magic strings to learn beyond the two strategy names.
-  (The old preset strings still decode, as backward-compatibility for existing
-  user manifests, but aren't the documented interface.)
-- **Identity leaves the runtime.** `agent == .claudeCode` / `== .pi` / `== .codex`
-  special-casing is gone from the launch, probe, transcript, and discovery paths;
-  they all read `agent.resumeSpec`.
-- **The common case is code-free.** A new claude-like CLI is four lines of JSON.
-  Only genuinely new *mechanisms* (a third discovery format, a new seed) touch
-  Swift — and then only to add a named strategy the config points at.
+  explicit; the only magic string is the one seed name. (The old preset strings
+  still decode, as backward-compatibility for existing user manifests, but
+  aren't the documented interface.)
+- **Mechanisms, not identities.** Strategies describe *how* (a format, a key
+  path, a file to pre-create), never *who* — there is no `"discover": "codex"`
+  pointing at agent-named code. Agent identity is gone from the launch, probe,
+  transcript, and discovery paths; they all read `agent.resumeSpec`.
+- **The common case is code-free.** A new claude-like CLI is four lines of JSON;
+  a new discovered-id CLI is a `discover` object. Only a genuinely new mechanism
+  (a third record format, a second seed) touches Swift.
