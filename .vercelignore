@@ -1,14 +1,19 @@
 # Only web/landing is deployed (Vercel project root directory = web/landing).
 # Keep the upload to sources: exclude the Swift app, build artifacts and deps.
-.build/
-.swiftpm/
-Sources/
-Tests/
-termio.app/
-packaging/
-scripts/
-tools/
-docs/
-web/docs/
-web/landing/node_modules/
-web/landing/.next/
+#
+# NOTE: every pattern is anchored with a leading "/" so it matches ONLY the
+# repo-root entry. An unanchored "docs/" would (gitignore semantics) also match
+# web/landing/content/docs and web/landing/src/app/docs and silently strip the
+# docs site from the build — which is exactly what happened once. Keep the slash.
+/.build/
+/.swiftpm/
+/Sources/
+/Tests/
+/termio.app/
+/packaging/
+/scripts/
+/tools/
+/docs/
+/web/docs/
+/web/landing/node_modules/
+/web/landing/.next/
