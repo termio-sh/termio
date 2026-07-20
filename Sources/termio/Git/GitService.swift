@@ -34,6 +34,12 @@ enum GitService {
         await offMain { discardChanges(change, repoRoot) }
     }
 
+    /// Discards a whole selection in one confirmed action — the multi-select's
+    /// "Discard N Files…". Sequential and best-effort per file, like the single form.
+    static func discard(_ changes: [GitChange], in repoRoot: String) async {
+        await offMain { for change in changes { _ = discardChanges(change, repoRoot) } }
+    }
+
     // MARK: History
 
     /// The most recent commits on the current branch (newest first), for the History tab.
@@ -105,12 +111,19 @@ enum GitService {
 
         var changes = parseStatus(raw)
         applyCounts(&changes, repoRoot: repoRoot)
+        // Conflicts float to the top — they are the one status that *must* be acted
+        // on. Everything else sorts by full path, so siblings cluster the way the
+        // file tree shows them rather than in git's emit order.
+        changes.sort { a, b in
+            if (a.status == .conflicted) != (b.status == .conflicted) { return a.status == .conflicted }
+            return a.path.localizedCaseInsensitiveCompare(b.path) == .orderedAscending
+        }
         return changes
     }
 
     /// Parses `git status --porcelain=v2 -z`. Records are NUL-separated; the path is
     /// always the *current* path, so renames (type `2`) carry the original path in the
-    /// following NUL field, which is consumed and ignored.
+    /// following NUL field, kept for the row's `old → new` tooltip.
     private static func parseStatus(_ raw: String) -> [GitChange] {
         let tokens = raw.components(separatedBy: "\0").filter { !$0.isEmpty }
         var result: [GitChange] = []
@@ -127,8 +140,9 @@ enum GitService {
             case "2":
                 let f = rec.split(separator: " ", maxSplits: 9, omittingEmptySubsequences: false)
                 guard f.count == 10 else { continue }
-                if i < tokens.count { i += 1 } // skip the original path
-                result.append(make(xy: Array(f[1]), path: String(f[9]), untracked: false))
+                var change = make(xy: Array(f[1]), path: String(f[9]), untracked: false)
+                if i < tokens.count { change.originalPath = tokens[i]; i += 1 }
+                result.append(change)
             case "u":
                 let f = rec.split(separator: " ", maxSplits: 10, omittingEmptySubsequences: false)
                 guard f.count == 11 else { continue }
@@ -148,21 +162,25 @@ enum GitService {
         let x = xy.first ?? "."
         let y = xy.count > 1 ? xy[1] : "."
         let primary: Character = (y != ".") ? y : x
-        return GitChange(path: path, status: GitFileStatus(code: primary), isUntracked: untracked)
+        var change = GitChange(path: path, status: GitFileStatus(code: primary), isUntracked: untracked)
+        change.isStaged = x != "." && y == "."
+        return change
     }
 
     /// Fills each change's add/delete counts: `git diff --numstat` (unstaged) merged
     /// with `--cached` (staged) for tracked files, and a line count for untracked ones.
     private static func applyCounts(_ changes: inout [GitChange], repoRoot: String) {
         var counts: [String: (Int, Int)] = [:]
+        var binaries: Set<String> = []
         for args in [["diff", "--numstat"], ["diff", "--numstat", "--cached"]] {
             guard let out = run(args, in: repoRoot) else { continue }
             for line in out.split(separator: "\n") {
                 let parts = line.split(separator: "\t", maxSplits: 2)
                 guard parts.count == 3 else { continue }
-                let adds = Int(parts[0]) ?? 0   // "-" for binary → 0
-                let dels = Int(parts[1]) ?? 0
                 let path = String(parts[2])
+                if parts[0] == "-" { binaries.insert(path); continue }
+                let adds = Int(parts[0]) ?? 0
+                let dels = Int(parts[1]) ?? 0
                 let existing = counts[path] ?? (0, 0)
                 counts[path] = (existing.0 + adds, existing.1 + dels)
             }
@@ -170,12 +188,20 @@ enum GitService {
         for idx in changes.indices {
             if changes[idx].isUntracked {
                 let abs = (repoRoot as NSString).appendingPathComponent(changes[idx].path)
-                if let content = try? String(contentsOfFile: abs, encoding: .utf8), !content.isEmpty {
-                    changes[idx].additions = content.split(separator: "\n", omittingEmptySubsequences: false).count
+                if let content = try? String(contentsOfFile: abs, encoding: .utf8) {
+                    if !content.isEmpty {
+                        changes[idx].additions = content.split(separator: "\n", omittingEmptySubsequences: false).count
+                    }
+                } else {
+                    // Unreadable as UTF-8 but present on disk: a new binary.
+                    changes[idx].isBinary = FileManager.default.fileExists(atPath: abs)
                 }
-            } else if let c = counts[changes[idx].path] {
-                changes[idx].additions = c.0
-                changes[idx].deletions = c.1
+            } else {
+                if let c = counts[changes[idx].path] {
+                    changes[idx].additions = c.0
+                    changes[idx].deletions = c.1
+                }
+                changes[idx].isBinary = binaries.contains(changes[idx].path)
             }
         }
     }

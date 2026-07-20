@@ -19,16 +19,24 @@ enum GitPaneMode: Hashable, Sendable {
 
 /// One changed file in the working tree, as reported by `git status`. `path` is
 /// POSIX, relative to the repo root (so it may contain `/`); `name` is just the
-/// last component for the row label.
+/// last component for the row label and `directory` the dimmed remainder.
 struct GitChange: Identifiable, Hashable, Sendable {
     let path: String
     let status: GitFileStatus
     let isUntracked: Bool
     var additions: Int = 0
     var deletions: Int = 0
+    /// For a rename, the path the file moved *from* — surfaced in the row tooltip.
+    var originalPath: String? = nil
+    /// The change sits entirely in the index (nothing further in the worktree) —
+    /// what `git commit` in the terminal would take right now.
+    var isStaged: Bool = false
+    /// `--numstat` reported `-` for the line counts, so `+`/`−` would be a lie.
+    var isBinary: Bool = false
 
     var id: String { path }
     var name: String { (path as NSString).lastPathComponent }
+    var directory: String { (path as NSString).deletingLastPathComponent }
 }
 
 /// One commit in the branch's history, parsed from `git log`. Shown as a row in

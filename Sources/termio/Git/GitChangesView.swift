@@ -4,11 +4,12 @@ import SwiftUI
 // MARK: - Git pane
 
 /// The git pane, split into two tabs after GitHub Desktop: **Changes** (the working
-/// tree's files, with a checkbox that stages/unstages each one for real and a click that
-/// opens its diff over the terminal) and **History** (past commits and their diffs).
-/// Committing and pushing are deliberately left to the terminal — the GUI is for staging,
-/// reviewing, and reading, not authoring commits. The list rows match the file tree (same
-/// interface font and `SidebarRowHighlight`). All state lives in `GitPanelModel`.
+/// tree's files; clicking a row opens its diff over the terminal) and **History** (past
+/// commits and their diffs). Committing and pushing are deliberately left to the
+/// terminal — the GUI is for reviewing and reading, not authoring commits. The mode
+/// tabs sit at the top (they answer "what am I looking at"); the bottom bar carries the
+/// list's totals and refresh (it answers "how much"). The list rows match the file tree
+/// (same interface font and `SidebarRowHighlight`). All state lives in `GitPanelModel`.
 struct GitChangesView: View {
     @EnvironmentObject var store: TermioStore
     @EnvironmentObject var settings: AppSettings
@@ -23,9 +24,13 @@ struct GitChangesView: View {
     /// Which of the two tabs is showing.
     @State private var mode: GitPaneMode = .changes
 
-    /// The file a "Discard Changes…" action is waiting to confirm — non-nil while the
+    /// The files a "Discard Changes…" action is waiting to confirm — non-nil while the
     /// destructive alert is up, so the actual `git restore`/delete only fires on "OK".
-    @State private var pendingDiscard: GitChange?
+    @State private var pendingDiscard: [GitChange]?
+
+    /// The list's selected rows, by path. Exactly one selected row opens its diff;
+    /// several become the targets of the batch context-menu actions.
+    @State private var selection = Set<String>()
 
     init(repoRoot: String, changeCount: Binding<Int>) {
         self.repoRoot = repoRoot
@@ -37,6 +42,7 @@ struct GitChangesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            topBar
             switch mode {
             case .changes: changesBody
             case .history: GitHistoryView(model: model, repoRoot: repoRoot, chrome: chrome, font: settings.interfaceFont)
@@ -46,15 +52,101 @@ struct GitChangesView: View {
         .task(id: repoRoot) { await model.load() }
         .task(id: mode) { if mode == .history { await model.loadHistory() } }
         .onChange(of: model.changes.count) { _, count in changeCount = count }
-        // Re-read when a diff overlay closes — the user may have just acted on it.
-        .onChange(of: store.openDiff) { _, request in
-            if request == nil { Task { await model.load() } }
+        .onChange(of: selection) { _, selected in
+            if selected.count == 1, let change = model.changes.first(where: { $0.path == selected.first }) {
+                open(change)
+            } else if selected.count > 1, store.openDiff != nil {
+                // A multi-selection has no single diff to show — drop the overlay.
+                store.openDiff = nil
+            }
         }
-        .alert("Discard Changes?", isPresented: discardAlertPresented, presenting: pendingDiscard) { change in
-            Button("Discard Changes", role: .destructive) { performDiscard(change) }
+        // Re-read when a diff overlay closes — the user may have just acted on it. A
+        // lone selection is released too, so clicking the same row reopens its diff.
+        .onChange(of: store.openDiff) { _, request in
+            if request == nil {
+                Task { await model.load() }
+                if selection.count == 1 { selection.removeAll() }
+            }
+        }
+        .onChange(of: store.openFileURL) { _, url in
+            if url == nil, selection.count == 1 { selection.removeAll() }
+        }
+        .alert("Discard Changes?", isPresented: discardAlertPresented, presenting: pendingDiscard) { changes in
+            Button("Discard Changes", role: .destructive) { performDiscard(changes) }
             Button("Cancel", role: .cancel) { pendingDiscard = nil }
-        } message: { change in
-            Text("All changes to “\(change.name)” will be lost. This cannot be undone.")
+        } message: { changes in
+            Text(discardMessage(changes))
+        }
+    }
+
+    // MARK: Chrome
+
+    /// The pane's mode switch, pinned at the top over a hairline: `Changes | History`
+    /// with the active mode lit in the chrome accent — GitHub Desktop's tab placement.
+    private var topBar: some View {
+        HStack(spacing: 8) {
+            switchButton("Changes", .changes)
+            Divider().frame(height: 12)
+            switchButton("History", .history)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+        }
+    }
+
+    private func switchButton(_ title: String, _ value: GitPaneMode) -> some View {
+        let active = mode == value
+        return Button {
+            mode = value
+        } label: {
+            Text(title)
+                .font(.system(size: 11.5, weight: active ? .semibold : .regular))
+                .foregroundStyle(active ? AnyShapeStyle(chrome?.accent ?? Color.accentColor) : AnyShapeStyle(.secondary))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Status strip under the content: what the visible list adds up to, and refresh.
+    private var bottomBar: some View {
+        HStack(spacing: 5) {
+            summary
+            Spacer(minLength: 8)
+            TreeHeaderButton(systemName: "arrow.clockwise", help: "Refresh") {
+                Task {
+                    if mode == .changes { await model.load() }
+                    else { await model.loadHistory(force: true) }
+                }
+            }
+        }
+        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 6)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+        }
+    }
+
+    @ViewBuilder
+    private var summary: some View {
+        switch mode {
+        case .changes:
+            if !model.changes.isEmpty {
+                let additions = model.changes.reduce(0) { $0 + $1.additions }
+                let deletions = model.changes.reduce(0) { $0 + $1.deletions }
+                Text("\(model.changes.count) \(model.changes.count == 1 ? "file" : "files")")
+                    .foregroundStyle(.secondary)
+                if additions > 0 { Text("+\(additions)").foregroundStyle(.green) }
+                if deletions > 0 { Text("−\(deletions)").foregroundStyle(.red) }
+            }
+        case .history:
+            if !model.commits.isEmpty {
+                Text("\(model.commits.count) commits").foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -81,72 +173,58 @@ struct GitChangesView: View {
         }
     }
 
-    /// The pane's mode switch, pinned at the *bottom* (Xcode's version-editor jump bar):
-    /// `Changes | History` on the left with the active mode lit in the chrome accent, and
-    /// refresh on the right — above a full-width hairline that splits it from the content.
-    private var bottomBar: some View {
-        HStack(spacing: 8) {
-            switchButton("Changes", .changes)
-            Divider().frame(height: 12)
-            switchButton("History", .history)
-            Spacer(minLength: 8)
-            TreeHeaderButton(systemName: "arrow.clockwise", help: "Refresh") {
-                Task {
-                    if mode == .changes { await model.load() }
-                    else { await model.loadHistory(force: true) }
-                }
-            }
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, 8)
-        .padding(.vertical, 6)
-        .overlay(alignment: .top) {
-            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
-        }
-    }
-
-    private func switchButton(_ title: String, _ value: GitPaneMode) -> some View {
-        let active = mode == value
-        return Button {
-            mode = value
-        } label: {
-            Text(title)
-                .font(.system(size: 11.5, weight: active ? .semibold : .regular))
-                .foregroundStyle(active ? AnyShapeStyle(chrome?.accent ?? Color.accentColor) : AnyShapeStyle(.secondary))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
     private var changeList: some View {
         // A native `List` with a `selection:` binding — the same shape as the file tree
-        // (`FileTreeList`). Selection drives "open the diff", which is what lets each row be
-        // `.draggable` at the same time: a SwiftUI tap gesture would strangle the drag, but
-        // List's AppKit-level selection coexists with it. The checkbox is a `Button`, so it
-        // toggles staging without also opening the diff.
-        List(model.changes, selection: selectedPath) { change in
+        // (`FileTreeList`). Selection drives "open the diff", which is what lets each row
+        // be `.draggable` at the same time: a SwiftUI tap gesture would strangle the drag,
+        // but List's AppKit-level selection coexists with it. The Set binding gives ⌘- and
+        // ⇧-click multi-selection for free.
+        List(model.changes, selection: $selection) { change in
             GitChangeRow(
                 change: change,
                 fileURL: fileURL(for: change),
                 font: settings.interfaceFont,
                 chrome: chrome,
-                isSelected: store.openDiff?.change.path == change.path && store.openDiff?.commit == nil,
-                onDiscard: { pendingDiscard = change }
+                isSelected: selection.contains(change.path),
+                onDiscard: { pendingDiscard = [change] }
             )
-            .contextMenu {
-                Button("Open in Editor") { openInEditor(change) }
-                Button("Reveal in Finder") { revealInFinder(change) }
-                Divider()
-                Button("Copy Path") { copyPath(change) }
-                Button("Copy Relative Path") { copyToPasteboard(change.path) }
-                Button("Copy Diff") { copyDiff(change) }
-                Divider()
-                Button("Discard Changes…", role: .destructive) { pendingDiscard = change }
-            }
+            .contextMenu { contextMenu(for: change) }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .environment(\.defaultMinListRowHeight, 1)
+    }
+
+    /// The row's menu acts on the whole selection when the clicked row is part of it,
+    /// and on just that row otherwise — GitHub Desktop's rule.
+    @ViewBuilder
+    private func contextMenu(for change: GitChange) -> some View {
+        let targets = targets(for: change)
+        if targets.count == 1 {
+            Button("Open in Editor") { openInEditor(change) }
+            Button("Reveal in Finder") { revealInFinder(change) }
+            Divider()
+            Button("Copy Path") { copyPath(change) }
+            Button("Copy Relative Path") { copyToPasteboard(change.path) }
+            Button("Copy Diff") { copyDiff(targets) }
+            Divider()
+            Button("Discard Changes…", role: .destructive) { pendingDiscard = targets }
+        } else {
+            Button("Copy Paths") {
+                copyToPasteboard(targets.map { fileURL(for: $0).path }.joined(separator: "\n"))
+            }
+            Button("Copy Relative Paths") {
+                copyToPasteboard(targets.map(\.path).joined(separator: "\n"))
+            }
+            Button("Copy Diff") { copyDiff(targets) }
+            Divider()
+            Button("Discard \(targets.count) Files…", role: .destructive) { pendingDiscard = targets }
+        }
+    }
+
+    private func targets(for change: GitChange) -> [GitChange] {
+        guard selection.contains(change.path), selection.count > 1 else { return [change] }
+        return model.changes.filter { selection.contains($0.path) }
     }
 
     private func open(_ change: GitChange) {
@@ -177,10 +255,16 @@ struct GitChangesView: View {
         copyToPasteboard(fileURL(for: change).path)
     }
 
-    /// Puts the file's raw unified diff on the pasteboard — ready to paste into an agent
-    /// prompt ("fix this") or `git apply`.
-    private func copyDiff(_ change: GitChange) {
-        Task { copyToPasteboard(await GitService.diffText(for: change, in: repoRoot)) }
+    /// Puts the raw unified diff of every target on the pasteboard — ready to paste into
+    /// an agent prompt ("fix this") or `git apply`. Order matches the list.
+    private func copyDiff(_ changes: [GitChange]) {
+        Task {
+            var parts: [String] = []
+            for change in changes {
+                parts.append(await GitService.diffText(for: change, in: repoRoot))
+            }
+            copyToPasteboard(parts.joined())
+        }
     }
 
     private func copyToPasteboard(_ string: String) {
@@ -190,14 +274,28 @@ struct GitChangesView: View {
     }
 
     /// Runs the confirmed discard off the main thread, closes the diff overlay if it was
-    /// showing the file we just reverted, then reloads so the row drops out of the list.
-    private func performDiscard(_ change: GitChange) {
+    /// showing one of the discarded files, then reloads so the rows drop out of the list.
+    private func performDiscard(_ changes: [GitChange]) {
         pendingDiscard = nil
         Task {
-            await GitService.discard(change, in: repoRoot)
-            if store.openDiff?.change.path == change.path { store.openDiff = nil }
+            await GitService.discard(changes, in: repoRoot)
+            if let open = store.openDiff, changes.contains(where: { $0.path == open.change.path }) {
+                store.openDiff = nil
+            }
+            selection.removeAll()
             await model.load()
         }
+    }
+
+    /// The alert body: one file is named outright; a batch is enumerated up to ten
+    /// names before collapsing to a count (GitHub Desktop's cap).
+    private func discardMessage(_ changes: [GitChange]) -> String {
+        if changes.count == 1, let only = changes.first {
+            return "All changes to “\(only.name)” will be lost. This cannot be undone."
+        }
+        let listed = changes.prefix(10).map(\.name).joined(separator: "\n")
+        let more = changes.count > 10 ? "\n…and \(changes.count - 10) more" : ""
+        return "All changes to these \(changes.count) files will be lost. This cannot be undone.\n\n\(listed)\(more)"
     }
 
     private var discardAlertPresented: Binding<Bool> {
@@ -208,35 +306,15 @@ struct GitChangesView: View {
     private func fileURL(for change: GitChange) -> URL {
         URL(fileURLWithPath: repoRoot).appendingPathComponent(change.path)
     }
-
-    /// Bridges List selection to the open diff: the selected row is whichever change is
-    /// currently open, and selecting a row opens it. Bound by `GitChange.ID` (the path) —
-    /// List tags rows with the element's `id`, so a selection binding of any other type
-    /// never fires. Deselection is ignored — closing the diff is the overlay's own job.
-    private var selectedPath: Binding<String?> {
-        Binding(
-            get: {
-                if let diff = store.openDiff, diff.commit == nil { return diff.change.path }
-                // Image/SVG/PDF changes open in the preview overlay, not the diff — match the
-                // open file back to its row so the selection stays put while it's up.
-                if let open = store.openFileURL?.standardizedFileURL,
-                   let change = model.changes.first(where: { fileURL(for: $0).standardizedFileURL == open }) {
-                    return change.path
-                }
-                return nil
-            },
-            set: { path in
-                if let change = model.changes.first(where: { $0.path == path }) { open(change) }
-            }
-        )
-    }
 }
 
-/// A single row in the changes list: a colored status letter, the file name (dimmed when
-/// deleted), and right-aligned `+adds −dels`. `.draggable` out as the file's URL. Opening
-/// is the List's own `selection:` binding, not a tap gesture, which is what keeps the drag
-/// immediate; the discard control is a `Button`, so it acts without triggering the row's
-/// open-diff selection.
+/// A single row in the changes list: a colored status letter, the file name with its
+/// directory dimmed beside it (the path shrinks first; the name survives narrow widths),
+/// and right-aligned `+adds −dels` — or a `binary` tag when line counts would lie — plus
+/// a small dot when the change is fully staged. `.draggable` out as the file's URL.
+/// Opening is the List's own `selection:` binding, not a tap gesture, which is what keeps
+/// the drag immediate; the discard control is a `Button`, so it acts without triggering
+/// the row's open-diff selection.
 private struct GitChangeRow: View {
     let change: GitChange
     let fileURL: URL
@@ -258,9 +336,17 @@ private struct GitChangeRow: View {
                 .font(font)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .layoutPriority(1)
                 .foregroundStyle(change.status == .deleted ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+            if !change.directory.isEmpty {
+                Text(change.directory)
+                    .font(font)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(.tertiary)
+            }
             Spacer(minLength: 6)
-            // On hover the trailing +/− counts give way to a single discard button — the
+            // On hover the trailing counts give way to a single discard button — the
             // one destructive action worth a one-click affordance (everything else lives
             // in the right-click menu). The counts return when the pointer leaves.
             if isHovering {
@@ -271,10 +357,20 @@ private struct GitChangeRow: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .help("Discard Changes…")
-            } else if change.additions > 0 || change.deletions > 0 {
+            } else {
                 HStack(spacing: 5) {
-                    if change.additions > 0 { Text("+\(change.additions)").foregroundStyle(.green) }
-                    if change.deletions > 0 { Text("−\(change.deletions)").foregroundStyle(.red) }
+                    if change.isBinary {
+                        Text("binary").foregroundStyle(.secondary)
+                    } else {
+                        if change.additions > 0 { Text("+\(change.additions)").foregroundStyle(.green) }
+                        if change.deletions > 0 { Text("−\(change.deletions)").foregroundStyle(.red) }
+                    }
+                    if change.isStaged {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 5, height: 5)
+                            .help("Staged — the next git commit takes this file")
+                    }
                 }
                 .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                 .opacity(0.85)
@@ -294,6 +390,6 @@ private struct GitChangeRow: View {
                 .animation(.easeInOut(duration: 0.12), value: isHovering)
         )
         .onHover { isHovering = $0 }
-        .help(change.path)
+        .help(change.originalPath.map { "\($0) → \(change.path)" } ?? change.path)
     }
 }
