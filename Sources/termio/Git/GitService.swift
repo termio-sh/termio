@@ -270,6 +270,95 @@ enum GitService {
         return (o, n)
     }
 
+    /// A recognized code-hosting forge, detected from the origin remote's hostname.
+    /// Each forge shapes its branch-tree URL differently, so a "view remote" link
+    /// must know which one it's talking to.
+    enum Forge {
+        case github, gitlab, bitbucket, gitea
+
+        var name: String {
+            switch self {
+            case .github: return "GitHub"
+            case .gitlab: return "GitLab"
+            case .bitbucket: return "Bitbucket"
+            case .gitea: return "Gitea"
+            }
+        }
+
+        /// The path that shows `branch`'s file tree, relative to the repo's web URL.
+        fileprivate func branchPath(_ branch: String) -> String {
+            switch self {
+            case .github: return "tree/\(branch)"
+            case .gitlab: return "-/tree/\(branch)"
+            case .bitbucket: return "src/\(branch)"
+            case .gitea: return "src/branch/\(branch)"
+            }
+        }
+
+        /// Hostname → forge. Exact hosts cover the public instances; the substring
+        /// checks cover the self-hosted convention (`gitlab.company.com`, `gitea.…`).
+        fileprivate init?(host: String) {
+            switch true {
+            case host == "github.com" || host == "www.github.com": self = .github
+            case host == "bitbucket.org" || host.contains("bitbucket"): self = .bitbucket
+            case host.contains("gitlab"): self = .gitlab
+            case host == "codeberg.org" || host.contains("gitea") || host.contains("forgejo"): self = .gitea
+            default: return nil
+            }
+        }
+    }
+
+    struct RemotePage {
+        let forge: Forge
+        let url: URL
+    }
+
+    /// The forge web page for `dir`'s checkout — the current branch's tree when the
+    /// branch exists on the remote, else the repository root (an unpushed branch would
+    /// 404). `nil` when there is no repository or the origin remote isn't a forge we
+    /// can shape a URL for.
+    static func remotePage(in dir: String) async -> RemotePage? {
+        await offMain { resolveRemotePage(dir) }
+    }
+
+    private static func resolveRemotePage(_ dir: String) -> RemotePage? {
+        guard let remote = run(["remote", "get-url", "origin"], in: dir)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            let (host, path) = parseRemote(remote),
+            let forge = Forge(host: host),
+            let repo = URL(string: "https://\(host)/\(path)") else { return nil }
+        guard run(["rev-parse", "--abbrev-ref", "@{upstream}"], in: dir) != nil,
+              let branch = run(["rev-parse", "--abbrev-ref", "HEAD"], in: dir)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !branch.isEmpty, branch != "HEAD",
+              let escaped = branch.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+        else { return RemotePage(forge: forge, url: repo) }
+        let branchURL = URL(string: "\(repo.absoluteString)/\(forge.branchPath(escaped))") ?? repo
+        return RemotePage(forge: forge, url: branchURL)
+    }
+
+    /// Splits a remote into web-addressable host + repo path, from either the scp-like
+    /// form (`git@host:owner/repo.git`) or a real URL (`https://…`, `ssh://…`). Ports
+    /// and userinfo are dropped — the web UI lives on plain https.
+    private static func parseRemote(_ remote: String) -> (host: String, path: String)? {
+        var host: String
+        var path: String
+        if !remote.contains("://"), remote.contains("@"), let colon = remote.firstIndex(of: ":") {
+            let hostPart = String(remote[..<colon])
+            host = hostPart.components(separatedBy: "@").last ?? hostPart
+            path = String(remote[remote.index(after: colon)...])
+        } else if let url = URL(string: remote), let urlHost = url.host {
+            host = urlHost
+            path = url.path
+        } else {
+            return nil
+        }
+        path = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if path.hasSuffix(".git") { path = String(path.dropLast(4)) }
+        guard !host.isEmpty, !path.isEmpty else { return nil }
+        return (host, path)
+    }
+
     // MARK: Process
 
     private static func offMain<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {

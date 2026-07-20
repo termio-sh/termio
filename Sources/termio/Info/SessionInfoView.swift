@@ -37,6 +37,10 @@ struct SessionInfoView: View {
         store.selectedSessionID.flatMap { store.transcriptPaths[$0] }
     }
 
+    /// The working directory's page on its forge (GitHub, GitLab, …), detected from
+    /// the origin remote — `nil` (row hidden) for a non-repo or an unrecognized host.
+    @State private var remotePage: GitService.RemotePage?
+
     var body: some View {
         content
             // Learn the transcript from disk when no hook has delivered it — so the
@@ -48,6 +52,11 @@ struct SessionInfoView: View {
                       store.transcriptPaths[id] == nil,
                       let path = store.resolveTranscriptPath(for: id) else { return }
                 store.transcriptPaths[id] = path
+            }
+            .task(id: workingDirectory) {
+                remotePage = nil
+                guard let workingDirectory else { return }
+                remotePage = await GitService.remotePage(in: workingDirectory)
             }
     }
 
@@ -88,6 +97,11 @@ struct SessionInfoView: View {
             VStack(alignment: .leading, spacing: 1) {
                 InfoRow(symbol: "doc.on.doc", title: "Copy Path") { copy(path) }
                 InfoRow(symbol: "folder", title: "Reveal in Finder") { revealInFinder(path) }
+                if let remotePage {
+                    InfoRow(forge: remotePage.forge, title: "View on \(remotePage.forge.name)") {
+                        NSWorkspace.shared.open(remotePage.url)
+                    }
+                }
                 ForEach(EditorTarget.installed) { editor in
                     InfoRow(appIcon: editor.appIcon, title: "Open in \(editor.name)") {
                         editor.open(URL(fileURLWithPath: path))
@@ -177,6 +191,7 @@ private struct InfoRow: View {
     private enum Leading {
         case symbol(String)
         case appIcon(NSImage?)
+        case forge(GitService.Forge)
     }
 
     private let leading: Leading
@@ -193,6 +208,12 @@ private struct InfoRow: View {
 
     init(appIcon: NSImage?, title: String, action: @escaping () -> Void) {
         self.leading = .appIcon(appIcon)
+        self.title = title
+        self.action = action
+    }
+
+    init(forge: GitService.Forge, title: String, action: @escaping () -> Void) {
+        self.leading = .forge(forge)
         self.title = title
         self.action = action
     }
@@ -237,6 +258,10 @@ private struct InfoRow: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
+        case .forge(let forge):
+            // A brand mark fills its box edge-to-edge; 14 in the 18pt slot lands it
+            // at the same optical size as the 13pt SF Symbols above it.
+            ForgeIconView(forge: forge, size: 14)
         }
     }
 }
