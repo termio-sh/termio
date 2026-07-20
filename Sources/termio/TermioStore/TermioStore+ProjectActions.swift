@@ -558,6 +558,7 @@ extension TermioStore {
         currentTool[id] = nil
         liveTitles[id] = nil
         detectedAgents[id] = nil
+        processSpawnedAt[id] = nil
         lastWorkingAt[id] = nil
         lastHookReportAt[id] = nil
         lastUserInputAt[id] = nil

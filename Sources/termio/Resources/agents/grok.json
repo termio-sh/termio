@@ -20,7 +20,9 @@
     "type": "json",
     "file": "~/.grok/hooks/termio.json",
     "dialect": "grok",
+    "conversation": "sessionId",
     "events": [
+      { "on": "SessionStart", "state": "idle" },
       { "on": "UserPromptSubmit", "state": "working" },
       { "on": "PreToolUse", "state": "working" },
       { "on": "PostToolUse", "state": "working" },

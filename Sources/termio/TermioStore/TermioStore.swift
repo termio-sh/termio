@@ -244,6 +244,12 @@ final class TermioStore: ObservableObject {
     /// structured log instead of scraping the terminal.
     @Published var transcriptPaths: [Session.ID: String] = [:]
 
+    /// When each session's agent process was spawned in *this* app run — unlike the
+    /// persisted `Session.launchedAt` (stamped once, at the session's first launch
+    /// ever), this bounds turn-boundary re-discovery to store records the current
+    /// process could actually have created (see `rediscoverConversation`).
+    var processSpawnedAt: [Session.ID: Date] = [:]
+
     /// When each currently-working session last reported activity, used to recover
     /// a session whose turn ended without a `done` hook (see `sweepStaleWorking`).
     /// Refreshed both by working hooks and by a *changed* rendered screen

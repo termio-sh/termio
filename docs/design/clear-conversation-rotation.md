@@ -146,3 +146,82 @@ smallest spot that makes it graceful.
    auto-compact mid-turn does not flick status (matcher excludes it);
    quit-and-relaunch right after `/clear` opens a working fresh session, not a
    resume error.
+
+## Phase 2 — rotation signals for the other agents
+
+Phase 1's three downstream mechanisms — advance `transcriptPaths`, advance the
+resume pin, invalidate the stale topic title — were already agent-generic; only
+the *signal* (Claude's hook-carried `transcript_path`) was Claude-specific.
+Phase 2 gives every other rotating agent a signal, through two new ATP manifest
+mechanisms. All three consequences now flow through one shared adoption point
+(`TermioStore.adoptConversationID`), so title invalidation comes for free
+regardless of which signal fired.
+
+### Mechanism 1 — identity-bearing reports (`hooks.conversation`)
+
+The manifest's `hooks` object gains a `conversation` locator: where the hook
+host exposes the agent's own id for the conversation it is currently writing.
+`termio agent report` grew matching flags (`--conversation <id>` for plugins
+that hold the id in-process, `--conversation-from <field>` to mine it out of
+the JSON blob shell hooks receive on stdin), and the report payload carries it
+as `conversation_id`. A report whose conversation id differs from the session's
+pin *is* the rotation — `applyStatusReport` adopts it exactly the way a
+hook-carried transcript path is adopted today. The locator is
+dialect-interpreted, mechanism-named, never agent-named:
+
+| dialect | locator meaning | example |
+| --- | --- | --- |
+| json (shell hooks) | stdin JSON field name | `session_id` (Codex), `sessionId` (Grok) |
+| opencode plugin | dot key path in the event object | `properties.sessionID` |
+| pi plugin | the `context` mechanism — the extension context's session manager | `context` |
+
+### Mechanism 2 — turn-boundary re-discovery
+
+For a discovered-id agent whose reports carry no identity, discovery no longer
+runs at most once: on each `done` report that arrived without a
+`conversation_id`, `AgentSessionStore.rediscover` re-scans the agent's declared
+`discover` store for the **newest** record born in the session's directory
+since this app run spawned the process (the original discovery binds to the
+*earliest* record after the persisted first-ever launch; re-discovery bounds
+itself to the live process so a resumed tab's window can't span days and
+swallow records from runs in between). A newer record with a different id is
+an in-process rotation;
+adopt it. The no-guessing rule holds: when two same-agent sessions share the
+directory, a newer record can't be attributed and nothing moves. The scan runs
+only at turn end, never on a timer, and is skipped entirely for agents whose
+manifest declares an identity locator — from such an agent, a report *without*
+an id is deliberate (an OpenCode subagent's turn end), and its store record
+would be exactly the false match the scan must not adopt.
+
+### What each agent ships
+
+| Agent | signal | rotation command | verified against |
+| --- | --- | --- | --- |
+| Codex | `conversation: session_id` + `capturesTranscript` (its hook stdin carries `session_id` and `transcript_path` = the live rollout); `SessionStart` event added so rotation lands at `/new` time; mechanism 2 covers it only when a user-override manifest drops the locator | `/new` | codex-cli 0.144.6 binary + openai/codex hook schemas |
+| OpenCode | plugin passes `event.properties.sessionID` on `session.status` / `session.idle` / `permission.updated`. Subagent child sessions share the plugin bus, so the template learns top-level ids from `session.created`/`session.updated` (children carry `parentID`) and forwards only those | `session.new` (`<leader>n`) | opencode 1.17.20 bundled schemas + SDK types |
+| Pi | extension reads `context.sessionManager.getSessionId()` (Pi reloads extensions with a fresh context after a session switch); `session_start` event added so rotation lands at `/new` time, before the lazily-created session file exists | `/new` | pi 0.80.6 shipped source |
+| Grok | `conversation: sessionId` mined from hook stdin (Grok's payload is camelCase); `SessionStart` event added | `/new` (alias `/clear`) | grok 0.2.106 local docs (`~/.grok/docs/user-guide/10-hooks.md`, `17-sessions.md`) |
+| Claude Code | unchanged — Phase 1's transcript-filename reconcile, now routed through the shared adoption point | `/clear` | — |
+
+Notes: Codex's and Grok's `SessionStart` subscriptions also fire at process
+start, where the reported id equals the pin — a no-op by construction (`state:
+idle` matches a freshly started session). Pi's and Grok's rotated pins point at
+conversations the pinned-store probe resolves on relaunch (create-vs-resume
+stays existence-gated, so quitting before the new conversation's first message
+correctly re-creates under the adopted id). A plain terminal running a
+hand-started agent never adopts an id — the tab relaunches as a shell, so
+there is no pin to keep honest.
+
+### Phase 2 test plan
+
+Per agent: start a session in termio, chat until the trace/title reflect the
+conversation, run the rotation command, then verify (a) the resume pin
+(`Session.resumeID`) advances to the agent's new id, (b) the sidebar title
+falls back to the agent name, (c) View Trace follows for agents with a
+transcript (Claude, Codex, Pi — Codex's arrives with the next hook event, Pi's
+once the new session file materializes on the first assistant reply), and (d)
+quit-and-relaunch resumes the *new* conversation. For OpenCode, additionally
+run a subagent-spawning prompt and confirm the pin never moves to a child
+session id. For Codex, verify mechanism 2 by the same steps with
+`capturesTranscript`/`conversation` removed from a user-override manifest —
+rotation must then land on the `done` report at turn end.

@@ -17,7 +17,9 @@
     "type": "plugin",
     "dir": "~/.pi/agent/extensions",
     "dialect": "pi",
+    "conversation": "context",
     "events": [
+      { "on": "session_start", "state": "idle" },
       { "on": "agent_start", "state": "working" },
       { "on": "agent_end", "state": "done" }
     ]

@@ -22,6 +22,12 @@ struct StatusReport: Decodable {
     /// address of the raw Q&A instead of scraping the terminal. Absent for agents
     /// whose hook doesn't carry it.
     let transcriptPath: String?
+    /// The agent's own id for the conversation this session is currently writing,
+    /// forwarded by hooks/plugins whose host exposes it (the manifest's
+    /// `hooks.conversation` locator). Lets termio advance the resume pin the moment
+    /// the agent rotates conversations in-process (`/new`), without needing the id
+    /// to be encoded in a transcript filename. Absent for identity-blind hooks.
+    let conversationID: String?
 
     private enum CodingKeys: String, CodingKey {
         case termioSession = "termio_session"
@@ -29,6 +35,7 @@ struct StatusReport: Decodable {
         case tool
         case cwd
         case transcriptPath = "transcript_path"
+        case conversationID = "conversation_id"
     }
 }
 
@@ -261,13 +268,20 @@ enum AgentStatusHooks {
     /// silent no-op if the copy is missing, instead of spamming every agent turn with
     /// hook-failure noise.
     static func reportCommand(
-        state: String, withTranscript: Bool = false, dialect: HookDialect = .claudeNested
+        state: String, withTranscript: Bool = false, conversationField: String? = nil,
+        dialect: HookDialect = .claudeNested
     ) -> String {
         var command = "\(shellQuote(cliPath)) agent report \(state)"
         // Claude feeds each hook a JSON blob on stdin carrying `transcript_path`; the
         // CLI mines it out (jq-free) so termio can address the raw Q&A log. Only enabled
         // for agents that reliably provide stdin, so the CLI's `cat` can't block.
         if withTranscript { command += " --transcript" }
+        // Some agents' stdin blob also names the live conversation id (Codex
+        // `session_id`, Grok `sessionId`); the manifest declares the field and the CLI
+        // mines it, so termio can follow an in-process `/new` rotation. Same stdin
+        // caveat as `--transcript`. The field name is validated at manifest load to be
+        // a bare identifier, so it embeds safely.
+        if let conversationField { command += " --conversation-from \(conversationField)" }
         // Cursor reads the hook's stdout as its JSON reply, so the CLI must stay silent
         // and print a benign `{}`. (Claude/Codex ignore hook stdout, so they don't.)
         // The fallback keeps that contract even when the CLI itself couldn't run.
@@ -334,9 +348,13 @@ private struct JSONHookFile: AgentStatusInstaller {
     let events: [AgentHookEvent]
     let label: String
     /// Whether this agent's hooks pass a JSON payload on stdin we can mine for the
-    /// session's `transcript_path`. Only Claude Code is known to (and to always
-    /// supply stdin, so the capturing `cat` can't block); others stay off.
+    /// session's `transcript_path`. Only enabled for agents verified to always
+    /// supply stdin (Claude Code, Codex), so the capturing `cat` can't block.
     var capturesTranscript: Bool = false
+    /// The stdin JSON field naming the live conversation id (`hooks.conversation`
+    /// in the manifest), or `nil` for identity-blind hooks. Same stdin caveat as
+    /// `capturesTranscript`.
+    var conversationField: String?
     /// The file's structural shape (see `HookDialect`). Defaults to Claude's, which
     /// Codex also uses; Cursor overrides it.
     var dialect: HookDialect = .claudeNested
@@ -362,6 +380,7 @@ private struct JSONHookFile: AgentStatusInstaller {
             events: spec.events,
             label: id,
             capturesTranscript: spec.capturesTranscript,
+            conversationField: spec.conversation,
             dialect: spec.dialect,
             removesFileWhenEmpty: isDedicatedTermioFile,
             legacyURLs: legacyURLs)
@@ -395,7 +414,8 @@ private struct JSONHookFile: AgentStatusInstaller {
         for event in events {
             var groups = hooks[event.name] as? [[String: Any]] ?? []
             let command = AgentStatusHooks.reportCommand(
-                state: event.state, withTranscript: capturesTranscript, dialect: dialect)
+                state: event.state, withTranscript: capturesTranscript,
+                conversationField: conversationField, dialect: dialect)
             let group: [String: Any]
             if dialect == .cursorFlat {
                 group = ["command": command]
@@ -526,11 +546,11 @@ private struct PluginFile: AgentStatusInstaller {
         case .openCodePlugin:
             filename = "termio.js"
             legacyFilename = "termio-status.js"
-            contents = openCodeSource(events: spec.events)
+            contents = openCodeSource(events: spec.events, conversationPath: spec.conversation)
         case .piPlugin:
             filename = "termio.js"
             legacyFilename = "termio-status.js"
-            contents = piSource(events: spec.events)
+            contents = piSource(events: spec.events, conversation: spec.conversation)
         case .ampPlugin:
             filename = "termio.ts"
             legacyFilename = "termio-status.ts"
@@ -604,26 +624,59 @@ private struct PluginFile: AgentStatusInstaller {
     /// when the turn ends; `permission.updated` means it's waiting on the user. Each
     /// maps to the public report contract shelled out via Bun's `$`. The session id
     /// comes from `TERMIO_SESSION`, which the PTY carries into the in-process plugin.
-    private static func openCodeSource(events: [AgentHookEvent]) -> String {
+    ///
+    /// `conversationPath` (the manifest's `hooks.conversation`) is the dot key path
+    /// in the event object naming OpenCode's own conversation id; when set, each
+    /// report also carries it so termio can follow an in-process new-session
+    /// rotation. Subagent child sessions share this event bus, and adopting a
+    /// child's id would mis-pin the tab, so the plugin learns which ids are
+    /// top-level from `session.created`/`session.updated` (child sessions carry
+    /// `parentID`) and forwards only those.
+    private static func openCodeSource(events: [AgentHookEvent], conversationPath: String?) -> String {
+        let conversationExpression = conversationPath.map { path in
+            "event" + path.split(separator: ".").map { "?.\($0)" }.joined()
+        }
         let branches = events.map { event in
             let eventName = jsString(event.name)
             let state = jsString(event.state)
+            let arguments = conversationExpression.map { "\(state), \($0)" } ?? state
             if let matcher = event.matcher {
-                return "      if (event.type === \(eventName) && event.properties?.status?.type === \(jsString(matcher))) return report(\(state));"
+                return "      if (event.type === \(eventName) && event.properties?.status?.type === \(jsString(matcher))) return report(\(arguments));"
             }
-            return "      if (event.type === \(eventName)) return report(\(state));"
+            return "      if (event.type === \(eventName)) return report(\(arguments));"
         }.joined(separator: "\n")
+        let identity = conversationExpression == nil ? "" : """
+
+          const roots = new Set();
+          const note = (info) => {
+            if (!info?.id) return;
+            if (info.parentID) roots.delete(info.id); else roots.add(info.id);
+          };
+        """
+        let identityBranches = conversationExpression == nil ? "" : """
+              if (event.type === "session.created" || event.type === "session.updated") return note(event.properties?.info);
+
+        """
+        let reportBody = conversationExpression == nil ? """
+            return $`${cli} agent report ${state}`.quiet().nothrow();
+        """ : """
+            if (conversation && roots.has(conversation)) {
+              return $`${cli} agent report ${state} --conversation ${conversation}`.quiet().nothrow();
+            }
+            return $`${cli} agent report ${state}`.quiet().nothrow();
+        """
+        let reportParameters = conversationExpression == nil ? "(state)" : "(state, conversation)"
         return """
         // termio agent status — reports OpenCode session lifecycle to termio.
         // Socket marker: \(AgentStatusHooks.marker)
         export const TermioStatus = async ({ $ }) => {
-          const cli = \(jsString(cliPath));
-          const report = (state) => {
-            return $`${cli} agent report ${state}`.quiet().nothrow();
+          const cli = \(jsString(cliPath));\(identity)
+          const report = \(reportParameters) => {
+        \(reportBody)
           };
           return {
             event: async ({ event }) => {
-        \(branches)
+        \(identityBranches)\(branches)
             },
           };
         };
@@ -633,15 +686,40 @@ private struct PluginFile: AgentStatusInstaller {
     /// Pi extension: `agent_start` fires when a turn begins, `agent_end` when it
     /// returns to the user. Pi has no shell-hook config, so the extension itself
     /// shells out via `pi.exec`; the session id rides in on `TERMIO_SESSION`.
-    private static func piSource(events: [AgentHookEvent]) -> String {
+    ///
+    /// `conversation == "context"` (the manifest's `hooks.conversation`) means Pi's
+    /// own conversation id is read from the extension context's session manager and
+    /// forwarded with each report, so termio can follow an in-process `/new`
+    /// rotation (Pi reloads extensions with a fresh context when it switches
+    /// sessions). The id is embedded in a shell command, so it is forwarded only
+    /// when it looks like a bare token — Pi's uuidv7 ids always do.
+    private static func piSource(events: [AgentHookEvent], conversation: String?) -> String {
+        guard conversation != nil else {
+            let listeners = events.map { event in
+                let command = AgentStatusHooks.reportCommand(state: event.state)
+                return "  pi.on(\(jsString(event.name)), () => pi.exec(\"sh\", [\"-c\", \(jsString(command))]));"
+            }.joined(separator: "\n")
+            return """
+            // termio agent status — reports Pi turn lifecycle to termio.
+            // Socket marker: \(AgentStatusHooks.marker)
+            export default (pi) => {
+            \(listeners)
+            };
+            """
+        }
         let listeners = events.map { event in
-            let command = AgentStatusHooks.reportCommand(state: event.state)
-            return "  pi.on(\(jsString(event.name)), () => pi.exec(\"sh\", [\"-c\", \(jsString(command))]));"
+            "  pi.on(\(jsString(event.name)), (_event, context) => report(\(jsString(event.state)), context));"
         }.joined(separator: "\n")
         return """
         // termio agent status — reports Pi turn lifecycle to termio.
         // Socket marker: \(AgentStatusHooks.marker)
         export default (pi) => {
+          const cli = \(jsString(AgentStatusHooks.shellQuote(cliPath)));
+          const report = (state, context) => {
+            const id = context?.sessionManager?.getSessionId?.();
+            const conversation = id && /^[A-Za-z0-9._-]+$/.test(id) ? ` --conversation ${id}` : "";
+            pi.exec("sh", ["-c", `${cli} agent report ${state}${conversation} 2>/dev/null || true`]);
+          };
         \(listeners)
         };
         """

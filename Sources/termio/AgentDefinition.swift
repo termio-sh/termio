@@ -446,6 +446,12 @@ struct AgentHookSpec: Hashable {
     let directory: String?
     let dialect: HookDialect
     let capturesTranscript: Bool
+    /// Where the hook host exposes the live conversation id, so reports can carry
+    /// it and termio can follow an in-process `/new` rotation. Dialect-interpreted:
+    /// a stdin JSON field name for shell hooks (`session_id`, `sessionId`), a dot
+    /// key path in the event object for the OpenCode plugin, or the named
+    /// `context` mechanism for the Pi plugin. `nil` for identity-blind hooks.
+    let conversation: String?
     let events: [AgentHookEvent]
 }
 
@@ -889,6 +895,9 @@ struct AgentManifest: Decodable {
         var dir: String?
         var dialect: String?
         var capturesTranscript: Bool?
+        /// Dialect-interpreted locator of the live conversation id (see
+        /// `AgentHookSpec.conversation`).
+        var conversation: String?
         var events: [Event]
         struct Event: Decodable {
             var on: String?
@@ -1021,6 +1030,41 @@ struct AgentManifest: Decodable {
             throw ManifestError.invalid("\(id): \(typeName) hooks require 'file'")
         }
 
+        // The conversation locator is embedded in generated hook commands and plugin
+        // source, so it must be a bare token: a JSON field name for shell hooks, a
+        // dot path of JS identifiers for the OpenCode plugin, or the one named
+        // mechanism (`context`) for the Pi plugin. Anything else is a manifest error,
+        // never rendered.
+        var conversation: String?
+        if let raw = hooks.conversation?.trimmingCharacters(in: .whitespaces), !raw.isEmpty {
+            func isIdentifier(_ value: Substring) -> Bool {
+                guard let first = value.first, first.isLetter || first == "_" else { return false }
+                return value.dropFirst().allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+            }
+            switch dialect {
+            case .claudeNested, .cursorFlat:
+                guard isIdentifier(raw[...]) else {
+                    throw ManifestError.invalid(
+                        "\(id): hook conversation must name a stdin JSON field, not '\(raw)'")
+                }
+            case .openCodePlugin:
+                let components = raw.split(separator: ".", omittingEmptySubsequences: false)
+                guard !components.isEmpty, components.allSatisfy(isIdentifier) else {
+                    throw ManifestError.invalid(
+                        "\(id): hook conversation must be a dot key path, not '\(raw)'")
+                }
+            case .piPlugin:
+                guard raw == "context" else {
+                    throw ManifestError.invalid(
+                        "\(id): hook conversation for this dialect must be 'context', not '\(raw)'")
+                }
+            case .kimiTOML, .ampPlugin:
+                throw ManifestError.invalid(
+                    "\(id): hook conversation is not supported for this dialect")
+            }
+            conversation = raw
+        }
+
         let validStates: Set<String> = ["working", "attention", "done", "idle"]
         let events = try hooks.events.map { event -> AgentHookEvent in
             guard let name = event.on ?? event.event, !name.isEmpty else {
@@ -1037,6 +1081,7 @@ struct AgentManifest: Decodable {
             directory: hooks.dir,
             dialect: dialect,
             capturesTranscript: hooks.capturesTranscript ?? false,
+            conversation: conversation,
             events: events)
     }
 

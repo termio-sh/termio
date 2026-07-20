@@ -19,6 +19,7 @@
     "type": "plugin",
     "dir": "~/.config/opencode/plugin",
     "dialect": "opencode",
+    "conversation": "properties.sessionID",
     "events": [
       { "on": "session.status", "state": "working", "matcher": "busy" },
       { "on": "session.idle", "state": "done" },

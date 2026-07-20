@@ -24,7 +24,10 @@
     "type": "json",
     "file": "~/.codex/hooks.json",
     "dialect": "codex",
+    "capturesTranscript": true,
+    "conversation": "session_id",
     "events": [
+      { "on": "SessionStart", "state": "idle" },
       { "on": "UserPromptSubmit", "state": "working" },
       { "on": "PreToolUse", "state": "working" },
       { "on": "PostToolUse", "state": "working" },

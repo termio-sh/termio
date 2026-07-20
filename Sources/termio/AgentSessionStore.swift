@@ -31,15 +31,30 @@ enum AgentSessionStore {
         return match(agent: agent, directory: directory, after: launchedAt)?.url.path
     }
 
+    /// Re-discovery at a turn boundary: the *newest* record born in this directory
+    /// since launch is the conversation the agent is writing right now. Where
+    /// `discover` binds to the record created at launch (earliest match), this
+    /// follows the agent through an in-process rotation (`/new`) that minted a newer
+    /// one. Returns the id plus the record path when the record doubles as the
+    /// transcript (`jsonl`).
+    static func rediscover(agent: AgentPreset, directory: String, after launchedAt: Date?)
+        -> (id: String, transcriptPath: String?)? {
+        guard let hit = match(agent: agent, directory: directory, after: launchedAt, newest: true)
+        else { return nil }
+        let isTranscript = agent.resumeSpec.discover?.format == .jsonl
+        return (hit.id, isTranscript ? hit.url.path : nil)
+    }
+
     /// The session record for this agent — its URL and the session id parsed from it.
     /// Both `discover` (id, for resume) and `discoverTranscript` (path, for the trace
     /// viewer) read from the same scan.
-    private static func match(agent: AgentPreset, directory: String, after launchedAt: Date?)
-        -> (url: URL, id: String)? {
+    private static func match(agent: AgentPreset, directory: String, after launchedAt: Date?,
+                              newest: Bool = false) -> (url: URL, id: String)? {
         guard let launchedAt, let spec = agent.resumeSpec.discover else { return nil }
         let root = URL(fileURLWithPath: (spec.root as NSString).expandingTildeInPath)
         let target = canonical(directory)
-        return bestMatch(in: root, ext: spec.format.fileExtension, after: launchedAt) { url in
+        return bestMatch(in: root, ext: spec.format.fileExtension, after: launchedAt,
+                         newest: newest) { url in
             guard let object = record(at: url, format: spec.format),
                   let id = value(at: spec.id, in: object),
                   let cwd = value(at: spec.cwd, in: object),
@@ -80,7 +95,10 @@ enum AgentSessionStore {
     /// Walks `root` for `ext` files created at/after `launchedAt`, runs `identify` (which
     /// confirms the working directory and returns the session id), and returns the URL and
     /// id of the *earliest-created* match — the session born when we launched this one.
+    /// With `newest`, the *latest-created* match instead — the session the agent most
+    /// recently rotated to (see `rediscover`).
     private static func bestMatch(in root: URL, ext: String, after launchedAt: Date,
+                                  newest: Bool = false,
                                   identify: (URL) -> String?) -> (url: URL, id: String)? {
         let keys: [URLResourceKey] = [.creationDateKey, .isRegularFileKey]
         guard let enumerator = FileManager.default.enumerator(
@@ -93,7 +111,7 @@ enum AgentSessionStore {
                   let values = try? url.resourceValues(forKeys: Set(keys)),
                   values.isRegularFile == true,
                   let created = values.creationDate, created >= threshold,
-                  best == nil || created < best!.created,
+                  best.map({ newest ? created > $0.created : created < $0.created }) ?? true,
                   let id = identify(url)
             else { continue }
             best = (url, id, created)

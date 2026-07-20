@@ -79,7 +79,9 @@ sessions() {
     printf '%s' "$request" | nc -U "$SOCKET"
 }
 
-# The public hook contract: `termio agent report <state> [--transcript] [--reply]`.
+# The public hook contract:
+#   `termio agent report <state> [--transcript] [--conversation <id>]
+#                                [--conversation-from <field>] [--reply]`
 # An agent's status hook runs this instead of a hand-rolled `printf | nc`; termio
 # stamps the absolute path to this script into the hook file at install time. It reads
 # the session id from $TERMIO_SESSION (which the PTY carries) and the cwd from $PWD,
@@ -88,29 +90,43 @@ sessions() {
 # global hook file per agent, so a single report fans out to both; each app keeps only
 # the reports whose session id it stamped and ignores the rest (`TermioStore.sessionID`).
 # A missing socket (app not running) is a silent no-op — hooks fire constantly.
-#   --transcript  slurp stdin (Claude feeds hooks a JSON blob) and forward its
-#                 transcript_path so termio can address the raw Q&A log.
-#   --reply       stay silent on stdout and print `{}` at the end, for agents (Cursor)
-#                 that read the hook's stdout as its JSON reply.
+#   --transcript          slurp stdin (Claude feeds hooks a JSON blob) and forward its
+#                         transcript_path so termio can address the raw Q&A log.
+#   --conversation        forward this agent-reported conversation id verbatim, for
+#                         in-process plugins that already hold the live id.
+#   --conversation-from   mine the conversation id out of the named string field of
+#                         the JSON on stdin (agents disagree on the field name:
+#                         Codex `session_id`, Grok `sessionId`).
+#   --reply               stay silent on stdout and print `{}` at the end, for agents
+#                         (Cursor) that read the hook's stdout as its JSON reply.
 agent() {
     op="${1:-}"
     [ $# -gt 0 ] && shift || true
     if [ "$op" != "report" ]; then
         echo "termio: unknown agent command '${op:-}'" >&2
-        echo "usage: termio agent report <working|attention|done|idle> [--transcript] [--reply]" >&2
+        echo "usage: termio agent report <working|attention|done|idle> [--transcript] [--conversation <id>] [--conversation-from <field>] [--reply]" >&2
         exit 1
     fi
 
     state=""
     with_transcript=0
     reply=0
-    for arg in "$@"; do
-        case "$arg" in
+    conversation=""
+    conversation_from=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
             --transcript) with_transcript=1 ;;
             --reply) reply=1 ;;
-            working|attention|done|idle) state="$arg" ;;
-            *) echo "termio: unknown agent report argument '$arg'" >&2; exit 1 ;;
+            --conversation)
+                [ $# -ge 2 ] || { echo "termio: --conversation needs a value" >&2; exit 1; }
+                conversation="$2"; shift ;;
+            --conversation-from)
+                [ $# -ge 2 ] || { echo "termio: --conversation-from needs a field name" >&2; exit 1; }
+                conversation_from="$2"; shift ;;
+            working|attention|done|idle) state="$1" ;;
+            *) echo "termio: unknown agent report argument '$1'" >&2; exit 1 ;;
         esac
+        shift
     done
     if [ -z "$state" ]; then
         echo "termio: agent report needs a state (working|attention|done|idle)" >&2
@@ -120,18 +136,29 @@ agent() {
     session=$(json_escape "${TERMIO_SESSION:-}")
     cwd=$(json_escape "$PWD")
 
+    # Read stdin once when any flag mines it. `head -1` closes the pipe so the
+    # pipeline's exit status is sed's (0), keeping `set -e` happy even when grep
+    # matches nothing.
+    input=""
+    if [ "$with_transcript" -eq 1 ] || [ -n "$conversation_from" ]; then
+        input=$(cat)
+    fi
+    if [ -z "$conversation" ] && [ -n "$conversation_from" ]; then
+        conversation=$(printf '%s' "$input" \
+            | grep -o "\"$conversation_from\":\"[^\"]*\"" | head -1 | sed 's/.*:"//;s/"$//')
+    fi
+
+    payload=$(printf '{"termio_session":"%s","state":"%s","cwd":"%s"' \
+        "$session" "$state" "$cwd")
     if [ "$with_transcript" -eq 1 ]; then
         # Mirror the old hook: mine transcript_path out of the JSON on stdin, jq-free.
-        # `head -1` closes the pipe so the pipeline's exit status is sed's (0), keeping
-        # `set -e` happy even when grep matches nothing.
-        input=$(cat)
         tp=$(printf '%s' "$input" | grep -o '"transcript_path":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')
-        payload=$(printf '{"termio_session":"%s","state":"%s","cwd":"%s","transcript_path":"%s"}' \
-            "$session" "$state" "$cwd" "$(json_escape "$tp")")
-    else
-        payload=$(printf '{"termio_session":"%s","state":"%s","cwd":"%s"}' \
-            "$session" "$state" "$cwd")
+        payload=$(printf '%s,"transcript_path":"%s"' "$payload" "$(json_escape "$tp")")
     fi
+    if [ -n "$conversation" ]; then
+        payload=$(printf '%s,"conversation_id":"%s"' "$payload" "$(json_escape "$conversation")")
+    fi
+    payload="$payload}"
 
     # Fan out to every channel's status socket, not just this binary's own: the
     # report is self-identifying (the session id routes it), so broadcasting is

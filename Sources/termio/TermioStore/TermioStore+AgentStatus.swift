@@ -66,16 +66,32 @@ extension TermioStore {
         guard let id = sessionID(for: report) else { return }
         // Remember the session's transcript address whenever a hook carries it, so
         // `sessions send` can hand it back as the place to read the response.
-        if let path = report.transcriptPath, !path.isEmpty {
+        let carriedTranscript = report.transcriptPath.flatMap { $0.isEmpty ? nil : $0 }
+        if let path = carriedTranscript {
             transcriptPaths[id] = path
-            // The hook path is the one signal that can carry a *new* conversation id
+            // A hook-carried path can name a *new* conversation id in its filename
             // (after `/clear`), so advance the resume pin to match — a no-op unless it
             // actually rotated. See docs/design/agent-resume-identity.md.
             reconcileResumeID(id, transcriptPath: path)
-        } else if transcriptPaths[id] == nil, let path = resolveTranscriptPath(for: id) {
-            // The hook didn't carry a path (Codex never does; a pre-hook Claude session
-            // never will), so learn it from the agent's own on-disk transcript instead —
-            // same result as Claude's hook-carried path, just discovered.
+        }
+        if let conversation = report.conversationID, !conversation.isEmpty {
+            // An identity-bearing report names the live conversation outright — the
+            // rotation signal for agents whose hook host exposes the id (the
+            // manifest's `hooks.conversation`). On a rotation without a hook-carried
+            // transcript, re-resolve it from the agent's store; nil clears a stale
+            // path that described the discarded conversation.
+            if adoptConversationID(conversation, for: id), carriedTranscript == nil {
+                transcriptPaths[id] = resolveTranscriptPath(for: id)
+            }
+        } else if report.state == "done" {
+            // Identity-blind turn end: for a discovered-id agent, re-scan its store in
+            // case the conversation rotated in-process (`/new`) since discovery.
+            rediscoverConversation(for: id)
+        }
+        if transcriptPaths[id] == nil, let path = resolveTranscriptPath(for: id) {
+            // The hook didn't carry a path (a pre-hook Claude session never will), so
+            // learn it from the agent's own on-disk transcript instead — same result
+            // as Claude's hook-carried path, just discovered.
             transcriptPaths[id] = path
         }
         // Any recognized report proves this session's hooks are alive and speaking,

@@ -363,6 +363,7 @@ extension TermioStore {
 
         state.configuration = TerminalSurfaceOptions(backend: .inMemory(inMemory))
         surfaces[session.id] = state
+        processSpawnedAt[session.id] = Date()
         monitor(state, for: session.id)
         warmUpRendering(state)
         // Record that this session has now launched (and its pinned resume id) so the
@@ -524,15 +525,29 @@ extension TermioStore {
     /// transcript and orphans the old file; the once-pinned id (`recordLaunch` writes
     /// it only while nil) would otherwise resume the cleared conversation. A no-op
     /// unless the live transcript names a different id than the pin, and only for
-    /// styles whose filename *is* the id — discovered-id agents advance through
-    /// re-discovery instead. Fed by the hook-carried transcript path in
+    /// styles whose filename *is* the id — other agents advance through an
+    /// identity-bearing report or turn-boundary re-discovery, which land in the same
+    /// `adoptConversationID`. Fed by the hook-carried transcript path in
     /// `applyStatusReport`. See docs/design/agent-resume-identity.md.
     func reconcileResumeID(_ id: Session.ID, transcriptPath: String) {
-        guard let location = locate(id) else { return }
-        var session = projects[location.project].sessions[location.session]
-        guard let liveID = session.agent.resumeSpec.conversationID(fromTranscriptPath: transcriptPath),
-              liveID != session.resumeID
+        guard let session = session(id),
+              let liveID = session.agent.resumeSpec.conversationID(fromTranscriptPath: transcriptPath)
         else { return }
+        adoptConversationID(liveID, for: id)
+    }
+
+    /// The one point where a session's conversation identity changes, shared by every
+    /// rotation signal (transcript-filename reconcile, identity-bearing reports,
+    /// turn-boundary re-discovery). Returns whether the pin actually advanced.
+    @discardableResult
+    func adoptConversationID(_ conversationID: String, for id: Session.ID) -> Bool {
+        guard let location = locate(id) else { return false }
+        var session = projects[location.project].sessions[location.session]
+        // Only a session whose declared agent can resume by id has a pin to keep
+        // honest. A plain terminal that merely *runs* an agent (cwd-correlated
+        // report) relaunches as a shell, so adopting an id there is pure noise.
+        guard session.agent.resumeSpec.resume != nil else { return false }
+        guard conversationID != session.resumeID else { return false }
         // A genuine rotation (the pin already named a conversation and it changed —
         // not the first-report adoption of an unpinned session) also orphans the
         // sidebar topic title: it describes the discarded conversation. Drop both
@@ -543,8 +558,61 @@ extension TermioStore {
             liveTitles[id] = nil
             session.liveTitle = nil
         }
-        session.resumeID = liveID
+        session.resumeID = conversationID
         projects[location.project].sessions[location.session] = session
+        return true
+    }
+
+    /// Turn-boundary re-discovery for a discovered-id agent whose reports carry no
+    /// conversation identity: at each turn end, re-scan the agent's own session store
+    /// for a record born in this session's directory since launch. The newest such
+    /// record is the conversation the agent is writing *now*, so a changed id means
+    /// an in-process rotation (`/new`) — advance the pin and transcript through the
+    /// shared adoption path. Guarded by the no-guessing rule: when two same-agent
+    /// sessions share the directory, a newer record can't be attributed and nothing
+    /// moves. The scan runs only on `done` reports, so its cost lands at turn end,
+    /// not on a timer.
+    func rediscoverConversation(for id: Session.ID) {
+        guard let session = session(id),
+              session.agent.resumeSpec.discover != nil,
+              session.launched,
+              let directory = session.worktreePath ?? project(for: id)?.path
+        else { return }
+        // An agent whose manifest declares an identity locator reports the id
+        // whenever it is attributable; a report *without* one is deliberate (an
+        // OpenCode subagent's turn end, say), and its store record — same agent,
+        // same directory, newer — is exactly the false match this scan must not
+        // adopt. Re-discovery is only for manifests with no identity channel.
+        guard session.agent.hookSpec?.conversation == nil else { return }
+        guard soleAgentSession(session.agent, in: directory, is: id) else { return }
+        // Bound the scan to this app run's process, not the persisted first-ever
+        // `launchedAt` — a resumed tab's window would otherwise span days and swallow
+        // records the agent minted in runs (or outside termio) in between.
+        guard let spawnedAt = processSpawnedAt[id] else { return }
+        guard let found = AgentSessionStore.rediscover(
+            agent: session.agent, directory: directory, after: spawnedAt)
+        else { return }
+        if adoptConversationID(found.id, for: id) {
+            transcriptPaths[id] = found.transcriptPath
+        }
+    }
+
+    /// Whether `id` is the only session of this agent working in `directory` — the
+    /// precondition for attributing a store record to it without guessing.
+    private func soleAgentSession(_ agent: AgentDefinition, in directory: String,
+                                  is id: Session.ID) -> Bool {
+        let target = URL(fileURLWithPath: directory).standardizedFileURL.path
+        var count = 0
+        for project in projects {
+            for peer in project.sessions where peer.agent == agent {
+                let peerDirectory = peer.worktreePath ?? project.path
+                guard URL(fileURLWithPath: peerDirectory).standardizedFileURL.path == target
+                else { continue }
+                if peer.id != id { return false }
+                count += 1
+            }
+        }
+        return count == 1
     }
 
     /// The position of a session in the project tree, for an in-place edit.
