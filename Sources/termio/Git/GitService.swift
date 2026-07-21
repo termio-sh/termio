@@ -22,9 +22,11 @@ enum GitService {
     /// then shows the inter-hunk gaps as fixed, non-expandable bands).
     static func diffRows(for change: GitChange, in repoRoot: String, commit: String? = nil) async -> [DiffRow] {
         await offMain {
-            let full = parseDiff(loadDiffText(change, repoRoot, commit: commit, context: 999_999))
-            guard full.count > 20_000 else { return full }
-            return parseDiff(loadDiffText(change, repoRoot, commit: commit))
+            let full = loadDiffText(change, repoRoot, commit: commit, context: 999_999)
+            // ~20k lines of average code ≈ 1.5 MB. Beyond that, re-fetch at git's
+            // default 3-line context rather than parse (and render) a whole huge file.
+            let text = full.count <= 1_500_000 ? full : loadDiffText(change, repoRoot, commit: commit)
+            return parseDiff(text)
         }
     }
 

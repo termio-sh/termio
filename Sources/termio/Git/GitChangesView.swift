@@ -194,6 +194,16 @@ struct GitChangesView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .environment(\.defaultMinListRowHeight, 1)
+        // ← / → walk the open diff from here too — the list usually holds focus
+        // (↑ ↓ walk via selection), so the overlay's own keys alone wouldn't fire.
+        .onKeyPress(.leftArrow) { walkOverlay(-1) }
+        .onKeyPress(.rightArrow) { walkOverlay(+1) }
+    }
+
+    private func walkOverlay(_ delta: Int) -> KeyPress.Result {
+        guard let next = store.openDiff?.neighbor(delta) else { return .ignored }
+        store.openDiff = next
+        return .handled
     }
 
     /// The row's menu acts on the whole selection when the clicked row is part of it,
