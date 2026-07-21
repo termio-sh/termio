@@ -121,11 +121,19 @@ private struct CommitRow: View {
         Button(action: onTap) {
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(commit.subject)
-                        .font(font)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    HStack(spacing: 6) {
+                        Text(commit.subject)
+                            .font(font)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        // Tag chips mark release boundaries (termio releases by tagging
+                        // main); rare enough that they may squeeze the subject.
+                        ForEach(commit.tags, id: \.self) { tag in
+                            TagChip(name: tag)
+                                .layoutPriority(1)
+                        }
+                    }
                     HStack(spacing: 5) {
                         CommitAvatar(author: commit.author, chrome: chrome)
                         Text(commit.author)
@@ -139,6 +147,13 @@ private struct CommitRow: View {
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.tertiary)
                             .layoutPriority(1)
+                        if commit.isUnpushed {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .layoutPriority(1)
+                                .help("Not pushed to upstream")
+                        }
                     }
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
@@ -159,6 +174,21 @@ private struct CommitRow: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .help(commit.subject)
+    }
+}
+
+/// A quiet outlined capsule naming a tag that points at the commit — a release
+/// boundary in the history, since termio cuts releases by tagging main.
+private struct TagChip: View {
+    let name: String
+
+    var body: some View {
+        Text(name)
+            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(Capsule().strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
     }
 }
 

@@ -55,7 +55,9 @@ struct GitChangesView: View {
             case .changes: changesBody
             case .history: GitHistoryView(model: model, repoRoot: repoRoot, chrome: chrome, font: settings.interfaceFont)
             }
-            bottomBar
+            // Only Changes has a real total to report ("N files +A −D"). History's
+            // count would just echo the fetch limit — meaningless, so no bar.
+            if mode == .changes { bottomBar }
         }
         .task(id: repoRoot) { await model.load() }
         .task(id: mode) { if mode == .history { await model.loadHistory() } }
@@ -180,20 +182,13 @@ struct GitChangesView: View {
 
     @ViewBuilder
     private var summary: some View {
-        switch mode {
-        case .changes:
-            if !model.changes.isEmpty {
-                let additions = model.changes.reduce(0) { $0 + $1.additions }
-                let deletions = model.changes.reduce(0) { $0 + $1.deletions }
-                Text("\(model.changes.count) \(model.changes.count == 1 ? "file" : "files")")
-                    .foregroundStyle(.secondary)
-                if additions > 0 { Text("+\(additions)").foregroundStyle(.green) }
-                if deletions > 0 { Text("−\(deletions)").foregroundStyle(.red) }
-            }
-        case .history:
-            if !model.commits.isEmpty {
-                Text("\(model.commits.count) commits").foregroundStyle(.secondary)
-            }
+        if !model.changes.isEmpty {
+            let additions = model.changes.reduce(0) { $0 + $1.additions }
+            let deletions = model.changes.reduce(0) { $0 + $1.deletions }
+            Text("\(model.changes.count) \(model.changes.count == 1 ? "file" : "files")")
+                .foregroundStyle(.secondary)
+            if additions > 0 { Text("+\(additions)").foregroundStyle(.green) }
+            if deletions > 0 { Text("−\(deletions)").foregroundStyle(.red) }
         }
     }
 

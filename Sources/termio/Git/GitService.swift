@@ -85,9 +85,17 @@ enum GitService {
     }
 
     /// Parses `git log` into commit rows. Fields are joined by US (`\u{1f}`) and records
-    /// by RS (`\u{1e}`), so subjects with spaces/tabs survive intact.
+    /// by RS (`\u{1e}`), so subjects with spaces/tabs survive intact. `%D` carries the
+    /// commit's decorations, from which only tags are kept (branch refs would restate
+    /// what the pane's scope and the sidebar already say).
     private static func loadLog(_ repoRoot: String, _ limit: Int) -> [GitCommit] {
-        let format = ["%H", "%h", "%s", "%an", "%ad"].joined(separator: "\u{1f}") + "\u{1e}"
+        // Commits the upstream doesn't have yet. `run` returns nil on a non-zero exit,
+        // so a branch with no upstream yields an empty set — no rows marked.
+        let unpushed = Set(
+            (run(["rev-list", "@{upstream}..HEAD"], in: repoRoot) ?? "")
+                .split(separator: "\n").map(String.init)
+        )
+        let format = ["%H", "%h", "%s", "%an", "%ad", "%D"].joined(separator: "\u{1f}") + "\u{1e}"
         guard let out = run(
             ["log", "-n", String(limit), "--date=relative", "--pretty=format:\(format)"],
             in: repoRoot
@@ -95,9 +103,13 @@ enum GitService {
         return out.components(separatedBy: "\u{1e}").compactMap { record in
             let fields = record.trimmingCharacters(in: .whitespacesAndNewlines)
                 .components(separatedBy: "\u{1f}")
-            guard fields.count == 5, !fields[0].isEmpty else { return nil }
+            guard fields.count == 6, !fields[0].isEmpty else { return nil }
+            let tags = fields[5].components(separatedBy: ", ")
+                .filter { $0.hasPrefix("tag: ") }
+                .map { String($0.dropFirst("tag: ".count)) }
             return GitCommit(sha: fields[0], shortSHA: fields[1], subject: fields[2],
-                             author: fields[3], relativeDate: fields[4])
+                             author: fields[3], relativeDate: fields[4],
+                             tags: tags, isUnpushed: unpushed.contains(fields[0]))
         }
     }
 

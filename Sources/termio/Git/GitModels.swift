@@ -51,6 +51,13 @@ struct GitCommit: Identifiable, Hashable, Sendable {
     let author: String
     /// Human "3 hours ago" string straight from `git log --date=relative`.
     let relativeDate: String
+    /// Tags pointing at this commit — release boundaries in termio's tag-is-the-release
+    /// flow, shown as chips on the row.
+    let tags: [String]
+    /// True when the commit hasn't reached the branch's upstream (`@{u}..HEAD`).
+    /// False everywhere when the branch has no upstream, so a purely local branch
+    /// doesn't mark every row.
+    let isUnpushed: Bool
 
     var id: String { sha }
 }
