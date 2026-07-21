@@ -115,21 +115,17 @@ struct GitChangesView: View {
         .buttonStyle(.plain)
     }
 
-    /// Status strip under the content: what the visible list adds up to, and refresh.
+    /// Status strip under the content: what the visible list adds up to. There is no
+    /// refresh control — the model watches the worktree and git dir and re-reads on
+    /// its own (see `GitPanelModel.armWatcher`), the same invariant that lets IDEs
+    /// ship without one.
     private var bottomBar: some View {
         HStack(spacing: 5) {
             summary
             Spacer(minLength: 8)
-            TreeHeaderButton(systemName: "arrow.clockwise", help: "Refresh") {
-                Task {
-                    if mode == .changes { await model.load() }
-                    else { await model.loadHistory(force: true) }
-                }
-            }
         }
         .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-        .padding(.leading, 12)
-        .padding(.trailing, 8)
+        .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .overlay(alignment: .top) {
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
