@@ -126,15 +126,22 @@ struct GitDiffView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(rows) { row in
-                        DiffLineRow(row: row, font: diffFont, gutterFont: gutterFont,
-                                    showOldGutter: hasOldLines, showNewGutter: hasNewLines)
-                    }
-                }
-                .padding(.bottom, 12)
+            // A `List` (NSTableView underneath), not a `ScrollView`+`LazyVStack`: the rows
+            // soft-wrap, so their heights vary, and LazyVStack only *estimates* heights for
+            // off-screen content — scrolling fights the estimates (visible jitter) and rows
+            // laid out at an old width keep their stale wrap after the inspector resizes.
+            // NSTableView measures and caches real row heights and re-lays them out on
+            // width changes, which is why the Changes list built on it holds steady.
+            List(rows) { row in
+                DiffLineRow(row: row, font: diffFont, gutterFont: gutterFont,
+                            showOldGutter: hasOldLines, showNewGutter: hasNewLines)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 1)
         }
     }
 
