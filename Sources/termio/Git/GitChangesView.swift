@@ -24,6 +24,14 @@ struct GitChangesView: View {
     /// Which of the two tabs is showing.
     @State private var mode: GitPaneMode = .changes
 
+    /// Slides the mode switch's selection pill from the old segment to the new one.
+    @Namespace private var pillNamespace
+
+    /// Fixed height of the pane's top bar, shared with the diff overlay's file header
+    /// (`GitDiffView`) so the two bars — and their bottom hairlines — line up across
+    /// the terminal | inspector split.
+    static let topBarHeight: CGFloat = 34
+
     /// The files a "Discard Changes…" action is waiting to confirm — non-nil while the
     /// destructive alert is up, so the actual `git restore`/delete only fires on "OK".
     @State private var pendingDiscard: [GitChange]?
@@ -86,33 +94,71 @@ struct GitChangesView: View {
 
     // MARK: Chrome
 
-    /// The pane's mode switch, pinned at the top over a hairline: `Changes | History`
-    /// with the active mode lit in the chrome accent — GitHub Desktop's tab placement.
+    /// The pane's mode switch, pinned at the top over a hairline — GitHub Desktop's tab
+    /// placement, drawn as a miniature of `InspectorTabsToolbar`'s segmented track (our
+    /// own capsule track + a sliding Liquid Glass selection pill) so both switches in
+    /// the inspector share one design language.
     private var topBar: some View {
-        HStack(spacing: 8) {
-            switchButton("Changes", .changes)
-            Divider().frame(height: 12)
-            switchButton("History", .history)
+        HStack(spacing: 0) {
+            modeSwitch
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+        .padding(.horizontal, 8)
+        .frame(height: Self.topBarHeight)
+    }
+
+    private var modeSwitch: some View {
+        HStack(spacing: 0) {
+            segment("Changes", .changes)
+            segment("History", .history)
+        }
+        // The selection pill rides behind the active segment and slides across on switch.
+        .background { selectionPill }
+        .padding(2.5)
+        .background { trackBackground }
+        // Scope the slide to this control so switching modes doesn't animate the pane
+        // content swap below (same reasoning as `InspectorTabsToolbar`).
+        .animation(.snappy(duration: 0.28), value: mode)
+    }
+
+    private func segment(_ title: String, _ value: GitPaneMode) -> some View {
+        let active = mode == value
+        // Constant weight: a semibold-on-select would re-measure the segment and make
+        // the track jitter as the pill lands. Selection reads via .primary + the pill.
+        return Text(title)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(active ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .padding(.horizontal, 10)
+            .frame(height: 21)
+            .matchedGeometryEffect(id: value, in: pillNamespace)
+            .contentShape(.capsule)
+            .onTapGesture { mode = value }
+    }
+
+    @ViewBuilder
+    private var selectionPill: some View {
+        if #available(macOS 26.0, *) {
+            Capsule()
+                .fill(.clear)
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .matchedGeometryEffect(id: mode, in: pillNamespace, isSource: false)
+        } else {
+            Capsule(style: .continuous)
+                .fill(Color(nsColor: .controlColor))
+                .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
+                .matchedGeometryEffect(id: mode, in: pillNamespace, isSource: false)
         }
     }
 
-    private func switchButton(_ title: String, _ value: GitPaneMode) -> some View {
-        let active = mode == value
-        return Button {
-            mode = value
-        } label: {
-            Text(title)
-                .font(.system(size: 11.5, weight: active ? .semibold : .regular))
-                .foregroundStyle(active ? AnyShapeStyle(chrome?.accent ?? Color.accentColor) : AnyShapeStyle(.secondary))
-                .contentShape(Rectangle())
+    @ViewBuilder
+    private var trackBackground: some View {
+        if #available(macOS 26.0, *) {
+            Capsule()
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
+        } else {
+            Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
         }
-        .buttonStyle(.plain)
     }
 
     /// Status strip under the content: what the visible list adds up to. There is no

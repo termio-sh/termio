@@ -35,6 +35,9 @@ struct GitHistoryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView(.vertical) {
+                    // No separators: fixed-height rows + the hover/selection wash do the
+                    // separating, like a modern SwiftUI List (hairlines between every row
+                    // read as legacy chrome in a narrow pane).
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(model.commits) { commit in
                             CommitRow(commit: commit, isExpanded: expanded == commit.sha, chrome: chrome, font: font) {
@@ -43,14 +46,9 @@ struct GitHistoryView: View {
                             if expanded == commit.sha {
                                 commitFiles(commit)
                             }
-                            // A hairline between commits, inset past the avatar to align under
-                            // the message text — the Xcode / Mail list separator.
-                            Divider()
-                                .padding(.leading, 46)
-                                .opacity(0.5)
                         }
                     }
-                    .padding(.bottom, 10)
+                    .padding(.vertical, 6)
                 }
             }
         }
@@ -66,7 +64,7 @@ struct GitHistoryView: View {
                 Text("No file changes")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
-                    .padding(.leading, 46)
+                    .padding(.leading, 24)
                     .padding(.vertical, 4)
             } else {
                 ForEach(files) { file in
@@ -84,7 +82,7 @@ struct GitHistoryView: View {
         } else {
             ProgressView()
                 .controlSize(.small)
-                .padding(.leading, 46)
+                .padding(.leading, 24)
                 .padding(.vertical, 4)
         }
     }
@@ -104,11 +102,12 @@ struct GitHistoryView: View {
     }
 }
 
-/// One commit, Xcode-style: the author's initials avatar anchors the row; the subject
-/// reads in the interface font beside it, with `sha · when` muted underneath. A chevron
-/// fades in on hover and turns down when expanded — no permanent glyph cluttering the
-/// leading edge. Hover / expanded lift use the app's shared `SidebarRowHighlight` (the
-/// same accent wash as the sidebar and file tree), not a one-off fill.
+/// One commit, GitHub Desktop-style: the subject on a single truncated line (every row
+/// the same height — a big leading avatar and wrapping subjects made the list ragged),
+/// with a small avatar + `author · when · sha` muted underneath. The sha is tertiary,
+/// not accent: accent is reserved for selection so the list stays quiet. A chevron
+/// fades in on hover and turns down when expanded. Hover / expanded lift use the app's
+/// shared `SidebarRowHighlight` (the same accent wash as the sidebar and file tree).
 private struct CommitRow: View {
     let commit: GitCommit
     let isExpanded: Bool
@@ -120,22 +119,26 @@ private struct CommitRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(alignment: .top, spacing: 10) {
-                CommitAvatar(author: commit.author, chrome: chrome)
-                    .padding(.top, 1)
+            HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(commit.subject)
                         .font(font)
                         .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     HStack(spacing: 5) {
-                        Text(commit.shortSHA)
-                            .font(.system(size: 10.5, design: .monospaced))
-                            .foregroundStyle(chrome?.accent ?? .accentColor)
+                        CommitAvatar(author: commit.author, chrome: chrome)
+                        Text(commit.author)
+                            .lineLimit(1)
                         Text("·").foregroundStyle(.tertiary)
                         Text(commit.relativeDate)
                             .lineLimit(1)
+                            .layoutPriority(1)
+                        Text("·").foregroundStyle(.tertiary)
+                        Text(commit.shortSHA)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .layoutPriority(1)
                     }
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
@@ -143,12 +146,9 @@ private struct CommitRow: View {
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                    // Match the commit subject's color (`.primary`) rather than a muted
-                    // tertiary, so the expand affordance reads as strong as the message.
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     .opacity(isHovering || isExpanded ? 1 : 0)
-                    .padding(.top, 4)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
@@ -158,12 +158,15 @@ private struct CommitRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+        .help(commit.subject)
     }
 }
 
-/// A circular initials avatar — the Xcode source-control row anchor — filled in the chrome
-/// accent so it derives from the terminal theme like the rest of termio's chrome (one
-/// source of color truth) rather than a per-author rainbow hue.
+/// A small circular initials avatar riding in the metadata line (GitHub Desktop's
+/// placement — a 24pt leading avatar column read as a loud repeated stripe when one
+/// author dominates). Filled in the chrome accent so it derives from the terminal theme
+/// like the rest of termio's chrome (one source of color truth) rather than a per-author
+/// rainbow hue.
 private struct CommitAvatar: View {
     let author: String
     let chrome: ChromeTheme?
@@ -171,10 +174,10 @@ private struct CommitAvatar: View {
     var body: some View {
         Circle()
             .fill((chrome?.accent ?? .accentColor).gradient)
-            .frame(width: 24, height: 24)
+            .frame(width: 15, height: 15)
             .overlay(
                 Text(initials)
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .font(.system(size: 6.5, weight: .semibold))
                     .foregroundStyle(.white)
             )
             .help(author)
@@ -215,7 +218,7 @@ private struct CommitFileRow: View {
                 if change.deletions > 0 { Text("−\(change.deletions)").foregroundStyle(.red) }
             }
             .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-            .padding(.leading, 46)
+            .padding(.leading, 24)
             .padding(.trailing, 14)
             .padding(.vertical, 3)
             .frame(maxWidth: .infinity, alignment: .leading)
