@@ -40,6 +40,26 @@ enum GitService {
         await offMain { for change in changes { _ = discardChanges(change, repoRoot) } }
     }
 
+    /// The directories whose file-system events invalidate the git pane: the worktree
+    /// itself, plus the resolved git dir(s). For a linked worktree the metadata lives
+    /// *outside* the checkout (`.git` there is a pointer file; commits write into the
+    /// primary checkout's `.git/worktrees/<name>` and `refs`), so watching the tree
+    /// alone would miss commits made in the terminal. `gitDirs` is empty for a non-repo.
+    static func watchPaths(for repoRoot: String) async -> (worktree: String, gitDirs: [String]) {
+        await offMain {
+            var dirs: [String] = []
+            for args in [["rev-parse", "--absolute-git-dir"], ["rev-parse", "--git-common-dir"]] {
+                guard let out = run(args, in: repoRoot)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines), !out.isEmpty else { continue }
+                let absolute = out.hasPrefix("/")
+                    ? out : (repoRoot as NSString).appendingPathComponent(out)
+                let standardized = URL(fileURLWithPath: absolute).standardizedFileURL.path
+                if !dirs.contains(standardized) { dirs.append(standardized) }
+            }
+            return (repoRoot, dirs)
+        }
+    }
+
     // MARK: History
 
     /// The most recent commits on the current branch (newest first), for the History tab.

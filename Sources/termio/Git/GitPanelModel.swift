@@ -1,3 +1,5 @@
+import AppKit
+import Combine
 import SwiftUI
 
 // MARK: - Git-pane state
@@ -22,23 +24,78 @@ final class GitPanelModel: ObservableObject {
     @Published var isLoadingHistory = false
     private var didLoadHistory = false
 
-    init(repoRoot: String) { self.repoRoot = repoRoot }
+    private var watcher: FolderEventStream?
+    private var appActiveObserver: AnyCancellable?
+    private var refreshDebounce: Task<Void, Never>?
+
+    init(repoRoot: String) {
+        self.repoRoot = repoRoot
+        // Re-activation catches whatever happened while termio was in the background
+        // (a rebase in another app, a pull on another machine's shared folder…).
+        appActiveObserver = NotificationCenter.default
+            .publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in self?.scheduleRefresh(includeHistory: true) }
+    }
+
+    deinit { refreshDebounce?.cancel() }
 
     // MARK: Loading
 
-    /// Reloads the working-tree change list.
+    /// Reloads the working-tree change list. The first successful pass also arms the
+    /// file-system watch, so from then on the pane refreshes itself.
     func load() async {
         changes = await GitService.changes(in: repoRoot)
         isLoading = false
+        if watcher == nil { await armWatcher() }
     }
 
-    /// Loads the commit history on demand (first time the History tab opens), and can be
-    /// re-run by the refresh button.
+    /// Loads the commit history on demand (first time the History tab opens); re-run
+    /// with `force` when the git dir reports a change.
     func loadHistory(force: Bool = false) async {
         guard force || !didLoadHistory else { return }
         didLoadHistory = true
-        isLoadingHistory = true
+        isLoadingHistory = commits.isEmpty
         commits = await GitService.log(in: repoRoot)
         isLoadingHistory = false
+    }
+
+    // MARK: Auto-refresh
+
+    /// The pane has no refresh button for the same reason IDEs don't: an invalidation
+    /// chain keeps it fresh instead. Any write under the worktree re-reads the changes
+    /// list; a write under the git dir (the terminal committing, the agent staging,
+    /// a branch flip) also re-reads history; app re-activation is the catch-all. The
+    /// git dirs are watched separately because a linked worktree's metadata lives
+    /// outside the checkout — see `GitService.watchPaths`.
+    private func armWatcher() async {
+        let (tree, gitDirs) = await GitService.watchPaths(for: repoRoot)
+        guard watcher == nil, !gitDirs.isEmpty else { return }
+        // The primary checkout's `.git` sits inside the tree and needs no second watch.
+        var paths = [tree]
+        paths += gitDirs.filter { !$0.hasPrefix(tree + "/") }
+        watcher = FolderEventStream(
+            paths: paths, latency: 0.4,
+            queue: DispatchQueue(label: "sh.termio.gitpane.fsevents", qos: .utility)
+        ) { [weak self] eventPaths in
+            let touchesGitDir = eventPaths.contains { path in
+                gitDirs.contains { path.hasPrefix($0) } || path.contains("/.git/") || path.hasSuffix("/.git")
+            }
+            Task { @MainActor [weak self] in
+                self?.scheduleRefresh(includeHistory: touchesGitDir)
+            }
+        }
+    }
+
+    /// Coalesces a burst of events (FSEvents latency already batches most) into one
+    /// reload a beat later. `git status` itself may refresh the index once, which
+    /// echoes back as a git-dir event — the second pass reads clean and the chain ends.
+    private func scheduleRefresh(includeHistory: Bool) {
+        refreshDebounce?.cancel()
+        refreshDebounce = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard let self, !Task.isCancelled else { return }
+            await self.load()
+            if includeHistory, self.didLoadHistory { await self.loadHistory(force: true) }
+        }
     }
 }
