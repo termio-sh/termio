@@ -155,13 +155,21 @@ final class HomeTabPill: UIView {
         selectedIndex = index
         for (i, button) in buttons.enumerated() {
             // The active tab gets the accent, like Telegram's
-            // selectedTextColor — selection reads in color, not just weight.
-            button.tintColor = i == index ? tintColor : .secondaryLabel
+            // selectedTextColor — crossfaded, never snapped.
+            let target: UIColor = i == index ? tintColor : .secondaryLabel
+            if animated, button.tintColor != target {
+                UIView.transition(
+                    with: button, duration: 0.22,
+                    options: [.transitionCrossDissolve, .allowUserInteraction]
+                ) { button.tintColor = target }
+            } else {
+                button.tintColor = target
+            }
         }
-        // Telegram gives every tab icon its own selection animation — an
-        // in-place character move (the bubble wiggles, the gear turns),
-        // never a size pop. Same here, per symbol; bounce stays banned
-        // (it scales the glyph and reads as a sudden size jump).
+        // Telegram rests each tab icon on the last frame of a hand-animated
+        // 48pt Lottie and replays it once on every select. Same idea, hand-
+        // keyed in Core Animation per icon — in-place character moves with
+        // overshoot, never a size pop.
         if animated, changed, buttons.indices.contains(index) {
             playSelectionAnimation(on: buttons[index], symbol: symbols[index])
         }
@@ -176,22 +184,65 @@ final class HomeTabPill: UIView {
         }
     }
 
-    /// Each tab's own move: the gear turns, the bubbles light up in
-    /// conversation order (variable color, layer by layer), anything else
-    /// wiggles in place. All size-stable, all one-shot.
+    /// The character set: the gear engages with a springy quarter-turn, the
+    /// bubbles rock against each other like a conversation, the folder does
+    /// a small hop-and-tip as if opening. All one-shot and size-stable.
     private func playSelectionAnimation(on button: UIButton, symbol: String) {
-        guard let imageView = button.imageView else { return }
+        guard let layer = button.imageView?.layer else { return }
+        layer.removeAnimation(forKey: "tabSelect")
+        let animation: CAAnimation
         switch symbol {
         case "gearshape":
-            if #available(iOS 18.0, *) {
-                imageView.addSymbolEffect(.rotate, options: .nonRepeating)
-            }
+            // A quarter turn lands on gearshape's 8-tooth symmetry, so the
+            // snap back to the model value after the spring is invisible.
+            let spin = CASpringAnimation(keyPath: "transform.rotation.z")
+            spin.fromValue = 0
+            spin.toValue = CGFloat.pi / 2
+            spin.mass = 1
+            spin.stiffness = 170
+            spin.damping = 13
+            spin.initialVelocity = 4
+            spin.duration = spin.settlingDuration
+            animation = spin
         case "bubble.left.and.bubble.right":
-            imageView.addSymbolEffect(.variableColor.iterative, options: .nonRepeating)
-        default:
-            if #available(iOS 18.0, *) {
-                imageView.addSymbolEffect(.wiggle, options: .nonRepeating)
-            }
+            animation = Self.characterMove(
+                rotationDegrees: [0, 8, -6, 3, 0],
+                x: [0, 1.2, -1.2, 0.4, 0],
+                y: [0, 0, 0, 0, 0],
+                duration: 0.55
+            )
+        default: // the folder, and any future tab without its own move
+            animation = Self.characterMove(
+                rotationDegrees: [0, -7, 3, -1, 0],
+                x: [0, 0, 0, 0, 0],
+                y: [0, -2.5, 0.3, -0.6, 0],
+                duration: 0.5
+            )
         }
+        layer.add(animation, forKey: "tabSelect")
+    }
+
+    /// A grouped in-place keyframe move (tilt + nudge), eased per segment —
+    /// the hand-keyed stand-in for Telegram's per-icon Lottie files.
+    private static func characterMove(
+        rotationDegrees: [CGFloat], x: [CGFloat], y: [CGFloat], duration: CFTimeInterval
+    ) -> CAAnimation {
+        func keyframes(_ keyPath: String, _ values: [CGFloat]) -> CAKeyframeAnimation {
+            let anim = CAKeyframeAnimation(keyPath: keyPath)
+            anim.values = values
+            anim.timingFunctions = Array(
+                repeating: CAMediaTimingFunction(name: .easeInEaseOut),
+                count: max(values.count - 1, 1)
+            )
+            return anim
+        }
+        let group = CAAnimationGroup()
+        group.animations = [
+            keyframes("transform.rotation.z", rotationDegrees.map { $0 * .pi / 180 }),
+            keyframes("transform.translation.x", x),
+            keyframes("transform.translation.y", y),
+        ]
+        group.duration = duration
+        return group
     }
 }
