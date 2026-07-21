@@ -28,3 +28,86 @@ extension UIButton {
         }
     }
 }
+
+/// A Liquid Glass surface for custom floating chrome. On iOS 26 it's a real
+/// interactive `UIGlassEffect`; older systems fall back to a chrome-material
+/// blur, which reads as translucent glass too.
+enum GlassChrome {
+    static func makeView(interactive: Bool) -> UIVisualEffectView {
+        if #available(iOS 26.0, *) {
+            let glass = UIGlassEffect(style: .regular)
+            glass.isInteractive = interactive
+            return UIVisualEffectView(effect: glass)
+        }
+        return UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
+    }
+}
+
+/// The home's compact tab switcher: a small Telegram-scale glass capsule that
+/// floats in the bottom-LEFT corner, paired with whatever action button a tab
+/// floats bottom-right. Hand-rolled on purpose: the iOS 26 system tab bar
+/// auto-sizes but always owns the bottom center — the only native way to
+/// left-align the group is a `.search`-role tab's detached circle, whose
+/// semantics ("select the search tab") can't host a ＋ menu.
+final class HomeTabPill: UIView {
+    var onSelect: ((Int) -> Void)?
+
+    private var buttons: [UIButton] = []
+
+    init(items: [(title: String, symbol: String)]) {
+        super.init(frame: .zero)
+        let glass = GlassChrome.makeView(interactive: true)
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        glass.layer.cornerRadius = 22
+        glass.clipsToBounds = true
+        addSubview(glass)
+
+        buttons = items.enumerated().map { index, item in
+            var config = UIButton.Configuration.plain()
+            config.image = UIImage(systemName: item.symbol)
+            config.imagePlacement = .top
+            config.imagePadding = 2
+            config.preferredSymbolConfigurationForImage = .init(pointSize: 15, weight: .semibold)
+            config.attributedTitle = AttributedString(
+                item.title,
+                attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 10, weight: .semibold)])
+            )
+            config.contentInsets = NSDirectionalEdgeInsets(top: 5, leading: 10, bottom: 5, trailing: 10)
+            let button = UIButton(configuration: config)
+            button.addAction(UIAction { [weak self] _ in
+                self?.select(index)
+                self?.onSelect?(index)
+            }, for: .touchUpInside)
+            return button
+        }
+
+        let stack = UIStackView(arrangedSubviews: buttons)
+        stack.axis = .horizontal
+        stack.alignment = .fill
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        glass.contentView.addSubview(stack)
+        NSLayoutConstraint.activate([
+            glass.topAnchor.constraint(equalTo: topAnchor),
+            glass.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glass.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.topAnchor.constraint(equalTo: glass.contentView.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor, constant: 4),
+            stack.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor, constant: -4),
+            stack.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor),
+            heightAnchor.constraint(equalToConstant: 44),
+        ])
+        select(0)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Selection is plain tint, Telegram-style: the active tab in full label
+    /// color, the rest quiet — no sliding highlight to maintain.
+    func select(_ index: Int) {
+        for (i, button) in buttons.enumerated() {
+            button.tintColor = i == index ? .label : .secondaryLabel
+        }
+    }
+}

@@ -1,11 +1,13 @@
 import UIKit
 
-/// The shell: the home is a two-tab bar — Projects (the strip + project list,
-/// with its pushed project pages) and Chats (the Mac's loose agent sessions),
+/// The shell: the home is two tabs — Projects (the strip + project list, with
+/// its pushed project pages) and Chats (the Mac's loose agent sessions),
 /// mirroring the desktop sidebar's Chats/Projects pairing as the two top-level
-/// destinations. On iOS 26 the system renders it as the floating Liquid Glass
-/// tab bar. Tapping a session anywhere slides its terminal in full-screen over
-/// the whole thing, and "back" slides it away to reveal the tabs wherever they
+/// destinations. The switcher is a compact Telegram-scale glass pill floating
+/// bottom-LEFT (`HomeTabPill` — see there for why the system tab bar doesn't
+/// fit), leaving the bottom-right corner to a tab's own action button (Chats'
+/// ＋). Tapping a session anywhere slides its terminal in full-screen over the
+/// whole thing, and "back" slides it away to reveal the tabs wherever they
 /// were. Screens draw their own chrome (large titles, glass buttons, the
 /// terminal its compact header), so the navigation bars stay hidden.
 ///
@@ -33,17 +35,11 @@ final class RootContainerViewController: UIViewController {
     private lazy var chatsNav = HomeNavigationController(
         rootViewController: ChatListViewController(store: store)
     )
-    /// The two-tab home. A stock UITabBarController: on iOS 26 the system
-    /// dresses it as the floating Liquid Glass bar for free.
-    private lazy var homeTabs: UITabBarController = {
-        let tabs = UITabBarController()
-        projectsNav.tabBarItem = UITabBarItem(
-            title: "Projects", image: UIImage(systemName: "folder"), tag: 0)
-        chatsNav.tabBarItem = UITabBarItem(
-            title: "Chats", image: UIImage(systemName: "bubble.left.and.bubble.right"), tag: 1)
-        tabs.viewControllers = [projectsNav, chatsNav]
-        return tabs
-    }()
+    /// The bottom-left floating switcher between the two.
+    private let tabPill = HomeTabPill(items: [
+        (title: "Projects", symbol: "folder"),
+        (title: "Chats", symbol: "bubble.left.and.bubble.right"),
+    ])
 
     /// Every parked terminal is a live libghostty surface (scrollback + render
     /// buffers + a streaming socket) whose view stays in the window. On the
@@ -63,13 +59,30 @@ final class RootContainerViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
 
-        // The tabbed home is the permanent base layer: added once, always
-        // behind any terminal, revealed whenever no terminal is slid in over it.
-        addChild(homeTabs)
-        homeTabs.view.frame = view.bounds
-        homeTabs.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(homeTabs.view)
-        homeTabs.didMove(toParent: self)
+        // Both tab stacks are permanent base layers: added once, always behind
+        // any terminal, only ever toggled hidden — so each tab keeps its
+        // scroll position and pushed pages across switches.
+        for nav in [projectsNav, chatsNav] {
+            addChild(nav)
+            nav.view.frame = view.bounds
+            nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.addSubview(nav.view)
+            nav.didMove(toParent: self)
+        }
+        chatsNav.view.isHidden = true
+
+        // The switcher floats over both; terminals slide in above it.
+        tabPill.onSelect = { [weak self] index in
+            guard let self else { return }
+            projectsNav.view.isHidden = index != 0
+            chatsNav.view.isHidden = index != 1
+        }
+        tabPill.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(tabPill)
+        NSLayoutConstraint.activate([
+            tabPill.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            tabPill.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+        ])
 
         store.onOpenSession = { [weak self] session, companionURL in
             guard let self else { return }

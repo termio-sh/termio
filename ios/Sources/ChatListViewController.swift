@@ -30,6 +30,8 @@ final class ChatListViewController: UIViewController {
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
+        // Added last so it floats over the list, opposite the home tab pill.
+        configureNewChatButton()
         refilter()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -48,7 +50,7 @@ final class ChatListViewController: UIViewController {
         tableView.reloadData()
     }
 
-    // MARK: - Top bar (large title + new chat + settings)
+    // MARK: - Top bar (large title + settings)
 
     private func configureTopBar() -> UIView {
         let pageTitle = UILabel()
@@ -56,10 +58,37 @@ final class ChatListViewController: UIViewController {
         pageTitle.font = .systemFont(ofSize: 34, weight: .bold)
         pageTitle.textColor = .label
 
-        // ＋ mirrors a project page's new-session menu, permanently aimed at
-        // the chats container. The menu is deferred so it always reflects the
-        // roster's current agent list (and hides while unpaired).
-        newChatButton.applyGlassSymbol("plus")
+        let gear = UIButton(type: .system)
+        gear.applyGlassSymbol("gearshape")
+        gear.tintColor = .label
+        gear.accessibilityLabel = "Settings"
+        gear.addAction(UIAction { [weak self] _ in
+            self?.presentSettings()
+        }, for: .touchUpInside)
+
+        let spacer = UIView()
+        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer, gear])
+        bar.axis = .horizontal
+        bar.alignment = .center
+        bar.spacing = 8
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bar)
+        NSLayoutConstraint.activate([
+            bar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            gear.widthAnchor.constraint(equalToConstant: 40),
+            gear.heightAnchor.constraint(equalToConstant: 40),
+        ])
+        return bar
+    }
+
+    /// ＋ floats bottom-right, opposite the home tab pill — the compose corner.
+    /// It mirrors a project page's new-session menu, permanently aimed at the
+    /// chats container; deferred so it always reflects the roster's current
+    /// agent list (and hides while unpaired).
+    private func configureNewChatButton() {
+        newChatButton.applyGlassSymbol("plus", pointSize: 17)
         newChatButton.tintColor = .label
         newChatButton.accessibilityLabel = "New Chat"
         newChatButton.showsMenuAsPrimaryAction = true
@@ -72,32 +101,14 @@ final class ChatListViewController: UIViewController {
                 completion(store.newSessionActions(in: chatsProject))
             },
         ])
-
-        let gear = UIButton(type: .system)
-        gear.applyGlassSymbol("gearshape")
-        gear.tintColor = .label
-        gear.accessibilityLabel = "Settings"
-        gear.addAction(UIAction { [weak self] _ in
-            self?.presentSettings()
-        }, for: .touchUpInside)
-
-        let spacer = UIView()
-        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer, newChatButton, gear])
-        bar.axis = .horizontal
-        bar.alignment = .center
-        bar.spacing = 8
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(bar)
+        newChatButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(newChatButton)
         NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            newChatButton.widthAnchor.constraint(equalToConstant: 40),
-            newChatButton.heightAnchor.constraint(equalToConstant: 40),
-            gear.widthAnchor.constraint(equalToConstant: 40),
-            gear.heightAnchor.constraint(equalToConstant: 40),
+            newChatButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            newChatButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+            newChatButton.widthAnchor.constraint(equalToConstant: 44),
+            newChatButton.heightAnchor.constraint(equalToConstant: 44),
         ])
-        return bar
     }
 
     private func presentSettings() {
@@ -117,6 +128,10 @@ final class ChatListViewController: UIViewController {
         tableView.keyboardDismissMode = .onDrag
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
         tableView.translatesAutoresizingMaskIntoConstraints = false
+        // The floating pill/＋ sit over the list; reserve room so the last
+        // rows scroll clear of them.
+        tableView.contentInset.bottom = 56
+        tableView.verticalScrollIndicatorInsets.bottom = 56
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 16),

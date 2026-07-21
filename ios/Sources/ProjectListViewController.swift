@@ -179,8 +179,10 @@ final class ProjectListViewController: UIViewController {
             forHeaderFooterViewReuseIdentifier: SectionCapView.reuseID
         )
         tableView.translatesAutoresizingMaskIntoConstraints = false
-        // The tab bar owns the bottom edge; the table's automatic safe-area
-        // adjustment keeps the last rows clear of it.
+        // The floating tab pill sits over the list; reserve room so the last
+        // rows scroll clear of it.
+        tableView.contentInset.bottom = 56
+        tableView.verticalScrollIndicatorInsets.bottom = 56
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 16),
