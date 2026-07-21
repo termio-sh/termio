@@ -5,8 +5,9 @@ import UIKit
 /// The Chats tab: the Mac's loose agent sessions (the `chats`-kind container),
 /// listed flat — the phone twin of the desktop sidebar's Chats section. The
 /// sessions ARE the content: no project page in between, a row goes straight
-/// to its terminal, like the ChatGPT chat list. ＋ starts a new chat through
-/// the same `start` flow project pages use, aimed at the chats container.
+/// to its terminal, like the ChatGPT chat list. ＋ starts a new chat in one
+/// tap — the Mac picks the agent, the same default ⌘N launches — with the
+/// per-agent menu kept behind a long-press.
 final class ChatListViewController: UIViewController {
     private let store: RosterStore
 
@@ -75,14 +76,20 @@ final class ChatListViewController: UIViewController {
     }
 
     /// ＋ floats bottom-right, opposite the home tab pill — the compose corner.
-    /// It mirrors a project page's new-session menu, permanently aimed at the
-    /// chats container; deferred so it always reflects the roster's current
-    /// agent list (and hides while unpaired).
+    /// A TAP is one New Chat, no questions asked: the Mac resolves the agent
+    /// through its ⌘N default policy (`startDefaultChat`), so composing costs
+    /// zero choices. The per-agent menu survives on LONG-PRESS as the
+    /// pick-a-specific-agent escape hatch — `menu` stays set, it's just no
+    /// longer the primary action. Deferred so it always reflects the roster's
+    /// current agent list (and the button hides while unpaired).
     private func configureNewChatButton() {
         newChatButton.applyGlassSymbol("plus", pointSize: 22)
         newChatButton.tintColor = .label
         newChatButton.accessibilityLabel = "New Chat"
-        newChatButton.showsMenuAsPrimaryAction = true
+        newChatButton.addAction(
+            UIAction { [weak self] _ in self?.store.startDefaultChat() },
+            for: .touchUpInside
+        )
         newChatButton.menu = UIMenu(children: [
             UIDeferredMenuElement.uncached { [weak self] completion in
                 guard let self, let chatsProject = store.chatsProject else {

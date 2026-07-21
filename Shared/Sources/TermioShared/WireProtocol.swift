@@ -23,10 +23,18 @@ public enum CompanionControl: Codable, Sendable, Equatable {
     case attach(sessionID: String)
     /// The client asks the Mac to create a session in a project — the phone's
     /// equivalent of the sidebar's new-session buttons. Answered with
-    /// `.started` (or `.error`).
-    case start(projectID: String, agent: String)
-    /// A `start` succeeded; the new session is ready to `attach`.
-    case started(sessionID: String)
+    /// `.started` (or `.error`). `agent` nil is the phone's bare "New Chat":
+    /// the Mac resolves the agent itself (pinned → last used → first enabled,
+    /// the same policy behind ⌘N) so the habit lives in exactly one place —
+    /// the phone never re-implements it. Older Macs drop an agent-less start
+    /// (their decoder required the field), which degrades to "nothing
+    /// happens", never to a wrong agent.
+    case start(projectID: String, agent: String?)
+    /// A `start` succeeded; the new session is ready to `attach`. `agent`
+    /// echoes the wire id the Mac actually launched — the client can't know
+    /// it for an agent-less start until the next roster push. nil from an
+    /// older Mac; the client falls back to the agent it asked for.
+    case started(sessionID: String, agent: String?)
     /// The client asks the Mac to close a session (the phone's swipe-to-remove).
     /// No success reply — the next roster push drops the row everywhere.
     case stop(sessionID: String)
@@ -98,9 +106,15 @@ public enum CompanionControl: Codable, Sendable, Equatable {
         case .attach(let sessionID):
             return #"{"t":"attach","session":"\#(sessionID)"}"#
         case .start(let projectID, let agent):
-            return #"{"t":"start","project":"\#(projectID)","agent":"\#(agent)"}"#
-        case .started(let sessionID):
-            return #"{"t":"started","session":"\#(sessionID)"}"#
+            // A nil agent omits the key (not `null`) so the hand-rolled
+            // decoders on both ends keep reading plain `as? String`.
+            var fields: [String: Any] = ["t": "start", "project": projectID]
+            if let agent { fields["agent"] = agent }
+            return Self.json(fields)
+        case .started(let sessionID, let agent):
+            var fields: [String: Any] = ["t": "started", "session": sessionID]
+            if let agent { fields["agent"] = agent }
+            return Self.json(fields)
         case .stop(let sessionID):
             return #"{"t":"stop","session":"\#(sessionID)"}"#
         case .resize(let cols, let rows):
@@ -179,12 +193,13 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             guard let sessionID = obj["session"] as? String else { return nil }
             return .attach(sessionID: sessionID)
         case "start":
-            guard let projectID = obj["project"] as? String,
-                  let agent = obj["agent"] as? String else { return nil }
-            return .start(projectID: projectID, agent: agent)
+            guard let projectID = obj["project"] as? String else { return nil }
+            // Missing agent = "Mac picks" — lenient, so today's phone can talk
+            // to a Mac that still always sends one.
+            return .start(projectID: projectID, agent: obj["agent"] as? String)
         case "started":
             guard let sessionID = obj["session"] as? String else { return nil }
-            return .started(sessionID: sessionID)
+            return .started(sessionID: sessionID, agent: obj["agent"] as? String)
         case "stop":
             guard let sessionID = obj["session"] as? String else { return nil }
             return .stop(sessionID: sessionID)

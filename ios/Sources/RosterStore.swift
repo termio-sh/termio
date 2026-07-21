@@ -34,8 +34,9 @@ final class RosterStore {
 
     private var client: CompanionClient?
     /// The project+agent of an in-flight `start`, so the `.started` reply
-    /// knows what to open.
-    private var pendingStart: (project: MockProject, agent: RosterAgent)?
+    /// knows what to open. `agent` is nil for a bare New Chat — the Mac picks
+    /// one and echoes it back in `.started`.
+    private var pendingStart: (project: MockProject, agent: RosterAgent?)?
     private var pairingObserver: NSObjectProtocol?
 
     /// Every session currently blocked on the user, across all projects, in
@@ -119,6 +120,17 @@ final class RosterStore {
         client?.send(.start(projectID: projectID, agent: agent.id))
     }
 
+    /// The Chats tab's one-tap ＋: start a chat with no agent named, so the
+    /// Mac resolves its default (pinned → last used → first enabled — the
+    /// exact ⌘N policy, which also keeps updating "last used"). The phone
+    /// deliberately owns none of that policy; the per-agent menu behind
+    /// long-press stays the escape hatch for picking a specific one.
+    func startDefaultChat() {
+        guard let project = chatsProject, let projectID = project.rosterID else { return }
+        pendingStart = (project, nil)
+        client?.send(.start(projectID: projectID, agent: nil))
+    }
+
     /// Close on the Mac; the next roster push drops the row everywhere.
     func stopSession(_ sessionID: String) {
         client?.send(.stop(sessionID: sessionID))
@@ -180,8 +192,8 @@ final class RosterStore {
                 userInfo: ["statuses": statuses]
             )
         }
-        client.onStarted = { [weak self] sessionID in
-            self?.openStartedSession(sessionID)
+        client.onStarted = { [weak self] sessionID, agentID in
+            self?.openStartedSession(sessionID, agentID: agentID)
         }
         client.onError = { [weak self] reason in
             guard let self, pendingStart != nil else { return }
@@ -204,13 +216,21 @@ final class RosterStore {
     }
 
     /// The Mac created the session; open it attached, like tapping its row.
-    private func openStartedSession(_ sessionID: String) {
+    /// `agentID` is the `.started` echo of what the Mac launched — it wins
+    /// over the agent we asked for (for a bare New Chat we asked for none),
+    /// falling back to the request's agent against an older Mac that doesn't
+    /// echo. The synthesized row is a placeholder for the terminal header
+    /// only; the next roster push carries the real one.
+    private func openStartedSession(_ sessionID: String, agentID: String?) {
         guard let pending = pendingStart else { return }
         pendingStart = nil
+        let agent = agentID.map { id in
+            enabledAgents.first { $0.id == id } ?? RosterAgent.fallback(wire: id)
+        } ?? pending.agent ?? .terminal
         let session = MockSession(
-            title: pending.agent.name,
+            title: agent.name,
             project: pending.project.name,
-            agent: pending.agent,
+            agent: agent,
             status: .idle,
             subtitle: "", time: "",
             rosterID: sessionID,

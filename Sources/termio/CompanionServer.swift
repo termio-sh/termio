@@ -76,7 +76,12 @@ final class CompanionServer {
     private let port: UInt16
     private let rosterProvider: () -> CompanionRoster
     private let ptyForSession: (String) -> PTYProcess?
-    private let startSession: (String, String) -> String?
+    /// Creates a session for a `start` request. A nil agent is the phone's
+    /// bare New Chat — the store resolves it through the same default-agent
+    /// policy as ⌘N. Returns the new session's wire id plus the agent wire id
+    /// actually launched (echoed in `.started` so the phone can label the
+    /// session before the next roster push), or nil when the start failed.
+    private let startSession: (String, String?) -> (sessionID: String, agentID: String)?
     private let stopSession: (String) -> Bool
     /// Resolves a session's transcript path and display title for a `trace`
     /// request, or nil when the session has no readable transcript yet.
@@ -102,7 +107,7 @@ final class CompanionServer {
         port: UInt16 = CompanionServer.defaultPort,
         rosterProvider: @escaping () -> CompanionRoster,
         ptyForSession: @escaping (String) -> PTYProcess?,
-        startSession: @escaping (String, String) -> String?,
+        startSession: @escaping (String, String?) -> (sessionID: String, agentID: String)?,
         stopSession: @escaping (String) -> Bool,
         traceProvider: @escaping (String) -> (path: String, title: String)?
     ) {
@@ -294,8 +299,11 @@ final class CompanionServer {
             // The phone's sidebar-equivalent "new session" — same store action
             // the CLI's `sessions start` uses; the roster push announces it to
             // every other client, the reply lets this one attach immediately.
-            if let sessionID = startSession(projectID, agent) {
-                sendControl(.started(sessionID: sessionID), to: connection)
+            if let started = startSession(projectID, agent) {
+                sendControl(
+                    .started(sessionID: started.sessionID, agent: started.agentID),
+                    to: connection
+                )
             } else {
                 sendControl(.error(message: "could not start a session there"), to: connection)
             }
@@ -954,8 +962,26 @@ extension TermioStore {
 
     /// Create a session in a project for a phone `start` request — the same
     /// `addSession` the sidebar buttons and the CLI use. Returns the new
-    /// session's wire id, nil if the project is unknown.
-    func companionStartSession(projectID wireID: String, agent wireAgent: String) -> String? {
+    /// session's wire id plus the launched agent's wire id (the `.started`
+    /// echo), nil if the project is unknown or no agent could be resolved.
+    func companionStartSession(
+        projectID wireID: String, agent wireAgent: String?
+    ) -> (sessionID: String, agentID: String)? {
+        // An agent-less start is the phone's bare New Chat (the Chats tab's ＋
+        // tap). The default-agent habit lives on the Mac only: resolve exactly
+        // the way ⌘N does (pinned → last used → first enabled, see
+        // `defaultChatAgent`), and land in the scratch chats container —
+        // `addScratchSession` finds or creates it by kind, so the phone's
+        // projectID (its view of that container) is deliberately not needed.
+        // Going through `addScratchSession` also feeds `lastChatAgentID`, so
+        // the phone and ⌘N keep sharing one habit. nil when every agent is
+        // disabled — the caller answers with the standard start error.
+        guard let wireAgent else {
+            guard let preset = defaultChatAgent() else { return nil }
+            addScratchSession(agent: preset)
+            guard let sessionID = selectedSessionID?.uuidString else { return nil }
+            return (sessionID, preset.wireName)
+        }
         let prefix = wireID.lowercased()
         guard !prefix.isEmpty,
               let project = projects.first(where: {
@@ -967,7 +993,8 @@ extension TermioStore {
         // an unknown token falls back to a plain terminal.
         let preset = AgentPreset.allCases.first { $0.wireName == wireAgent } ?? .terminal
         addSession(to: project.id, agent: preset)
-        return selectedSessionID?.uuidString
+        guard let sessionID = selectedSessionID?.uuidString else { return nil }
+        return (sessionID, preset.wireName)
     }
 
     /// Close a session for a phone `stop` request — the same `closeSession`

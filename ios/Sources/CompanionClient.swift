@@ -29,7 +29,9 @@ final class CompanionClient: NSObject {
     /// `true` once connected, `false` on drop — delivered on the main queue.
     var onConnected: ((Bool) -> Void)?
     /// A `start` we sent succeeded; the new session id is ready to attach.
-    var onStarted: ((String) -> Void)?
+    /// The second value is the agent the Mac actually launched (nil from an
+    /// older Mac) — the only source of truth for an agent-less New Chat.
+    var onStarted: ((String, String?) -> Void)?
     /// A directory listing arrived (reply to `.listFiles`).
     var onFileList: ((String, [WireFileEntry]) -> Void)?
     /// File contents arrived (reply to `.readFile`).
@@ -184,7 +186,7 @@ final class CompanionClient: NSObject {
                         onRoster?(roster)
                     } else {
                         switch CompanionControl.decode(text) {
-                        case .started(let sessionID): onStarted?(sessionID)
+                        case .started(let sessionID, let agent): onStarted?(sessionID, agent)
                         case .fileList(let path, let entries): onFileList?(path, entries)
                         case .file(let file): onFile?(file)
                         case .written(let path, let mtime): onWritten?(path, mtime)
