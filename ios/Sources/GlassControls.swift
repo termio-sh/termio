@@ -155,10 +155,12 @@ final class HomeTabPill: UIView {
             // selectedTextColor — selection reads in color, not just weight.
             button.tintColor = i == index ? tintColor : .secondaryLabel
         }
-        // Telegram plays the tab icon's selection animation on every switch;
-        // the SF-symbol equivalent is a one-shot bounce.
-        if animated, changed, buttons.indices.contains(index) {
-            buttons[index].imageView?.addSymbolEffect(.bounce, options: .nonRepeating)
+        // Telegram plays the tab icon's selection animation on every switch —
+        // an in-place character move (the bubble wiggles, the gear turns),
+        // never a size pop. The SF-symbol equivalent is a one-shot wiggle;
+        // bounce scales the glyph and reads as a sudden size jump.
+        if animated, changed, buttons.indices.contains(index), #available(iOS 18.0, *) {
+            buttons[index].imageView?.addSymbolEffect(.wiggle, options: .nonRepeating)
         }
         layoutIfNeeded()
         let settle = { self.selection.frame = self.selectionFrame() }
