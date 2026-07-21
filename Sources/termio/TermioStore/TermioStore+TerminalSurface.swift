@@ -800,9 +800,21 @@ extension TermioStore {
     /// notification while the user is looking elsewhere. (Claude Code emits
     /// OSC 9/99 notifications natively inside Ghostty, so this works with no
     /// per-agent configuration.) Selecting the session clears the flag.
+    ///
+    /// A `.done` session is never downgraded here. Bell and notification are
+    /// *edge* events — "something happened", not "this is my state" — and agents
+    /// fire them for turn completion as much as for being blocked: Grok posts an
+    /// OSC 777 turn-complete notification a few seconds *after* its Stop hook
+    /// (its unfocused-delay default), which would repaint the green "finished"
+    /// as the orange "waiting for you" on every tool-using turn. Once a turn has
+    /// ended, nothing can be blocked on the user, so the flag is meaningless.
+    /// The title channel keeps its right to override `done` (see
+    /// `applyTitleActivity`): a title is a *level* signal of the agent's current
+    /// state, so "Action Required" after a turn ends is a real question to you.
     private func monitor(_ state: TerminalViewState, for id: Session.ID) {
         let flag: () -> Void = { [weak self] in
-            guard let self, self.selectedSessionID != id else { return }
+            guard let self, self.selectedSessionID != id, self.statuses[id] != .done
+            else { return }
             self.statuses[id] = .needsAttention
         }
         monitors[id] = [
