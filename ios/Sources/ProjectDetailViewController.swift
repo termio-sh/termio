@@ -3,11 +3,11 @@ import TermioShared
 import UIKit
 
 /// One project's page: its sessions as a plain list, with the ＋ (new session
-/// per enabled agent) riding the title — the project-level home for
-/// project-level actions. Pushed from the Projects root; tapping a session
-/// slides its terminal in over everything, so coming back lands here. Tracks
-/// the live roster by the project's stable key and pops itself if the Mac
-/// closes the project.
+/// per enabled agent) floating bottom-right — the compose corner, same as the
+/// Chats tab. Pushed from the Projects root; tapping a session slides its
+/// terminal in over everything, so coming back lands here. Tracks the live
+/// roster by the project's stable key and pops itself if the Mac closes the
+/// project.
 final class ProjectDetailViewController: UIViewController {
     private let store: RosterStore
     private let projectKey: String
@@ -38,6 +38,8 @@ final class ProjectDetailViewController: UIViewController {
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
+        // Added last so it floats over the list.
+        configureAddButton()
         reload()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -66,11 +68,12 @@ final class ProjectDetailViewController: UIViewController {
             return
         }
         project = live
+        addButton.isHidden = store.companionURL == nil || project.rosterID == nil
         tableView.reloadData()
         updateEmptyState()
     }
 
-    // MARK: - Top bar (back + title + new session)
+    // MARK: - Top bar (back + title)
 
     private func configureTopBar() -> UIView {
         let back = UIButton(type: .system)
@@ -89,27 +92,10 @@ final class ProjectDetailViewController: UIViewController {
         pageTitle.lineBreakMode = .byTruncatingTail
         pageTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // The Mac project menu's "New … Session" actions — the ＋ rides the
-        // title, reachable even when every session is closed. Live rosters
-        // only; the bundled mock can't start anything.
-        addButton.applyGlassSymbol("plus")
-        addButton.tintColor = .label
-        addButton.accessibilityLabel = "New session in \(project.name)"
-        addButton.showsMenuAsPrimaryAction = true
-        addButton.menu = UIMenu(children: [
-            UIDeferredMenuElement.uncached { [weak self] completion in
-                guard let self else { return completion([]) }
-                completion(store.newSessionActions(in: project))
-            },
-        ])
-        addButton.isHidden = store.companionURL == nil || project.rosterID == nil
-
-        let spacer = UIView()
-        let bar = UIStackView(arrangedSubviews: [back, pageTitle, spacer, addButton])
+        let bar = UIStackView(arrangedSubviews: [back, pageTitle])
         bar.axis = .horizontal
         bar.alignment = .center
         bar.spacing = 10
-        bar.setCustomSpacing(4, after: spacer)
         bar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(bar)
 
@@ -127,11 +113,9 @@ final class ProjectDetailViewController: UIViewController {
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            bar.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -12),
             back.widthAnchor.constraint(equalToConstant: 40),
             back.heightAnchor.constraint(equalToConstant: 40),
-            addButton.widthAnchor.constraint(equalToConstant: 40),
-            addButton.heightAnchor.constraint(equalToConstant: 40),
             // Indented to the title's left edge (past the back chevron).
             context.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 62),
             context.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -16),
@@ -149,6 +133,33 @@ final class ProjectDetailViewController: UIViewController {
             anchor.heightAnchor.constraint(equalToConstant: 0),
         ])
         return anchor
+    }
+
+    // MARK: - Add button (the floating ＋)
+
+    /// The Mac project menu's "New … Session" actions — ＋ floats bottom-right
+    /// like Slack's compose button, the same corner the Chats tab uses, and the
+    /// project page has this corner to itself (the home tab pill hides on
+    /// pushed pages). Live rosters only; the bundled mock can't start anything.
+    private func configureAddButton() {
+        addButton.applyGlassSymbol("plus", pointSize: 17)
+        addButton.tintColor = .label
+        addButton.accessibilityLabel = "New session in \(project.name)"
+        addButton.showsMenuAsPrimaryAction = true
+        addButton.menu = UIMenu(children: [
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                guard let self else { return completion([]) }
+                completion(store.newSessionActions(in: project))
+            },
+        ])
+        addButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(addButton)
+        NSLayoutConstraint.activate([
+            addButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            addButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            addButton.widthAnchor.constraint(equalToConstant: 48),
+            addButton.heightAnchor.constraint(equalToConstant: 48),
+        ])
     }
 
     /// "~/Documents/GitHub/termio" — home-relative, like the Mac's chrome.
@@ -173,6 +184,10 @@ final class ProjectDetailViewController: UIViewController {
         tableView.keyboardDismissMode = .onDrag
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "session")
         tableView.translatesAutoresizingMaskIntoConstraints = false
+        // The floating ＋ sits over the list; reserve room so the last rows
+        // scroll clear of it.
+        tableView.contentInset.bottom = 80
+        tableView.verticalScrollIndicatorInsets.bottom = 80
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 12),

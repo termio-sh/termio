@@ -27,6 +27,7 @@ final class ProjectListViewController: UIViewController {
     private var sortByName = UserDefaults.standard.string(forKey: "sessions.sortOrder") == "name"
 
     private let filterButton = UIButton(type: .system)
+    private let newSessionButton = UIButton(type: .system)
     private let tableView = UITableView(frame: .zero, style: .grouped)
     /// The Telegram/iMessage-style zero state shown when there are no projects
     /// to list — never fake rows. Its copy tracks `CompanionLink.state`.
@@ -53,6 +54,8 @@ final class ProjectListViewController: UIViewController {
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
+        // Added last so it floats over the list, opposite the home tab pill.
+        configureNewSessionButton()
         refilter()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -138,6 +141,40 @@ final class ProjectListViewController: UIViewController {
         refilter()
     }
 
+    // MARK: - New-session button (the floating ＋)
+
+    /// ＋ floats bottom-right like Slack's compose button — the same corner as
+    /// the Chats tab's ＋, so "start something new" always lives in one place.
+    /// A project must be picked first, so the menu is one submenu per project
+    /// with the agents inside (the long-press menu, made discoverable);
+    /// deferred so it always reflects the live roster, hidden while unpaired.
+    private func configureNewSessionButton() {
+        newSessionButton.applyGlassSymbol("plus", pointSize: 17)
+        newSessionButton.tintColor = .label
+        newSessionButton.accessibilityLabel = "New Session"
+        newSessionButton.showsMenuAsPrimaryAction = true
+        newSessionButton.menu = UIMenu(children: [
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                guard let self else { return completion([]) }
+                completion(visible.filter { $0.rosterID != nil }.map { project in
+                    UIMenu(
+                        title: project.name,
+                        image: UIImage(systemName: "folder"),
+                        children: self.store.newSessionActions(in: project)
+                    )
+                })
+            },
+        ])
+        newSessionButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(newSessionButton)
+        NSLayoutConstraint.activate([
+            newSessionButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            newSessionButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            newSessionButton.widthAnchor.constraint(equalToConstant: 48),
+            newSessionButton.heightAnchor.constraint(equalToConstant: 48),
+        ])
+    }
+
     private func presentSettings() {
         // The sheet inherits the window's app-wide Appearance override, same
         // as every other screen.
@@ -191,6 +228,8 @@ final class ProjectListViewController: UIViewController {
             : store.projects
         visible = ordered.filter { $0.kind != "chats" }
         sections = (attention.isEmpty ? [] : [.needsYou]) + [.projects]
+        newSessionButton.isHidden = store.companionURL == nil
+            || !visible.contains { $0.rosterID != nil }
         tableView.reloadData()
         updateEmptyState()
     }
