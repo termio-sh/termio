@@ -182,9 +182,10 @@ private struct AgentManagerRow: View {
     @State private var available: Bool?
 
     var body: some View {
-        // `Group` is transparent inside a Form (its children each become a row), so the
-        // header and the disclosed controls read as sibling rows while sharing one probe.
-        Group {
+        // One VStack = one Form row, so the header and its disclosed controls share a
+        // single cell — separators fall only between agents, and the drawer can't be
+        // mistaken for top-level rows (as `Group`'s sibling rows were).
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 IconBadge(preset.icon)
                 VStack(alignment: .leading, spacing: 2) {
@@ -229,43 +230,53 @@ private struct AgentManagerRow: View {
             }
 
             if isExpanded {
-                TextField(
-                    "Command",
-                    text: Binding(
-                        get: { settings.agentCommandOverrides[preset.rawValue] ?? "" },
-                        set: { settings.agentCommandOverrides[preset.rawValue] = $0 }
-                    ),
-                    prompt: Text(preset.command ?? "")
-                )
-
-                if available == false, let url = preset.installURL {
-                    Link(destination: url) {
-                        Label("Install \(preset.displayName)", systemImage: "arrow.down.circle")
-                    }
-                }
-
-                if let flag = preset.permissionBypassFlag {
-                    Toggle(isOn: Binding(
-                        get: { settings.bypassesPermissions(preset) },
-                        set: { settings.setBypassPermissions(preset, enabled: $0) }
-                    )) {
-                        SettingsLabel(
-                            title: "Skip permission prompts",
-                            subtext: "Runs with `\(flag)`. The agent won't ask before editing files or running commands."
+                VStack(alignment: .leading, spacing: 12) {
+                    LabeledContent("Command") {
+                        TextField(
+                            "",
+                            text: Binding(
+                                get: { settings.agentCommandOverrides[preset.rawValue] ?? "" },
+                                set: { settings.agentCommandOverrides[preset.rawValue] = $0 }
+                            ),
+                            prompt: Text(preset.command ?? "")
                         )
+                        .textFieldStyle(.plain)
+                        .labelsHidden()
                     }
-                    .toggleStyle(.switch)
-                }
 
-                // The visible twin of the row's right-click item — a drawer-only
-                // action so the scannable list stays clean. No confirmation: the
-                // agent is one "Add Agent" pick away from coming back.
-                Button(role: .destructive) {
-                    settings.removeAgent(preset)
-                } label: {
-                    Text("Remove Agent").foregroundStyle(.red)
+                    if available == false, let url = preset.installURL {
+                        Link(destination: url) {
+                            Label("Install \(preset.displayName)", systemImage: "arrow.down.circle")
+                        }
+                    }
+
+                    if let flag = preset.permissionBypassFlag {
+                        Toggle(isOn: Binding(
+                            get: { settings.bypassesPermissions(preset) },
+                            set: { settings.setBypassPermissions(preset, enabled: $0) }
+                        )) {
+                            SettingsLabel(
+                                title: "Skip permission prompts",
+                                subtext: "Runs with `\(flag)`. The agent won't ask before editing files or running commands."
+                            )
+                        }
+                        .toggleStyle(.switch)
+                    }
+
+                    // The visible twin of the row's right-click item — a drawer-only
+                    // action so the scannable list stays clean. No confirmation: the
+                    // agent is one "Add Agent" pick away from coming back.
+                    Button(role: .destructive) {
+                        settings.removeAgent(preset)
+                    } label: {
+                        Text("Remove Agent").foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                // Indent to the title's column (icon 22 + spacing 10) so the drawer
+                // reads as the row's children, not more agents.
+                .padding(.leading, 32)
+                .padding(.top, 12)
             }
         }
         // Re-checks whenever the effective command changes, so typing a valid path
