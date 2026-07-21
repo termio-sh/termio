@@ -53,23 +53,12 @@ struct GitDiffView: View {
         request.siblings.firstIndex { $0.path == request.change.path }
     }
 
-    /// Steps to the previous/next sibling that has a textual diff, skipping the
-    /// image/PDF kind the preview overlay owns. Returns false at either end so the
-    /// key press falls through instead of pretending to act.
+    /// Steps to the previous/next diffable sibling. Returns false at either end so
+    /// the key press falls through instead of pretending to act.
     private func walk(_ delta: Int) -> Bool {
-        guard let onNavigate, let index = walkIndex else { return false }
-        var next = index + delta
-        while next >= 0, next < request.siblings.count {
-            let candidate = request.siblings[next]
-            let url = URL(fileURLWithPath: request.repoRoot).appendingPathComponent(candidate.path)
-            if !FileActivation.previewsRatherThanDiff(url) {
-                onNavigate(GitDiffRequest(repoRoot: request.repoRoot, change: candidate,
-                                          commit: request.commit, siblings: request.siblings))
-                return true
-            }
-            next += delta
-        }
-        return false
+        guard let onNavigate, let next = request.neighbor(delta) else { return false }
+        onNavigate(next)
+        return true
     }
 
     // MARK: Header
@@ -280,86 +269,44 @@ struct GitDiffView: View {
         await buildStyledLines(parsed)
     }
 
-    /// Colors the code through the editor's Highlightr pipeline. Each *side* of the
-    /// file is reconstructed as one text (context + additions = new file, context +
-    /// deletions = old file) and highlighted whole, so multi-line constructs — block
-    /// comments, raw strings — keep their true state; per-line highlighting can't do
-    /// that. The theme's own foreground/font attributes are re-emitted as SwiftUI
-    /// attributes (Text ignores AppKit-scope ones) and the add/delete emphasis span
-    /// is layered back on top. Oversized diffs skip coloring rather than stall.
+    /// Colors the code through `DiffHighlighter` (the editor's Highlightr pipeline
+    /// behind a shared actor). Oversized diffs skip coloring rather than stall; a
+    /// result that lands after the user has walked on is dropped, not applied.
     private func buildStyledLines(_ rows: [DiffRow]) async {
         let url = URL(fileURLWithPath: request.repoRoot).appendingPathComponent(request.change.path)
         guard let language = FileEditorView.highlightLanguage(for: url) else { return }
         let code = rows.filter { $0.kind != .hunk }
         guard code.count <= 8000, code.reduce(0, { $0 + $1.text.count }) <= 600_000 else { return }
 
-        let theme = colorScheme == .dark ? "xcode-dark" : "xcode"
-        let font = settings.resolvedTerminalFont()
-        let newSide = code.filter { $0.kind == .context || $0.kind == .addition }
-        let oldSide = code.filter { $0.kind == .context || $0.kind == .deletion }
-
-        let styled = await Task.detached(priority: .userInitiated) { () -> [Int: AttributedString] in
-            guard let highlightr = Highlightr(), highlightr.setTheme(to: theme) else { return [:] }
-            highlightr.theme.setCodeFont(font)
-            var result: [Int: AttributedString] = [:]
-
-            func apply(_ side: [DiffRow], keeping kinds: Set<DiffRow.Kind>) {
-                let joined = side.map(\.text).joined(separator: "\n")
-                guard let colored = highlightr.highlight(joined, as: language, fastRender: true),
-                      colored.string == joined else { return }
-                var location = 0
-                for row in side {
-                    let length = (row.text as NSString).length
-                    defer { location += length + 1 }
-                    guard kinds.contains(row.kind), length > 0 else { continue }
-                    let sub = colored.attributedSubstring(from: NSRange(location: location, length: length))
-                    result[row.id] = swiftUIAttributed(sub, emphasis: row.emphasis, kind: row.kind)
-                }
-            }
-            // Context lines take the new side's colors; the old side only contributes
-            // its deletions (the context would be identical, so skip the overwrite).
-            apply(newSide, keeping: [.context, .addition])
-            apply(oldSide, keeping: [.deletion])
-            return result
-        }.value
+        let styled = await DiffHighlighter.shared.styledLines(
+            newSide: code.filter { $0.kind == .context || $0.kind == .addition },
+            oldSide: code.filter { $0.kind == .context || $0.kind == .deletion },
+            language: language,
+            theme: colorScheme == .dark ? "xcode-dark" : "xcode",
+            font: settings.resolvedTerminalFont()
+        )
+        guard !Task.isCancelled else { return }
         styledLines = styled
     }
+}
 
-    /// Re-emits an AppKit attributed line as SwiftUI attributes and lays the intraline
-    /// emphasis back over it. `Text` only honors the SwiftUI attribute scope, so the
-    /// theme's `NSColor`/`NSFont` runs must be translated, not just bridged.
-    private nonisolated static func swiftUIAttributed(
-        _ line: NSAttributedString, emphasis: Range<Int>?, kind: DiffRow.Kind
-    ) -> AttributedString {
-        var attributed = AttributedString("")
-        line.enumerateAttributes(in: NSRange(location: 0, length: line.length)) { attributes, range, _ in
-            var piece = AttributedString(line.attributedSubstring(from: range).string)
-            if let color = attributes[.foregroundColor] as? NSColor {
-                piece.foregroundColor = Color(nsColor: color)
+extension GitDiffRequest {
+    /// The nearest sibling in `delta`'s direction that has a textual diff —
+    /// image/PDF siblings belong to the preview overlay and are skipped. The one
+    /// walking rule, shared by the overlay's own ← / → and the Changes list's.
+    func neighbor(_ delta: Int) -> GitDiffRequest? {
+        guard let index = siblings.firstIndex(where: { $0.path == change.path }) else { return nil }
+        var next = index + delta
+        while next >= 0, next < siblings.count {
+            let candidate = siblings[next]
+            let url = URL(fileURLWithPath: repoRoot).appendingPathComponent(candidate.path)
+            if !FileActivation.previewsRatherThanDiff(url) {
+                return GitDiffRequest(repoRoot: repoRoot, change: candidate,
+                                      commit: commit, siblings: siblings)
             }
-            if let pieceFont = attributes[.font] as? NSFont {
-                piece.font = Font(pieceFont)
-            }
-            attributed += piece
+            next += delta
         }
-        if let emphasis, !emphasis.isEmpty {
-            let characters = attributed.characters
-            if let start = characters.index(characters.startIndex, offsetBy: emphasis.lowerBound,
-                                            limitedBy: characters.endIndex),
-               let end = characters.index(characters.startIndex, offsetBy: emphasis.upperBound,
-                                          limitedBy: characters.endIndex),
-               start < end {
-                attributed[start..<end].backgroundColor =
-                    kind == .addition ? Color.green.opacity(0.28) : Color.red.opacity(0.28)
-            }
-        }
-        return attributed
-    }
-
-    private nonisolated func swiftUIAttributed(
-        _ line: NSAttributedString, emphasis: Range<Int>?, kind: DiffRow.Kind
-    ) -> AttributedString {
-        Self.swiftUIAttributed(line, emphasis: emphasis, kind: kind)
+        return nil
     }
 }
 
@@ -399,19 +346,9 @@ private struct DiffLineRow: View {
 
     private var codeText: Text {
         if let styled, !styled.characters.isEmpty { return Text(styled) }
-        guard let emphasis = row.emphasis, !emphasis.isEmpty, !row.text.isEmpty else {
-            return Text(row.text.isEmpty ? " " : row.text)
-        }
+        guard !row.text.isEmpty else { return Text(" ") }
         var attributed = AttributedString(row.text)
-        let characters = attributed.characters
-        if let start = characters.index(characters.startIndex, offsetBy: emphasis.lowerBound,
-                                        limitedBy: characters.endIndex),
-           let end = characters.index(characters.startIndex, offsetBy: emphasis.upperBound,
-                                      limitedBy: characters.endIndex),
-           start < end {
-            attributed[start..<end].backgroundColor =
-                row.kind == .addition ? Color.green.opacity(0.28) : Color.red.opacity(0.28)
-        }
+        attributed.applyDiffEmphasis(row.emphasis, kind: row.kind)
         return Text(attributed)
     }
 
