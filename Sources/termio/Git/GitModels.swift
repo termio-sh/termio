@@ -49,6 +49,8 @@ struct GitCommit: Identifiable, Hashable, Sendable {
     let shortSHA: String
     let subject: String
     let author: String
+    /// Author email, the key `CommitAvatarStore` resolves to a GitHub avatar.
+    let authorEmail: String
     /// Human "3 hours ago" string straight from `git log --date=relative`.
     let relativeDate: String
     /// Tags pointing at this commit — release boundaries in termio's tag-is-the-release

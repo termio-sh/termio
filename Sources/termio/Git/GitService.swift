@@ -95,7 +95,7 @@ enum GitService {
             (run(["rev-list", "@{upstream}..HEAD"], in: repoRoot) ?? "")
                 .split(separator: "\n").map(String.init)
         )
-        let format = ["%H", "%h", "%s", "%an", "%ad", "%D"].joined(separator: "\u{1f}") + "\u{1e}"
+        let format = ["%H", "%h", "%s", "%an", "%ae", "%ad", "%D"].joined(separator: "\u{1f}") + "\u{1e}"
         guard let out = run(
             ["log", "-n", String(limit), "--date=relative", "--pretty=format:\(format)"],
             in: repoRoot
@@ -103,12 +103,12 @@ enum GitService {
         return out.components(separatedBy: "\u{1e}").compactMap { record in
             let fields = record.trimmingCharacters(in: .whitespacesAndNewlines)
                 .components(separatedBy: "\u{1f}")
-            guard fields.count == 6, !fields[0].isEmpty else { return nil }
-            let tags = fields[5].components(separatedBy: ", ")
+            guard fields.count == 7, !fields[0].isEmpty else { return nil }
+            let tags = fields[6].components(separatedBy: ", ")
                 .filter { $0.hasPrefix("tag: ") }
                 .map { String($0.dropFirst("tag: ".count)) }
             return GitCommit(sha: fields[0], shortSHA: fields[1], subject: fields[2],
-                             author: fields[3], relativeDate: fields[4],
+                             author: fields[3], authorEmail: fields[4], relativeDate: fields[5],
                              tags: tags, isUnpushed: unpushed.contains(fields[0]))
         }
     }

@@ -135,7 +135,7 @@ private struct CommitRow: View {
                         }
                     }
                     HStack(spacing: 5) {
-                        CommitAvatar(author: commit.author, chrome: chrome)
+                        CommitAvatar(author: commit.author, email: commit.authorEmail, chrome: chrome)
                         Text(commit.author)
                             .lineLimit(1)
                         Text("·").foregroundStyle(.tertiary)
@@ -192,25 +192,44 @@ private struct TagChip: View {
     }
 }
 
-/// A small circular initials avatar riding in the metadata line (GitHub Desktop's
-/// placement — a 24pt leading avatar column read as a loud repeated stripe when one
-/// author dominates). Filled in the chrome accent so it derives from the terminal theme
-/// like the rest of termio's chrome (one source of color truth) rather than a per-author
-/// rainbow hue.
+/// A small circular avatar riding in the metadata line (GitHub Desktop's placement —
+/// a 24pt leading avatar column read as a loud repeated stripe when one author
+/// dominates). The author's real GitHub avatar when `CommitAvatarStore` resolves one
+/// from the commit email; otherwise an initials circle filled in the chrome accent so
+/// it derives from the terminal theme like the rest of termio's chrome (one source of
+/// color truth) rather than a per-author rainbow hue.
 private struct CommitAvatar: View {
     let author: String
+    let email: String
     let chrome: ChromeTheme?
 
+    @State private var avatar: NSImage?
+
     var body: some View {
-        Circle()
-            .fill((chrome?.accent ?? .accentColor).gradient)
-            .frame(width: 15, height: 15)
-            .overlay(
-                Text(initials)
-                    .font(.system(size: 6.5, weight: .semibold))
-                    .foregroundStyle(.white)
-            )
-            .help(author)
+        Group {
+            if let avatar {
+                Image(nsImage: avatar)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 15, height: 15)
+                    .clipShape(Circle())
+            } else {
+                Circle()
+                    .fill((chrome?.accent ?? .accentColor).gradient)
+                    .frame(width: 15, height: 15)
+                    .overlay(
+                        Text(initials)
+                            .font(.system(size: 6.5, weight: .semibold))
+                            .foregroundStyle(.white)
+                    )
+            }
+        }
+        .help(author)
+        .task(id: email) {
+            guard avatar == nil,
+                  let data = await CommitAvatarStore.shared.imageData(for: email) else { return }
+            avatar = NSImage(data: data)
+        }
     }
 
     private var initials: String {
