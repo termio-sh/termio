@@ -60,7 +60,26 @@ final class HomeTabPill: UIView {
     var onSelect: ((Int) -> Void)?
 
     private var buttons: [UIButton] = []
-    private let selection = UIView()
+    /// The sliding selected-item capsule. Telegram's is the system liquid
+    /// lens (private API, warps the content below); the public equivalent is
+    /// an interactive `UIGlassEffect` — real refraction, not a flat fill —
+    /// resting on a faint tint like their lens's restingBackgroundColor.
+    /// Pre-26 falls back to the flat current-chat-pill fill.
+    private let selection: UIView = {
+        if #available(iOS 26.0, *) {
+            let glass = UIGlassEffect(style: .regular)
+            glass.isInteractive = true
+            glass.tintColor = UIColor.label.withAlphaComponent(0.08)
+            let view = UIVisualEffectView(effect: glass)
+            view.layer.cornerRadius = 28
+            view.clipsToBounds = true
+            return view
+        }
+        let view = UIView()
+        view.backgroundColor = UIColor.label.withAlphaComponent(0.08)
+        view.layer.cornerRadius = 28
+        return view
+    }()
     private var selectedIndex = 0
 
     init(items: [(title: String, symbol: String)]) {
@@ -71,11 +90,6 @@ final class HomeTabPill: UIView {
         glass.clipsToBounds = true
         addSubview(glass)
 
-        // The sliding selected-item capsule, under the buttons; its frame
-        // tracks the selected button in layoutSubviews. Same fill as the
-        // session rows' current-chat pill, so selection reads consistently.
-        selection.backgroundColor = UIColor.label.withAlphaComponent(0.08)
-        selection.layer.cornerRadius = 28
         glass.contentView.addSubview(selection)
 
         buttons = items.enumerated().map { index, item in
@@ -83,12 +97,14 @@ final class HomeTabPill: UIView {
             config.image = UIImage(systemName: item.symbol)
             config.imagePlacement = .top
             config.imagePadding = 3
-            config.preferredSymbolConfigurationForImage = .init(pointSize: 20, weight: .medium)
+            // ~17pt matches the drawn area of Telegram's ~28px tab icons;
+            // 20pt SF symbols read oversized next to them.
+            config.preferredSymbolConfigurationForImage = .init(pointSize: 17, weight: .medium)
             config.attributedTitle = AttributedString(
                 item.title,
                 attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 10, weight: .semibold)])
             )
-            config.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+            config.contentInsets = NSDirectionalEdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12)
             let button = UIButton(configuration: config)
             button.addAction(UIAction { [weak self] _ in
                 self?.select(index, animated: true)
@@ -132,15 +148,23 @@ final class HomeTabPill: UIView {
     }
 
     func select(_ index: Int, animated: Bool) {
+        let changed = selectedIndex != index
         selectedIndex = index
         for (i, button) in buttons.enumerated() {
-            button.tintColor = i == index ? .label : .secondaryLabel
+            // The active tab gets the accent, like Telegram's
+            // selectedTextColor — selection reads in color, not just weight.
+            button.tintColor = i == index ? tintColor : .secondaryLabel
+        }
+        // Telegram plays the tab icon's selection animation on every switch;
+        // the SF-symbol equivalent is a one-shot bounce.
+        if animated, changed, buttons.indices.contains(index) {
+            buttons[index].imageView?.addSymbolEffect(.bounce, options: .nonRepeating)
         }
         layoutIfNeeded()
         let settle = { self.selection.frame = self.selectionFrame() }
         if animated {
-            UIView.animate(withDuration: 0.3, delay: 0,
-                           usingSpringWithDamping: 0.85, initialSpringVelocity: 0,
+            UIView.animate(withDuration: 0.35, delay: 0,
+                           usingSpringWithDamping: 0.8, initialSpringVelocity: 0.2,
                            options: .curveEaseOut, animations: settle)
         } else {
             settle()
