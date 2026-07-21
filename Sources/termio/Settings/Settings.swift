@@ -95,6 +95,7 @@ final class AppSettings: ObservableObject {
         static let agentCommands = "agents.commandOverrides"
         static let bypassPermissionAgents = "agents.bypassPermissions"
         static let disabledAgents = "agents.disabled"
+        static let addedAgents = "agents.added"
         static let agentOrder = "agents.order"
         static let agentHooksEnabled = "agents.hooksEnabled"
         static let sessionControlEnabled = "agents.sessionControlEnabled"
@@ -281,6 +282,15 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(Array(disabledAgents), forKey: Key.disabledAgents) }
     }
 
+    /// Agents pinned to the Agents settings list even while switched off, by
+    /// `rawValue`. A row on that list means added-or-enabled (`isAgentListed`); the
+    /// rest wait behind its "Add Agent" menu. `setAgent` keeps any agent the user
+    /// flips in here, so switching one off leaves its row in place — only
+    /// `removeAgent` drops a row back into the menu.
+    @Published var addedAgents: Set<String> {
+        didSet { defaults.set(Array(addedAgents), forKey: Key.addedAgents) }
+    }
+
     /// The user's own agent arrangement, as an ordered list of `rawValue`s — the
     /// runtime layer that overrides each manifest's default `order` (the VSCode
     /// model: shipped defaults, user settings on top). Empty until the user drags a
@@ -404,6 +414,7 @@ final class AppSettings: ObservableObject {
         agentCommandOverrides = defaults.dictionary(forKey: Key.agentCommands) as? [String: String] ?? [:]
         bypassPermissionAgents = Set(defaults.stringArray(forKey: Key.bypassPermissionAgents) ?? [])
         disabledAgents = Set(defaults.stringArray(forKey: Key.disabledAgents) ?? [])
+        addedAgents = Set(defaults.stringArray(forKey: Key.addedAgents) ?? [])
         agentOrder = defaults.stringArray(forKey: Key.agentOrder) ?? []
         agentHooksEnabled = defaults.bool(forKey: Key.agentHooksEnabled)
         sessionControlEnabled = defaults.bool(forKey: Key.sessionControlEnabled)
@@ -459,11 +470,36 @@ final class AppSettings: ObservableObject {
     }
 
     func setAgent(_ agent: AgentPreset, enabled: Bool) {
+        // Either flip pins the row: enabling implies one, and disabling must not
+        // silently drop one — only `removeAgent` does that. Also catches agents
+        // that were never explicitly added (enabled by default or by manifest).
+        addedAgents.insert(agent.rawValue)
         if enabled {
             disabledAgents.remove(agent.rawValue)
         } else {
             disabledAgents.insert(agent.rawValue)
         }
+    }
+
+    /// Whether the agent occupies a row on the Agents settings tab: explicitly
+    /// added, or enabled (a default-enabled agent has a row without ever being
+    /// added, so enabled ⊆ listed holds by construction).
+    func isAgentListed(_ agent: AgentPreset) -> Bool {
+        addedAgents.contains(agent.rawValue) || isAgentEnabled(agent)
+    }
+
+    /// Puts the agent's row on the Agents settings list without enabling it —
+    /// enabling is a separate, availability-gated step (see `AgentSettingsTab`).
+    func addAgent(_ agent: AgentPreset) {
+        addedAgents.insert(agent.rawValue)
+    }
+
+    /// Drops the agent's row from the settings list back into the "Add Agent"
+    /// menu. Also disables it: an unlisted agent must not linger in the session
+    /// pickers. Written directly (not via `setAgent`), which would re-pin the row.
+    func removeAgent(_ agent: AgentPreset) {
+        addedAgents.remove(agent.rawValue)
+        disabledAgents.insert(agent.rawValue)
     }
 
     /// Applies the user's `agentOrder` on top of the catalog's default order. The
