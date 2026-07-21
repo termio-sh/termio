@@ -60,6 +60,8 @@ final class HomeTabPill: UIView {
     var onSelect: ((Int) -> Void)?
 
     private var buttons: [UIButton] = []
+    /// The tab symbols, kept to pick each tab's own selection animation.
+    private let symbols: [String]
     /// The sliding selected-item capsule. Telegram's is the system liquid
     /// lens (private API, warps the content below); the public equivalent is
     /// an interactive `UIGlassEffect` — real refraction, not a flat fill —
@@ -83,6 +85,7 @@ final class HomeTabPill: UIView {
     private var selectedIndex = 0
 
     init(items: [(title: String, symbol: String)]) {
+        symbols = items.map(\.symbol)
         super.init(frame: .zero)
         let glass = GlassChrome.makeView(interactive: true)
         glass.translatesAutoresizingMaskIntoConstraints = false
@@ -155,12 +158,12 @@ final class HomeTabPill: UIView {
             // selectedTextColor — selection reads in color, not just weight.
             button.tintColor = i == index ? tintColor : .secondaryLabel
         }
-        // Telegram plays the tab icon's selection animation on every switch —
-        // an in-place character move (the bubble wiggles, the gear turns),
-        // never a size pop. The SF-symbol equivalent is a one-shot wiggle;
-        // bounce scales the glyph and reads as a sudden size jump.
-        if animated, changed, buttons.indices.contains(index), #available(iOS 18.0, *) {
-            buttons[index].imageView?.addSymbolEffect(.wiggle, options: .nonRepeating)
+        // Telegram gives every tab icon its own selection animation — an
+        // in-place character move (the bubble wiggles, the gear turns),
+        // never a size pop. Same here, per symbol; bounce stays banned
+        // (it scales the glyph and reads as a sudden size jump).
+        if animated, changed, buttons.indices.contains(index) {
+            playSelectionAnimation(on: buttons[index], symbol: symbols[index])
         }
         layoutIfNeeded()
         let settle = { self.selection.frame = self.selectionFrame() }
@@ -170,6 +173,25 @@ final class HomeTabPill: UIView {
                            options: .curveEaseOut, animations: settle)
         } else {
             settle()
+        }
+    }
+
+    /// Each tab's own move: the gear turns, the bubbles light up in
+    /// conversation order (variable color, layer by layer), anything else
+    /// wiggles in place. All size-stable, all one-shot.
+    private func playSelectionAnimation(on button: UIButton, symbol: String) {
+        guard let imageView = button.imageView else { return }
+        switch symbol {
+        case "gearshape":
+            if #available(iOS 18.0, *) {
+                imageView.addSymbolEffect(.rotate, options: .nonRepeating)
+            }
+        case "bubble.left.and.bubble.right":
+            imageView.addSymbolEffect(.variableColor.iterative, options: .nonRepeating)
+        default:
+            if #available(iOS 18.0, *) {
+                imageView.addSymbolEffect(.wiggle, options: .nonRepeating)
+            }
         }
     }
 }
