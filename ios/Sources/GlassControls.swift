@@ -43,39 +43,54 @@ enum GlassChrome {
     }
 }
 
-/// The home's compact tab switcher: a small Telegram-scale glass capsule that
-/// floats in the bottom-LEFT corner, paired with whatever action button a tab
-/// floats bottom-right. Hand-rolled on purpose: the iOS 26 system tab bar
-/// auto-sizes but always owns the bottom center — the only native way to
-/// left-align the group is a `.search`-role tab's detached circle, whose
-/// semantics ("select the search tab") can't host a ＋ menu.
+/// The home's compact tab switcher: a small glass capsule floating in the
+/// bottom-LEFT corner, paired with whatever action button a tab floats
+/// bottom-right. Hand-rolled on purpose: the iOS 26 system tab bar auto-sizes
+/// but always owns the bottom center — the only native way to left-align the
+/// group is a `.search`-role tab's detached circle, whose semantics ("select
+/// the search tab") can't host a ＋ menu.
+///
+/// Recipe follows Telegram's TabBarComponent, scaled down: icon over a
+/// semibold-10 label (their exact label style), items padded ~10pt, capsule
+/// radius = height/2 with a 4pt inner inset, and — the detail that makes it
+/// read finished — a sliding selection capsule behind the active item
+/// (Telegram's selectionFrame; theirs is 56+4×2 tall, ours 52 total).
 final class HomeTabPill: UIView {
     var onSelect: ((Int) -> Void)?
 
     private var buttons: [UIButton] = []
+    private let selection = UIView()
+    private var selectedIndex = 0
 
     init(items: [(title: String, symbol: String)]) {
         super.init(frame: .zero)
         let glass = GlassChrome.makeView(interactive: true)
         glass.translatesAutoresizingMaskIntoConstraints = false
-        glass.layer.cornerRadius = 22
+        glass.layer.cornerRadius = 26
         glass.clipsToBounds = true
         addSubview(glass)
+
+        // The sliding selected-item capsule, under the buttons; its frame
+        // tracks the selected button in layoutSubviews. Same fill as the
+        // session rows' current-chat pill, so selection reads consistently.
+        selection.backgroundColor = UIColor.label.withAlphaComponent(0.08)
+        selection.layer.cornerRadius = 22
+        glass.contentView.addSubview(selection)
 
         buttons = items.enumerated().map { index, item in
             var config = UIButton.Configuration.plain()
             config.image = UIImage(systemName: item.symbol)
             config.imagePlacement = .top
-            config.imagePadding = 2
-            config.preferredSymbolConfigurationForImage = .init(pointSize: 15, weight: .semibold)
+            config.imagePadding = 3
+            config.preferredSymbolConfigurationForImage = .init(pointSize: 16, weight: .semibold)
             config.attributedTitle = AttributedString(
                 item.title,
                 attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 10, weight: .semibold)])
             )
-            config.contentInsets = NSDirectionalEdgeInsets(top: 5, leading: 10, bottom: 5, trailing: 10)
+            config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
             let button = UIButton(configuration: config)
             button.addAction(UIAction { [weak self] _ in
-                self?.select(index)
+                self?.select(index, animated: true)
                 self?.onSelect?(index)
             }, for: .touchUpInside)
             return button
@@ -84,6 +99,7 @@ final class HomeTabPill: UIView {
         let stack = UIStackView(arrangedSubviews: buttons)
         stack.axis = .horizontal
         stack.alignment = .fill
+        stack.distribution = .fillEqually
         stack.translatesAutoresizingMaskIntoConstraints = false
         glass.contentView.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -95,19 +111,38 @@ final class HomeTabPill: UIView {
             stack.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor, constant: -4),
             stack.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor),
-            heightAnchor.constraint(equalToConstant: 44),
+            heightAnchor.constraint(equalToConstant: 52),
         ])
-        select(0)
+        select(0, animated: false)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Selection is plain tint, Telegram-style: the active tab in full label
-    /// color, the rest quiet — no sliding highlight to maintain.
-    func select(_ index: Int) {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        selection.frame = selectionFrame()
+    }
+
+    private func selectionFrame() -> CGRect {
+        guard buttons.indices.contains(selectedIndex) else { return .zero }
+        return buttons[selectedIndex].convert(buttons[selectedIndex].bounds, to: selection.superview)
+            .insetBy(dx: 0, dy: 4)
+    }
+
+    func select(_ index: Int, animated: Bool) {
+        selectedIndex = index
         for (i, button) in buttons.enumerated() {
             button.tintColor = i == index ? .label : .secondaryLabel
+        }
+        layoutIfNeeded()
+        let settle = { self.selection.frame = self.selectionFrame() }
+        if animated {
+            UIView.animate(withDuration: 0.3, delay: 0,
+                           usingSpringWithDamping: 0.85, initialSpringVelocity: 0,
+                           options: .curveEaseOut, animations: settle)
+        } else {
+            settle()
         }
     }
 }
