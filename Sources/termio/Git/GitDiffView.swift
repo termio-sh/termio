@@ -20,6 +20,9 @@ struct GitDiffView: View {
 
     @State private var rows: [DiffRow] = []
     @State private var isLoading = true
+    /// The spinner waits 0.15 s before appearing, so a fast file-to-file walk swaps
+    /// content with no intermediate flash; only a genuinely slow diff shows it.
+    @State private var showsSpinner = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -118,6 +121,11 @@ struct GitDiffView: View {
             ProgressView()
                 .controlSize(.small)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .opacity(showsSpinner ? 1 : 0)
+                .task {
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    showsSpinner = true
+                }
         } else if rows.isEmpty {
             ContentUnavailableView(
                 "No Diff",

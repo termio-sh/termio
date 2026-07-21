@@ -162,7 +162,11 @@ struct TerminalPane: View {
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: store.openFileURL)
+        // The fade is tied to presence (nil ↔ non-nil), NOT to the value: animating the
+        // value would crossfade content-to-content switches (arrow-key walking, clicking
+        // file after file), stacking two translucent copies — visible ghosting. Switching
+        // swaps instantly, Quick Look style; only open and close fade.
+        .animation(.easeOut(duration: 0.12), value: store.openFileURL != nil)
         // Clicking a row in the inspector's Changes pane covers the terminal with that file's
         // unified diff (the surface keeps running underneath), the git counterpart of the editor
         // overlay above. Escape or the close button clears it.
@@ -176,7 +180,7 @@ struct TerminalPane: View {
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: store.openDiff)
+        .animation(.easeOut(duration: 0.12), value: store.openDiff != nil)
         // The Info pane's "View Trace" covers the terminal with the session's rendered agent trace
         // (dashboard + collapsible conversation), themed to match termio. Escape or the close button
         // clears it, like the editor and diff overlays.
@@ -190,7 +194,7 @@ struct TerminalPane: View {
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: store.openTrace)
+        .animation(.easeOut(duration: 0.12), value: store.openTrace != nil)
         // The ⌘⇧O/⌘⇧P palette lives in its own floating NSPanel (owned by
         // the app delegate — a SwiftUI overlay would render *under* the NSView
         // terminal surfaces); this only hands focus back to the terminal when
