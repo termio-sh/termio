@@ -325,7 +325,8 @@ struct FileEditorView: View {
     /// actually ships (e.g. it has no `toml`/`jsonc` — those fold into `ini`/`json`). The whole file
     /// name is checked first (so `Dockerfile`, `Cargo.lock`, `yarn.lock`, … resolve by name, not
     /// extension), then the extension. Unknown files return `nil` to let highlight.js auto-detect.
-    private static func highlightLanguage(for url: URL) -> String? {
+    /// Shared with `GitDiffView`, which colors diff lines through the same grammar set.
+    static func highlightLanguage(for url: URL) -> String? {
         // Extension-less or specially-named files, keyed by the whole (lowercased) name.
         switch url.lastPathComponent.lowercased() {
         case "dockerfile", "containerfile": return "dockerfile"

@@ -15,8 +15,17 @@ enum GitService {
     /// The unified-diff rows for one changed file (staged + unstaged vs `HEAD`, or the
     /// whole file for an untracked one). With `commit` set, the file's diff *at that
     /// commit* instead — the History tab's per-file view.
+    ///
+    /// Rows are fetched with *full* context (`-U999999`) so the whole file is present
+    /// and the overlay can collapse unchanged runs into expandable bands client-side;
+    /// a pathological row count falls back to git's default 3-line context (the view
+    /// then shows the inter-hunk gaps as fixed, non-expandable bands).
     static func diffRows(for change: GitChange, in repoRoot: String, commit: String? = nil) async -> [DiffRow] {
-        await offMain { parseDiff(loadDiffText(change, repoRoot, commit: commit)) }
+        await offMain {
+            let full = parseDiff(loadDiffText(change, repoRoot, commit: commit, context: 999_999))
+            guard full.count > 20_000 else { return full }
+            return parseDiff(loadDiffText(change, repoRoot, commit: commit))
+        }
     }
 
     /// The raw unified-diff text for one changed file — what "Copy Diff" puts on the
@@ -244,25 +253,28 @@ enum GitService {
         }
     }
 
-    private static func loadDiffText(_ change: GitChange, _ repoRoot: String, commit: String? = nil) -> String {
+    private static func loadDiffText(_ change: GitChange, _ repoRoot: String,
+                                     commit: String? = nil, context: Int? = nil) -> String {
+        let contextArguments = context.map { ["-U\($0)"] } ?? []
         // History file row: the file's change within one commit. `--format=` strips the
         // commit header so parseDiff sees only the unified diff.
         if let commit {
-            return run(["show", "--format=", "-M", commit, "--", change.path],
+            return run(["show", "--format=", "-M"] + contextArguments + [commit, "--", change.path],
                        in: repoRoot, ignoreStatus: true) ?? ""
         }
         if change.isUntracked {
             // `--no-index` exits non-zero when the files differ, which is the normal
             // case here, so the status is ignored.
-            return run(["diff", "--no-index", "--", "/dev/null", change.path],
+            return run(["diff", "--no-index"] + contextArguments + ["--", "/dev/null", change.path],
                        in: repoRoot, ignoreStatus: true) ?? ""
         }
         // `diff HEAD` shows staged and unstaged together. Fall back to the split views
         // for a repo with no commit yet, or a fully-staged change.
-        if let d = run(["diff", "HEAD", "--", change.path], in: repoRoot), !d.isEmpty { return d }
-        let unstaged = run(["diff", "--", change.path], in: repoRoot) ?? ""
+        if let d = run(["diff"] + contextArguments + ["HEAD", "--", change.path], in: repoRoot),
+           !d.isEmpty { return d }
+        let unstaged = run(["diff"] + contextArguments + ["--", change.path], in: repoRoot) ?? ""
         if !unstaged.isEmpty { return unstaged }
-        return run(["diff", "--cached", "--", change.path], in: repoRoot) ?? ""
+        return run(["diff"] + contextArguments + ["--cached", "--", change.path], in: repoRoot) ?? ""
     }
 
     /// Parses unified-diff text into rows, tracking old/new line numbers from each
@@ -276,7 +288,9 @@ enum GitService {
             let line = String(raw)
             if line.hasPrefix("@@") {
                 if let (o, n) = parseHunkHeader(line) { oldNo = o; newNo = n }
-                rows.append(DiffRow(id: id, kind: .hunk, text: line, oldLine: nil, newLine: nil)); id += 1
+                // Hunk rows carry their start numbers so the overlay can size the gap
+                // to the previous hunk when it renders the boundary as a "⋯ n lines" band.
+                rows.append(DiffRow(id: id, kind: .hunk, text: line, oldLine: oldNo, newLine: newNo)); id += 1
                 continue
             }
             if isFileHeader(line) { continue }
