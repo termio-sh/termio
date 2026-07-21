@@ -375,6 +375,9 @@ private struct GitChangeRow: View {
                 }
                 .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                 .opacity(0.85)
+                // Counts never wrap or compress — when the row runs out of width the
+                // dimmed directory is the one flexible element that gives way.
+                .fixedSize()
             }
         }
         .padding(.horizontal, 14)
