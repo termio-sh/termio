@@ -239,8 +239,17 @@ struct GitDiffView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, 1)
+            // A realistic per-line estimate, NOT 1: the table uses this to size its
+            // viewport, and a 1 pt estimate on a full-context diff (thousands of rows)
+            // makes it materialize them all at once — a seconds-long main-thread stall.
+            .environment(\.defaultMinListRowHeight, lineHeightEstimate)
         }
+    }
+
+    /// Approximate single-line row height (font line box + the row's 1 pt paddings).
+    private var lineHeightEstimate: CGFloat {
+        let font = settings.resolvedTerminalFont()
+        return (font.ascender - font.descender + font.leading).rounded(.up) + 2
     }
 
     /// Whether any code row carries an old/new line number (hunk rows don't count —
