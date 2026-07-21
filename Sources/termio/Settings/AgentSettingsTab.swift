@@ -226,7 +226,7 @@ private struct AgentManagerRow: View {
             // the padding and the Spacer are holes in the Form row's hit test.
             .contentShape(Rectangle())
             .contextMenu {
-                Button("Remove Agent") { settings.removeAgent(preset) }
+                Button("Remove from List") { settings.removeAgent(preset) }
             }
 
             if isExpanded {
@@ -264,16 +264,14 @@ private struct AgentManagerRow: View {
                     }
 
                     // The visible twin of the row's right-click item — a drawer-only
-                    // action so the scannable list stays clean. A real bordered
-                    // button (the macOS settings shape for destructive row actions,
-                    // red on the text only), not an iOS-style bare red row. No
-                    // confirmation: the agent is one "Add Agent" pick away from
-                    // coming back.
-                    Button("Remove Agent", role: .destructive) {
+                    // action so the scannable list stays clean. Deliberately not
+                    // red: nothing is destroyed — the row folds back into the "Add
+                    // Agent" menu with its overrides intact, so no confirmation
+                    // either.
+                    Button("Remove from List") {
                         settings.removeAgent(preset)
                     }
                     .buttonStyle(.bordered)
-                    .tint(.red)
                     .controlSize(.small)
                 }
                 // Indent to the title's column (icon 22 + spacing 10) so the drawer
