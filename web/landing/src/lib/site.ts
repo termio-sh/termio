@@ -16,7 +16,6 @@ export const supportedAgents = [
 export const navLinks = [
   { label: "Docs", href: "/docs" },
   { label: "Changelog", href: "/changelog" },
-  { label: "Docs", href: "/docs/atp" },
 ] as const;
 
 // Community Discord invite, surfaced in the site nav.

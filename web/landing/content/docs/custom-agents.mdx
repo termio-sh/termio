@@ -52,7 +52,7 @@ reorder, or tweak its command from **Settings ▸ Agents** like any other.
 | `command` | | The program and arguments to launch. Omit it to open your login shell. The binary must be on your `PATH`. |
 | `icon` | | An icon — see below. Defaults to a generic glyph. |
 | `status` | | Screen-scrape rules for live status — see below. |
-| `resume` | | Resume strategy: `"none"` (default), `"claude"`, `"codex"`, `"pi"`, or `"opencode"`. |
+| `resume` | | How a reopened session continues its exact conversation — an object of launch-argument templates and a session-store descriptor. See the [Agent Terminal Protocol](/docs/atp#resume). Omit it and every launch starts fresh. |
 | `permissionBypassFlag` | | A flag appended when you toggle "skip permission prompts" for this agent. |
 | `tint` | | A hex color (e.g. `"#14B8A6"`) used to tint the "working" spinner. |
 
