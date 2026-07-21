@@ -264,14 +264,17 @@ private struct AgentManagerRow: View {
                     }
 
                     // The visible twin of the row's right-click item — a drawer-only
-                    // action so the scannable list stays clean. No confirmation: the
-                    // agent is one "Add Agent" pick away from coming back.
-                    Button(role: .destructive) {
+                    // action so the scannable list stays clean. A real bordered
+                    // button (the macOS settings shape for destructive row actions,
+                    // red on the text only), not an iOS-style bare red row. No
+                    // confirmation: the agent is one "Add Agent" pick away from
+                    // coming back.
+                    Button("Remove Agent", role: .destructive) {
                         settings.removeAgent(preset)
-                    } label: {
-                        Text("Remove Agent").foregroundStyle(.red)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .controlSize(.small)
                 }
                 // Indent to the title's column (icon 22 + spacing 10) so the drawer
                 // reads as the row's children, not more agents.
