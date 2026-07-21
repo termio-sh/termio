@@ -35,10 +35,22 @@ final class RootContainerViewController: UIViewController {
     private lazy var chatsNav = HomeNavigationController(
         rootViewController: ChatListViewController(store: store)
     )
-    /// The bottom-left floating switcher between the two.
+    /// The Settings tab, Telegram's placement: the same page the unpaired
+    /// zero state presents modally, minus the modal ✕. A stock nav (bar
+    /// visible) — settings uses system chrome, unlike the home lists.
+    private lazy var settingsNav: UINavigationController = {
+        let settings = SettingsViewController()
+        settings.showsCloseButton = false
+        let nav = UINavigationController(rootViewController: settings)
+        // Keep the table's last rows clear of the floating pill.
+        nav.additionalSafeAreaInsets.bottom = 76
+        return nav
+    }()
+    /// The bottom-left floating switcher between the three.
     private let tabPill = HomeTabPill(items: [
         (title: "Projects", symbol: "folder"),
         (title: "Chats", symbol: "bubble.left.and.bubble.right"),
+        (title: "Settings", symbol: "gearshape"),
     ])
 
     /// Every parked terminal is a live libghostty surface (scrollback + render
@@ -59,23 +71,25 @@ final class RootContainerViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
 
-        // Both tab stacks are permanent base layers: added once, always behind
+        // All tab stacks are permanent base layers: added once, always behind
         // any terminal, only ever toggled hidden — so each tab keeps its
         // scroll position and pushed pages across switches.
-        for nav in [projectsNav, chatsNav] {
+        let tabStacks: [UIViewController] = [projectsNav, chatsNav, settingsNav]
+        for nav in tabStacks {
             addChild(nav)
             nav.view.frame = view.bounds
             nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             view.addSubview(nav.view)
             nav.didMove(toParent: self)
+            nav.view.isHidden = nav !== projectsNav
         }
-        chatsNav.view.isHidden = true
 
-        // The switcher floats over both; terminals slide in above it.
+        // The switcher floats over all of them; terminals slide in above it.
         tabPill.onSelect = { [weak self] index in
             guard let self else { return }
-            projectsNav.view.isHidden = index != 0
-            chatsNav.view.isHidden = index != 1
+            for (i, nav) in tabStacks.enumerated() {
+                nav.view.isHidden = i != index
+            }
         }
         tabPill.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tabPill)

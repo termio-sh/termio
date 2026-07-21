@@ -102,18 +102,8 @@ final class ProjectListViewController: UIViewController {
             },
         ])
 
-        // Settings rides the top bar now that the tab bar owns the bottom edge
-        // (the old floating gear puck would collide with it).
-        let gear = UIButton(type: .system)
-        gear.applyGlassSymbol("gearshape")
-        gear.tintColor = .label
-        gear.accessibilityLabel = "Settings"
-        gear.addAction(UIAction { [weak self] _ in
-            self?.presentSettings()
-        }, for: .touchUpInside)
-
         let spacer = UIView()
-        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer, filterButton, gear])
+        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer, filterButton])
         bar.axis = .horizontal
         bar.alignment = .center
         bar.spacing = 8
@@ -126,8 +116,6 @@ final class ProjectListViewController: UIViewController {
             // Telegram's nav-bar glass buttons are 40pt circles.
             filterButton.widthAnchor.constraint(equalToConstant: 40),
             filterButton.heightAnchor.constraint(equalToConstant: 40),
-            gear.widthAnchor.constraint(equalToConstant: 40),
-            gear.heightAnchor.constraint(equalToConstant: 40),
         ])
         return bar
     }
@@ -180,9 +168,9 @@ final class ProjectListViewController: UIViewController {
         )
         tableView.translatesAutoresizingMaskIntoConstraints = false
         // The floating tab pill sits over the list; reserve room so the last
-        // rows scroll clear of it.
-        tableView.contentInset.bottom = 56
-        tableView.verticalScrollIndicatorInsets.bottom = 56
+        // rows scroll clear of it (64pt pill + margins).
+        tableView.contentInset.bottom = 80
+        tableView.verticalScrollIndicatorInsets.bottom = 80
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 16),

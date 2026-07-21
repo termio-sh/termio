@@ -50,7 +50,7 @@ final class ChatListViewController: UIViewController {
         tableView.reloadData()
     }
 
-    // MARK: - Top bar (large title + settings)
+    // MARK: - Top bar (large title)
 
     private func configureTopBar() -> UIView {
         let pageTitle = UILabel()
@@ -58,16 +58,8 @@ final class ChatListViewController: UIViewController {
         pageTitle.font = .systemFont(ofSize: 34, weight: .bold)
         pageTitle.textColor = .label
 
-        let gear = UIButton(type: .system)
-        gear.applyGlassSymbol("gearshape")
-        gear.tintColor = .label
-        gear.accessibilityLabel = "Settings"
-        gear.addAction(UIAction { [weak self] _ in
-            self?.presentSettings()
-        }, for: .touchUpInside)
-
         let spacer = UIView()
-        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer, gear])
+        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer])
         bar.axis = .horizontal
         bar.alignment = .center
         bar.spacing = 8
@@ -77,8 +69,7 @@ final class ChatListViewController: UIViewController {
             bar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            gear.widthAnchor.constraint(equalToConstant: 40),
-            gear.heightAnchor.constraint(equalToConstant: 40),
+            bar.heightAnchor.constraint(equalToConstant: 40),
         ])
         return bar
     }
@@ -105,14 +96,12 @@ final class ChatListViewController: UIViewController {
         view.addSubview(newChatButton)
         NSLayoutConstraint.activate([
             newChatButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            newChatButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            newChatButton.widthAnchor.constraint(equalToConstant: 44),
-            newChatButton.heightAnchor.constraint(equalToConstant: 44),
+            // Telegram's detached circle scale (48pt), centered against the
+            // 64pt pill anchored 8pt above the safe area.
+            newChatButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            newChatButton.widthAnchor.constraint(equalToConstant: 48),
+            newChatButton.heightAnchor.constraint(equalToConstant: 48),
         ])
-    }
-
-    private func presentSettings() {
-        present(UINavigationController(rootViewController: SettingsViewController()), animated: true)
     }
 
     // MARK: - Table
@@ -129,9 +118,9 @@ final class ChatListViewController: UIViewController {
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
         tableView.translatesAutoresizingMaskIntoConstraints = false
         // The floating pill/＋ sit over the list; reserve room so the last
-        // rows scroll clear of them.
-        tableView.contentInset.bottom = 56
-        tableView.verticalScrollIndicatorInsets.bottom = 56
+        // rows scroll clear of them (64pt pill + margins).
+        tableView.contentInset.bottom = 80
+        tableView.verticalScrollIndicatorInsets.bottom = 80
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 16),

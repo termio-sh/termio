@@ -50,11 +50,12 @@ enum GlassChrome {
 /// group is a `.search`-role tab's detached circle, whose semantics ("select
 /// the search tab") can't host a ＋ menu.
 ///
-/// Recipe follows Telegram's TabBarComponent, scaled down: icon over a
-/// semibold-10 label (their exact label style), items padded ~10pt, capsule
-/// radius = height/2 with a 4pt inner inset, and — the detail that makes it
-/// read finished — a sliding selection capsule behind the active item
-/// (Telegram's selectionFrame; theirs is 56+4×2 tall, ours 52 total).
+/// Recipe follows Telegram's TabBarComponent at its exact metrics: a 64pt bar
+/// (56pt items + 4pt inner inset), icon over a semibold-10 label (icon area
+/// 8pt from the top, label 8pt from the bottom), equal-width items padded
+/// ~10pt, capsule radius = height/2, and — the detail that makes it read
+/// finished — a sliding selection capsule behind the active item
+/// (Telegram's selectionFrame, the full 56pt item).
 final class HomeTabPill: UIView {
     var onSelect: ((Int) -> Void)?
 
@@ -66,7 +67,7 @@ final class HomeTabPill: UIView {
         super.init(frame: .zero)
         let glass = GlassChrome.makeView(interactive: true)
         glass.translatesAutoresizingMaskIntoConstraints = false
-        glass.layer.cornerRadius = 26
+        glass.layer.cornerRadius = 32
         glass.clipsToBounds = true
         addSubview(glass)
 
@@ -74,7 +75,7 @@ final class HomeTabPill: UIView {
         // tracks the selected button in layoutSubviews. Same fill as the
         // session rows' current-chat pill, so selection reads consistently.
         selection.backgroundColor = UIColor.label.withAlphaComponent(0.08)
-        selection.layer.cornerRadius = 22
+        selection.layer.cornerRadius = 28
         glass.contentView.addSubview(selection)
 
         buttons = items.enumerated().map { index, item in
@@ -82,12 +83,12 @@ final class HomeTabPill: UIView {
             config.image = UIImage(systemName: item.symbol)
             config.imagePlacement = .top
             config.imagePadding = 3
-            config.preferredSymbolConfigurationForImage = .init(pointSize: 16, weight: .semibold)
+            config.preferredSymbolConfigurationForImage = .init(pointSize: 20, weight: .medium)
             config.attributedTitle = AttributedString(
                 item.title,
                 attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 10, weight: .semibold)])
             )
-            config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
+            config.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
             let button = UIButton(configuration: config)
             button.addAction(UIAction { [weak self] _ in
                 self?.select(index, animated: true)
@@ -111,7 +112,7 @@ final class HomeTabPill: UIView {
             stack.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor, constant: -4),
             stack.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor),
-            heightAnchor.constraint(equalToConstant: 52),
+            heightAnchor.constraint(equalToConstant: 64),
         ])
         select(0, animated: false)
     }

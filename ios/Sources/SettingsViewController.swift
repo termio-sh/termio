@@ -62,28 +62,35 @@ final class SettingsViewController: UITableViewController {
         }
     }
 
+    /// False when the page lives as the home's Settings tab — nothing to
+    /// dismiss there; true for the modal presentation (the unpaired zero
+    /// state's "Connect a Mac" path).
+    var showsCloseButton = true
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Settings"
-        // A real glass ✕ at a Telegram-scale target, not the slim system
-        // Done text item.
-        // Telegram's sheet close: a 44pt glass circle with a ~17pt cross.
-        let close = UIButton(type: .system)
-        close.applyGlassSymbol("xmark", pointSize: 17)
-        close.accessibilityLabel = "Close"
-        close.addAction(UIAction { [weak self] _ in
-            self?.dismiss(animated: true)
-        }, for: .touchUpInside)
-        NSLayoutConstraint.activate([
-            close.widthAnchor.constraint(equalToConstant: 44),
-            close.heightAnchor.constraint(equalToConstant: 44),
-        ])
-        let closeItem = UIBarButtonItem(customView: close)
-        if #available(iOS 26.0, *) {
-            // The bar wraps items in its own glass; the button already has one.
-            closeItem.hidesSharedBackground = true
+        if showsCloseButton {
+            // A real glass ✕ at a Telegram-scale target, not the slim system
+            // Done text item.
+            // Telegram's sheet close: a 44pt glass circle with a ~17pt cross.
+            let close = UIButton(type: .system)
+            close.applyGlassSymbol("xmark", pointSize: 17)
+            close.accessibilityLabel = "Close"
+            close.addAction(UIAction { [weak self] _ in
+                self?.dismiss(animated: true)
+            }, for: .touchUpInside)
+            NSLayoutConstraint.activate([
+                close.widthAnchor.constraint(equalToConstant: 44),
+                close.heightAnchor.constraint(equalToConstant: 44),
+            ])
+            let closeItem = UIBarButtonItem(customView: close)
+            if #available(iOS 26.0, *) {
+                // The bar wraps items in its own glass; the button already has one.
+                closeItem.hidesSharedBackground = true
+            }
+            navigationItem.rightBarButtonItem = closeItem
         }
-        navigationItem.rightBarButtonItem = closeItem
         // The Connectivity row's inline status tracks the live link.
         stateObserver = NotificationCenter.default.addObserver(
             forName: CompanionLink.stateDidChange, object: nil, queue: .main
