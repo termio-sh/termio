@@ -138,11 +138,11 @@ final class ProjectDetailViewController: UIViewController {
     // MARK: - Add button (the floating ＋)
 
     /// The Mac project menu's "New … Session" actions — ＋ floats bottom-right
-    /// like Slack's compose button, the same corner the Chats tab uses, and the
-    /// project page has this corner to itself (the home tab pill hides on
-    /// pushed pages). Live rosters only; the bundled mock can't start anything.
+    /// like Slack's compose button, the same corner every home screen uses,
+    /// balancing the tab pill bottom-left. Live rosters only; the bundled mock
+    /// can't start anything.
     private func configureAddButton() {
-        addButton.applyGlassSymbol("plus", pointSize: 17)
+        addButton.applyGlassSymbol("plus", pointSize: 22)
         addButton.tintColor = .label
         addButton.accessibilityLabel = "New session in \(project.name)"
         addButton.showsMenuAsPrimaryAction = true
@@ -156,9 +156,11 @@ final class ProjectDetailViewController: UIViewController {
         view.addSubview(addButton)
         NSLayoutConstraint.activate([
             addButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            addButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
-            addButton.widthAnchor.constraint(equalToConstant: 48),
-            addButton.heightAnchor.constraint(equalToConstant: 48),
+            // The tab pill's own scale (64pt, 8pt above the safe area), so the
+            // two ends of the bottom edge read as one balanced bar.
+            addButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+            addButton.widthAnchor.constraint(equalToConstant: 64),
+            addButton.heightAnchor.constraint(equalToConstant: 64),
         ])
     }
 

@@ -149,7 +149,7 @@ final class ProjectListViewController: UIViewController {
     /// with the agents inside (the long-press menu, made discoverable);
     /// deferred so it always reflects the live roster, hidden while unpaired.
     private func configureNewSessionButton() {
-        newSessionButton.applyGlassSymbol("plus", pointSize: 17)
+        newSessionButton.applyGlassSymbol("plus", pointSize: 22)
         newSessionButton.tintColor = .label
         newSessionButton.accessibilityLabel = "New Session"
         newSessionButton.showsMenuAsPrimaryAction = true
@@ -169,9 +169,11 @@ final class ProjectListViewController: UIViewController {
         view.addSubview(newSessionButton)
         NSLayoutConstraint.activate([
             newSessionButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            newSessionButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
-            newSessionButton.widthAnchor.constraint(equalToConstant: 48),
-            newSessionButton.heightAnchor.constraint(equalToConstant: 48),
+            // The tab pill's own scale (64pt, 8pt above the safe area), so the
+            // two ends of the bottom edge read as one balanced bar.
+            newSessionButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+            newSessionButton.widthAnchor.constraint(equalToConstant: 64),
+            newSessionButton.heightAnchor.constraint(equalToConstant: 64),
         ])
     }
 

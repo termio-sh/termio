@@ -6,11 +6,11 @@ import UIKit
 /// destinations. The switcher is a compact Telegram-scale glass pill floating
 /// bottom-LEFT (`HomeTabPill` — see there for why the system tab bar doesn't
 /// fit), leaving the bottom-right corner to each screen's own ＋ (the Slack
-/// compose corner). The pill is HOME chrome: it fades out when a project page
-/// is pushed and back in on pop — drilled-in screens own the whole bottom
-/// edge. Tapping a session anywhere slides its terminal in full-screen over
-/// the whole thing, and "back" slides it away to reveal the tabs wherever
-/// they were. Screens draw their own chrome (large titles, glass buttons, the
+/// compose corner) at the pill's own 64pt scale, so the bottom edge reads as
+/// one balanced bar on every home screen — pushed project pages included.
+/// Tapping a session anywhere slides its terminal in full-screen over the
+/// whole thing, and "back" slides it away to reveal the tabs wherever they
+/// were. Screens draw their own chrome (large titles, glass buttons, the
 /// terminal its compact header), so the navigation bars stay hidden.
 ///
 /// **Why containment instead of a UINavigationController.** Destroying a
@@ -99,23 +99,6 @@ final class RootContainerViewController: UIViewController {
             tabPill.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             tabPill.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
         ])
-
-        // The pill switches HOME screens, so it only exists at home: fade it
-        // with the push/pop transition when a project page drills in (Chats
-        // and Settings never push). Alongside the transition coordinator so an
-        // interactive swipe-back drags it in, and cancelling restores it.
-        projectsNav.onDepthChange = { [weak self] pushed, coordinator in
-            guard let self else { return }
-            let apply = { self.tabPill.alpha = pushed ? 0 : 1 }
-            if let coordinator {
-                coordinator.animate(alongsideTransition: { _ in apply() }) { context in
-                    guard context.isCancelled else { return }
-                    self.tabPill.alpha = self.projectsNav.viewControllers.count > 1 ? 0 : 1
-                }
-            } else {
-                apply()
-            }
-        }
 
         store.onOpenSession = { [weak self] session, companionURL in
             guard let self else { return }
@@ -323,30 +306,14 @@ final class RootContainerViewController: UIViewController {
 /// chrome), but the edge swipe-back kept alive — hiding the bar normally
 /// disables `interactivePopGestureRecognizer`, so it gets a delegate that
 /// re-arms it whenever there is somewhere to pop to.
-private final class HomeNavigationController: UINavigationController,
-    UIGestureRecognizerDelegate, UINavigationControllerDelegate {
-    /// Fired on every push/pop with whether a page is (about to be) drilled
-    /// in past the root, plus the transition coordinator so the observer can
-    /// animate alongside (nil for non-animated stack changes).
-    var onDepthChange: ((_ pushed: Bool, _ coordinator: UIViewControllerTransitionCoordinator?) -> Void)?
-
+private final class HomeNavigationController: UINavigationController, UIGestureRecognizerDelegate {
     override func viewDidLoad() {
         super.viewDidLoad()
         isNavigationBarHidden = true
-        delegate = self
         interactivePopGestureRecognizer?.delegate = self
     }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         viewControllers.count > 1
-    }
-
-    func navigationController(
-        _ navigationController: UINavigationController,
-        willShow viewController: UIViewController,
-        animated: Bool
-    ) {
-        // `viewControllers` already reflects the post-transition stack here.
-        onDepthChange?(viewControllers.count > 1, animated ? transitionCoordinator : nil)
     }
 }

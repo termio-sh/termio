@@ -79,7 +79,7 @@ final class ChatListViewController: UIViewController {
     /// chats container; deferred so it always reflects the roster's current
     /// agent list (and hides while unpaired).
     private func configureNewChatButton() {
-        newChatButton.applyGlassSymbol("plus", pointSize: 17)
+        newChatButton.applyGlassSymbol("plus", pointSize: 22)
         newChatButton.tintColor = .label
         newChatButton.accessibilityLabel = "New Chat"
         newChatButton.showsMenuAsPrimaryAction = true
@@ -96,11 +96,11 @@ final class ChatListViewController: UIViewController {
         view.addSubview(newChatButton)
         NSLayoutConstraint.activate([
             newChatButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            // Telegram's detached circle scale (48pt), centered against the
-            // 64pt pill anchored 8pt above the safe area.
-            newChatButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
-            newChatButton.widthAnchor.constraint(equalToConstant: 48),
-            newChatButton.heightAnchor.constraint(equalToConstant: 48),
+            // The tab pill's own scale (64pt, 8pt above the safe area), so the
+            // two ends of the bottom edge read as one balanced bar.
+            newChatButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+            newChatButton.widthAnchor.constraint(equalToConstant: 64),
+            newChatButton.heightAnchor.constraint(equalToConstant: 64),
         ])
     }
 
