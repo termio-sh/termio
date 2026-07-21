@@ -1,10 +1,13 @@
 import UIKit
 
-/// The shell: the home stack (Projects root → a pushed project page) is the
-/// base layer; tapping a session anywhere slides its terminal in full-screen
-/// over it, and "back" slides it away to reveal the stack wherever it was.
-/// Screens draw their own chrome (large titles, glass buttons, the terminal
-/// its compact header), so the navigation bar stays hidden.
+/// The shell: the home is a two-tab bar — Projects (the strip + project list,
+/// with its pushed project pages) and Chats (the Mac's loose agent sessions),
+/// mirroring the desktop sidebar's Chats/Projects pairing as the two top-level
+/// destinations. On iOS 26 the system renders it as the floating Liquid Glass
+/// tab bar. Tapping a session anywhere slides its terminal in full-screen over
+/// the whole thing, and "back" slides it away to reveal the tabs wherever they
+/// were. Screens draw their own chrome (large titles, glass buttons, the
+/// terminal its compact header), so the navigation bars stay hidden.
 ///
 /// **Why containment instead of a UINavigationController.** Destroying a
 /// libghostty surface races the engine's render/IO threads — the source of the
@@ -19,12 +22,28 @@ import UIKit
 final class RootContainerViewController: UIViewController {
     /// The one live roster model, shared by every home screen.
     let store = RosterStore()
-    /// The home stack: Projects root, plus a pushed project page. Plain UIKit
-    /// views only — terminals never enter this stack (see the containment
-    /// note above), so a real navigation controller is safe here.
-    private lazy var homeNav = HomeNavigationController(
+    /// The Projects tab's stack: the root list, plus a pushed project page.
+    /// Plain UIKit views only — terminals never enter this stack (see the
+    /// containment note above), so a real navigation controller is safe here.
+    private lazy var projectsNav = HomeNavigationController(
         rootViewController: ProjectListViewController(store: store)
     )
+    /// The Chats tab's stack: the flat chat list (nothing pushes onto it yet;
+    /// a nav keeps both tabs the same shape).
+    private lazy var chatsNav = HomeNavigationController(
+        rootViewController: ChatListViewController(store: store)
+    )
+    /// The two-tab home. A stock UITabBarController: on iOS 26 the system
+    /// dresses it as the floating Liquid Glass bar for free.
+    private lazy var homeTabs: UITabBarController = {
+        let tabs = UITabBarController()
+        projectsNav.tabBarItem = UITabBarItem(
+            title: "Projects", image: UIImage(systemName: "folder"), tag: 0)
+        chatsNav.tabBarItem = UITabBarItem(
+            title: "Chats", image: UIImage(systemName: "bubble.left.and.bubble.right"), tag: 1)
+        tabs.viewControllers = [projectsNav, chatsNav]
+        return tabs
+    }()
 
     /// Every parked terminal is a live libghostty surface (scrollback + render
     /// buffers + a streaming socket) whose view stays in the window. On the
@@ -44,13 +63,13 @@ final class RootContainerViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
 
-        // The home stack is the permanent base layer: added once, always
+        // The tabbed home is the permanent base layer: added once, always
         // behind any terminal, revealed whenever no terminal is slid in over it.
-        addChild(homeNav)
-        homeNav.view.frame = view.bounds
-        homeNav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(homeNav.view)
-        homeNav.didMove(toParent: self)
+        addChild(homeTabs)
+        homeTabs.view.frame = view.bounds
+        homeTabs.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(homeTabs.view)
+        homeTabs.didMove(toParent: self)
 
         store.onOpenSession = { [weak self] session, companionURL in
             guard let self else { return }
@@ -201,7 +220,7 @@ final class RootContainerViewController: UIViewController {
     func openFirstProjectPage() {
         loadViewIfNeeded()
         guard let first = store.projects.first else { return }
-        homeNav.pushViewController(
+        projectsNav.pushViewController(
             ProjectDetailViewController(store: store, project: first),
             animated: false
         )
@@ -212,7 +231,7 @@ final class RootContainerViewController: UIViewController {
     func openProjectPage(named name: String) -> Bool {
         loadViewIfNeeded()
         guard let project = store.projects.first(where: { $0.name == name }) else { return false }
-        homeNav.pushViewController(
+        projectsNav.pushViewController(
             ProjectDetailViewController(store: store, project: project),
             animated: false
         )
@@ -221,9 +240,12 @@ final class RootContainerViewController: UIViewController {
 
     /// Repaint the current-session pill on whichever home screens are up.
     private func refreshHomeLists() {
-        for screen in homeNav.viewControllers {
+        for screen in projectsNav.viewControllers {
             (screen as? ProjectListViewController)?.refresh()
             (screen as? ProjectDetailViewController)?.refresh()
+        }
+        for screen in chatsNav.viewControllers {
+            (screen as? ChatListViewController)?.refresh()
         }
     }
 

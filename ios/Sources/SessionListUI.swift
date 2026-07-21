@@ -104,22 +104,6 @@ struct RowSeparator: View {
     }
 }
 
-// MARK: - Glass chrome
-
-enum GlassChrome {
-    /// A Liquid Glass surface. On iOS 26 it's a real interactive `UIGlassEffect`
-    /// (the Telegram tab-bar look); older systems fall back to a chrome-material
-    /// blur, which reads as translucent glass too.
-    static func makeView(interactive: Bool) -> UIVisualEffectView {
-        if #available(iOS 26.0, *) {
-            let glass = UIGlassEffect(style: .regular)
-            glass.isInteractive = interactive
-            return UIVisualEffectView(effect: glass)
-        }
-        return UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
-    }
-}
-
 // MARK: - Empty state view
 
 /// The centered zero state — a quiet glyph (or spinner), a title, a line of

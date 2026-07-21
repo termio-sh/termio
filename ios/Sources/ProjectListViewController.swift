@@ -12,16 +12,13 @@ import UIKit
 final class ProjectListViewController: UIViewController {
     private let store: RosterStore
 
-    private enum Section { case needsYou, chats, projects }
+    private enum Section { case needsYou, projects }
     /// The sections currently on screen, rebuilt on every roster change.
     private var sections: [Section] = []
     /// Cross-project attention sessions (the strip's rows).
     private var attention: [MockSession] = []
-    /// Loose agent sessions from the Mac's "Chats" container, listed flat —
-    /// mirroring the desktop sidebar's Chats-over-Projects pairing. The
-    /// sessions ARE the content here, so no folder row to drill through.
-    private var chats: [MockSession] = []
     /// The store's projects in the chosen order — what the table shows.
+    /// Chats-kind containers are excluded: they have their own tab.
     private var visible: [MockProject] = []
 
     /// Mirrors the Mac sidebar's sort pull-down. The roster arrives in the
@@ -56,8 +53,6 @@ final class ProjectListViewController: UIViewController {
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
-        // Added last so the floating glass footer layers over the list.
-        configureBottomBar()
         refilter()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -107,8 +102,18 @@ final class ProjectListViewController: UIViewController {
             },
         ])
 
+        // Settings rides the top bar now that the tab bar owns the bottom edge
+        // (the old floating gear puck would collide with it).
+        let gear = UIButton(type: .system)
+        gear.applyGlassSymbol("gearshape")
+        gear.tintColor = .label
+        gear.accessibilityLabel = "Settings"
+        gear.addAction(UIAction { [weak self] _ in
+            self?.presentSettings()
+        }, for: .touchUpInside)
+
         let spacer = UIView()
-        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer, filterButton])
+        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer, filterButton, gear])
         bar.axis = .horizontal
         bar.alignment = .center
         bar.spacing = 8
@@ -121,6 +126,8 @@ final class ProjectListViewController: UIViewController {
             // Telegram's nav-bar glass buttons are 40pt circles.
             filterButton.widthAnchor.constraint(equalToConstant: 40),
             filterButton.heightAnchor.constraint(equalToConstant: 40),
+            gear.widthAnchor.constraint(equalToConstant: 40),
+            gear.heightAnchor.constraint(equalToConstant: 40),
         ])
         return bar
     }
@@ -141,45 +148,6 @@ final class ProjectListViewController: UIViewController {
         sortByName = byName
         UserDefaults.standard.set(byName ? "name" : "recentActivity", forKey: "sessions.sortOrder")
         refilter()
-    }
-
-    // MARK: - Bottom bar (the floating settings button)
-
-    /// Telegram's iOS 26 tab bar: nothing spans the width. A **detached
-    /// circular glass button** floats bottom-right (settings) and the list
-    /// scrolls under it, so the footer reads as chrome, not a divider. The
-    /// Mac pairing and its live status live in Settings ▸ Connectivity.
-    private func configureBottomBar() {
-        let gear = UIButton(type: .system)
-        gear.setImage(
-            UIImage(systemName: "gearshape", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)),
-            for: .normal
-        )
-        gear.tintColor = .label
-        gear.accessibilityLabel = "Settings"
-        gear.addAction(UIAction { [weak self] _ in
-            self?.presentSettings()
-        }, for: .touchUpInside)
-        let puck = GlassChrome.makeView(interactive: true)
-        gear.translatesAutoresizingMaskIntoConstraints = false
-        puck.contentView.addSubview(gear)
-        puck.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(puck)
-
-        let puckSize: CGFloat = 44
-        puck.layer.cornerRadius = puckSize / 2
-        puck.clipsToBounds = true
-
-        NSLayoutConstraint.activate([
-            puck.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            puck.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            puck.widthAnchor.constraint(equalToConstant: puckSize),
-            puck.heightAnchor.constraint(equalToConstant: puckSize),
-            gear.centerXAnchor.constraint(equalTo: puck.contentView.centerXAnchor),
-            gear.centerYAnchor.constraint(equalTo: puck.contentView.centerYAnchor),
-            gear.widthAnchor.constraint(equalTo: puck.widthAnchor),
-            gear.heightAnchor.constraint(equalTo: puck.heightAnchor),
-        ])
     }
 
     private func presentSettings() {
@@ -211,11 +179,8 @@ final class ProjectListViewController: UIViewController {
             forHeaderFooterViewReuseIdentifier: SectionCapView.reuseID
         )
         tableView.translatesAutoresizingMaskIntoConstraints = false
-        // The floating glass footer sits over the list, so the list runs to the
-        // bottom edge and reserves room with an inset — the last rows clear the
-        // pill instead of butting a divider.
-        tableView.contentInset.bottom = 56
-        tableView.verticalScrollIndicatorInsets.bottom = 56
+        // The tab bar owns the bottom edge; the table's automatic safe-area
+        // adjustment keeps the last rows clear of it.
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 16),
@@ -226,21 +191,16 @@ final class ProjectListViewController: UIViewController {
     }
 
     /// Rebuild the section list from the store: the attention strip (only when
-    /// non-empty), the flat Chats group (only when non-empty), then the
-    /// projects in the chosen order. Chats-kind containers never render as
-    /// project rows — their loose sessions list directly, like the Mac sidebar.
+    /// non-empty), then the projects in the chosen order. Chats-kind containers
+    /// belong to the Chats tab — their attention sessions still surface in the
+    /// strip here, the cross-cutting shortcut.
     private func refilter() {
         attention = store.attentionSessions
         let ordered = sortByName
             ? store.projects.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             : store.projects
-        chats = ordered.filter { $0.kind == "chats" }.flatMap(\.sessions)
         visible = ordered.filter { $0.kind != "chats" }
-        sections = (attention.isEmpty ? [] : [.needsYou])
-            + (chats.isEmpty ? [] : [.chats])
-            // Skip an empty Projects group when Chats has the page to itself;
-            // when everything is empty the zero state covers the table anyway.
-            + (visible.isEmpty && !chats.isEmpty ? [] : [.projects])
+        sections = (attention.isEmpty ? [] : [.needsYou]) + [.projects]
         tableView.reloadData()
         updateEmptyState()
     }
@@ -267,7 +227,7 @@ final class ProjectListViewController: UIViewController {
     /// stalled (the Mac isn't answering — offer Try Again), or connected-but-idle
     /// (nudge toward opening a project on the Mac).
     private func updateEmptyState() {
-        emptyState.isHidden = !visible.isEmpty || !attention.isEmpty || !chats.isEmpty
+        emptyState.isHidden = !visible.isEmpty || !attention.isEmpty
         guard !emptyState.isHidden else {
             stopConnectingGraceTimer()
             return
@@ -359,7 +319,6 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch sections[section] {
         case .needsYou: attention.count
-        case .chats: chats.count
         case .projects: visible.count
         }
     }
@@ -371,12 +330,7 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: SectionCapView.reuseID
         ) as! SectionCapView
-        let title = switch sections[section] {
-        case .needsYou: "Needs You"
-        case .chats: "Chats"
-        case .projects: "Projects"
-        }
-        header.configure(title: title)
+        header.configure(title: sections[section] == .needsYou ? "Needs You" : "Projects")
         return header
     }
 
@@ -412,19 +366,6 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
             }
             .margins(.horizontal, 12)
             .margins(.vertical, 0)
-        case .chats:
-            let session = chats[indexPath.row]
-            cell.contentConfiguration = UIHostingConfiguration {
-                SessionRow(
-                    session: session,
-                    isCurrent: session.key == store.currentSessionKey,
-                    // The group header already says Chats; no per-row repeat.
-                    showsProject: false,
-                    showsSeparator: indexPath.row < chats.count - 1
-                )
-            }
-            .margins(.horizontal, 12)
-            .margins(.vertical, 0)
         case .projects:
             cell.contentConfiguration = UIHostingConfiguration {
                 ProjectRow(
@@ -444,9 +385,6 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
             // Straight to the terminal — the strip exists so the blocked
             // session is one tap away, never behind its project page.
             store.openSession(attention[indexPath.row])
-        case .chats:
-            // Loose sessions have no project page; the row IS the session.
-            store.openSession(chats[indexPath.row])
         case .projects:
             navigationController?.pushViewController(
                 ProjectDetailViewController(store: store, project: visible[indexPath.row]),
@@ -455,20 +393,14 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
         }
     }
 
-    /// Trailing swipe on a session row (the strip or a chat): the Mac session
-    /// menu's "Close Session".
+    /// Trailing swipe on a strip row: the Mac session menu's "Close Session".
     func tableView(
         _ tableView: UITableView,
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
     ) -> UISwipeActionsConfiguration? {
-        let session: MockSession? = switch sections[indexPath.section] {
-        case .needsYou: attention[indexPath.row]
-        case .chats: chats[indexPath.row]
-        case .projects: nil
-        }
-        guard let session,
+        guard sections[indexPath.section] == .needsYou,
               store.companionURL != nil,
-              let sessionID = session.rosterID
+              let sessionID = attention[indexPath.row].rosterID
         else { return nil }
         let close = UIContextualAction(style: .destructive, title: "Close") { [weak self] _, _, done in
             self?.store.stopSession(sessionID)

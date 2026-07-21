@@ -44,6 +44,18 @@ final class RosterStore {
         projects.flatMap(\.sessions).filter { $0.status == .needsAttention }
     }
 
+    /// The Mac's loose-agent-sessions container — the Chats tab's backing
+    /// project (and the target a phone-started chat lands in). nil when
+    /// paired to an older Mac that doesn't send project kinds.
+    var chatsProject: MockProject? {
+        projects.first { $0.kind == "chats" }
+    }
+
+    /// The Chats tab's rows, flat and in roster order.
+    var chatSessions: [MockSession] {
+        projects.filter { $0.kind == "chats" }.flatMap(\.sessions)
+    }
+
     /// The live project for a stable key (path, falling back to name — see
     /// `MockProject.stableKey`), or nil once the Mac closes it.
     func project(forKey key: String) -> MockProject? {
