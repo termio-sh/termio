@@ -2,6 +2,7 @@ import Highlightr
 import QuickLook
 import TermioShared
 import UIKit
+import WebKit
 
 /// Full-screen file view — the phone's counterpart of the macOS editor
 /// overlay: a compact header (name · repo-relative path · close), the content
@@ -32,6 +33,14 @@ final class FileViewerController: UIViewController {
     private let footerLabel = UILabel()
     private let editButton = UIButton(type: .system)
     private var rendered = false
+
+    /// The Mac-rendered Markdown preview (`WireFile.html`), shown in a web
+    /// view over the text view — the TraceViewController pattern. Markdown
+    /// opens in preview; the pencil flips to source (and editing, when
+    /// allowed). One-way per open: the preview HTML was rendered from the
+    /// bytes as fetched, so after edits it would lie — reopening re-renders.
+    private var webView: WKWebView?
+    private var previewing = false
 
     private var editMode = false
     /// mtime (ms) the current buffer is based on; advanced by each `written`.
@@ -80,6 +89,7 @@ final class FileViewerController: UIViewController {
         let header = configureHeader()
         let footer = configureFooter()
         configureText(below: header, above: footer)
+        configurePreview(below: header, above: footer)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -190,6 +200,36 @@ final class FileViewerController: UIViewController {
         ])
     }
 
+    /// The Markdown preview layer, only when the Mac sent one. Sits over the
+    /// text view with the same frame; transparent like TraceViewController so
+    /// the themed page's own background shows through cleanly.
+    private func configurePreview(below header: UIView, above footer: UIView) {
+        guard let html = file.html else { return }
+        let web = WKWebView()
+        web.isOpaque = false
+        web.backgroundColor = .clear
+        web.scrollView.backgroundColor = .clear
+        web.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(web)
+        NSLayoutConstraint.activate([
+            web.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
+            web.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            web.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            web.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -4),
+        ])
+        web.loadHTMLString(html, baseURL: nil)
+        webView = web
+        previewing = true
+        textView.isHidden = true
+    }
+
+    private func leavePreview() {
+        previewing = false
+        webView?.removeFromSuperview()
+        webView = nil
+        textView.isHidden = false
+    }
+
     // MARK: - Content
 
     private var canEdit: Bool {
@@ -230,6 +270,9 @@ final class FileViewerController: UIViewController {
     // MARK: - Editing / auto-save
 
     private func toggleEditing() {
+        // From the Markdown preview, the pencil first drops to the source —
+        // then straight into editing, one tap, like the Mac's Preview→edit flip.
+        if previewing { leavePreview() }
         if editMode {
             // Done: flush whatever is pending and drop the keyboard.
             saveDebounce?.cancel()

@@ -12,7 +12,12 @@ import Foundation
 /// they match the editor you flip from. All colors come through `var(--…)` filled from
 /// the active `TraceTheme`, so the page tracks whatever chrome theme termio is on.
 enum MarkdownReaderRenderer {
-    static func document(_ source: String, theme: TraceTheme, fontFamily: String) -> String {
+    /// `embedFonts: false` drops the ~230KB of inlined Quattro `@font-face`
+    /// CSS — the companion server's phone previews take this path, where the
+    /// stack's system-sans fallthrough beats paying the weight per file read.
+    static func document(
+        _ source: String, theme: TraceTheme, fontFamily: String, embedFonts: Bool = true
+    ) -> String {
         """
         <!doctype html>
         <html>
@@ -20,7 +25,7 @@ enum MarkdownReaderRenderer {
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-        \(quattroFontFaces)
+        \(embedFonts ? quattroFontFaces : "")
         \(themeVariables(theme))
         :root { --font-mono: \(monoStack(fontFamily)); }
         \(css)

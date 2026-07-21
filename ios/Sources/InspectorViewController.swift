@@ -278,7 +278,12 @@ final class InspectorViewController: UIViewController {
         guard let projectID = session.projectRosterID else { return }
         pendingRead = path
         setLoading(true)
-        client?.send(.readFile(projectID: projectID, path: path))
+        client?.send(.readFile(
+            projectID: projectID, path: path,
+            // For the Mac-rendered Markdown preview — same trait contract as
+            // `.trace`, so the page matches this screen's appearance.
+            dark: traitCollection.userInterfaceStyle == .dark
+        ))
     }
 
     private func findRemoteNode(_ path: String, in nodes: [RemoteNode]) -> RemoteNode? {

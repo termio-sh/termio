@@ -12,11 +12,15 @@ import UIKit
 final class ProjectListViewController: UIViewController {
     private let store: RosterStore
 
-    private enum Section { case needsYou, projects }
+    private enum Section { case needsYou, chats, projects }
     /// The sections currently on screen, rebuilt on every roster change.
     private var sections: [Section] = []
     /// Cross-project attention sessions (the strip's rows).
     private var attention: [MockSession] = []
+    /// Loose agent sessions from the Mac's "Chats" container, listed flat —
+    /// mirroring the desktop sidebar's Chats-over-Projects pairing. The
+    /// sessions ARE the content here, so no folder row to drill through.
+    private var chats: [MockSession] = []
     /// The store's projects in the chosen order — what the table shows.
     private var visible: [MockProject] = []
 
@@ -222,13 +226,21 @@ final class ProjectListViewController: UIViewController {
     }
 
     /// Rebuild the section list from the store: the attention strip (only when
-    /// non-empty), then the projects in the chosen order.
+    /// non-empty), the flat Chats group (only when non-empty), then the
+    /// projects in the chosen order. Chats-kind containers never render as
+    /// project rows — their loose sessions list directly, like the Mac sidebar.
     private func refilter() {
         attention = store.attentionSessions
-        visible = sortByName
+        let ordered = sortByName
             ? store.projects.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             : store.projects
-        sections = (attention.isEmpty ? [] : [.needsYou]) + [.projects]
+        chats = ordered.filter { $0.kind == "chats" }.flatMap(\.sessions)
+        visible = ordered.filter { $0.kind != "chats" }
+        sections = (attention.isEmpty ? [] : [.needsYou])
+            + (chats.isEmpty ? [] : [.chats])
+            // Skip an empty Projects group when Chats has the page to itself;
+            // when everything is empty the zero state covers the table anyway.
+            + (visible.isEmpty && !chats.isEmpty ? [] : [.projects])
         tableView.reloadData()
         updateEmptyState()
     }
@@ -255,7 +267,7 @@ final class ProjectListViewController: UIViewController {
     /// stalled (the Mac isn't answering — offer Try Again), or connected-but-idle
     /// (nudge toward opening a project on the Mac).
     private func updateEmptyState() {
-        emptyState.isHidden = !visible.isEmpty || !attention.isEmpty
+        emptyState.isHidden = !visible.isEmpty || !attention.isEmpty || !chats.isEmpty
         guard !emptyState.isHidden else {
             stopConnectingGraceTimer()
             return
@@ -347,6 +359,7 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch sections[section] {
         case .needsYou: attention.count
+        case .chats: chats.count
         case .projects: visible.count
         }
     }
@@ -358,7 +371,12 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: SectionCapView.reuseID
         ) as! SectionCapView
-        header.configure(title: sections[section] == .needsYou ? "Needs You" : "Projects")
+        let title = switch sections[section] {
+        case .needsYou: "Needs You"
+        case .chats: "Chats"
+        case .projects: "Projects"
+        }
+        header.configure(title: title)
         return header
     }
 
@@ -394,6 +412,19 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
             }
             .margins(.horizontal, 12)
             .margins(.vertical, 0)
+        case .chats:
+            let session = chats[indexPath.row]
+            cell.contentConfiguration = UIHostingConfiguration {
+                SessionRow(
+                    session: session,
+                    isCurrent: session.key == store.currentSessionKey,
+                    // The group header already says Chats; no per-row repeat.
+                    showsProject: false,
+                    showsSeparator: indexPath.row < chats.count - 1
+                )
+            }
+            .margins(.horizontal, 12)
+            .margins(.vertical, 0)
         case .projects:
             cell.contentConfiguration = UIHostingConfiguration {
                 ProjectRow(
@@ -413,6 +444,9 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
             // Straight to the terminal — the strip exists so the blocked
             // session is one tap away, never behind its project page.
             store.openSession(attention[indexPath.row])
+        case .chats:
+            // Loose sessions have no project page; the row IS the session.
+            store.openSession(chats[indexPath.row])
         case .projects:
             navigationController?.pushViewController(
                 ProjectDetailViewController(store: store, project: visible[indexPath.row]),
@@ -421,14 +455,20 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
         }
     }
 
-    /// Trailing swipe on a strip row: the Mac session menu's "Close Session".
+    /// Trailing swipe on a session row (the strip or a chat): the Mac session
+    /// menu's "Close Session".
     func tableView(
         _ tableView: UITableView,
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
     ) -> UISwipeActionsConfiguration? {
-        guard sections[indexPath.section] == .needsYou,
+        let session: MockSession? = switch sections[indexPath.section] {
+        case .needsYou: attention[indexPath.row]
+        case .chats: chats[indexPath.row]
+        case .projects: nil
+        }
+        guard let session,
               store.companionURL != nil,
-              let sessionID = attention[indexPath.row].rosterID
+              let sessionID = session.rosterID
         else { return nil }
         let close = UIContextualAction(style: .destructive, title: "Close") { [weak self] _, _, done in
             self?.store.stopSession(sessionID)

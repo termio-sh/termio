@@ -21,6 +21,10 @@ struct MockSession: Identifiable {
     var projectPath: String?
     /// The project's current git branch (nil for non-repos / mock rows).
     var branch: String?
+    /// The branch of the worktree checkout this session runs in — set only
+    /// when the session lives off the project's main checkout, so rows label
+    /// worktree sessions without repeating the project branch on every line.
+    var worktreeBranch: String?
 
     static let samples: [MockSession] = [
         .init(title: "fix-sidebar", project: "termio", agent: .sampleClaude,
@@ -47,6 +51,9 @@ struct MockProject: Identifiable {
     var rosterID: String?
     /// Current git branch of the checkout (nil for non-repos / mock data).
     var branch: String?
+    /// The Mac's `ProjectKind` raw value ("folder" / "terminals" / "chats");
+    /// nil from an older Mac or mock data — treat as a plain folder project.
+    var kind: String?
     let sessions: [MockSession]
 
     /// Projects keep their order; within a project, attention floats up.
@@ -139,7 +146,8 @@ extension SessionStatus {
 extension MockSession {
     init(roster: RosterSession, project: RosterProject, agentsByID: [String: RosterAgent]) {
         // "—" is the desktop's placeholder for "no branch"; drop it here.
-        let branch = project.branch.flatMap { $0 == "—" || $0.isEmpty ? nil : $0 }
+        let projectBranch = project.branch.flatMap { $0 == "—" || $0.isEmpty ? nil : $0 }
+        let worktreeBranch = roster.branch.flatMap { $0 == "—" || $0.isEmpty ? nil : $0 }
         self.init(
             title: roster.title,
             project: project.name,
@@ -150,7 +158,10 @@ extension MockSession {
             rosterID: roster.id,
             projectRosterID: project.id,
             projectPath: project.path,
-            branch: branch
+            // The terminal top bar shows where the session actually runs, so
+            // a worktree's branch wins over the project checkout's.
+            branch: worktreeBranch ?? projectBranch,
+            worktreeBranch: worktreeBranch
         )
     }
 }
@@ -162,6 +173,7 @@ extension MockProject {
             path: roster.path,
             rosterID: roster.id,
             branch: roster.branch.flatMap { $0 == "—" || $0.isEmpty ? nil : $0 },
+            kind: roster.kind,
             sessions: roster.sessions.map {
                 MockSession(roster: $0, project: roster, agentsByID: agentsByID)
             }

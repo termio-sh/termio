@@ -311,8 +311,8 @@ final class CompanionServer {
             bridges[id]?.applyClientResize(cols: cols, rows: rows)
         case .listFiles(let projectID, let path):
             handleListFiles(projectID: projectID, path: path, on: connection)
-        case .readFile(let projectID, let path):
-            handleReadFile(projectID: projectID, path: path, on: connection)
+        case .readFile(let projectID, let path, let dark):
+            handleReadFile(projectID: projectID, path: path, dark: dark, on: connection)
         case .writeFile(let projectID, let path, let base64, let baseMtime):
             handleWriteFile(
                 projectID: projectID, path: path, base64: base64,
@@ -510,7 +510,7 @@ final class CompanionServer {
         return paths
     }
 
-    private func handleReadFile(projectID: String, path: String, on connection: NWConnection) {
+    private func handleReadFile(projectID: String, path: String, dark: Bool, on connection: NWConnection) {
         guard let root = projectRoot(for: projectID),
               let url = Self.resolve(path, under: root) else {
             sendControl(.error(message: "unknown project or path"), to: connection)
@@ -518,7 +518,7 @@ final class CompanionServer {
         }
         Task.detached(priority: .userInitiated) { [weak self] in
             let reply: CompanionControl
-            if let file = Self.readFilePayload(at: url, path: path) {
+            if let file = Self.readFilePayload(at: url, path: path, dark: dark) {
                 reply = .file(file)
             } else {
                 reply = .error(message: "could not read \(path)")
@@ -674,7 +674,7 @@ final class CompanionServer {
 
     nonisolated private static let maxFileBytes = 1 << 20 // 1 MB — plenty for "peek at a source file"
 
-    nonisolated private static func readFilePayload(at url: URL, path: String) -> WireFile? {
+    nonisolated private static func readFilePayload(at url: URL, path: String, dark: Bool = false) -> WireFile? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
@@ -699,7 +699,26 @@ final class CompanionServer {
             size: size,
             binary: binary,
             truncated: truncated,
-            mtime: mtimeMillis(url)
+            mtime: mtimeMillis(url),
+            html: markdownPreviewHTML(for: data, path: path, binary: binary, truncated: truncated, dark: dark)
+        )
+    }
+
+    /// The phone's Markdown preview, rendered Mac-side with the same reader
+    /// pipeline as the desktop editor's Preview pane (the trace pattern: one
+    /// renderer, the phone only supplies its light/dark trait). Fonts are not
+    /// embedded — the phone falls through to its system stack instead of
+    /// paying ~230KB of woff2 CSS per file read. nil for anything that is not
+    /// a complete, decodable Markdown document.
+    nonisolated private static func markdownPreviewHTML(
+        for data: Data, path: String, binary: Bool, truncated: Bool, dark: Bool
+    ) -> String? {
+        guard !binary, !truncated,
+              ["md", "markdown"].contains((path as NSString).pathExtension.lowercased()),
+              let source = String(data: data, encoding: .utf8)
+        else { return nil }
+        return MarkdownReaderRenderer.document(
+            source, theme: TraceTheme.builtin(dark: dark), fontFamily: "", embedFonts: false
         )
     }
 
@@ -1000,6 +1019,7 @@ extension TermioStore {
                 name: project.name,
                 path: project.path,
                 branch: branchModel.branch(for: project.path) ?? project.branch,
+                kind: project.kind.rawValue,
                 // Browser panes stay Mac-only: the phone renders terminals over
                 // the PTY wire, and a browser session has no PTY to attach.
                 sessions: project.sessions.filter { !$0.isBrowser }.map { session in
@@ -1011,7 +1031,11 @@ extension TermioStore {
                         title: displayTitle(for: session),
                         agent: Self.wireAgent(session.agent),
                         status: Self.wireStatus(status(for: session.id)),
-                        subtitle: activity.isEmpty ? nil : activity
+                        subtitle: activity.isEmpty ? nil : activity,
+                        // Worktree sessions ride the project's flat roster, so
+                        // the checkout's branch is the phone's only clue that a
+                        // row lives off the main checkout.
+                        branch: session.worktreePath.flatMap { branch(forFolder: $0) }
                     )
                 }
             )

@@ -81,6 +81,10 @@ struct SessionRow: View {
     private var subtitle: String {
         var parts: [String] = []
         if showsProject, !session.project.isEmpty { parts.append(session.project) }
+        // The worktree's branch, verbatim like the Mac sidebar's label — only
+        // set for sessions living off the main checkout, so plain rows don't
+        // repeat the project branch.
+        if let branch = session.worktreeBranch { parts.append(branch) }
         if !session.subtitle.isEmpty { parts.append(session.subtitle) }
         return parts.joined(separator: " · ")
     }
