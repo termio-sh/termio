@@ -221,6 +221,9 @@ private struct AgentManagerRow: View {
                 // off (an already-on agent stays revocable while the hint shows).
                 .disabled(available == false && !settings.isAgentEnabled(preset))
             }
+            // Without an explicit shape only the row's glyphs are right-clickable —
+            // the padding and the Spacer are holes in the Form row's hit test.
+            .contentShape(Rectangle())
             .contextMenu {
                 Button("Remove Agent") { settings.removeAgent(preset) }
             }
@@ -253,6 +256,16 @@ private struct AgentManagerRow: View {
                     }
                     .toggleStyle(.switch)
                 }
+
+                // The visible twin of the row's right-click item — a drawer-only
+                // action so the scannable list stays clean. No confirmation: the
+                // agent is one "Add Agent" pick away from coming back.
+                Button(role: .destructive) {
+                    settings.removeAgent(preset)
+                } label: {
+                    Text("Remove Agent").foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
             }
         }
         // Re-checks whenever the effective command changes, so typing a valid path
