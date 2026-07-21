@@ -133,7 +133,10 @@ public struct BrandImageView: View {
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
         } else {
-            Color.clear.frame(width: size, height: size)
+            // The name arrived over the wire from a peer whose bundle may not
+            // match ours (an older Mac naming an asset this build dropped) —
+            // degrade to the terminal glyph, visibly, never an invisible tile.
+            HugeIconView(icon: .terminal, size: size, color: .monochromeInk)
         }
     }
 
