@@ -1094,7 +1094,7 @@ private struct StatusDot: View {
 /// The "agent is working" mark: a 3×3 grid of dots with a bright comet that orbits
 /// the eight perimeter cells, so the small nine-square grid reads as rotating. Sits
 /// in place of the session's brand icon while a turn is in flight (see `SessionRow`).
-private struct WorkingIndicator: View {
+struct WorkingIndicator: View {
     /// Pure ink, deeper than `.primary`: labelColor keeps ~15% transparency and
     /// the sidebar's vibrancy lightens it again, which left even the comet's
     /// full-opacity head reading grey. Appearance-adaptive black/white punches
@@ -1104,6 +1104,12 @@ private struct WorkingIndicator: View {
     })
 
     var tint: Color = Self.ink
+
+    /// When nil the comet self-animates via `TimelineView`; supplying a phase
+    /// (0...1) renders one still frame instead, so a caller can drive the rotation
+    /// with its own timer where `TimelineView` never ticks — e.g. inside an open
+    /// `NSMenu`, which runs a modal event-tracking loop.
+    var phase: Double? = nil
 
     /// The eight perimeter cells of the 3×3 grid in clockwise order, as
     /// `(column, row)` with the center at `(1, 1)`. The comet travels this ring.
@@ -1118,25 +1124,33 @@ private struct WorkingIndicator: View {
     private let period: Double = 1.1
 
     var body: some View {
-        TimelineView(.animation) { context in
-            let phase = context.date.timeIntervalSinceReferenceDate
-                .truncatingRemainder(dividingBy: period) / period
-            ZStack {
-                // A steady center anchors the spinning ring, matching the tail
-                // so the grid reads as one solid mark with a swell running
-                // around it.
-                dot(opacity: 0.5, scale: 1)
-                ForEach(Array(Self.ring.enumerated()), id: \.offset) { index, cell in
-                    let distance = ringDistance(at: index, phase: phase)
-                    dot(opacity: opacity(distance: distance), scale: scale(distance: distance))
-                        .offset(
-                            x: CGFloat(cell.0 - 1) * spacing,
-                            y: CGFloat(cell.1 - 1) * spacing
-                        )
-                }
+        if let phase {
+            grid(phase: phase)
+        } else {
+            TimelineView(.animation) { context in
+                let p = context.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: period) / period
+                grid(phase: p)
             }
-            .frame(width: 13, height: 13)
         }
+    }
+
+    private func grid(phase: Double) -> some View {
+        ZStack {
+            // A steady center anchors the spinning ring, matching the tail
+            // so the grid reads as one solid mark with a swell running
+            // around it.
+            dot(opacity: 0.5, scale: 1)
+            ForEach(Array(Self.ring.enumerated()), id: \.offset) { index, cell in
+                let distance = ringDistance(at: index, phase: phase)
+                dot(opacity: opacity(distance: distance), scale: scale(distance: distance))
+                    .offset(
+                        x: CGFloat(cell.0 - 1) * spacing,
+                        y: CGFloat(cell.1 - 1) * spacing
+                    )
+            }
+        }
+        .frame(width: 13, height: 13)
     }
 
     private func dot(opacity: Double, scale: Double) -> some View {

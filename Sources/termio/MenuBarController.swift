@@ -16,16 +16,24 @@ import SwiftUI
 /// We manage a raw `NSStatusItem` (not SwiftUI's `MenuBarExtra`) because termio
 /// drives an explicit `NSApplication` rather than the SwiftUI app lifecycle.
 @MainActor
-final class MenuBarController {
+final class MenuBarController: NSObject, NSMenuDelegate {
     private let store: TermioStore
     private let onSelect: (Session.ID) -> Void
     private let statusItem: NSStatusItem
     private var cancellables: Set<AnyCancellable> = []
 
+    /// The roster rows for working sessions, so the comet timer can advance them
+    /// while the menu is open. Rebuilt each `buildMenu()`.
+    private var workingItems: [NSMenuItem] = []
+    private var cometTimer: Timer?
+    private var cometPhase: Double = 0
+    private var isMenuOpen = false
+
     init(store: TermioStore, onSelect: @escaping (Session.ID) -> Void) {
         self.store = store
         self.onSelect = onSelect
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        super.init()
         // Drawing the mark as the button's own image lets `variableLength` size the
         // item to fit it (a manually-added subview was getting clipped); the layer
         // backs the working-state pulse animation.
@@ -40,6 +48,10 @@ final class MenuBarController {
 
     private func refresh() {
         applyIcon(for: store.aggregateStatus)
+        // Rebuilding the menu while it's open swaps out the very items the comet timer
+        // animates (and can dismiss the menu), so defer the rebuild until it closes;
+        // `menuDidClose` calls back here to catch up on anything that changed.
+        guard !isMenuOpen else { return }
         statusItem.menu = buildMenu()
     }
 
@@ -137,14 +149,16 @@ final class MenuBarController {
 
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
+        menu.delegate = self
+        workingItems.removeAll()
 
-        // The roster is a "what needs me right now" queue, so it lists only agent
-        // sessions that want the user — done (green) or blocked on input (amber).
-        // Plain terminals are managed in the window, and working/idle agents are
-        // running fine on their own; both stay out of the menu.
+        // The roster is an "active + your turn" queue: working agents (shown with the
+        // sidebar's orbiting-comet mark) plus the two resting states that want you —
+        // done (green) or blocked on input (amber). Idle agents are getting on fine
+        // on their own and plain terminals live in the window, so both stay out.
         for project in store.projects {
             let agentSessions = project.sessions.filter {
-                $0.agent != .terminal && needsYou(store.status(for: $0.id))
+                $0.agent != .terminal && shouldList(store.status(for: $0.id))
             }
             guard !agentSessions.isEmpty else { continue }
 
@@ -161,10 +175,15 @@ final class MenuBarController {
                 )
                 item.target = self
                 item.representedObject = session.id.uuidString
-                // The row leads with the agent's real brand mark so each session is
-                // recognisable at a glance; a busy/done/blocked session also carries
-                // a small trailing colour dot, while idle rows stay clean.
-                item.image = agentImage(for: session.agent)
+                // A working row swaps the brand mark for the comet, exactly as the
+                // sidebar does, and the timer spins it while the menu is open; other
+                // rows lead with the agent's real brand mark and trail a status dot.
+                if status == .working {
+                    item.image = cometImage(phase: cometPhase)
+                    workingItems.append(item)
+                } else {
+                    item.image = agentImage(for: session.agent)
+                }
                 item.attributedTitle = rowTitle(store.displayTitle(for: session), status: status)
                 item.indentationLevel = 1
                 menu.addItem(item)
@@ -172,7 +191,7 @@ final class MenuBarController {
         }
 
         if menu.items.isEmpty {
-            let empty = NSMenuItem(title: "Nothing needs you", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: "All caught up", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         }
@@ -211,8 +230,9 @@ final class MenuBarController {
         }
     }
 
-    /// The row title with a trailing status dot for any session that is busy, done,
-    /// or blocked — idle sessions get a plain title so the roster stays calm.
+    /// The row title with a trailing status dot for a session that just finished
+    /// (green) or is blocked on you (amber). Working rows carry the comet mark and
+    /// idle rows a plain title, so neither trails a dot.
     private func rowTitle(_ title: String, status: SessionStatus) -> NSAttributedString {
         let result = NSMutableAttributedString(
             string: title,
@@ -226,24 +246,77 @@ final class MenuBarController {
         return result
     }
 
-    /// Whether a session's status warrants pulling the user in: done (green,
-    /// waiting to be looked at) or blocked on input (amber). Working and idle
-    /// agents are getting on fine without you, so they stay off the roster.
-    private func needsYou(_ status: SessionStatus) -> Bool {
-        switch status {
-        case .done, .needsAttention: return true
-        case .idle, .working: return false
-        }
+    /// Whether a session belongs on the roster: anything not at rest. Working
+    /// agents show progress and done/blocked agents want you; only idle agents
+    /// (and plain terminals, filtered separately) stay off the list.
+    private func shouldList(_ status: SessionStatus) -> Bool {
+        status != .idle
     }
 
-    /// The accent colour for a non-idle status, or `nil` for idle (no dot).
+    /// The trailing dot colour for a resting "your turn" state — green when the
+    /// agent just finished, amber when it's blocked on you. Working shows the comet
+    /// in place of a dot and idle shows nothing, so both get no colour. This is the
+    /// sidebar's exact dot vocabulary (see `StatusDot`).
     private func statusColor(for status: SessionStatus) -> NSColor? {
         switch status {
-        case .idle: return nil
-        case .working: return .systemBlue
+        case .idle, .working: return nil
         case .done: return .systemGreen
         case .needsAttention: return .systemOrange
         }
+    }
+
+    /// The sidebar's orbiting-comet working mark, rasterised at a fixed phase so the
+    /// menu timer can advance it frame by frame. Mirrors `agentImage`'s deferred
+    /// drawing-handler trick so the ink resolves under the dropdown's appearance
+    /// (menu bar tint and menu theme can differ), passing the resolved black/white
+    /// as the comet tint rather than relying on its adaptive-ink default.
+    private func cometImage(phase: Double) -> NSImage {
+        let side: CGFloat = 15
+        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            let appearance = NSAppearance.currentDrawing()
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let renderer = ImageRenderer(
+                content: WorkingIndicator(tint: isDark ? .white : .black, phase: phase)
+                    .frame(width: side, height: side)
+            )
+            renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+            guard let rendered = renderer.nsImage else { return false }
+            rendered.draw(in: rect)
+            return true
+        }
+    }
+
+    /// While the menu is open its modal event-tracking loop stops SwiftUI's
+    /// `TimelineView` clock, so we spin the comet ourselves: a timer added in
+    /// `.common` mode (which fires during tracking) advances the phase and re-renders
+    /// every working row. All working rows share one frame, so it renders once a tick.
+    func menuWillOpen(_ menu: NSMenu) {
+        isMenuOpen = true
+        guard !workingItems.isEmpty else { return }
+        cometTimer?.invalidate()
+        let interval = 1.0 / 15.0
+        let period = 1.1  // matches the sidebar's WorkingIndicator
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.cometPhase += interval / period
+                if self.cometPhase >= 1 { self.cometPhase -= 1 }
+                let frame = self.cometImage(phase: self.cometPhase)
+                for item in self.workingItems { item.image = frame }
+            }
+        }
+        // An open menu runs its own event-tracking loop; register the timer in that
+        // mode explicitly (`.common` doesn't reliably include it) so it keeps firing.
+        RunLoop.main.add(timer, forMode: .eventTracking)
+        cometTimer = timer
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
+        cometTimer?.invalidate()
+        cometTimer = nil
+        // Catch up on any store changes deferred while the menu was open.
+        refresh()
     }
 
     @objc private func didPickSession(_ sender: NSMenuItem) {
