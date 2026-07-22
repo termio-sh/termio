@@ -60,11 +60,14 @@ struct TreeHeaderButton: View {
 }
 
 /// The right-click menu actions the tree's rows invoke: `newFile`/`newFolder`
-/// (created inside the given directory) and `delete`. Bundled so `FileRow` carries
-/// one value rather than three closures. (Single-click open is driven by the List's
-/// native selection, not a row action — see `FileBrowserView`.)
+/// (created inside the given directory), `rename`, and `delete`. Bundled so
+/// `FileRow` carries one value rather than a fistful of closures. (Single-click
+/// open is driven by the List's native selection, not a row action — see
+/// `FileBrowserView`. Reveal in Finder / Copy Path need no view state, so they
+/// live directly in the row menu.)
 struct FileTreeActions {
     let newFile: (_ directory: URL) -> Void
     let newFolder: (_ directory: URL) -> Void
+    let rename: (URL) -> Void
     let delete: (URL) -> Void
 }

@@ -28,7 +28,7 @@ struct FileTreeList: View {
         // outline view's `selectionHighlightStyle = .none` (see `FileRow`), leaving our
         // own `SidebarRowHighlight` as the sole, left-sidebar-matching selection cue.
         List(nodes, children: \.children, selection: $selection) { node in
-            FileRow(node: node, font: font, isSelected: selection == node.url, onDrop: onDrop, actions: actions, captureOutline: captureOutline)
+            FileRow(node: node, font: font, isSelected: selection == node.url, onDrop: onDrop, rootURL: rootURL, actions: actions, captureOutline: captureOutline)
                 .listRowSeparator(.hidden)
         }
         .listStyle(.plain)
@@ -57,6 +57,8 @@ private struct FileRow: View {
     let font: Font
     let isSelected: Bool
     let onDrop: (_ sources: [URL], _ destination: URL) -> Bool
+    /// The project root — the base "Copy Relative Path" resolves against.
+    let rootURL: URL
     let actions: FileTreeActions
     /// Reports the hosting outline view up to `FileBrowserView` (see `FileTreeList`).
     let captureOutline: (NSOutlineView?) -> Void
@@ -134,11 +136,13 @@ private struct FileRow: View {
         // Right-click menu via an AppKit `NSMenu`, NOT SwiftUI's `.contextMenu` —
         // the latter paints an accent highlight ring around the targeted row that
         // can't be styled off. New File / New Folder appear only for a folder (they
-        // create inside it); a file gets just Delete. The empty area below the rows
-        // has its own root menu (see `EmptyAreaContextMenu`).
+        // create inside it); every row gets Reveal in Finder, Copy Path, Rename,
+        // Delete. The empty area below the rows has its own root menu (see
+        // `EmptyAreaContextMenu`).
         .background(RowContextMenu(
             isDirectory: node.isDirectory,
             target: node.url,
+            rootURL: rootURL,
             actions: actions
         ))
 
@@ -160,10 +164,12 @@ private struct FileRow: View {
 /// `.contextMenu` — the latter rings the targeted row with an un-styleable accent
 /// highlight. A secondary-click recognizer on the row's own view pops the menu up,
 /// so nothing emphasizes the row. New File / New Folder appear only for a folder
-/// (created inside it); a file gets just Delete.
+/// (created inside it); every row gets Reveal in Finder, Copy Path / Copy Relative
+/// Path, Rename, and Delete.
 private struct RowContextMenu: NSViewRepresentable {
     let isDirectory: Bool
     let target: URL
+    let rootURL: URL
     let actions: FileTreeActions
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -171,13 +177,13 @@ private struct RowContextMenu: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
         context.coordinator.owner = view
-        context.coordinator.configure(isDirectory: isDirectory, target: target, actions: actions)
+        context.coordinator.configure(isDirectory: isDirectory, target: target, rootURL: rootURL, actions: actions)
         context.coordinator.attach()
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.configure(isDirectory: isDirectory, target: target, actions: actions)
+        context.coordinator.configure(isDirectory: isDirectory, target: target, rootURL: rootURL, actions: actions)
         context.coordinator.attach()
     }
 
@@ -190,13 +196,15 @@ private struct RowContextMenu: NSViewRepresentable {
         weak var owner: NSView?
         private var isDirectory = false
         private var target = URL(fileURLWithPath: "/")
+        private var rootURL = URL(fileURLWithPath: "/")
         private var actions: FileTreeActions?
         private weak var hostView: NSView?
         private var recognizer: NSClickGestureRecognizer?
 
-        func configure(isDirectory: Bool, target: URL, actions: FileTreeActions) {
+        func configure(isDirectory: Bool, target: URL, rootURL: URL, actions: FileTreeActions) {
             self.isDirectory = isDirectory
             self.target = target
+            self.rootURL = rootURL
             self.actions = actions
         }
 
@@ -228,6 +236,12 @@ private struct RowContextMenu: NSViewRepresentable {
                 menu.addItem(menuItem("New Folder", #selector(newFolder)))
                 menu.addItem(.separator())
             }
+            menu.addItem(menuItem("Reveal in Finder", #selector(revealInFinder)))
+            menu.addItem(.separator())
+            menu.addItem(menuItem("Copy Path", #selector(copyPath)))
+            menu.addItem(menuItem("Copy Relative Path", #selector(copyRelativePath)))
+            menu.addItem(.separator())
+            menu.addItem(menuItem("Rename…", #selector(rename)))
             menu.addItem(menuItem("Delete", #selector(deleteItem)))
             menu.popUp(positioning: nil, at: recognizer.location(in: hostView), in: hostView)
         }
@@ -240,7 +254,34 @@ private struct RowContextMenu: NSViewRepresentable {
 
         @objc private func newFile() { actions?.newFile(target) }
         @objc private func newFolder() { actions?.newFolder(target) }
+        @objc private func rename() { actions?.rename(target) }
         @objc private func deleteItem() { actions?.delete(target) }
+
+        @objc private func revealInFinder() {
+            NSWorkspace.shared.activateFileViewerSelecting([target])
+        }
+
+        @objc private func copyPath() {
+            setPasteboard(target.path)
+        }
+
+        /// The path relative to the project root — the form agents and build tools
+        /// take; falls back to the absolute path for anything outside the root.
+        @objc private func copyRelativePath() {
+            let rootPath = rootURL.standardizedFileURL.path
+            let path = target.standardizedFileURL.path
+            if path.hasPrefix(rootPath + "/") {
+                setPasteboard(String(path.dropFirst(rootPath.count + 1)))
+            } else {
+                setPasteboard(path)
+            }
+        }
+
+        private func setPasteboard(_ string: String) {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(string, forType: .string)
+        }
 
         private static func rowView(above view: NSView) -> NSView? {
             var ancestor = view.superview

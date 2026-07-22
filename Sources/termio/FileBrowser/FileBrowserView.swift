@@ -21,6 +21,9 @@ struct FileBrowserView: View {
     /// Bumped to collapse the whole tree: it is the file list's `.id`, so changing it
     /// rebuilds the list fresh — and a fresh `List(children:)` starts fully collapsed.
     @State private var treeGeneration = 0
+    /// Watches the project root on disk and bumps its `changeToken` when anything under
+    /// it changes, so the tree stays live with an agent's edits (see `onChange` below).
+    @StateObject private var watcher = FileTreeWatcher()
 
     /// The directory the tree is rooted at: the selected session's worktree if it
     /// has one, otherwise its project folder. `nil` when nothing is selected.
@@ -96,10 +99,19 @@ struct FileBrowserView: View {
             guard let projectPath else { return false }
             return receive(urls, into: URL(fileURLWithPath: projectPath))
         }
-        .onAppear { refresh(); seedChangeCount() }
+        .onAppear { refresh(); seedChangeCount(); watcher.watch(projectPath) }
+        .onDisappear { watcher.watch(nil) }
         .onChange(of: projectPath) {
             refresh()
             seedChangeCount()
+            watcher.watch(projectPath)
+        }
+        // The project root changed on disk (an agent wrote, renamed, or removed a
+        // file): rebuild the tree from disk. Keep the Changes badge fresh too, unless
+        // the Changes pane is open — it owns the count live while visible.
+        .onChange(of: watcher.changeToken) {
+            refresh()
+            if store.inspectorTab != .changes { seedChangeCount() }
         }
         .onChange(of: browserState.selection) {
             // The table fires native selection on a clean click — reliably, unlike a
@@ -296,6 +308,7 @@ struct FileBrowserView: View {
         FileTreeActions(
             newFile: { createFile(in: $0) },
             newFolder: { createFolder(in: $0) },
+            rename: { rename($0) },
             delete: { delete($0) }
         )
     }
@@ -327,6 +340,35 @@ struct FileBrowserView: View {
         }
     }
 
+    /// Prompts for a new name (pre-filled with the current one) and renames `url` in
+    /// place. If the renamed file was selected — and so open in the editor — the
+    /// selection moves to the new URL and it is re-activated, so the editor follows
+    /// the rename instead of holding (and auto-saving back) the old path.
+    private func rename(_ url: URL) {
+        guard let name = promptForName(title: "Rename “\(url.lastPathComponent)”", defaultName: url.lastPathComponent, buttonTitle: "Rename"),
+              name != url.lastPathComponent
+        else { return }
+        let target = url.deletingLastPathComponent().appendingPathComponent(name)
+        guard !FileManager.default.fileExists(atPath: target.path) else {
+            let alert = NSAlert()
+            alert.messageText = "“\(name)” already exists."
+            alert.informativeText = "Choose a different name."
+            alert.runModal()
+            return
+        }
+        do {
+            let wasSelected = browserState.selection == url
+            try FileManager.default.moveItem(at: url, to: target)
+            refresh()
+            if wasSelected {
+                browserState.selection = target
+                if !isDirectory(target) { onActivate(target) }
+            }
+        } catch {
+            Log.files.error("failed to rename \(url.path, privacy: .public) to \(target.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Moves `url` to the Trash after a confirm — recoverable, not an unlink — clears
     /// it from the selection, and refreshes.
     private func delete(_ url: URL) {
@@ -347,10 +389,10 @@ struct FileBrowserView: View {
 
     /// A modal name prompt — one text field in an `NSAlert`, pre-filled with
     /// `defaultName`. Returns the trimmed entry, or `nil` if cancelled or emptied.
-    private func promptForName(title: String, defaultName: String) -> String? {
+    private func promptForName(title: String, defaultName: String, buttonTitle: String = "Create") -> String? {
         let alert = NSAlert()
         alert.messageText = title
-        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: buttonTitle)
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
         field.stringValue = defaultName
