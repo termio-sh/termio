@@ -8,8 +8,10 @@ import SwiftUI
 /// Rather than swapping to unrelated symbols, state is conveyed *over* the mark —
 /// it breathes while an agent works, and wears a small coloured status badge when
 /// a session is done (green) or waiting on you (amber). Clicking it drops a
-/// roster of every session grouped by project, each with its own status dot;
-/// picking one focuses that session and brings the window forward.
+/// roster of just the sessions that want you — done (green) or blocked on input
+/// (amber) — grouped by project; working and idle agents are running fine on
+/// their own and stay out of the list. Picking one focuses that session and
+/// brings the window forward.
 ///
 /// We manage a raw `NSStatusItem` (not SwiftUI's `MenuBarExtra`) because termio
 /// drives an explicit `NSApplication` rather than the SwiftUI app lifecycle.
@@ -136,10 +138,14 @@ final class MenuBarController {
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
-        // The roster is a launchpad for AI agents, so plain terminal sessions are
-        // omitted — they're managed in the window, not summoned from the menu bar.
+        // The roster is a "what needs me right now" queue, so it lists only agent
+        // sessions that want the user — done (green) or blocked on input (amber).
+        // Plain terminals are managed in the window, and working/idle agents are
+        // running fine on their own; both stay out of the menu.
         for project in store.projects {
-            let agentSessions = project.sessions.filter { $0.agent != .terminal }
+            let agentSessions = project.sessions.filter {
+                $0.agent != .terminal && needsYou(store.status(for: $0.id))
+            }
             guard !agentSessions.isEmpty else { continue }
 
             let header = NSMenuItem(title: project.name, action: nil, keyEquivalent: "")
@@ -166,7 +172,7 @@ final class MenuBarController {
         }
 
         if menu.items.isEmpty {
-            let empty = NSMenuItem(title: "No sessions", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: "Nothing needs you", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         }
@@ -218,6 +224,16 @@ final class MenuBarController {
             attributes: [.foregroundColor: color, .font: NSFont.systemFont(ofSize: 8)]
         ))
         return result
+    }
+
+    /// Whether a session's status warrants pulling the user in: done (green,
+    /// waiting to be looked at) or blocked on input (amber). Working and idle
+    /// agents are getting on fine without you, so they stay off the roster.
+    private func needsYou(_ status: SessionStatus) -> Bool {
+        switch status {
+        case .done, .needsAttention: return true
+        case .idle, .working: return false
+        }
     }
 
     /// The accent colour for a non-idle status, or `nil` for idle (no dot).
