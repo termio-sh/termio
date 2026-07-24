@@ -360,7 +360,7 @@ private struct FileHeaderRow: View {
             .help(isExpanded ? "Collapse Results" : "Expand Results")
 
             HStack(spacing: 5) {
-                FileIconView(url: url, size: 15, symbolSize: 13)
+                FileIconView(url: url, size: 15)
                     .frame(width: 16, alignment: .leading)
                 Text(url.lastPathComponent)
                     .font(.system(size: 12, weight: .medium))

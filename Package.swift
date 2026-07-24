@@ -53,10 +53,6 @@ let package = Package(
             resources: [
                 // Vendor favicons rendered as agent brand marks; see BrandImageAsset.
                 .process("Resources"),
-                // Devicon language/tool logos (one SVG per file type), loaded by name
-                // for the file tree; see LangIconCatalog / LangIconView. Kept as a
-                // folder copy (not `.process`) so the lookup subdirectory survives.
-                .copy("LangIcons"),
             ],
             swiftSettings: [
                 // Relax strict concurrency for the AppKit/SwiftUI glue; the app is

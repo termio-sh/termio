@@ -4,9 +4,8 @@ import SwiftUI
 /// ported from CodeEdit's `FileIcon` (https://github.com/CodeEditApp/CodeEdit, MIT). Every symbol here
 /// must be a real SF Symbol — CodeEdit's `doc.json`/`doc.javascript`/`doc.python`/`doc.ruby` are its own
 /// asset-catalog glyphs, not system symbols, so they render blank via `Image(systemName:)`. Most files
-/// draw a bundled Devicon instead (see `FileIconView`); this fallback shows only when none is bundled,
-/// e.g. `Package.resolved`. Extended with a few extensions CodeEdit doesn't list. Shared so both the
-/// editor header and the file tree show the same icon.
+/// draw a bundled Devicon on iOS (see `FileIcons`); this fallback shows only when none is bundled,
+/// e.g. `Package.resolved`. Extended with a few extensions CodeEdit doesn't list.
 public enum FileTypeIcon {
     /// The SF Symbol + tint for a file, keyed by its lowercased extension (special names like
     /// `Dockerfile`/`Makefile`/`LICENSE` are matched too). Falls back to a plain doc in steel.

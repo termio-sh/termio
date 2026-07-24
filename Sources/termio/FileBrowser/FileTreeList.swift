@@ -91,9 +91,7 @@ private struct FileRow: View {
                 )
                     .frame(width: 16, alignment: .leading)
             } else {
-                // The file's real language/tool logo (a Devicon mark) when bundled,
-                // else a tinted SF Symbol — see `FileIconView`.
-                FileIconView(url: node.url, size: 15, symbolSize: 13)
+                FileIconView(url: node.url, size: 15)
                     .frame(width: 16, alignment: .leading)
             }
             Text(node.name)
