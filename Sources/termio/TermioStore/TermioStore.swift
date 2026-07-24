@@ -468,6 +468,7 @@ final class TermioStore: ObservableObject {
         // isn't also delivered to the terminal/app underneath.
         linkClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             guard let self, event.modifierFlags.contains(.command) else { return event }
+            NSLog("[PATHCLICK] cmd-leftMouseDown hovered=%@", TerminalLinkState.hoveredURL ?? "nil")
             if let url = TerminalLinkState.hoveredURL {
                 self.openTerminalLink(url, surfaceWorkingDirectory: nil)
                 return nil

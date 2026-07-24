@@ -29,7 +29,7 @@ final class TerminalPathScannerTests: XCTestCase {
     }
 
     private func resolve(_ row: String, near column: Int = 0) -> TerminalPathScanner.Match? {
-        TerminalPathScanner.resolve(in: row, nearColumn: column, workingDirectory: root.path)
+        TerminalPathScanner.resolve(in: row, nearColumn: column, baseDirectories: [root.path])
     }
 
     // MARK: - The happy paths agents actually print
@@ -62,7 +62,7 @@ final class TerminalPathScannerTests: XCTestCase {
     func testAbsolutePath() throws {
         let file = try touch("abs.txt")
         let match = TerminalPathScanner.resolve(
-            in: "see \(file.path):3", nearColumn: 4, workingDirectory: nil
+            in: "see \(file.path):3", nearColumn: 4, baseDirectories: []
         )
         XCTAssertEqual(match?.url, file.standardizedFileURL)
         XCTAssertEqual(match?.line, 3)
@@ -82,6 +82,18 @@ final class TerminalPathScannerTests: XCTestCase {
         let file = try touch("lib/core.rs")
         // Diff output prints `b/lib/core.rs`; the real file has no `b/`.
         XCTAssertEqual(resolve("b/lib/core.rs:8")?.url, file.standardizedFileURL)
+    }
+
+    func testResolvesAgainstProjectRootWhenCwdIsWrong() throws {
+        // The bug from the field: terminal reported cwd `~`, but the file lives in the
+        // project. Passing both bases (stale cwd first, project root second) must still
+        // open it — mirrors VS Code/Zed validating against the workspace, not just cwd.
+        let file = try touch("package.json")
+        let match = TerminalPathScanner.resolve(
+            in: "  package.json", nearColumn: 3,
+            baseDirectories: ["/Users/nobody", root.path]
+        )
+        XCTAssertEqual(match?.url, file.standardizedFileURL)
     }
 
     // MARK: - The false-positive guard

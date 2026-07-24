@@ -31,16 +31,28 @@ enum TerminalPathScanner {
     /// `nearColumn` is the clicked cell column; it only orders candidates, so a
     /// column that is off by a cell (grid padding, a wide glyph) still resolves the
     /// right path as long as the row holds a single real file — the common case.
-    static func resolve(in row: String, nearColumn: Int, workingDirectory: String?) -> Match? {
+    ///
+    /// `baseDirectories` are the roots a relative path is tried against, in order —
+    /// the terminal's own cwd, then the session's worktree / project root. Trusting
+    /// only the terminal-reported cwd is fragile (a shell that doesn't emit OSC 7, or
+    /// `ls` run in a subdir leaves the cwd stale); resolving against the project root
+    /// too is what lets `package.json` open even when the cwd read is `~`.
+    static func resolve(in row: String, nearColumn: Int, baseDirectories: [String]) -> Match? {
+        let bases = orderedUnique(baseDirectories)
         let ordered = tokens(in: row).sorted {
             $0.distance(to: nearColumn) < $1.distance(to: nearColumn)
         }
         for token in ordered {
-            if let match = validate(token, workingDirectory: workingDirectory) {
+            if let match = validate(token, baseDirectories: bases) {
                 return match
             }
         }
         return nil
+    }
+
+    private static func orderedUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { seen.insert($0).inserted }
     }
 
     // MARK: - Tokenising
@@ -90,7 +102,7 @@ enum TerminalPathScanner {
     /// but the de-prefixed form hits, that's the file the tool meant.
     private static let diffPrefixes = ["a/", "b/", "c/", "i/", "o/", "w/"]
 
-    private static func validate(_ token: Token, workingDirectory: String?) -> Match? {
+    private static func validate(_ token: Token, baseDirectories: [String]) -> Match? {
         // Strip wrapping punctuation first — a closing `).` sits *after* the `:line`
         // suffix (`(file.swift:10).`), so peeling the line has to see a clean tail.
         let (rawPath, line) = peelLineColumn(strip(token.text))
@@ -98,7 +110,7 @@ enum TerminalPathScanner {
         guard !stripped.isEmpty else { return nil }
 
         for candidate in pathVariants(stripped) {
-            for url in urls(for: candidate, workingDirectory: workingDirectory) {
+            for url in urls(for: candidate, baseDirectories: baseDirectories) {
                 var isDirectory: ObjCBool = false
                 if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
                    !isDirectory.boolValue {
@@ -150,14 +162,15 @@ enum TerminalPathScanner {
         return variants
     }
 
-    private static func urls(for path: String, workingDirectory: String?) -> [URL] {
+    private static func urls(for path: String, baseDirectories: [String]) -> [URL] {
         let expanded = (path as NSString).expandingTildeInPath
         if (expanded as NSString).isAbsolutePath {
             return [URL(fileURLWithPath: expanded).standardizedFileURL]
         }
-        guard let workingDirectory else { return [] }
-        let base = URL(fileURLWithPath: workingDirectory, isDirectory: true)
-        return [URL(fileURLWithPath: expanded, relativeTo: base).standardizedFileURL]
+        return baseDirectories.map { base in
+            URL(fileURLWithPath: expanded, relativeTo: URL(fileURLWithPath: base, isDirectory: true))
+                .standardizedFileURL
+        }
     }
 }
 
@@ -170,48 +183,111 @@ extension TermioStore {
     /// lets the click fall through to the terminal untouched.
     @MainActor
     func openBarePathUnderCommandClick(_ event: NSEvent) -> Bool {
-        guard let window = event.window,
-              let hit = window.contentView?.hitTest(event.locationInWindow),
-              let terminal = terminalSurfaceView(from: hit),
-              let state = terminal.delegate as? TerminalViewState,
-              let metrics = state.surfaceSize,
-              metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0,
-              case .inMemory(let session) = state.configuration.backend,
-              let viewport = session.readViewportText() else { return false }
+        guard let window = event.window else { pathClickLog("no window"); return false }
+        let windowPoint = event.locationInWindow
+
+        // Find the surface by enumerating terminal views and testing which one's frame
+        // contains the click — robust to overlays/hosting layers that a plain `hitTest`
+        // would return instead (ghostty disables link detection under mouse reporting,
+        // so this fallback must not depend on the same z-order hitTest gives).
+        guard let (terminal, state) = terminalSurface(at: windowPoint, in: window) else {
+            pathClickLog("no terminal surface under click")
+            return false
+        }
+        guard let metrics = state.surfaceSize,
+              metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0 else {
+            pathClickLog("no surfaceSize")
+            return false
+        }
+        guard case .inMemory(let session) = state.configuration.backend else {
+            pathClickLog("backend not inMemory")
+            return false
+        }
+        guard let viewport = session.readViewportText() else {
+            pathClickLog("nil viewport text")
+            return false
+        }
 
         // Same mapping the surface view uses internally: view-local points, y flipped
         // to a top-left origin. Cell size is the surface's cell metric (backing
         // pixels) brought back to points by the window's scale factor.
-        let local = terminal.convert(event.locationInWindow, from: nil)
+        let local = terminal.convert(windowPoint, from: nil)
         let scale = terminal.window?.backingScaleFactor ?? 2
         let cellWidth = CGFloat(metrics.cellWidthPixels) / scale
         let cellHeight = CGFloat(metrics.cellHeightPixels) / scale
-        guard cellWidth > 0, cellHeight > 0 else { return false }
+        guard cellWidth > 0, cellHeight > 0 else { pathClickLog("zero cell size"); return false }
 
         let column = Int(local.x / cellWidth)
         let rowIndex = Int((terminal.bounds.height - local.y) / cellHeight)
         let rows = viewport.components(separatedBy: "\n")
-        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let bases = pathBaseDirectories(for: state)
+        pathClickLog("local=\(local) bounds=\(terminal.bounds.size) cell=\(cellWidth)x\(cellHeight) "
+            + "col=\(column) row=\(rowIndex) rows=\(rows.count) bases=\(bases)")
+        guard rowIndex >= 0, rowIndex < rows.count else { pathClickLog("row out of range"); return false }
+        pathClickLog("rowText=<\(rows[rowIndex])>")
 
-        let workingDirectory = state.workingDirectory ?? selectedSessionWorkspace
         guard let match = TerminalPathScanner.resolve(
-            in: rows[rowIndex], nearColumn: column, workingDirectory: workingDirectory
-        ) else { return false }
+            in: rows[rowIndex], nearColumn: column, baseDirectories: bases
+        ) else {
+            pathClickLog("no path resolved on row")
+            return false
+        }
 
+        pathClickLog("OPEN \(match.url.path) line=\(match.line.map(String.init) ?? "nil")")
         openFileReadOnly = true
         openFileLine = match.line
         openFileURL = match.url
         return true
     }
 
-    /// Walks up from a hit-tested view to the enclosing terminal surface NSView, whose
-    /// `delegate` is the `TerminalViewState` (see `TerminalPane.terminalView(matching:)`).
-    private func terminalSurfaceView(from view: NSView) -> TerminalView? {
-        var node: NSView? = view
-        while let current = node {
-            if let terminal = current as? TerminalView { return terminal }
-            node = current.superview
+    /// The terminal surface (and its state) whose frame contains `windowPoint`. Walks
+    /// the whole view tree and geometry-tests each `TerminalView` rather than trusting
+    /// `hitTest`, so a transparent overlay above the grid can't hide the surface.
+    private func terminalSurface(
+        at windowPoint: CGPoint, in window: NSWindow
+    ) -> (TerminalView, TerminalViewState)? {
+        guard let root = window.contentView else { return nil }
+        var terminals: [TerminalView] = []
+        collectTerminalViews(under: root, into: &terminals)
+        pathClickLog("terminalViews=\(terminals.count)")
+        for terminal in terminals {
+            let local = terminal.convert(windowPoint, from: nil)
+            guard terminal.bounds.contains(local),
+                  let state = terminal.delegate as? TerminalViewState else { continue }
+            return (terminal, state)
         }
         return nil
     }
+
+    private func collectTerminalViews(under view: NSView, into out: inout [TerminalView]) {
+        if let terminal = view as? TerminalView { out.append(terminal) }
+        for subview in view.subviews { collectTerminalViews(under: subview, into: &out) }
+    }
+
+    /// Roots a relative path from the clicked surface is resolved against, most-specific
+    /// first: the terminal's own reported cwd, then the owning session's worktree and
+    /// project root. The project root is the reliable anchor — the terminal cwd can be
+    /// stale or unreported (no OSC 7), which is why a bare `package.json` must still
+    /// resolve against the project the surface belongs to.
+    private func pathBaseDirectories(for state: TerminalViewState) -> [String] {
+        var bases: [String] = []
+        if let id = surfaces.first(where: { $0.value === state })?.key {
+            // Live cwd straight from the kernel (`PROC_PIDVNODEPATHINFO`), the reliable
+            // anchor: it tracks a plain `cd` even when the shell never emits OSC 7 — the
+            // exact case where the OSC 7 `workingDirectory` read is stale (still `~`).
+            if let liveCwd = ptyProcesses[id]?.currentWorkingDirectory() { bases.append(liveCwd) }
+            if let worktree = session(id)?.worktreePath { bases.append(worktree) }
+            if let project = project(for: id) { bases.append(project.path) }
+        }
+        if let cwd = state.workingDirectory { bases.append(cwd) }
+        if let workspace = selectedSessionWorkspace { bases.append(workspace) }
+        return bases
+    }
+}
+
+/// Temporary trace for the cmd-click path fallback while it's being brought up. Only
+/// fires on a cmd-left-click with no libghostty-detected link, so it is not chatty.
+@MainActor
+private func pathClickLog(_ message: @autoclosure () -> String) {
+    NSLog("[PATHCLICK] %@", message())
 }
