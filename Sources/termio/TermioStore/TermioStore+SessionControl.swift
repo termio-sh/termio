@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import GhosttyKit
 import GhosttyTerminal
+import os
 
 /// Handles `termio sessions …` requests from `SessionControlListener`. Every
 /// operation is scoped to the caller's own project (resolved from the caller's
@@ -15,7 +16,21 @@ import GhosttyTerminal
 /// error instead of a silent misdelivery. `send` with *no* handle starts a fresh
 /// agent session — targeting an existing sibling is always an explicit act.
 extension TermioStore {
+    /// Per-op enter/exit timing for control requests, readable via
+    /// `log stream --predicate 'category == "session-control"'`. The exit line's
+    /// elapsed time is how long the op occupied the request path — the number
+    /// that catches head-of-line blocking on the main actor (design doc §4.2).
+    private static let controlTiming = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "sh.termio.app", category: "session-control")
+
     func handleSessionControl(_ request: ControlRequest) async -> Data {
+        let entered = ContinuousClock.now
+        Self.controlTiming.info("enter op=\(request.op, privacy: .public)")
+        defer {
+            let elapsed = entered.duration(to: .now)
+            Self.controlTiming.info(
+                "exit op=\(request.op, privacy: .public) elapsed_ms=\(Int(elapsed.components.seconds) * 1000 + Int(elapsed.components.attoseconds / 1_000_000_000_000_000), privacy: .public)")
+        }
         guard settings.sessionControlEnabled else {
             return controlError(request, "disabled",
                 "Session control is off. Enable it in termio ▸ Settings ▸ Agents.")
