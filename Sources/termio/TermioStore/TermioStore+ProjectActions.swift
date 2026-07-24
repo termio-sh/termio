@@ -291,12 +291,13 @@ extension TermioStore {
         let project = Project(
             name: agent == .terminal ? "Terminals" : "Chats",
             path: path,
-            branch: currentBranch(in: path) ?? "—",
+            branch: "—",
             sessions: [session],
             kind: containerKind
         )
         projects.append(project)
         selectedSessionID = session.id
+        resolveBranchLabel(for: project.id, at: path)
     }
 
     /// Opens an **SSH terminal** to `host` — a loose terminal that launches
@@ -467,11 +468,12 @@ extension TermioStore {
         let project = Project(
             name: url.lastPathComponent,
             path: path,
-            branch: currentBranch(in: path) ?? "—",
+            branch: "—",
             sessions: [session]
         )
         projects.append(project)
         selectedSessionID = project.sessions.first?.id
+        resolveBranchLabel(for: project.id, at: path)
     }
 
     /// Removes a project from the sidebar: tears down every session's live surface
@@ -603,10 +605,22 @@ extension TermioStore {
         relaunchSession(id)
     }
 
-    /// The checked-out branch of the git repository at `directory`, or `nil` when
-    /// it is not a repo (rendered as "—", matching the seed projects).
-    private func currentBranch(in directory: String) -> String? {
-        runGit(["rev-parse", "--abbrev-ref", "HEAD"], in: directory)
+    /// Fills in a just-created project's branch label off the main thread. Creation
+    /// seeds the label with "—" (the non-repo rendering) because resolving it means
+    /// spawning a `git rev-parse` subprocess and blocking on its exit — a visible
+    /// hitch to pay on the main thread just for sidebar chrome. The patch keys on
+    /// the project id, so a project closed before git answers is simply a no-op.
+    private func resolveBranchLabel(for projectID: Project.ID, at path: String) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let branch = Self.gitOutput(["rev-parse", "--abbrev-ref", "HEAD"], in: path),
+                  !branch.isEmpty else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      let index = self.projects.firstIndex(where: { $0.id == projectID })
+                else { return }
+                self.projects[index].branch = branch
+            }
+        }
     }
 
     /// Runs `git -C <directory> <arguments…>` synchronously, returning trimmed
@@ -614,6 +628,12 @@ extension TermioStore {
     /// treat `nil` as "couldn't do it" and fall back rather than trapping.
     @discardableResult
     private func runGit(_ arguments: [String], in directory: String) -> String? {
+        Self.gitOutput(arguments, in: directory)
+    }
+
+    /// The blocking body behind `runGit`, isolation-free so background work (the
+    /// branch-label resolve) can call it without hopping through the main actor.
+    private nonisolated static func gitOutput(_ arguments: [String], in directory: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["-C", directory] + arguments

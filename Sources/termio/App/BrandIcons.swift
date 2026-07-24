@@ -46,8 +46,22 @@ struct AgentImageView: View {
     let url: URL
     var size: CGFloat
 
+    /// Decoded icons, keyed by file URL. A working session's sidebar row re-renders
+    /// about once a second (spinner/liveness), and without this every pass re-reads
+    /// and re-decodes the icon file from disk — synchronous I/O inside `body`. An
+    /// icon *swap* re-keys by URL and shows immediately; editing the file in place
+    /// shows its new art on the next launch.
+    private static let decoded = NSCache<NSURL, NSImage>()
+
+    private static func image(at url: URL) -> NSImage? {
+        if let hit = decoded.object(forKey: url as NSURL) { return hit }
+        guard let loaded = NSImage(contentsOf: url) else { return nil }
+        decoded.setObject(loaded, forKey: url as NSURL)
+        return loaded
+    }
+
     var body: some View {
-        if let image = NSImage(contentsOf: url) {
+        if let image = Self.image(at: url) {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)
