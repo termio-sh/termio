@@ -27,6 +27,8 @@ usage:
   termio sessions list                       sibling sessions in this project + status
   termio sessions send "<prompt>"            start a NEW agent session and send it the prompt
   termio sessions send <agent>@<id> "<prompt>"   send to an existing session
+  termio sessions send --wait <agent>@<id> "<prompt>"  send, then block until the turn
+                                             settles and report the transcript range to read
   termio sessions answer <agent>@<id> "<choice>" answer a session's menu/permission prompt
   termio sessions close <agent>@<id> [...]   close session tabs
   termio sessions focus <agent>@<id>         select the session in the app
@@ -35,6 +37,9 @@ usage:
 
 options:
   --json           machine-readable output (any `sessions` command)
+  --wait           (send/answer) block until the turn settles; reply carries the final
+                   status and the transcript line range the response landed in
+  --timeout <ms>   cap for --wait (default 300000; clamped 1000–600000). implies --wait
   --agent <name>   agent for a new session (send without a handle; default: caller's)
   --help, --version
 
@@ -75,13 +80,20 @@ is_handle() {
 # code — agents check `$?`, not prose.
 request_once() {
     req_op="$1"; req_format="$2"; req_target="$3"; req_agent="$4"; req_text="$5"
-    request=$(printf '{"op":"%s","format":"%s","caller_session":"%s","caller_cwd":"%s","target":"%s","agent":"%s","text":"%s"}' \
+    req_wait="${6:-false}"; req_timeout="${7:-}"
+    # `wait`/`timeout_ms` are optional; append them only when set so older-shaped
+    # callers (and non-send ops) send the same request they always did.
+    extra=""
+    [ "$req_wait" = "true" ] && extra=',"wait":true'
+    [ -n "$req_timeout" ] && extra="$extra,\"timeout_ms\":$req_timeout"
+    request=$(printf '{"op":"%s","format":"%s","caller_session":"%s","caller_cwd":"%s","target":"%s","agent":"%s","text":"%s"%s}' \
         "$req_op" "$req_format" \
         "$(json_escape "${TERMIO_SESSION:-}")" \
         "$(json_escape "$PWD")" \
         "$(json_escape "$req_target")" \
         "$(json_escape "$req_agent")" \
-        "$(json_escape "$req_text")")
+        "$(json_escape "$req_text")" \
+        "$extra")
     response=$(printf '%s' "$request" | nc -U "$SOCKET")
     printf '%s\n' "$response"
     case "$response" in
@@ -113,10 +125,19 @@ sessions() {
     agent=""
     targets=""
     text=""
+    wait=false
+    timeout=""
     seen_positional=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --json) format=json ;;
+            --wait) wait=true ;;
+            --timeout)
+                [ $# -ge 2 ] || { echo "termio: --timeout needs a value in ms" >&2; exit 1; }
+                case "$2" in
+                    ''|*[!0-9]*) echo "termio: --timeout needs whole milliseconds" >&2; exit 1 ;;
+                esac
+                timeout="$2"; wait=true; shift ;;
             --agent)
                 [ $# -ge 2 ] || { echo "termio: --agent needs a value" >&2; exit 1; }
                 agent="$2"; shift ;;
@@ -164,7 +185,7 @@ sessions() {
         exit "$failed"
     fi
 
-    request_once "$op" "$format" "$targets" "$agent" "$text"
+    request_once "$op" "$format" "$targets" "$agent" "$text" "$wait" "$timeout"
 }
 
 # The public hook contract:

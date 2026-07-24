@@ -97,7 +97,8 @@ extension TermioStore {
         switch resolveTarget(token, in: project) {
         case .found(let session):
             let state = surface(for: session, in: project)
-            return await deliver(payload, to: session, state: state, request: request, created: false)
+            return await deliver(payload, to: session, state: state, request: request,
+                                 in: project, created: false)
         case .notFound:
             return controlError(request, "not_found", targetNotFoundMessage(request.target))
         case .ambiguous:
@@ -141,14 +142,15 @@ extension TermioStore {
         }
         let state = surface(for: fresh, in: project)
         await waitForBootSettle(of: state)
-        return await deliver(payload, to: fresh, state: state, request: request, created: true)
+        return await deliver(payload, to: fresh, state: state, request: request,
+                             in: project, created: true)
     }
 
     /// Types `payload` into a session's live surface and submits it. Shared by
     /// the existing-sibling and fresh-spawn paths.
     private func deliver(
         _ payload: String, to session: Session, state: TerminalViewState,
-        request: ControlRequest, created: Bool
+        request: ControlRequest, in project: Project, created: Bool
     ) async -> Data {
         // The libghostty surface attaches lazily on the pane's first render, so a
         // session never shown in the UI has no surface yet. Selecting it adds it to
@@ -172,7 +174,132 @@ extension TermioStore {
         _ = state.send(payload)
         try? await Task.sleep(for: .milliseconds(40))
         Self.pressReturn(on: surfaceHandle)
-        return sentReply(request, session, created: created)
+
+        // Without `--wait`, the reply is the send acknowledgement (the transcript
+        // path + a cursor to read the response from). With it, block until the turn
+        // settles and report the outcome plus the exact transcript range it landed in.
+        guard request.wantsWait else { return sentReply(request, session, created: created) }
+        // The cursor to read the reply from: wherever the transcript stands right
+        // after submitting. A fresh session's transcript often isn't known until its
+        // first hook fires mid-turn, so this is nil for now and re-read after the wait.
+        let cursorAtSend = transcriptPaths[session.id].map(Self.lineCount)
+        return await waitForReply(request, session: session, in: project,
+                                  cursorAtSend: cursorAtSend, created: created)
+    }
+
+    /// Blocks until the session the prompt was sent to finishes its turn — or stops
+    /// to ask the user (`needs-you`) — or the timeout elapses, then reports the
+    /// outcome. This is what lets a caller issue one `send --wait` instead of
+    /// sending and then polling `list` in a loop.
+    ///
+    /// Completion is read primarily from the **status resting**: the turn is done once
+    /// the session, having been seen `working`, drops back off `working` and stays there
+    /// for `settleWindow` (`needs-you` short-circuits immediately). Status is the signal
+    /// every real agent drives — built-ins via hooks, rule-based agents via the screen
+    /// classifier — and unlike a raw screen watch it is immune to a TUI footer that keeps
+    /// animating after the reply. A 300ms poll always catches the `working` span of a real
+    /// turn (an LLM round-trip is far longer). Only a session with no status signal at all
+    /// — a plain terminal driven by `send --wait` — falls back to the screen first changing
+    /// and then going still.
+    private func waitForReply(
+        _ request: ControlRequest, session: Session, in project: Project,
+        cursorAtSend: Int?, created: Bool
+    ) async -> Data {
+        let cap = min(max(request.timeoutMs ?? 300_000, 1_000), 600_000)
+        let deadline = Date().addingTimeInterval(Double(cap) / 1_000)
+        let settleWindow = 1.5
+
+        var sawWorking = false
+        var restingSince: Date?
+        var lastFrame = viewportText(for: session, in: project)
+        var lastChangeAt = Date()
+        var changedSinceSend = false
+        var settled: SessionStatus?
+
+        while Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(300))
+            let current = status(for: session.id)
+            if current == .working {
+                sawWorking = true
+                restingSince = nil
+            } else if restingSince == nil {
+                restingSince = Date()
+            }
+            if current == .needsAttention { settled = .needsAttention; break }
+
+            let now = Date()
+            let frame = viewportText(for: session, in: project)
+            if frame != lastFrame {
+                lastFrame = frame
+                lastChangeAt = now
+                changedSinceSend = true
+            }
+            guard current != .working else { continue }
+            let rested = restingSince.map { now.timeIntervalSince($0) >= settleWindow } ?? false
+            let screenQuiet = now.timeIntervalSince(lastChangeAt) >= settleWindow
+            // Status-tracked agent: seen working, now rested. (Footer animation can't
+            // fool this — it doesn't touch status.)
+            if sawWorking, rested { settled = current; break }
+            // No status signal at all (a plain terminal): the screen changed, then stilled.
+            if !sawWorking, changedSinceSend, screenQuiet { settled = current; break }
+        }
+        return waitReply(request, session: session, in: project,
+                         cursorAtSend: cursorAtSend, created: created, settled: settled)
+    }
+
+    /// The reply for a completed (or timed-out) `send --wait`. Hands back the turn's
+    /// final status and the exact transcript range to read — `cursor` (where the reply
+    /// begins, captured at send) through `cursor_end` (the log's length now) — so the
+    /// caller's own file tools read precisely the new content, no polling. When the
+    /// session is blocked on the user (`needs-you`), the current screen rides along so
+    /// the caller can see the prompt it must `answer`.
+    private func waitReply(
+        _ request: ControlRequest, session: Session, in project: Project,
+        cursorAtSend: Int?, created: Bool, settled: SessionStatus?
+    ) -> Data {
+        let handle = sessionHandle(for: session)
+        let statusToken = Self.statusToken(status(for: session.id))
+        var json: [String: Any] = [
+            "target": handle,
+            "title": displayTitle(for: session),
+            "status": statusToken,
+            "timed_out": settled == nil,
+        ]
+        if created { json["created"] = true }
+
+        let headline: String
+        switch settled {
+        case .needsAttention: headline = "\(handle) is waiting on you"
+        case .some: headline = "\(handle) finished (\(statusToken))"
+        case nil: headline = "\(handle) still \(statusToken) after the wait — timed out"
+        }
+        var text = headline
+
+        // The transcript may only have become known during the wait (a fresh
+        // session's first hook), so re-read it here rather than trusting the
+        // send-time snapshot.
+        if let transcript = transcriptPaths[session.id] {
+            let start = cursorAtSend ?? 0
+            let end = Self.lineCount(of: transcript)
+            json["transcript"] = transcript
+            json["cursor"] = start
+            json["cursor_end"] = end
+            text += "\n  transcript: \(transcript)\n  reply: lines \(start)–\(end) (read this range)"
+        }
+        if settled == .needsAttention, let screen = viewportText(for: session, in: project) {
+            json["screen"] = screen
+            text += "\n  on screen:\n\(screen)"
+        }
+        return control(request, ok: true, text: text, json: json)
+    }
+
+    /// The current viewport text of a session's terminal, or nil when it has no live
+    /// in-memory backend yet (never rendered). Reads through the backend's own lock
+    /// (`readViewportText`), so it's safe from this actor.
+    private func viewportText(for session: Session, in project: Project) -> String? {
+        let state = surfaces[session.id] ?? surface(for: session, in: project)
+        guard case .inMemory(let terminal) = state.configuration.backend else { return nil }
+        return terminal.readViewportText()
     }
 
     /// Waits for a freshly launched agent TUI to finish booting before keystrokes

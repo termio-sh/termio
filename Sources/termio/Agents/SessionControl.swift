@@ -26,14 +26,22 @@ struct ControlRequest: Decodable {
     let text: String?
     let lines: Int?
     let agent: String?
+    /// `send`/`answer` only: block until the turn the prompt kicked off settles
+    /// (or the timeout elapses) and report the outcome, instead of replying the
+    /// instant the keystrokes are delivered.
+    let wait: Bool?
+    /// The `--wait` cap in milliseconds; clamped server-side. Nil uses the default.
+    let timeoutMs: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case op, format, target, text, lines, agent
+        case op, format, target, text, lines, agent, wait
         case callerSession = "caller_session"
         case callerCwd = "caller_cwd"
+        case timeoutMs = "timeout_ms"
     }
 
     var wantsJSON: Bool { format == "json" }
+    var wantsWait: Bool { wait == true }
 }
 
 /// A local Unix-domain socket the `termio sessions` CLI connects to. Unlike
