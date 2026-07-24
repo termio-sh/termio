@@ -2,6 +2,16 @@ import SwiftUI
 import TermioShared
 import UIKit
 
+extension Color {
+    /// Monochrome ink for the working spinner, matching the Mac sidebar's
+    /// black/white comet: the motion already says "working", so color stays
+    /// reserved for the status dots (green done / orange attention) that have no
+    /// other channel. Adapts to light/dark like the Mac's appearance-matched ink.
+    static let sessionWorkingInk = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark ? .white : .black
+    })
+}
+
 // Pieces shared by the two home levels (the Projects root and a pushed
 // project page): the session row, the zero state, and the floating glass
 // chrome they both draw.
@@ -28,7 +38,7 @@ struct SessionRow: View {
         HStack(alignment: .center, spacing: 10) {
             Group {
                 if session.status == .working {
-                    WorkingIndicator(tint: session.agent.tintColor)
+                    WorkingIndicator(tint: .sessionWorkingInk)
                 } else {
                     AgentIconView(
                         ref: session.agent.iconRef,

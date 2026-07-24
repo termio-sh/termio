@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import TermioShared
 
 /// The menu-bar (tray) presence, modelled on Tailscale's status item: termio's
 /// own 3×3 grid brand mark stays constant as a flat monochrome glyph that sits

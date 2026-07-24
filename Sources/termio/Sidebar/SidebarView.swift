@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import TermioShared
 
 extension AppSettings {
     /// The sidebar text font built from the interface preferences. An empty family
@@ -967,7 +968,7 @@ private struct SessionRow: View {
                     // the sidebar's folder and terminal glyphs; the comet's own
                     // opacity ramp provides all the fade, so the head reads at
                     // full icon strength instead of a double-discounted grey.
-                    WorkingIndicator()
+                    WorkingIndicator(tint: .sidebarWorkingInk)
                 } else {
                     AgentIconView(agent: store.effectiveAgent(for: session), size: 15)
                 }
@@ -1168,93 +1169,13 @@ private struct StatusDot: View {
 /// The "agent is working" mark: a 3×3 grid of dots with a bright comet that orbits
 /// the eight perimeter cells, so the small nine-square grid reads as rotating. Sits
 /// in place of the session's brand icon while a turn is in flight (see `SessionRow`).
-struct WorkingIndicator: View {
-    /// Pure ink, deeper than `.primary`: labelColor keeps ~15% transparency and
-    /// the sidebar's vibrancy lightens it again, which left even the comet's
-    /// full-opacity head reading grey. Appearance-adaptive black/white punches
-    /// through both.
-    private static let ink = Color(nsColor: NSColor(name: nil) { appearance in
+extension Color {
+    /// Pure ink for the sidebar's working spinner: `labelColor` keeps ~15%
+    /// transparency and the sidebar's vibrancy lightens it again, which left even
+    /// the comet's full-opacity head reading grey. Appearance-adaptive
+    /// black/white punches through both. The shared `WorkingIndicator` takes its
+    /// tint from the caller so iOS can pass an agent brand color instead.
+    static let sidebarWorkingInk = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .white : .black
     })
-
-    var tint: Color = Self.ink
-
-    /// When nil the comet self-animates via `TimelineView`; supplying a phase
-    /// (0...1) renders one still frame instead, so a caller can drive the rotation
-    /// with its own timer where `TimelineView` never ticks — e.g. inside an open
-    /// `NSMenu`, which runs a modal event-tracking loop.
-    var phase: Double? = nil
-
-    /// The eight perimeter cells of the 3×3 grid in clockwise order, as
-    /// `(column, row)` with the center at `(1, 1)`. The comet travels this ring.
-    private static let ring: [(Int, Int)] = [
-        (0, 0), (1, 0), (2, 0), (2, 1), (2, 2), (1, 2), (0, 2), (0, 1),
-    ]
-    // Dots this small read lighter than their nominal opacity, so the size and
-    // the opacity ramp are tuned together: 2.5pt pure ink with a 0.5 tail floor
-    // sits at the same perceived weight as the neighboring 15pt glyphs.
-    private let dotSize: CGFloat = 2.5
-    private let spacing: CGFloat = 3.6
-    private let period: Double = 1.1
-
-    var body: some View {
-        if let phase {
-            grid(phase: phase)
-        } else {
-            TimelineView(.animation) { context in
-                let p = context.date.timeIntervalSinceReferenceDate
-                    .truncatingRemainder(dividingBy: period) / period
-                grid(phase: p)
-            }
-        }
-    }
-
-    private func grid(phase: Double) -> some View {
-        ZStack {
-            // A steady center anchors the spinning ring, matching the tail
-            // so the grid reads as one solid mark with a swell running
-            // around it.
-            dot(opacity: 0.5, scale: 1)
-            ForEach(Array(Self.ring.enumerated()), id: \.offset) { index, cell in
-                let distance = ringDistance(at: index, phase: phase)
-                dot(opacity: opacity(distance: distance), scale: scale(distance: distance))
-                    .offset(
-                        x: CGFloat(cell.0 - 1) * spacing,
-                        y: CGFloat(cell.1 - 1) * spacing
-                    )
-            }
-        }
-        .frame(width: 13, height: 13)
-    }
-
-    private func dot(opacity: Double, scale: Double) -> some View {
-        Circle()
-            .fill(tint)
-            .frame(width: dotSize * scale, height: dotSize * scale)
-            .opacity(opacity)
-    }
-
-    /// A perimeter cell's distance from the comet's head, measured the shorter way
-    /// around the ring so the tail wraps.
-    private func ringDistance(at index: Int, phase: Double) -> Double {
-        let count = Double(Self.ring.count)
-        let head = phase * count
-        let raw = abs(Double(index) - head)
-        return min(raw, count - raw)
-    }
-
-    /// The rotation is carried by two signals so neither has to be extreme: a
-    /// brightness wave AND a size swell at the comet's head. Opacity alone needed a
-    /// near-invisible tail to read as motion, which left the whole mark far paler
-    /// than the full-ink glyphs beside it; with the swell doing half the work the
-    /// tail floor stays at half ink and the grid keeps real visual weight.
-    private func opacity(distance: Double) -> Double {
-        max(0.5, 1 - distance / 4)
-    }
-
-    /// Size factor for a cell: the head swells a fifth and the swell dies
-    /// out over the next two cells.
-    private func scale(distance: Double) -> Double {
-        1 + 0.2 * max(0, 1 - distance / 2)
-    }
 }
