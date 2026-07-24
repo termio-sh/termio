@@ -173,6 +173,20 @@ extension TermioStore {
         promotionStreak[id] = nil
     }
 
+    /// Drops every per-session activity-tracking entry — the one place that
+    /// enumerates these dictionaries, so the teardown paths (close, project
+    /// removal, relaunch) can't drift out of step when a new tracker is added.
+    /// `transcriptPaths` is deliberately not here: a relaunch resumes the same
+    /// conversation, so only the close/remove paths clear it (inline).
+    func clearActivityTracking(for id: Session.ID) {
+        lastWorkingAt[id] = nil
+        lastHookReportAt[id] = nil
+        lastUserInputAt[id] = nil
+        promotionStreak[id] = nil
+        lastTitleActivity[id] = nil
+        lastScreenActivity[id] = nil
+    }
+
     /// Marks the moment of live user input into a session's terminal. Keystroke
     /// echo and mouse-mode scrolling repaint the screen exactly like agent
     /// output, so promotion holds off while the human is the one causing the

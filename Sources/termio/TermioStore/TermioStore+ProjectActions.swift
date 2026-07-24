@@ -490,11 +490,8 @@ extension TermioStore {
             monitors[sessionID] = nil
             removeRuntime(for: sessionID)
             processSpawnedAt[sessionID] = nil
-            lastWorkingAt[sessionID] = nil
-            lastHookReportAt[sessionID] = nil
-            lastUserInputAt[sessionID] = nil
-            promotionStreak[sessionID] = nil
-            lastTitleActivity[sessionID] = nil
+            transcriptPaths[sessionID] = nil
+            clearActivityTracking(for: sessionID)
         }
         projects.remove(at: projectIndex)
 
@@ -552,11 +549,8 @@ extension TermioStore {
         monitors[id] = nil
         removeRuntime(for: id)
         processSpawnedAt[id] = nil
-        lastWorkingAt[id] = nil
-        lastHookReportAt[id] = nil
-        lastUserInputAt[id] = nil
-        promotionStreak[id] = nil
-        lastTitleActivity[id] = nil
+        transcriptPaths[id] = nil
+        clearActivityTracking(for: id)
 
         // If the session held a split pane, collapse that pane; when it was also
         // the focused pane the prune moves the selection to its layout neighbor,
@@ -587,6 +581,15 @@ extension TermioStore {
         surfaces[id] = nil
         monitors[id] = nil
         processSpawnedAt[id] = nil
+        // The dead child's status must not carry into the respawn: a leftover
+        // spinner would read as the new process already working (and with the
+        // trackers cleared below, the stale-working sweep — which only visits
+        // sessions present in `lastWorkingAt` — could never correct it).
+        setStatus(.idle, for: id)
+        setCurrentTool(nil, for: id)
+        clearActivityTracking(for: id)
+        // `transcriptPaths` deliberately survives: the respawn resumes the same
+        // conversation, so the Info pane's trace should keep pointing at it.
         // `surfaces` is a plain cache, not `@Published` — nothing re-renders on
         // its own, so poke observers; the pane then rebuilds via `surface(for:)`.
         objectWillChange.send()

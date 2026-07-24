@@ -288,7 +288,11 @@ final class CompanionServer {
             let bridge = PTYBridge(pty: pty, connection: connection)
             bridges[id] = bridge
             bridge.start()
-            pty.addExitObserver { [weak self, weak connection] code in
+            // The bridge owns the token so `stop()` retires the observer with the
+            // attach: without that, a phone that re-attaches to another session
+            // would still hear THIS pty's exit — a spurious exit banner and a
+            // dropped connection while it's viewing a session that's fine.
+            bridge.exitToken = pty.addExitObserver { [weak self, weak connection] code in
                 guard let connection else { return }
                 Task { @MainActor in
                     self?.sendControl(.exit(code: code), to: connection)
@@ -794,6 +798,9 @@ private final class PTYBridge: @unchecked Sendable {
     private let queue = DispatchQueue(label: "termio.companion.bridge")
     private var sinkToken: UUID?
     private var resizeToken: UUID?
+    /// Set by the attach handler (the observer's body needs the server, which the
+    /// bridge doesn't know); cleared here in `stop()` like the other two tokens.
+    var exitToken: UUID?
     private let lock = NSLock()
     private var pendingBytes = 0
     private var behind = false
@@ -900,6 +907,8 @@ private final class PTYBridge: @unchecked Sendable {
         sinkToken = nil
         if let token = resizeToken { pty.removeResizeObserver(token) }
         resizeToken = nil
+        if let token = exitToken { pty.removeExitObserver(token) }
+        exitToken = nil
     }
 
     private func send(_ data: Data) {

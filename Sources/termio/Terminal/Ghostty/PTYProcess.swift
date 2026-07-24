@@ -102,7 +102,7 @@ final class PTYProcess: @unchecked Sendable {
     private var companionCols = 0
     private var companionRows = 0
     private var resizeObservers: [UUID: (Int, Int) -> Void] = [:]
-    private var exitObservers: [(Int32) -> Void] = []
+    private var exitObservers: [UUID: (Int32) -> Void] = [:]
     private var terminated = false
     /// Set (under `lock`) the moment `waitpid` reaps the child, after which its
     /// pid may be recycled — the escalation kill checks this so a delayed
@@ -217,7 +217,7 @@ final class PTYProcess: @unchecked Sendable {
                 let runtimeMs = UInt64(max(0, Date().timeIntervalSince(self.startedAt) * 1000))
                 self.onExit?(Int32(code), runtimeMs)
                 self.lock.lock()
-                let observers = self.exitObservers
+                let observers = Array(self.exitObservers.values)
                 self.lock.unlock()
                 for observer in observers { observer(Int32(code)) }
             }
@@ -448,10 +448,22 @@ final class PTYProcess: @unchecked Sendable {
     }
 
     /// Observe child exit (in addition to `onExit`, which the store owns).
-    /// Fired on the main queue.
-    func addExitObserver(_ observer: @escaping (Int32) -> Void) {
+    /// Fired on the main queue. The token unregisters it — an observer tied to
+    /// something shorter-lived than the PTY (a phone attach, outlived when the
+    /// same connection re-attaches to another session) must be removed on that
+    /// teardown, or the dead pairing still hears this PTY's exit.
+    @discardableResult
+    func addExitObserver(_ observer: @escaping (Int32) -> Void) -> UUID {
+        let id = UUID()
         lock.lock()
-        exitObservers.append(observer)
+        exitObservers[id] = observer
+        lock.unlock()
+        return id
+    }
+
+    func removeExitObserver(_ id: UUID) {
+        lock.lock()
+        exitObservers[id] = nil
         lock.unlock()
     }
 
