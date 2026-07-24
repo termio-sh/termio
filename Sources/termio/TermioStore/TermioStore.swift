@@ -467,11 +467,17 @@ final class TermioStore: ObservableObject {
         // that link in *both* shells and agent TUIs. Returning nil consumes the event so the click
         // isn't also delivered to the terminal/app underneath.
         linkClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
-            guard let self,
-                  event.modifierFlags.contains(.command),
-                  let url = TerminalLinkState.hoveredURL else { return event }
-            self.openTerminalLink(url, surfaceWorkingDirectory: nil)
-            return nil
+            guard let self, event.modifierFlags.contains(.command) else { return event }
+            if let url = TerminalLinkState.hoveredURL {
+                self.openTerminalLink(url, surfaceWorkingDirectory: nil)
+                return nil
+            }
+            // Nothing libghostty detected under the mouse — fall back to reconstructing
+            // a bare file path from the grid text at the click (see `TerminalPathScanner`).
+            // Consumed only when it actually opens a file; otherwise the click passes
+            // through to the terminal as before.
+            if self.openBarePathUnderCommandClick(event) { return nil }
+            return event
         }
         syncWatchedFolders()
 
@@ -834,7 +840,7 @@ final class TermioStore: ObservableObject {
 
     /// The working directory of the selected session (its worktree, else the project root), used as
     /// the fall-back base for resolving a relative path when the surface hasn't reported an OSC 7 cwd.
-    private var selectedSessionWorkspace: String? {
+    var selectedSessionWorkspace: String? {
         guard let id = selectedSessionID, let session = session(id), let project = project(for: id)
         else { return nil }
         return session.worktreePath ?? project.path
