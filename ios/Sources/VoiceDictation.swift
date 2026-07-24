@@ -1,22 +1,71 @@
 import AVFoundation
 import UIKit
 
-/// Hold-to-talk voice dictation: record the mic while the user holds the
-/// composer's mic button, then transcribe the clip with OpenAI's
-/// `gpt-4o-transcribe` and hand the text back for the composer to drop into the
-/// draft (never auto-sent — the same "dictation can't fire a half-formed
-/// prompt" contract the composer already keeps).
-///
-/// The clip is short (a held button, seconds to a minute) and the text is
-/// wanted only after release, so this records-then-POSTs to
-/// `/v1/audio/transcriptions` rather than opening a realtime socket — see
-/// `docs/rfcs/push-to-talk-voice-dictation.md` for why that model wins here.
-final class VoiceDictation: NSObject {
-    /// The transcription model. `gpt-4o-transcribe` is the most accurate of
-    /// OpenAI's speech-to-text models — worth it for prompts dense with
-    /// identifiers and paths — at $0.006/min.
-    static let model = "gpt-4o-transcribe"
+/// One of the bring-your-own-key transcription services the user can pick in
+/// Settings ▸ Voice. Each owns its endpoint, auth header, request shape, and
+/// its own Keychain entry, so keys never cross providers.
+enum TranscriptionProvider: String, CaseIterable {
+    case openAI
+    case elevenLabs
 
+    /// Settings label.
+    var displayName: String {
+        switch self {
+        case .openAI: "OpenAI"
+        case .elevenLabs: "ElevenLabs"
+        }
+    }
+
+    /// The key editor's field placeholder.
+    var keyPlaceholder: String {
+        switch self {
+        case .openAI: "sk-..."
+        case .elevenLabs: "Your ElevenLabs API key"
+        }
+    }
+
+    /// The Key section's footer — which model does the transcribing.
+    var keyFooter: String {
+        switch self {
+        case .openAI: "Transcribed with OpenAI gpt-4o-transcribe."
+        case .elevenLabs: "Transcribed with ElevenLabs Scribe."
+        }
+    }
+
+    fileprivate var keychainService: String {
+        switch self {
+        case .openAI: "sh.termio.mobile.openai"
+        case .elevenLabs: "sh.termio.mobile.elevenlabs"
+        }
+    }
+
+    fileprivate var endpointURL: URL {
+        switch self {
+        case .openAI: URL(string: "https://api.openai.com/v1/audio/transcriptions")!
+        case .elevenLabs: URL(string: "https://api.elevenlabs.io/v1/speech-to-text")!
+        }
+    }
+
+    /// The transcription model id sent in the request. `gpt-4o-transcribe` is
+    /// OpenAI's most accurate speech model; `scribe_v2` is ElevenLabs' Scribe.
+    fileprivate var model: String {
+        switch self {
+        case .openAI: "gpt-4o-transcribe"
+        case .elevenLabs: "scribe_v2"
+        }
+    }
+}
+
+/// Hold-to-talk voice dictation: record the mic while the user holds the
+/// terminal keyboard's mic key, then transcribe the clip with the provider the
+/// user picked in Settings ▸ Voice and hand the text back to drop into the
+/// terminal (never auto-sent — a dictation can't fire a half-formed prompt).
+///
+/// The clip is short (a held key, seconds to a minute) and the text is wanted
+/// only after release, so this records-then-POSTs rather than opening a
+/// realtime socket — see `docs/rfcs/push-to-talk-voice-dictation.md` for why
+/// that model wins here.
+final class VoiceDictation: NSObject {
     enum Failure: Error {
         case missingKey
         case microphonePermissionDenied
@@ -28,7 +77,7 @@ final class VoiceDictation: NSObject {
         /// A short line fit for the recording HUD's error state.
         var hudMessage: String {
             switch self {
-            case .missingKey: "Add your OpenAI key in Settings ▸ Voice"
+            case .missingKey: "Add an API key in Settings ▸ Voice"
             case .microphonePermissionDenied: "Allow microphone access in Settings"
             case .recordingFailed: "Couldn't start recording"
             case .empty: "Didn't catch that — try again"
@@ -49,7 +98,7 @@ final class VoiceDictation: NSObject {
     /// on the main queue once recording is actually underway (or with the
     /// reason it couldn't start).
     func start(completion: @escaping (Result<Void, Failure>) -> Void) {
-        guard Self.apiKey?.isEmpty == false else {
+        guard Self.hasAPIKey(for: MobileSettings.shared.transcriptionProvider) else {
             completion(.failure(.missingKey))
             return
         }
@@ -127,12 +176,13 @@ final class VoiceDictation: NSObject {
             return
         }
 
-        guard let key = Self.apiKey, !key.isEmpty else {
+        let provider = MobileSettings.shared.transcriptionProvider
+        guard let key = Self.apiKey(for: provider), !key.isEmpty else {
             cleanUp()
             completion(.failure(.missingKey))
             return
         }
-        transcribe(fileURL: fileURL, apiKey: key) { [weak self] result in
+        transcribe(fileURL: fileURL, provider: provider, apiKey: key) { [weak self] result in
             self?.cleanUp()
             completion(result)
         }
@@ -163,7 +213,7 @@ final class VoiceDictation: NSObject {
     // MARK: - Transcription
 
     private func transcribe(
-        fileURL: URL, apiKey: String,
+        fileURL: URL, provider: TranscriptionProvider, apiKey: String,
         completion: @escaping (Result<String, Failure>) -> Void
     ) {
         let audioData: Data
@@ -174,32 +224,7 @@ final class VoiceDictation: NSObject {
             return
         }
 
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let boundary = "termio-\(UUID().uuidString)"
-        request.setValue(
-            "multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type"
-        )
-
-        var body = Data()
-        func field(_ name: String, _ value: String) {
-            body.appendString("--\(boundary)\r\n")
-            body.appendString("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
-            body.appendString("\(value)\r\n")
-        }
-        field("model", Self.model)
-        // Plain-text response: the whole body is the transcript, no JSON to peel.
-        field("response_format", "text")
-        body.appendString("--\(boundary)\r\n")
-        body.appendString(
-            "Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n"
-        )
-        body.appendString("Content-Type: audio/m4a\r\n\r\n")
-        body.append(audioData)
-        body.appendString("\r\n--\(boundary)--\r\n")
-        request.httpBody = body
-
+        let request = provider.makeRequest(apiKey: apiKey, audioData: audioData)
         URLSession.shared.dataTask(with: request) { data, response, error in
             let result: Result<String, Failure>
             defer { DispatchQueue.main.async { completion(result) } }
@@ -212,67 +237,135 @@ final class VoiceDictation: NSObject {
                 result = .failure(.network("No response"))
                 return
             }
-            let bodyText = String(data: data, encoding: .utf8) ?? ""
             guard (200..<300).contains(http.statusCode) else {
                 result = .failure(.api(
-                    status: http.statusCode, message: Self.apiErrorMessage(from: data) ?? "Transcription failed"
+                    status: http.statusCode,
+                    message: provider.errorMessage(from: data) ?? "Transcription failed"
                 ))
                 return
             }
-            let transcript = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let transcript = provider.transcript(from: data)
             result = transcript.isEmpty ? .failure(.empty) : .success(transcript)
         }.resume()
     }
 
-    /// OpenAI errors come back as `{ "error": { "message": ... } }`.
-    private static func apiErrorMessage(from data: Data) -> String? {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let error = json["error"] as? [String: Any],
-              let message = error["message"] as? String
-        else { return nil }
-        return message
-    }
-
     // MARK: - API key (Keychain)
 
-    private static let keychainService = "sh.termio.mobile.openai"
+    // One entry per provider (keyed by service), same account. Reads use the
+    // service the value was written under, so a key stored before providers
+    // were split out still resolves under `.openAI` unchanged.
     private static let keychainAccount = "api-key"
 
-    /// The OpenAI API key, stored in the Keychain (never UserDefaults). Setting
-    /// nil or empty removes it.
-    static var apiKey: String? {
-        get {
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: keychainService,
-                kSecAttrAccount as String: keychainAccount,
-                kSecReturnData as String: true,
-                kSecMatchLimit as String: kSecMatchLimitOne,
-            ]
-            var item: CFTypeRef?
-            guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-                  let data = item as? Data
-            else { return nil }
-            return String(data: data, encoding: .utf8)
-        }
-        set {
-            let base: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: keychainService,
-                kSecAttrAccount as String: keychainAccount,
-            ]
-            SecItemDelete(base as CFDictionary)
-            guard let value = newValue?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !value.isEmpty, let data = value.data(using: .utf8)
-            else { return }
-            var add = base
-            add[kSecValueData as String] = data
-            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            SecItemAdd(add as CFDictionary, nil)
-        }
+    /// The stored key for `provider`, or nil. Kept in the Keychain, never
+    /// UserDefaults.
+    static func apiKey(for provider: TranscriptionProvider) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: provider.keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data
+        else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
-    static var hasAPIKey: Bool { apiKey?.isEmpty == false }
+    /// Stores the key for `provider`; a nil or empty value removes it.
+    static func setAPIKey(_ newValue: String?, for provider: TranscriptionProvider) {
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: provider.keychainService,
+            kSecAttrAccount as String: keychainAccount,
+        ]
+        SecItemDelete(base as CFDictionary)
+        guard let value = newValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty, let data = value.data(using: .utf8)
+        else { return }
+        var add = base
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    static func hasAPIKey(for provider: TranscriptionProvider) -> Bool {
+        apiKey(for: provider)?.isEmpty == false
+    }
+}
+
+private extension TranscriptionProvider {
+    /// Builds the multipart transcription POST for this provider.
+    func makeRequest(apiKey: String, audioData: Data) -> URLRequest {
+        var request = URLRequest(url: endpointURL)
+        request.httpMethod = "POST"
+        let boundary = "termio-\(UUID().uuidString)"
+        request.setValue(
+            "multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type"
+        )
+        switch self {
+        case .openAI:
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        case .elevenLabs:
+            request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
+        }
+
+        var body = Data()
+        func field(_ name: String, _ value: String) {
+            body.appendString("--\(boundary)\r\n")
+            body.appendString("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
+            body.appendString("\(value)\r\n")
+        }
+        switch self {
+        case .openAI:
+            field("model", model)
+            // Plain-text response: the whole body is the transcript, no JSON to peel.
+            field("response_format", "text")
+        case .elevenLabs:
+            field("model_id", model)
+        }
+        body.appendString("--\(boundary)\r\n")
+        body.appendString(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n"
+        )
+        body.appendString("Content-Type: audio/m4a\r\n\r\n")
+        body.append(audioData)
+        body.appendString("\r\n--\(boundary)--\r\n")
+        request.httpBody = body
+        return request
+    }
+
+    /// Pulls the transcript out of a 2xx response body.
+    func transcript(from data: Data) -> String {
+        let text: String
+        switch self {
+        case .openAI:
+            // response_format=text: the body is the transcript verbatim.
+            text = String(data: data, encoding: .utf8) ?? ""
+        case .elevenLabs:
+            // JSON: { "text": "…", "language_code": …, "words": [...] }.
+            let json = try? JSONSerialization.jsonObject(with: data)
+            text = (json as? [String: Any])?["text"] as? String ?? ""
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A human-readable message from an error response, if the body carries one.
+    func errorMessage(from data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        switch self {
+        case .openAI:
+            // { "error": { "message": … } }
+            return (json["error"] as? [String: Any])?["message"] as? String
+        case .elevenLabs:
+            // { "detail": "…" } or { "detail": { "message": … } }
+            if let detail = json["detail"] as? String { return detail }
+            return (json["detail"] as? [String: Any])?["message"] as? String
+        }
+    }
 }
 
 private extension Data {

@@ -47,6 +47,7 @@ final class MobileSettings {
         static let fontSize = "appearance.fontSize"
         static let terminalKeys = "terminalKeyboard.keys"
         static let pushToTalk = "voice.pushToTalk"
+        static let transcriptionProvider = "voice.provider"
     }
 
     private let defaults = UserDefaults.standard
@@ -106,6 +107,16 @@ final class MobileSettings {
         }
     }
 
+    /// Which transcription service dictation uses — the user's Settings ▸ Voice
+    /// choice. Each provider keeps its own key in the Keychain, so switching
+    /// never loses the other's key.
+    var transcriptionProvider: TranscriptionProvider {
+        didSet {
+            defaults.set(transcriptionProvider.rawValue, forKey: Key.transcriptionProvider)
+            notify()
+        }
+    }
+
     private init() {
         defaults.register(defaults: [
             Key.appearanceMode: AppearanceMode.system.rawValue,
@@ -114,6 +125,7 @@ final class MobileSettings {
             Key.fontSize: Self.defaultFontSize,
             Key.terminalKeys: TerminalKeyCatalog.defaultIDs,
             Key.pushToTalk: false,
+            Key.transcriptionProvider: TranscriptionProvider.openAI.rawValue,
         ])
         appearanceMode = AppearanceMode(
             rawValue: defaults.string(forKey: Key.appearanceMode) ?? ""
@@ -124,6 +136,9 @@ final class MobileSettings {
         terminalKeyIDs = defaults.stringArray(forKey: Key.terminalKeys)
             ?? TerminalKeyCatalog.defaultIDs
         pushToTalkEnabled = defaults.bool(forKey: Key.pushToTalk)
+        transcriptionProvider = TranscriptionProvider(
+            rawValue: defaults.string(forKey: Key.transcriptionProvider) ?? ""
+        ) ?? .openAI
     }
 
     private func notify() {

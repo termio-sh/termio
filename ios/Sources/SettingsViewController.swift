@@ -14,13 +14,14 @@ final class SettingsViewController: UITableViewController {
     }
 
     private enum Row: Int, CaseIterable {
-        case connectivity, appearance, terminalKeyboard
+        case connectivity, appearance, terminalKeyboard, voice
 
         var title: String {
             switch self {
             case .connectivity: "Connectivity"
             case .appearance: "Appearance"
             case .terminalKeyboard: "Terminal Keyboard"
+            case .voice: "Voice"
             }
         }
 
@@ -31,6 +32,7 @@ final class SettingsViewController: UITableViewController {
             case .connectivity: .wireless
             case .appearance: .paintBrush
             case .terminalKeyboard: .keyboard
+            case .voice: .voice
             }
         }
 
@@ -39,6 +41,7 @@ final class SettingsViewController: UITableViewController {
             case .connectivity: ConnectivitySettingsViewController()
             case .appearance: AppearanceSettingsViewController()
             case .terminalKeyboard: TerminalKeyboardSettingsViewController()
+            case .voice: VoiceSettingsViewController()
             }
         }
     }
@@ -364,20 +367,23 @@ final class TerminalKeyboardSettingsViewController: UITableViewController {
 
 // MARK: - Voice
 
-/// Voice dictation setup: the push-to-talk switch and the OpenAI key that
-/// powers it. With push-to-talk on, holding the terminal keyboard's space bar
-/// dictates a prompt; off, the space bar is just a space. The key lives in the
-/// Keychain (via `VoiceDictation`); two knobs on purpose.
+/// Voice dictation setup: the master switch, the transcription provider, and
+/// that provider's API key. With voice on, holding the terminal keyboard's mic
+/// key dictates a prompt. Each provider keeps its own key in the Keychain (via
+/// `VoiceDictation`), so switching providers never loses the other's key.
 final class VoiceSettingsViewController: UITableViewController {
     private let settings = MobileSettings.shared
 
     private enum Section: Int, CaseIterable {
-        case pushToTalk, key
+        case voice, provider, key
     }
 
     private enum KeyRow: Int, CaseIterable {
         case apiKey, remove
     }
+
+    /// The provider whose key the Key section is showing — the current choice.
+    private var provider: TranscriptionProvider { settings.transcriptionProvider }
 
     init() {
         super.init(style: .insetGrouped)
@@ -397,32 +403,39 @@ final class VoiceSettingsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section) {
-        case .pushToTalk, nil: 1
-        // "Remove" only earns a row once there's a key to remove.
-        case .key: VoiceDictation.hasAPIKey ? KeyRow.allCases.count : 1
+        case .voice, .provider, nil: 1
+        // "Remove" only earns a row once the selected provider has a key.
+        case .key: VoiceDictation.hasAPIKey(for: provider) ? KeyRow.allCases.count : 1
         }
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        section == Section.key.rawValue ? "OpenAI" : nil
+        switch Section(rawValue: section) {
+        case .provider: "Transcription"
+        // The key belongs to the chosen provider — name it so the two read together.
+        case .key: provider.displayName
+        default: nil
+        }
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch Section(rawValue: section) {
-        case .pushToTalk, nil:
-            "Hold the space bar on the terminal keyboard to dictate a prompt — "
-                + "release to drop the transcript into the draft, slide up to cancel."
+        case .voice, nil:
+            "Hold the mic key on the terminal keyboard to dictate a prompt — "
+                + "release to send it, slide up to cancel."
+        case .provider:
+            "Which service transcribes your voice. Each keeps its own key."
         case .key:
-            "Transcribed with OpenAI gpt-4o-transcribe; your key stays in this "
-                + "device's Keychain and is used only for transcription."
+            provider.keyFooter
+                + " Your key stays in this device's Keychain and is used only for transcription."
         }
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         switch Section(rawValue: indexPath.section) {
-        case .pushToTalk, nil:
+        case .voice, nil:
             let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
-            cell.textLabel?.text = "Push-to-Talk"
+            cell.textLabel?.text = "Voice Input"
             cell.selectionStyle = .none
             let toggle = UISwitch()
             toggle.isOn = settings.pushToTalkEnabled
@@ -432,13 +445,30 @@ final class VoiceSettingsViewController: UITableViewController {
             }, for: .valueChanged)
             cell.accessoryView = toggle
             return cell
+        case .provider:
+            let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+            cell.textLabel?.text = "Provider"
+            cell.selectionStyle = .none
+            let providers = TranscriptionProvider.allCases
+            let control = UISegmentedControl(items: providers.map(\.displayName))
+            control.selectedSegmentIndex = providers.firstIndex(of: provider) ?? 0
+            control.addAction(UIAction { [weak self, weak control] _ in
+                guard let self, let control else { return }
+                settings.transcriptionProvider = providers[control.selectedSegmentIndex]
+                // The Key section below tracks the selected provider.
+                tableView.reloadData()
+            }, for: .valueChanged)
+            control.sizeToFit()
+            cell.accessoryView = control
+            return cell
         case .key:
             let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+            let isSet = VoiceDictation.hasAPIKey(for: provider)
             switch KeyRow(rawValue: indexPath.row) {
             case .apiKey, nil:
                 cell.textLabel?.text = "API Key"
-                cell.detailTextLabel?.text = VoiceDictation.hasAPIKey ? "•••• Set" : "Not Set"
-                cell.detailTextLabel?.textColor = VoiceDictation.hasAPIKey ? .systemGreen : .secondaryLabel
+                cell.detailTextLabel?.text = isSet ? "•••• Set" : "Not Set"
+                cell.detailTextLabel?.textColor = isSet ? .systemGreen : .secondaryLabel
                 cell.accessoryType = .disclosureIndicator
             case .remove:
                 cell.textLabel?.text = "Remove Key"
@@ -455,26 +485,27 @@ final class VoiceSettingsViewController: UITableViewController {
         case .apiKey, nil:
             presentKeyEditor()
         case .remove:
-            VoiceDictation.apiKey = nil
+            VoiceDictation.setAPIKey(nil, for: provider)
             tableView.reloadData()
         }
     }
 
     private func presentKeyEditor() {
+        let provider = self.provider
         let alert = UIAlertController(
-            title: "OpenAI API Key",
-            message: "Paste your key (sk-…). It's stored in this device's Keychain.",
+            title: "\(provider.displayName) API Key",
+            message: "Paste your key. It's stored in this device's Keychain.",
             preferredStyle: .alert
         )
         alert.addTextField { field in
-            field.placeholder = "sk-..."
+            field.placeholder = provider.keyPlaceholder
             field.isSecureTextEntry = true
             field.autocapitalizationType = .none
             field.autocorrectionType = .no
-            field.text = VoiceDictation.apiKey
+            field.text = VoiceDictation.apiKey(for: provider)
         }
         alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self, weak alert] _ in
-            VoiceDictation.apiKey = alert?.textFields?.first?.text
+            VoiceDictation.setAPIKey(alert?.textFields?.first?.text, for: provider)
             self?.tableView.reloadData()
         })
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
