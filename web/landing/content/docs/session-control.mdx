@@ -52,16 +52,21 @@ for machine-readable output.
 | Command | What it does |
 | --- | --- |
 | `termio sessions list` | List the sessions in this project with their live status. |
-| `termio sessions send <id> "<text>"` | Type a prompt into a session and submit it. |
-| `termio sessions answer <id> "<text>"` | Answer a session's menu or permission prompt. |
-| `termio sessions start <agent>` | Start a new session with the named agent. |
-| `termio sessions stop <id>` | Close a session. |
+| `termio sessions spawn "<prompt>"` | Start a new agent session on the prompt. Add `--agent <id>` (e.g. `codex`, `grok`, `pi`) to choose the agent; it defaults to the caller's own kind. The reply carries the new `<agent>@<id>` handle. |
+| `termio sessions send <agent>@<id> "<text>"` | Type text into an existing session and submit it with a real Return keypress — a prompt to drive it, or a menu choice (`"1"`, `"yes"`) to answer a permission prompt. |
+| `termio sessions close <agent>@<id>` | Close one or more session tabs. |
+| `termio sessions focus <agent>@<id>` | Bring a session to the front in the app. |
 
-`<id>` is the short id from `list` (a session title also works). Commands are
-scoped to the current project automatically.
+`<agent>@<id>` is the handle `list` prints (a bare id or session title also works).
+Commands are scoped to the current project automatically.
+
+<Callout type="note">
+  `answer` is a deprecated alias of `send`, and `send` with no handle behaves like
+  `spawn` — both kept so existing scripts keep working. Prefer `spawn` and `send`.
+</Callout>
 
 <Callout type="tip">
-  This is what lets one agent hand work to another — kick off a task in a sibling
+  This is what lets one agent hand work to another — `spawn` a task in a sibling
   session, then poll `termio sessions list` until it reports **done** and read the
   result. An agent orchestrating other agents, all on your own machine.
 </Callout>

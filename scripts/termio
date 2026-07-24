@@ -24,10 +24,9 @@ usage:
   termio open [DIR]                          open DIR (default: cwd) as a project
   termio [DIR]                               shorthand for `termio open DIR`
 
-  termio sessions list                       sibling sessions in this project + status
-  termio sessions send "<prompt>"            start a NEW agent session and send it the prompt
-  termio sessions send <agent>@<id> "<prompt>"   send to an existing session
-  termio sessions answer <agent>@<id> "<choice>" answer a session's menu/permission prompt
+  termio sessions list                       sessions in this project + status
+  termio sessions spawn "<prompt>"           start a NEW agent session on the prompt
+  termio sessions send <agent>@<id> "<text>"     type a prompt (or menu answer) into a session
   termio sessions close <agent>@<id> [...]   close session tabs
   termio sessions focus <agent>@<id>         select the session in the app
 
@@ -35,10 +34,11 @@ usage:
 
 options:
   --json           machine-readable output (any `sessions` command)
-  --agent <name>   agent for a new session (send without a handle; default: caller's)
+  --agent <id>     agent for `spawn` (e.g. claudeCode, codex, grok, pi; default: caller's kind)
   --help, --version
 
-`<agent>@<id>` handles come from `termio sessions list` or a `send` reply.
+`<agent>@<id>` handles come from `termio sessions list` or a `spawn` reply.
+`answer` is a deprecated alias of `send`; `send` with no handle aliases `spawn`.
 EOF
 }
 
@@ -100,7 +100,7 @@ sessions() {
     [ $# -gt 0 ] && shift || true
 
     case "$op" in
-        list|send|answer|close|focus) ;;
+        list|spawn|send|answer|close|focus) ;;
         -h|--help|help) usage; exit 0 ;;
         *)
             echo "termio: unknown sessions command '$op'" >&2
@@ -124,11 +124,16 @@ sessions() {
                 if [ "$op" = close ]; then
                     # Every positional is a tab to close.
                     targets="${targets:+$targets }$1"
+                elif [ "$op" = spawn ]; then
+                    # `spawn` takes no handle — every positional is the prompt.
+                    text="${text:+$text }$1"
                 elif [ "$seen_positional" -eq 0 ] && { [ "$op" = answer ] || [ "$op" = focus ]; }; then
                     targets="$1"
                 elif [ "$seen_positional" -eq 0 ] && [ "$op" = send ] && is_handle "$1"; then
-                    # `send` alone takes an *optional* leading handle — absent, the
-                    # app starts a new agent session for the prompt.
+                    # A leading handle targets an existing session. Without one, `send`
+                    # is a back-compat alias for `spawn` (see dispatch below); the strict
+                    # is_handle shape keeps a prompt that merely opens with a word from
+                    # being mistaken for a handle.
                     targets="$1"
                 else
                     text="${text:+$text }$1"
@@ -152,6 +157,12 @@ sessions() {
                 exit 1
             fi
             ;;
+        spawn)
+            if [ -z "$text" ]; then
+                echo "termio: spawn needs a prompt (e.g. \`termio sessions spawn \"fix the build\" --agent codex\`)" >&2
+                exit 1
+            fi
+            ;;
     esac
 
     if [ "$op" = close ]; then
@@ -164,7 +175,15 @@ sessions() {
         exit "$failed"
     fi
 
-    request_once "$op" "$format" "$targets" "$agent" "$text"
+    # `spawn` and the no-handle `send` alias both start a fresh session: the app
+    # spawns whenever a `send` request carries an empty target. `answer` is a thin
+    # alias for sending to an existing session. So both fold onto the wire `send`;
+    # every other verb maps straight through.
+    wire_op="$op"
+    case "$op" in
+        spawn|answer) wire_op=send ;;
+    esac
+    request_once "$wire_op" "$format" "$targets" "$agent" "$text"
 }
 
 # The public hook contract:

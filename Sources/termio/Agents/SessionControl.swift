@@ -207,13 +207,12 @@ enum SessionSkillInstaller {
 
         - `termio sessions list` — siblings in this project, with status (working /
           idle / needs-you / done)
-        - `termio sessions send "<prompt>"` — start a NEW agent session and give it
-          the prompt (`--agent codex` picks the agent; default: your own kind). The
+        - `termio sessions spawn "<prompt>"` — start a NEW agent session on the
+          prompt (`--agent codex` picks the agent; default: your own kind). The
           reply contains the new session's handle — use it for every follow-up.
-        - `termio sessions send <agent>@<id> "<prompt>"` — type a prompt into that
-          existing sibling and submit it (a real Return keypress, so it actually runs)
-        - `termio sessions answer <agent>@<id> "<choice>"` — answer a sibling's
-          menu/permission prompt (e.g. `"1"`, `"yes"`)
+        - `termio sessions send <agent>@<id> "<text>"` — type text into that existing
+          sibling and submit it with a real Return keypress. Send a prompt to drive
+          it, or a menu choice (`"1"`, `"yes"`) to answer a permission prompt.
         - `termio sessions close <agent>@<id> …` — close session tabs;
           `termio sessions focus <agent>@<id>` — bring one to the front in the app
 
@@ -225,19 +224,19 @@ enum SessionSkillInstaller {
           and never run multiple `send` commands in parallel — delegate to ONE
           session.
         - Unsure which sibling the user means? Ask them, or start a fresh session
-          with a plain `send` — don't broadcast.
+          with `spawn` — don't broadcast.
 
         ### Reading a sibling's response
 
-        Don't scrape the terminal. `send` returns the sibling's **transcript** — the
-        agent's own structured Q&A log (Claude Code: a JSONL file) — plus a **cursor**
-        (its line count at send time). To read the reply:
+        Don't scrape the terminal. `spawn`/`send` returns the sibling's **transcript**
+        — the agent's own structured Q&A log (Claude Code: a JSONL file) — plus a
+        **cursor** (its line count at send time). To read the reply:
 
-        1. `send` and note `transcript` + `cursor` from the output. (A just-started
-           session has no transcript yet; it appears in `list --json` once the agent
-           reports it — read that file from the start.)
+        1. `spawn`/`send` and note `transcript` + `cursor` from the output. (A just-
+           started session has no transcript yet; it appears in `list --json` once the
+           agent reports it — read that file from the start.)
         2. Poll `termio sessions list` until that session's status is `done` (or
-           `needs-you` if it's blocked waiting on input — then `answer` it).
+           `needs-you` if it's blocked waiting on input — then `send` its answer).
         3. Read the transcript file from line `cursor` onward; the `assistant` entries
            after it are the reply. (Each line is a JSON object with a `type`/`role`.)
 
