@@ -39,6 +39,22 @@ extension TermioStore {
         }
     }
 
+    /// Validates a `watch` subscription and returns the caller's project id to scope
+    /// the stream to, or an error payload to write back before hanging up. The same
+    /// gating as any control op (session control enabled, caller resolves to a
+    /// project); the streaming itself is `SessionWatchHub`'s job.
+    func resolveWatchScope(_ request: ControlRequest) -> (UUID?, Data?) {
+        guard settings.sessionControlEnabled else {
+            return (nil, controlError(request, "disabled",
+                "Session control is off. Enable it in termio ▸ Settings ▸ Agents."))
+        }
+        guard let project = callerProject(session: request.callerSession, cwd: request.callerCwd) else {
+            return (nil, controlError(request, "no_scope",
+                "Couldn't tell which project you're in. Run this from inside a termio session."))
+        }
+        return (project.id, nil)
+    }
+
     /// The address a caller drives a session by. The id half is the stable key
     /// (minted at creation, never renumbered — unlike the sidebar's live labels);
     /// the agent half makes the handle self-describing in logs and lets the
@@ -419,7 +435,7 @@ extension TermioStore {
         String(id.uuidString.prefix(8)).lowercased()
     }
 
-    private static func statusToken(_ status: SessionStatus) -> String {
+    static func statusToken(_ status: SessionStatus) -> String {
         switch status {
         case .idle: return "idle"
         case .working: return "working"

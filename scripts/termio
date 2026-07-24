@@ -25,6 +25,7 @@ usage:
   termio [DIR]                               shorthand for `termio open DIR`
 
   termio sessions list                       sessions in this project + status
+  termio sessions watch [--state <s,…>]      stream status transitions until Ctrl-C (default: done,needs-you)
   termio sessions spawn "<prompt>"           start a NEW agent session on the prompt
   termio sessions send <agent>@<id> "<text>"     type a prompt (or menu answer) into a session
   termio sessions close <agent>@<id> [...]   close session tabs
@@ -35,6 +36,7 @@ usage:
 options:
   --json           machine-readable output (any `sessions` command)
   --agent <id>     agent for `spawn` (e.g. claudeCode, codex, grok, pi; default: caller's kind)
+  --state <s,…>    for `watch`: comma-separated states to report (working, idle, done, needs-you)
   --help, --version
 
 `<agent>@<id>` handles come from `termio sessions list` or a `spawn` reply.
@@ -70,18 +72,22 @@ is_handle() {
     printf '%s' "$1" | grep -qE '^[A-Za-z][A-Za-z0-9._-]*@[0-9a-fA-F]{4,32}$'
 }
 
+# The one-line JSON control request shared by the one-shot and streaming paths.
+build_request() {
+    printf '{"op":"%s","format":"%s","caller_session":"%s","caller_cwd":"%s","target":"%s","agent":"%s","text":"%s"}' \
+        "$1" "$2" \
+        "$(json_escape "${TERMIO_SESSION:-}")" \
+        "$(json_escape "$PWD")" \
+        "$(json_escape "$3")" \
+        "$(json_escape "$4")" \
+        "$(json_escape "$5")"
+}
+
 # One request/response round-trip. Prints the app's reply and returns nonzero when
 # it reports failure, so callers (and `set -e`) surface errors through the exit
 # code — agents check `$?`, not prose.
 request_once() {
-    req_op="$1"; req_format="$2"; req_target="$3"; req_agent="$4"; req_text="$5"
-    request=$(printf '{"op":"%s","format":"%s","caller_session":"%s","caller_cwd":"%s","target":"%s","agent":"%s","text":"%s"}' \
-        "$req_op" "$req_format" \
-        "$(json_escape "${TERMIO_SESSION:-}")" \
-        "$(json_escape "$PWD")" \
-        "$(json_escape "$req_target")" \
-        "$(json_escape "$req_agent")" \
-        "$(json_escape "$req_text")")
+    request=$(build_request "$1" "$2" "$3" "$4" "$5")
     response=$(printf '%s' "$request" | nc -U "$SOCKET")
     printf '%s\n' "$response"
     case "$response" in
@@ -100,7 +106,7 @@ sessions() {
     [ $# -gt 0 ] && shift || true
 
     case "$op" in
-        list|spawn|send|answer|close|focus) ;;
+        list|watch|spawn|send|answer|close|focus) ;;
         -h|--help|help) usage; exit 0 ;;
         *)
             echo "termio: unknown sessions command '$op'" >&2
@@ -113,6 +119,7 @@ sessions() {
     agent=""
     targets=""
     text=""
+    states=""
     seen_positional=0
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -120,6 +127,9 @@ sessions() {
             --agent)
                 [ $# -ge 2 ] || { echo "termio: --agent needs a value" >&2; exit 1; }
                 agent="$2"; shift ;;
+            --state)
+                [ $# -ge 2 ] || { echo "termio: --state needs a value" >&2; exit 1; }
+                states="$2"; shift ;;
             *)
                 if [ "$op" = close ]; then
                     # Every positional is a tab to close.
@@ -164,6 +174,21 @@ sessions() {
             fi
             ;;
     esac
+
+    if [ "$op" = watch ]; then
+        # Streaming: the app holds the connection open and pushes one line per scoped
+        # status transition until interrupted (Ctrl-C). `--state` (comma-separated)
+        # filters; empty means the two states a supervisor acts on — done, needs-you.
+        #
+        # Build the request into a variable *first*, then pipe an instant `printf` to
+        # `nc`. Piping `build_request` directly (`build_request … | nc`) runs nc
+        # concurrently with build_request's json_escape subprocesses, so nc connects
+        # and the app's read races the not-yet-written payload — the app then times
+        # out on an empty read and reports a malformed request.
+        watch_request=$(build_request watch "$format" "" "" "$states")
+        printf '%s' "$watch_request" | nc -U "$SOCKET"
+        exit 0
+    fi
 
     if [ "$op" = close ]; then
         # One request per tab; any failure fails the whole command, but every

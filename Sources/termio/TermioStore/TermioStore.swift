@@ -195,6 +195,17 @@ final class TermioStore: ObservableObject {
         runtime.status = status
         // The tray and window title present status, so a real change pings them.
         sessionRuntimeDidChange.send()
+        // Push the genuine transition to any `termio sessions watch` clients scoped
+        // to this session's project. The hub does the socket writes off the main
+        // thread, so a watcher never slows the agent tick that produced the event.
+        if let session = session(id), let project = project(for: id) {
+            SessionWatchHub.shared.broadcast(SessionWatchEvent(
+                projectID: project.id,
+                handle: sessionHandle(for: session),
+                status: Self.statusToken(status),
+                title: displayTitle(for: session),
+                cwd: runtimes[id]?.workingDirectory ?? ""))
+        }
         // A session *entering* `.working` is the "this project is active" signal that
         // floats its project up the Recent-Activity sort. Bumping here, on the genuine
         // transition, means one write per turn instead of one per hook/screen tick — the

@@ -38,9 +38,13 @@ extension TermioStore {
     /// current setting. Like the hook listener, the socket always runs; only the
     /// note written into the agent instruction files is toggled.
     func startSessionControl() {
-        let control = SessionControlListener { [weak self] request in
-            await self?.handleSessionControl(request) ?? Data()
-        }
+        let control = SessionControlListener(
+            onRequest: { [weak self] request in
+                await self?.handleSessionControl(request) ?? Data()
+            },
+            onWatch: { [weak self] request in
+                self?.resolveWatchScope(request) ?? (nil, nil)
+            })
         control.start()
         sessionControl = control
         installedSessionControlEnabled = settings.sessionControlEnabled
