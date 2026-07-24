@@ -52,14 +52,17 @@ for machine-readable output.
 | Command | What it does |
 | --- | --- |
 | `termio sessions list` | List the sessions in this project with their live status. |
-| `termio sessions watch` | Block and stream one line per status change — the push alternative to polling `list`. Defaults to `done` and `needs-you`; widen with `--state working,idle,done,needs-you`. Runs until you interrupt it. |
-| `termio sessions spawn "<prompt>"` | Start a new agent session on the prompt. Add `--agent <id>` (e.g. `codex`, `grok`, `pi`) to choose the agent; it defaults to the caller's own kind. The reply carries the new `<agent>@<id>` handle. |
+| `termio sessions watch` | Block and stream one line per status change — the push alternative to polling `list`. Defaults to `done` and `needs-you`; widen with `--state working,idle,done,needs-you`. On attach it first prints one snapshot line per session with its current status (tagged `"snapshot":true` in `--json`; skip with `--no-snapshot`), and in `--json` mode it writes `{"heartbeat":true}` after 30 seconds of silence so a supervisor can tell a quiet stream from a dead one. Runs until you interrupt it: exits `0` on Ctrl-C, `2` when the stream closed from the app side. |
+| `termio sessions spawn "<prompt>"` | Start a new agent session on the prompt. Add `--agent <id>` (e.g. `codex`, `grok`, `pi`) to choose the agent; it defaults to the caller's own kind. Replies immediately with the new `<agent>@<id>` handle — the prompt is typed in once the agent finishes booting. |
 | `termio sessions send <agent>@<id> "<text>"` | Type text into an existing session and submit it with a real Return keypress — a prompt to drive it, or a menu choice (`"1"`, `"yes"`) to answer a permission prompt. |
 | `termio sessions close <agent>@<id>` | Close one or more session tabs. |
 | `termio sessions focus <agent>@<id>` | Bring a session to the front in the app. |
 
 `<agent>@<id>` is the handle `list` prints (a bare id or session title also works).
-Commands are scoped to the current project automatically.
+Commands are scoped to the current project automatically. `termio sessions <verb>
+--help` prints focused help for one verb. Every one-shot command fails loud: an
+empty or missing reply exits `1`, bounded by a 15-second client timeout
+(override with the `TERMIO_CLI_TIMEOUT` environment variable).
 
 <Callout type="note">
   `answer` is a deprecated alias of `send`, and `send` with no handle behaves like

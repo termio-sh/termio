@@ -55,19 +55,30 @@ extension TermioStore {
     }
 
     /// Validates a `watch` subscription and returns the caller's project id to scope
-    /// the stream to, or an error payload to write back before hanging up. The same
-    /// gating as any control op (session control enabled, caller resolves to a
-    /// project); the streaming itself is `SessionWatchHub`'s job.
-    func resolveWatchScope(_ request: ControlRequest) -> (UUID?, Data?) {
+    /// the stream to plus the initial status snapshot (one event per scoped session,
+    /// unless the client opted out), or an error payload to write back before hanging
+    /// up. The same gating as any control op (session control enabled, caller
+    /// resolves to a project); the streaming itself is `SessionWatchHub`'s job.
+    func resolveWatchScope(_ request: ControlRequest) -> (UUID?, Data?, [SessionWatchEvent]) {
         guard settings.sessionControlEnabled else {
             return (nil, controlError(request, "disabled",
-                "Session control is off. Enable it in termio ▸ Settings ▸ Agents."))
+                "Session control is off. Enable it in termio ▸ Settings ▸ Agents."), [])
         }
         guard let project = callerProject(session: request.callerSession, cwd: request.callerCwd) else {
             return (nil, controlError(request, "no_scope",
-                "Couldn't tell which project you're in. Run this from inside a termio session."))
+                "Couldn't tell which project you're in. Run this from inside a termio session."), [])
         }
-        return (project.id, nil)
+        guard request.snapshot != false else { return (project.id, nil, []) }
+        let snapshot = project.sessions.map { session in
+            SessionWatchEvent(
+                projectID: project.id,
+                handle: sessionHandle(for: session),
+                status: Self.statusToken(status(for: session.id)),
+                title: displayTitle(for: session),
+                cwd: runtimes[session.id]?.workingDirectory ?? "",
+                snapshot: true)
+        }
+        return (project.id, nil, snapshot)
     }
 
     /// The address a caller drives a session by. The id half is the stable key
@@ -128,7 +139,7 @@ extension TermioStore {
         switch resolveTarget(token, in: project) {
         case .found(let session):
             let state = surface(for: session, in: project)
-            return await deliver(payload, to: session, state: state, request: request, created: false)
+            return await deliver(payload, to: session, state: state, request: request)
         case .notFound:
             return controlError(request, "not_found", targetNotFoundMessage(request.target))
         case .ambiguous:
@@ -171,16 +182,39 @@ extension TermioStore {
             return controlError(request, "start_failed", "Could not start the session.")
         }
         let state = surface(for: fresh, in: project)
-        await waitForBootSettle(of: state)
-        return await deliver(payload, to: fresh, state: state, request: request, created: true)
+        // Reply with the handle now; boot-settle + prompt delivery continue off the
+        // reply path so no verb silently blocks (§4.2). A delivery failure has no
+        // caller left to tell — it surfaces through the session's own status and
+        // its visibly broken pane, which the caller is about to watch anyway.
+        let handle = sessionHandle(for: fresh)
+        Task { [weak self] in
+            guard let self else { return }
+            await self.waitForBootSettle(of: state)
+            if await !self.performDelivery(payload, to: fresh, state: state) {
+                FileHandle.standardError.write(Data(
+                    "termio: session control could not deliver the queued prompt to \(handle)\n".utf8))
+            }
+        }
+        return spawnQueuedReply(request, fresh)
+    }
+
+    /// Types `payload` into an existing sibling's surface and builds the reply.
+    private func deliver(
+        _ payload: String, to session: Session, state: TerminalViewState,
+        request: ControlRequest
+    ) async -> Data {
+        guard await performDelivery(payload, to: session, state: state) else {
+            return controlError(request, "not_live",
+                "\(displayTitle(for: session)) has no live terminal yet — open it once in termio.")
+        }
+        return sentReply(request, session)
     }
 
     /// Types `payload` into a session's live surface and submits it. Shared by
-    /// the existing-sibling and fresh-spawn paths.
-    private func deliver(
-        _ payload: String, to session: Session, state: TerminalViewState,
-        request: ControlRequest, created: Bool
-    ) async -> Data {
+    /// the existing-sibling reply path and the fresh-spawn detached delivery.
+    private func performDelivery(
+        _ payload: String, to session: Session, state: TerminalViewState
+    ) async -> Bool {
         // The libghostty surface attaches lazily on the pane's first render, so a
         // session never shown in the UI has no surface yet. Selecting it adds it to
         // the mounted set; give the render one cycle. (A session shown even once
@@ -189,10 +223,7 @@ extension TermioStore {
             selectedSessionID = session.id
             try? await Task.sleep(for: .milliseconds(400))
         }
-        guard let surfaceHandle = Self.rawSurface(from: state) else {
-            return controlError(request, "not_live",
-                "\(displayTitle(for: session)) has no live terminal yet — open it once in termio.")
-        }
+        guard let surfaceHandle = Self.rawSurface(from: state) else { return false }
 
         // Type the prompt through the text path (fine for the body), then submit
         // with a real Return *key event*. A trailing "\r" in the text is delivered
@@ -203,7 +234,7 @@ extension TermioStore {
         _ = state.send(payload)
         try? await Task.sleep(for: .milliseconds(40))
         Self.pressReturn(on: surfaceHandle)
-        return sentReply(request, session, created: created)
+        return true
     }
 
     /// Waits for a freshly launched agent TUI to finish booting before keystrokes
@@ -267,27 +298,36 @@ extension TermioStore {
     /// The success reply for a send/answer. Beyond confirming delivery, it hands back
     /// the session's transcript address and a cursor (its line count at send time), so
     /// the caller can read the agent's response straight from its own structured log —
-    /// the caller's file tools resume from `cursor`. The transcript is known only once
-    /// a hook has reported it, so a just-spawned session's reply points the caller at
-    /// `list --json` instead (its whole transcript is this conversation anyway).
-    private func sentReply(_ request: ControlRequest, _ session: Session, created: Bool) -> Data {
+    /// the caller's file tools resume from `cursor`.
+    private func sentReply(_ request: ControlRequest, _ session: Session) -> Data {
         let handle = sessionHandle(for: session)
         var json: [String: Any] = [
             "target": handle,
             "title": displayTitle(for: session),
         ]
-        var text = created
-            ? "started \(handle) and sent the prompt — use this handle for follow-ups"
-            : "sent to \(handle)"
-        if created { json["created"] = true }
+        var text = "sent to \(handle)"
         if let transcript = transcriptPaths[session.id] {
             let cursor = Self.lineCount(of: transcript)
             json["transcript"] = transcript
             json["cursor"] = cursor
             text += "\n  transcript: \(transcript)\n  cursor: \(cursor)  (read the response from here on)"
-        } else if created {
-            text += "\n  (transcript path appears in `termio sessions list --json` once the agent reports it)"
         }
+        return control(request, ok: true, text: text, json: json)
+    }
+
+    /// The immediate reply for a fresh spawn: the handle is the payload, delivery is
+    /// still in flight (`queued`). A just-spawned session has no transcript yet — it
+    /// appears in `list --json` once the agent's hook reports one.
+    private func spawnQueuedReply(_ request: ControlRequest, _ session: Session) -> Data {
+        let handle = sessionHandle(for: session)
+        let json: [String: Any] = [
+            "target": handle,
+            "title": displayTitle(for: session),
+            "created": true,
+            "queued": true,
+        ]
+        let text = "started \(handle) — prompt queued; use this handle for follow-ups"
+            + "\n  (transcript path appears in `termio sessions list --json` once the agent reports it)"
         return control(request, ok: true, text: text, json: json)
     }
 

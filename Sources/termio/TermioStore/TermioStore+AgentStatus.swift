@@ -43,7 +43,7 @@ extension TermioStore {
                 await self?.handleSessionControl(request) ?? Data()
             },
             onWatch: { [weak self] request in
-                self?.resolveWatchScope(request) ?? (nil, nil)
+                self?.resolveWatchScope(request) ?? (nil, nil, [])
             })
         control.start()
         sessionControl = control

@@ -17,6 +17,8 @@ import Foundation
 ///   bare id / id prefix / title. Empty for `send` means "start a fresh session".
 /// - `text` — the prompt (`send`) or menu answer (`answer`).
 /// - `agent` — the agent for a fresh session (`send` with no target).
+/// - `snapshot` — `watch` only: `false` skips the initial per-session status
+///   snapshot (absent means snapshot on).
 struct ControlRequest: Decodable {
     let op: String
     let format: String?
@@ -26,9 +28,10 @@ struct ControlRequest: Decodable {
     let text: String?
     let lines: Int?
     let agent: String?
+    let snapshot: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case op, format, target, text, lines, agent
+        case op, format, target, text, lines, agent, snapshot
         case callerSession = "caller_session"
         case callerCwd = "caller_cwd"
     }
@@ -53,16 +56,17 @@ final class SessionControlListener {
 
     private let onRequest: @MainActor (ControlRequest) async -> Data
     /// Resolves a `watch` subscription: returns the caller's project id to scope the
-    /// stream to, or an error payload to write back and hang up. Split from
-    /// `onRequest` because a watch is not one-shot — the connection stays open and is
-    /// handed to `SessionWatchHub` instead of being answered and closed.
-    private let onWatch: @MainActor (ControlRequest) -> (UUID?, Data?)
+    /// stream to (plus the initial status snapshot to emit on attach), or an error
+    /// payload to write back and hang up. Split from `onRequest` because a watch is
+    /// not one-shot — the connection stays open and is handed to `SessionWatchHub`
+    /// instead of being answered and closed.
+    private let onWatch: @MainActor (ControlRequest) -> (UUID?, Data?, [SessionWatchEvent])
     private let queue = DispatchQueue(label: "com.termio.session-control")
     private var source: DispatchSourceRead?
     private var listenDescriptor: Int32 = -1
 
     init(onRequest: @escaping @MainActor (ControlRequest) async -> Data,
-         onWatch: @escaping @MainActor (ControlRequest) -> (UUID?, Data?)) {
+         onWatch: @escaping @MainActor (ControlRequest) -> (UUID?, Data?, [SessionWatchEvent])) {
         self.onRequest = onRequest
         self.onWatch = onWatch
     }
@@ -148,7 +152,7 @@ final class SessionControlListener {
         if decoded.op == "watch" {
             let resolve = onWatch
             Task { @MainActor in
-                let (projectID, errorData) = resolve(decoded)
+                let (projectID, errorData, snapshot) = resolve(decoded)
                 self.queue.async {
                     if let errorData {
                         Self.writeAll(descriptor, errorData)
@@ -158,7 +162,8 @@ final class SessionControlListener {
                     guard let projectID else { close(descriptor); return }
                     SessionWatchHub.shared.subscribe(
                         descriptor: descriptor, projectID: projectID,
-                        states: Self.watchStates(decoded.text), wantsJSON: decoded.wantsJSON)
+                        states: Self.watchStates(decoded.text), wantsJSON: decoded.wantsJSON,
+                        snapshot: snapshot)
                 }
             }
             return
@@ -219,6 +224,9 @@ struct SessionWatchEvent {
     let status: String
     let title: String
     let cwd: String
+    /// Marks the initial current-status lines emitted on subscribe, so a JSON
+    /// consumer can tell "already was" from a live transition.
+    var snapshot = false
 }
 
 /// Holds the open `watch` connections and fans status transitions out to them. A
@@ -239,20 +247,39 @@ final class SessionWatchHub {
         let projectID: UUID
         let states: Set<String>
         let wantsJSON: Bool
+        /// When the hub last successfully wrote to this client — the silence the
+        /// 30s heartbeat measures.
+        var lastWrite: Date
     }
 
     private let queue = DispatchQueue(label: "com.termio.session-watch")
     private var subscribers: [Int32: Subscriber] = [:]
+    private var heartbeatTimer: DispatchSourceTimer?
+    private static let heartbeatInterval: TimeInterval = 30
 
     /// Adopt a client descriptor as a watcher. Ownership of the fd transfers here —
-    /// the hub closes it when the client disconnects.
-    func subscribe(descriptor: Int32, projectID: UUID, states: Set<String>, wantsJSON: Bool) {
+    /// the hub closes it when the client disconnects. `snapshot` is written first:
+    /// one line per scoped session with its *current* status, so a supervisor
+    /// attaching late still learns a session is already `needs-you` (no
+    /// `list`-then-`watch` race). The snapshot ignores the state filter — it is a
+    /// roster, not a transition.
+    func subscribe(
+        descriptor: Int32, projectID: UUID, states: Set<String>, wantsJSON: Bool,
+        snapshot: [SessionWatchEvent]
+    ) {
         queue.async {
             var on: Int32 = 1
             setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on,
                        socklen_t(MemoryLayout<Int32>.size))
+            for event in snapshot {
+                guard Self.write(descriptor, wantsJSON ? event.jsonLine : event.wireLine) else {
+                    close(descriptor)
+                    return
+                }
+            }
             self.subscribers[descriptor] = Subscriber(
-                projectID: projectID, states: states, wantsJSON: wantsJSON)
+                projectID: projectID, states: states, wantsJSON: wantsJSON, lastWrite: Date())
+            self.startHeartbeatIfNeeded()
         }
     }
 
@@ -266,10 +293,47 @@ final class SessionWatchHub {
             for (fd, sub) in self.subscribers {
                 guard sub.projectID == event.projectID, sub.states.contains(event.status)
                 else { continue }
-                if !Self.write(fd, sub.wantsJSON ? jsonLine : line) {
+                if Self.write(fd, sub.wantsJSON ? jsonLine : line) {
+                    self.subscribers[fd]?.lastWrite = Date()
+                } else {
                     self.subscribers.removeValue(forKey: fd)
                     close(fd)
                 }
+            }
+        }
+    }
+
+    /// A `{"heartbeat":true}` line after 30s of silence, JSON subscribers only —
+    /// heartbeats are for programs; a human watching text mode just sees quiet.
+    /// Doubles as proactive dead-reader reaping: a failed heartbeat write reaps the
+    /// subscriber now instead of on the next (possibly far-off) transition.
+    private func startHeartbeatIfNeeded() {
+        guard heartbeatTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now() + Self.heartbeatInterval, repeating: Self.heartbeatInterval,
+            leeway: .seconds(1))
+        timer.setEventHandler { [weak self] in self?.sendHeartbeats() }
+        heartbeatTimer = timer
+        timer.resume()
+    }
+
+    private func sendHeartbeats() {
+        if subscribers.isEmpty {
+            heartbeatTimer?.cancel()
+            heartbeatTimer = nil
+            return
+        }
+        let line = Data("{\"heartbeat\":true}\n".utf8)
+        let now = Date()
+        for (fd, sub) in subscribers {
+            guard sub.wantsJSON,
+                  now.timeIntervalSince(sub.lastWrite) >= Self.heartbeatInterval else { continue }
+            if Self.write(fd, line) {
+                subscribers[fd]?.lastWrite = now
+            } else {
+                subscribers.removeValue(forKey: fd)
+                close(fd)
             }
         }
     }
@@ -296,10 +360,13 @@ private extension SessionWatchEvent {
         return Data("\(handle)  [\(status)]\(suffix)\n".utf8)
     }
     var jsonLine: Data {
-        let object: [String: Any] = [
-            "schema_version": 1, "handle": handle, "status": status,
-            "title": title, "cwd": cwd,
+        var object: [String: Any] = [
+            "schema_version": 1, "handle": handle, "status": status, "title": title,
         ]
+        // Omitted, not "": the runtime simply hasn't seen an OSC 7 yet, and an
+        // empty string reads like a real (broken) path to a JSON consumer.
+        if !cwd.isEmpty { object["cwd"] = cwd }
+        if snapshot { object["snapshot"] = true }
         let data = (try? JSONSerialization.data(
             withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
         return data + Data("\n".utf8)
@@ -346,10 +413,15 @@ enum SessionSkillInstaller {
           idle / needs-you / done)
         - `termio sessions watch` — block and stream one line per sibling status
           change (`done` / `needs-you` by default) until you interrupt it — the push
-          alternative to polling `list`. `--state working,idle,done,needs-you` widens it.
+          alternative to polling `list`. `--state working,idle,done,needs-you` widens
+          it. It opens with one snapshot line per sibling's current status
+          (`"snapshot":true` in `--json`; `--no-snapshot` skips), and in `--json`
+          writes `{"heartbeat":true}` after 30s of silence so a dead stream is
+          detectable. Exits 0 on your Ctrl-C, 2 if termio itself went away.
         - `termio sessions spawn "<prompt>"` — start a NEW agent session on the
-          prompt (`--agent codex` picks the agent; default: your own kind). The
-          reply contains the new session's handle — use it for every follow-up.
+          prompt (`--agent codex` picks the agent; default: your own kind). Replies
+          immediately with the new session's handle — use it for every follow-up;
+          the prompt itself is typed in once the agent finishes booting.
         - `termio sessions send <agent>@<id> "<text>"` — type text into that existing
           sibling and submit it with a real Return keypress. Send a prompt to drive
           it, or a menu choice (`"1"`, `"yes"`) to answer a permission prompt.
