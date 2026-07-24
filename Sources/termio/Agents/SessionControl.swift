@@ -110,6 +110,7 @@ final class SessionControlListener {
             Self.log("listen() failed: \(errno)"); close(descriptor); return
         }
         _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL, 0) | O_NONBLOCK)
+        _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC)
 
         let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: queue)
         source.setEventHandler { [weak self] in self?.acceptPending() }
@@ -123,6 +124,13 @@ final class SessionControlListener {
         while true {
             let client = accept(listenDescriptor, nil, nil)
             if client < 0 { break }
+            // A client connection must not leak into spawned PTY children: forkpty
+            // duplicates every open descriptor, and an inherited copy keeps the
+            // socket alive after our close — the CLI then never sees EOF and hangs
+            // until its own timeout. CLOEXEC closes the copies at the child's exec.
+            // (Measured: a spawn burst held every in-flight reply open for the
+            // CLI's full 15s timeout; see sessions-cli-v2.md §4.2 verification.)
+            _ = fcntl(client, F_SETFD, FD_CLOEXEC)
             handle(client)
         }
     }
