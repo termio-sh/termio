@@ -157,6 +157,12 @@ struct AgentDefinition: Identifiable {
             /// `root`; termio searches across the buckets rather than reconstruct each
             /// agent's private cwd encoding.
             var name: String
+            /// For a directory-based store: the filename of the transcript inside the
+            /// session directory, e.g. `"conversation.jsonl"`. When set,
+            /// `resolveTranscriptPath` looks for this exact file. `nil` (the default)
+            /// falls back to scanning for a single `.jsonl` file in the directory.
+            /// Only meaningful when `isDirectory` is true.
+            var transcriptName: String? = nil
         }
 
         /// A declarative description of how to recover an agent-minted session id from
@@ -843,6 +849,9 @@ struct AgentManifest: Decodable {
             /// `dir:<pattern>` or `file:<pattern>`, where `<pattern>` contains `{id}` and
             /// may contain a `*` glob (e.g. `dir:{id}`, `file:{id}.jsonl`, `file:*_{id}.jsonl`).
             var storeMatch: String?
+            /// For a directory-based store: the name of the transcript file inside the
+            /// session directory, e.g. `"conversation.jsonl"`.
+            var transcriptName: String?
             var discover: DiscoverFields?
             var seed: String?
 
@@ -944,7 +953,8 @@ struct AgentManifest: Decodable {
                 guard parts[1].contains("{id}") else {
                     throw ManifestError.invalid("\(id): storeMatch pattern must contain '{id}'")
                 }
-                store = .init(root: root, isDirectory: isDirectory, name: String(parts[1]))
+                store = .init(root: root, isDirectory: isDirectory, name: String(parts[1]),
+                              transcriptName: fields.transcriptName)
             default:
                 throw ManifestError.invalid("\(id): storeRoot and storeMatch must be set together")
             }

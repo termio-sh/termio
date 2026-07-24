@@ -44,11 +44,17 @@ enum SessionTraceRenderer {
                 return obj
             }
 
-        // Codex rollouts open with a `session_meta` header; Claude transcripts don't.
-        // The header picks the parser — the two schemas share nothing below it.
+        // Codex rollouts open with a `session_meta` header; Grok's chat_history
+        // carries `model_id` at the top level (not nested under `message`). The
+        // first assistant-type entry picks the parser — the three schemas share
+        // nothing below the header.
         let isCodex = rows.first?["type"] as? String == "session_meta"
-        let stats = isCodex ? analyzeCodex(rows) : analyze(rows)
-        let renderEntry = isCodex ? renderCodexEntry : renderEntry
+        let isGrok = !isCodex && (rows.first(where: { ($0["type"] as? String) == "assistant" })?["model_id"] != nil)
+        // Grok's chat_history.jsonl has no cwd/version/timestamps — those live in
+        // the sibling `summary.json` in the same session directory.
+        let grokMeta = isGrok ? grokSessionMeta(jsonlPath: jsonlPath) : nil
+        let stats = isCodex ? analyzeCodex(rows) : isGrok ? analyzeGrok(rows, meta: grokMeta) : analyze(rows)
+        let renderEntry = isCodex ? renderCodexEntry : isGrok ? renderGrokEntry : renderEntry
         let body = rows.map(renderEntry).filter { !$0.isEmpty }.joined(separator: "\n")
         return document(title: title, stats: stats, body: body, theme: theme)
     }
@@ -141,6 +147,150 @@ enum SessionTraceRenderer {
             }
         }
         return s
+    }
+
+    // MARK: Grok
+
+    /// Grok's `chat_history.jsonl` schema: no `message` wrapper, `model_id` at
+    /// top level, standalone `tool_result`/`reasoning` entries, and no token usage
+    /// or timestamp fields — so the dashboard omits Tokens and Duration when
+    /// those aren't available. Tool calls live on the assistant entry's
+    /// `tool_calls` array rather than inside content blocks.
+    /// `meta` is the sibling `summary.json` carrying cwd, model, git branch,
+    /// and timestamps the chat history itself lacks.
+    private static func analyzeGrok(_ rows: [[String: Any]], meta: GrokSessionMeta?) -> Stats {
+        var s = Stats()
+
+        // Session-level metadata from summary.json.
+        if let meta {
+            s.cwd = meta.cwd
+            s.gitBranch = meta.gitBranch
+            s.version = meta.version
+            s.firstTimestamp = meta.createdAt
+            s.lastTimestamp = meta.updatedAt
+            if let model = meta.model { s.models.insert(model) }
+            if let usage = meta.usage {
+                s.inputTokens = usage.inputTokens
+                s.outputTokens = usage.outputTokens
+                s.cacheTokens = usage.cacheTokens
+            }
+        }
+
+        for entry in rows {
+            let type = entry["type"] as? String
+
+            // Per-message model_id (may differ from the session-level model).
+            if let model = entry["model_id"] as? String { s.models.insert(model) }
+
+            switch type {
+            case "system":
+                // The system prompt is huge and not useful as metadata — skip.
+                break
+            case "user":
+                // Only count turns that carry user-visible content (a `<user_query>`
+                // or non-system text). Pure system-injection blocks don't count.
+                if let blocks = entry["content"] as? [[String: Any]] {
+                    let fullText = blocks.compactMap { b -> String? in
+                        guard (b["type"] as? String) == "text" else { return nil }
+                        return b["text"] as? String
+                    }.joined()
+                    if !grokExtractUserQuery(fullText).isEmpty {
+                        s.userTurns += 1
+                    }
+                }
+            case "assistant":
+                s.assistantTurns += 1
+                if let toolCalls = entry["tool_calls"] as? [[String: Any]] {
+                    for tc in toolCalls {
+                        let name = tc["name"] as? String ?? "tool"
+                        s.toolCounts[name, default: 0] += 1
+                    }
+                }
+            case "tool_result":
+                break
+            case "reasoning":
+                break
+            default:
+                break
+            }
+        }
+        return s
+    }
+
+    /// Metadata mined from Grok's `summary.json` (sibling of `chat_history.jsonl`
+    /// in the session directory), filling the cwd/version/timestamps the chat
+    /// history itself doesn't carry.
+    private struct GrokSessionMeta {
+        var cwd: String?
+        var gitBranch: String?
+        var version: String?
+        var model: String?
+        var createdAt: Date?
+        var updatedAt: Date?
+        /// Token counts from the last `turn_completed` event in `updates.jsonl`.
+        var usage: GrokUsage?
+    }
+
+    /// Token usage from Grok's `updates.jsonl` `turn_completed` events — cumulative
+    /// per turn, so the last occurrence is the session total.
+    private struct GrokUsage {
+        var inputTokens: Int
+        var outputTokens: Int
+        var cacheTokens: Int
+    }
+
+    /// Reads the `summary.json` next to `jsonlPath` plus `~/.grok/version.json`
+    /// and `updates.jsonl`, returning whatever metadata Grok recorded for this session.
+    private static func grokSessionMeta(jsonlPath: String) -> GrokSessionMeta? {
+        let dir = URL(fileURLWithPath: jsonlPath).deletingLastPathComponent()
+        let summaryURL = dir.appendingPathComponent("summary.json")
+        guard let data = try? Data(contentsOf: summaryURL),
+              let summary = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+
+        var meta = GrokSessionMeta()
+        if let info = summary["info"] as? [String: Any] {
+            meta.cwd = info["cwd"] as? String
+        }
+        meta.gitBranch = summary["head_branch"] as? String
+        meta.model = summary["current_model_id"] as? String
+        if let ts = summary["created_at"] as? String { meta.createdAt = date(from: ts) }
+        if let ts = summary["updated_at"] as? String { meta.updatedAt = date(from: ts) }
+
+        // Grok CLI version lives in ~/.grok/version.json, not per-session.
+        let versionURL = URL(fileURLWithPath: ("~/.grok/version.json" as NSString).expandingTildeInPath)
+        if let vData = try? Data(contentsOf: versionURL),
+           let version = try? JSONSerialization.jsonObject(with: vData) as? [String: Any] {
+            meta.version = version["version"] as? String
+        }
+
+        // Token counts: scan updates.jsonl for the last turn_completed event.
+        // Grok reports cumulative usage per turn, so the last one is the total.
+        meta.usage = grokSessionUsage(in: dir)
+        return meta
+    }
+
+    /// Scans `updates.jsonl` in the session directory for the last `turn_completed`
+    /// event and returns its cumulative token counts. Each turn_completed carries
+    /// `inputTokens`, `outputTokens`, and `cachedReadTokens` — the running total.
+    private static func grokSessionUsage(in dir: URL) -> GrokUsage? {
+        let updatesURL = dir.appendingPathComponent("updates.jsonl")
+        guard let text = try? String(contentsOf: updatesURL, encoding: .utf8) else { return nil }
+        var last: GrokUsage?
+        for line in text.split(whereSeparator: \.isNewline) {
+            guard let d = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let params = obj["params"] as? [String: Any],
+                  let update = params["update"] as? [String: Any],
+                  update["sessionUpdate"] as? String == "turn_completed",
+                  let usage = update["usage"] as? [String: Any]
+            else { continue }
+            last = GrokUsage(
+                inputTokens: (usage["inputTokens"] as? Int) ?? 0,
+                outputTokens: (usage["outputTokens"] as? Int) ?? 0,
+                cacheTokens: (usage["cachedReadTokens"] as? Int) ?? 0)
+        }
+        return last
     }
 
     // MARK: Dashboard
@@ -380,6 +530,105 @@ enum SessionTraceRenderer {
         guard !out.isEmpty else { return "" }
         let isError = (b["is_error"] as? Bool) ?? false
         return "<details class=\"tool-result\(isError ? " error" : "")\"><summary>\(isError ? "⚠ result" : "◀ result")</summary><pre>\(escaped(out))</pre></details>"
+    }
+
+    /// Grok entry renderer: dispatches on the top-level `type` field and shapes
+    /// content that is unwrapped (no `message` envelope).
+    private static func renderGrokEntry(_ entry: [String: Any]) -> String {
+        switch entry["type"] as? String {
+        case "system": return "" // shown in dashboard metadata, not the trace body
+        case "user": return renderGrokUser(entry)
+        case "assistant": return renderGrokAssistant(entry)
+        case "tool_result": return renderGrokToolResult(entry)
+        case "reasoning": return "" // internal reasoning — not part of the conversation
+        default: return ""
+        }
+    }
+
+    private static func renderGrokUser(_ entry: [String: Any]) -> String {
+        guard let blocks = entry["content"] as? [[String: Any]] else { return "" }
+        // Join all text blocks and extract the user-visible content. Grok injects
+        // system-level context (`<user_info>`, `<system-reminder>`, `<git_status>`)
+        // as separate text blocks alongside the actual `<user_query>`; only the
+        // query (or, when there isn't one, any non-system text) belongs in the trace.
+        let fullText = blocks.compactMap { b -> String? in
+            guard (b["type"] as? String) == "text" else { return nil }
+            return b["text"] as? String
+        }.joined()
+        let visible = grokExtractUserQuery(fullText)
+        guard !visible.isEmpty else { return "" }
+        return turnCard(role: "user", label: "You", body: textBlock(visible))
+    }
+
+    /// Extracts the user-visible content from a Grok user turn's concatenated text.
+    /// When `<user_query>…</user_query>` is present, only its inner content is shown;
+    /// otherwise, all known system-injection tags (and their content) are stripped, and
+    /// the remainder — the user's own words — is returned.
+    private static func grokExtractUserQuery(_ text: String) -> String {
+        // First, strip every known system-injection block — tags AND content — from
+        // the joined text, regardless of whether they span multiple original blocks.
+        let systemTags = ["user_info", "system-reminder", "git_status",
+                          "action_safety", "tool_calling", "background_tasks",
+                          "output_efficiency", "formatting", "user_guide"]
+        var cleaned = text
+        for tag in systemTags {
+            // Match `<tag>…</tag>` across newlines (dot matches line separators off by
+            // default in ICU regex, so use (?s) to make `.` match newlines too).
+            let pattern = "<" + NSRegularExpression.escapedPattern(for: tag) + ">.*?</" + NSRegularExpression.escapedPattern(for: tag) + ">"
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) {
+                let ns = cleaned as NSString
+                cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "")
+            }
+        }
+        // Now extract the user-visible query. When `<user_query>…</user_query>` is
+        // present, only its inner content is returned (the tags themselves are stripped
+        // by the loop above, but the content remains — so extract only that).
+        if let start = cleaned.range(of: "<user_query>"),
+           let end = cleaned.range(of: "</user_query>", range: start.upperBound..<cleaned.endIndex) {
+            return String(cleaned[start.upperBound..<end.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // No `<user_query>`: after stripping system tags, whatever is left is the user's
+        // own text. Collapse multiple blank lines into one.
+        let lines = cleaned.components(separatedBy: "\n")
+        let nonEmpty = lines.drop(while: { $0.trimmingCharacters(in: .whitespaces).isEmpty })
+        let result = nonEmpty.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Normalize runs of blank lines.
+        return result.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+    }
+
+    private static func renderGrokAssistant(_ entry: [String: Any]) -> String {
+        var parts: [String] = []
+        // Text content — a plain string, not a block array.
+        if let text = entry["content"] as? String, !text.isEmpty {
+            parts.append(textBlock(text, markdown: true))
+        }
+        // Tool calls from the `tool_calls` array.
+        if let toolCalls = entry["tool_calls"] as? [[String: Any]] {
+            for tc in toolCalls {
+                let name = tc["name"] as? String ?? "tool"
+                let args = tc["arguments"] as? String ?? ""
+                let prettyArgs = codexArguments(args) // reuses Codex arg-prettifier (JSON string → pretty)
+                let pre = prettyArgs.isEmpty ? "" : "<pre>\(escaped(prettyArgs))</pre>"
+                parts.append("<details class=\"tool-use\"><summary>▶ \(escaped(name))</summary>\(pre)</details>")
+            }
+        }
+        return parts.isEmpty ? "" : turnCard(role: "assistant", label: "Agent", body: parts.joined(separator: "\n"))
+    }
+
+    private static func renderGrokToolResult(_ entry: [String: Any]) -> String {
+        let out = entry["content"] as? String ?? ""
+        guard !out.isEmpty else { return "" }
+        return "<details class=\"tool-result\"><summary>◀ result</summary><pre>\(escaped(out))</pre></details>"
+    }
+
+    private static func renderGrokReasoning(_ entry: [String: Any]) -> String {
+        // Summaries are `[{type: "summary_text", text: "..."}]`.
+        let summaries = entry["summary"] as? [[String: Any]] ?? []
+        let text = summaries.compactMap { $0["text"] as? String }.joined(separator: "\n")
+        guard !text.isEmpty else { return "" }
+        return "<details class=\"thinking\"><summary>Thinking</summary><div>\(escaped(text))</div></details>"
     }
 
     private static func renderSummary(_ entry: [String: Any]) -> String {

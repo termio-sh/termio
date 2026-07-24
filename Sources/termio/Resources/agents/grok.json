@@ -9,7 +9,8 @@
     "create": "--session-id {id}",
     "resume": "--resume {id}",
     "storeRoot": "~/.grok/sessions",
-    "storeMatch": "dir:{id}"
+    "storeMatch": "dir:{id}",
+    "transcriptName": "chat_history.jsonl"
   },
   "icon": { "vector": "grok" },
   "install": "https://x.ai/cli",
@@ -20,6 +21,7 @@
     "type": "json",
     "file": "~/.grok/hooks/termio.json",
     "dialect": "grok",
+    "capturesTranscript": true,
     "conversation": "sessionId",
     "events": [
       { "on": "SessionStart", "state": "idle" },
