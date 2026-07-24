@@ -11,11 +11,20 @@ import Combine
 /// attribute read from that folder's `HEAD`. A folder is watched by observing the
 /// directory that contains its `HEAD` file — for the primary checkout that is
 /// `<repo>/.git`, for a linked worktree it is `<repo>/.git/worktrees/<name>`. Git
-/// resolves the right one via `rev-parse --git-path HEAD`. Watching the *directory*
+/// resolves the right one via `rev-parse --git-path HEAD` (the one git spawn left
+/// here, once per folder when the watch is armed). Watching the *directory*
 /// (not the file) survives git's atomic replace-on-write of `HEAD`, where the file
 /// inode is swapped out from under a file-level watch.
 ///
-/// All git work runs off the main thread; `branches` is only ever mutated on main,
+/// The state itself is read **in-process** — `HEAD` is a one-line text file and the
+/// linked worktrees are a directory listing. The previous shape spawned 2–3 `git
+/// rev-parse` processes per event, and the watched directory is `.git` itself, whose
+/// busiest file by far is `index`: every `git status` run by *anyone* (an agent's
+/// shell loop, the git pane's own reload) rewrites it and fired this watch. With a
+/// fleet of agent sessions that added up to a machine-wide process storm — dozens of
+/// short-lived `git` spawns a second, with trustd/tccd re-validating each one.
+///
+/// All reads run off the main thread; `branches` is only ever mutated on main,
 /// so SwiftUI observers stay safe.
 final class BranchModel: ObservableObject {
     /// Folder path → branch label (the branch name, or a short commit SHA when the
@@ -27,15 +36,24 @@ final class BranchModel: ObservableObject {
     /// and keeps that SHA for the tooltip.
     @Published private(set) var detachedFolders: Set<String> = []
 
-    /// Fired on the main thread after a watched folder's git directory changes. The store
-    /// uses it to re-scan for worktrees created/removed outside the app — a `git worktree
-    /// add` in a terminal writes into the primary checkout's `.git`, which this watch sees.
-    var onGitDirectoryChange: (() -> Void)?
+    /// Fired on the main thread when a watched folder's git state *actually changed*:
+    /// its HEAD moved (checkout, commit, rebase) or its linked-worktree set gained or
+    /// lost an entry. Deliberately not fired for every `.git` directory event — index
+    /// refreshes are the overwhelming majority and mean nothing to the worktree list.
+    /// Carries the folder so the store can reconcile just that project, not all of them.
+    var onGitStateChange: ((String) -> Void)?
 
     private let queue = DispatchQueue(label: "sh.termio.branch", qos: .utility)
     private var watchers: [String: Watcher] = [:]
+    /// The currently wanted watch set and the folders whose HEAD-directory resolution
+    /// is in flight — both main-only, so an overlapping `setWatched` can't double-arm.
+    private var wanted: Set<String> = []
+    private var arming: Set<String> = []
     /// Pending debounce work items per folder, touched only on `queue`.
     private var pending: [String: DispatchWorkItem] = [:]
+    /// The last state read per folder, touched only on `queue` — the change gate for
+    /// `onGitStateChange`.
+    private var lastStates: [String: GitState] = [:]
 
     /// A live file-system observer on the directory holding a folder's `HEAD`.
     private final class Watcher {
@@ -57,24 +75,42 @@ final class BranchModel: ObservableObject {
     /// newly present folder and stops watching any that has gone. Idempotent, so the
     /// store can call it after every change to the project tree. Main-actor only.
     func setWatched(_ folders: Set<String>) {
-        let wanted = Set(folders.map(Self.standardized))
+        wanted = Set(folders.map(Self.standardized))
 
         for (folder, watcher) in watchers where !wanted.contains(folder) {
             watcher.source.cancel()
             watchers[folder] = nil
             branches[folder] = nil
             detachedFolders.remove(folder)
+            queue.async { [weak self] in self?.lastStates[folder] = nil }
         }
-        for folder in wanted where watchers[folder] == nil {
-            arm(folder)
-            resolve(folder)
+        for folder in wanted where watchers[folder] == nil && !arming.contains(folder) {
+            arming.insert(folder)
+            // Resolve the HEAD directory off the main thread: it is the one git spawn
+            // left in this model, and launch-time git has hung in the kernel before
+            // (post-rebuild code-sign stall) — that must stall a utility queue, never
+            // app startup. The watch is then armed back on main, where `watchers` lives.
+            queue.async { [weak self] in
+                let headDirectory = self?.headDirectory(for: folder)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.arming.remove(folder)
+                    // The wanted set may have moved while git ran; arm only if current.
+                    guard let headDirectory, self.wanted.contains(folder),
+                          self.watchers[folder] == nil else { return }
+                    self.arm(folder, headDirectory: headDirectory)
+                    // Seed the state without notifying: the store reconciles everything
+                    // at launch anyway; the seed makes the first *event* comparable.
+                    self.queue.async { [weak self] in
+                        self?.refresh(folder, headDirectory: headDirectory, notify: false)
+                    }
+                }
+            }
         }
     }
 
-    /// Opens a directory-level watch on the folder's `HEAD` container. A folder that
-    /// is not a git repo simply gets no watcher (and no branch entry).
-    private func arm(_ folder: String) {
-        guard let headDirectory = headDirectory(for: folder) else { return }
+    /// Opens a directory-level watch on the folder's already-resolved `HEAD` container.
+    private func arm(_ folder: String, headDirectory: String) {
         let descriptor = open(headDirectory, O_EVTONLY)
         guard descriptor >= 0 else { return }
 
@@ -83,32 +119,35 @@ final class BranchModel: ObservableObject {
             eventMask: [.write, .delete, .rename, .extend, .link, .revoke],
             queue: queue
         )
-        source.setEventHandler { [weak self] in self?.scheduleResolve(folder) }
+        source.setEventHandler { [weak self] in
+            self?.scheduleRefresh(folder, headDirectory: headDirectory)
+        }
         source.setCancelHandler { close(descriptor) }
         watchers[folder] = Watcher(source: source)
         source.resume()
     }
 
     /// Coalesces a burst of file-system events (a checkout rewrites several refs)
-    /// into a single re-resolve. Runs on `queue`, where `pending` lives.
-    private func scheduleResolve(_ folder: String) {
+    /// into a single re-read. Runs on `queue`, where `pending` lives.
+    private func scheduleRefresh(_ folder: String, headDirectory: String) {
         pending[folder]?.cancel()
         let item = DispatchWorkItem { [weak self] in
             self?.pending[folder] = nil
-            self?.publish(folder, state: self?.currentBranchState(for: folder))
-            // A ref change is often also a worktree-tree change (add/remove touches the
-            // primary checkout's .git); let the store reconcile its worktree list.
-            DispatchQueue.main.async { self?.onGitDirectoryChange?() }
+            self?.refresh(folder, headDirectory: headDirectory, notify: true)
         }
         pending[folder] = item
         queue.asyncAfter(deadline: .now() + 0.12, execute: item)
     }
 
-    /// Reads the branch off the main thread and publishes it.
-    private func resolve(_ folder: String) {
-        queue.async { [weak self] in
-            self?.publish(folder, state: self?.currentBranchState(for: folder))
-        }
+    /// Re-reads a folder's git state, publishes the branch label, and — when notifying
+    /// and something really moved — reports the change. Runs on `queue`.
+    private func refresh(_ folder: String, headDirectory: String, notify: Bool) {
+        let state = readGitState(headDirectory: headDirectory)
+        let changed = lastStates[folder] != state
+        lastStates[folder] = state
+        publish(folder, state: state.branch)
+        guard notify, changed else { return }
+        DispatchQueue.main.async { [weak self] in self?.onGitStateChange?(folder) }
     }
 
     private func publish(_ folder: String, state: BranchState?) {
@@ -124,30 +163,62 @@ final class BranchModel: ObservableObject {
         }
     }
 
-    // MARK: - Git
+    // MARK: - In-process git state
 
-    private struct BranchState {
+    private struct BranchState: Equatable {
         var label: String
         var isDetached: Bool
     }
 
-    /// The folder's current branch name, or its short SHA plus detached state when
-    /// no branch owns HEAD. Returns `nil` when the folder is not a git work tree.
-    private func currentBranchState(for folder: String) -> BranchState? {
-        guard git(["rev-parse", "--is-inside-work-tree"], in: folder) == "true" else { return nil }
-        let head = git(["rev-parse", "--abbrev-ref", "HEAD"], in: folder)
-        if let head, head != "HEAD", !head.isEmpty {
-            return BranchState(label: head, isDetached: false)
+    /// Everything a git-dir event can meaningfully change for us: where HEAD points,
+    /// and which linked worktrees exist. Equatable so an `index` refresh — same HEAD,
+    /// same worktrees — is recognized as the no-op it is.
+    private struct GitState: Equatable {
+        var branch: BranchState?
+        var worktreeNames: [String]
+    }
+
+    private func readGitState(headDirectory: String) -> GitState {
+        GitState(branch: readBranch(headDirectory: headDirectory),
+                 worktreeNames: readWorktreeNames(headDirectory: headDirectory))
+    }
+
+    /// Parses `HEAD` directly instead of spawning `git rev-parse`: the file is either
+    /// `ref: refs/heads/<branch>` or a bare commit hash (detached). The label matches
+    /// what `--abbrev-ref` printed, except a detached SHA is always 7 chars (git may
+    /// lengthen its abbreviation for ambiguity; for a display chip that nicety isn't
+    /// worth a process per event).
+    private func readBranch(headDirectory: String) -> BranchState? {
+        guard let raw = try? String(
+            contentsOfFile: headDirectory + "/HEAD", encoding: .utf8) else { return nil }
+        let head = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if head.hasPrefix("ref: ") {
+            let ref = head.dropFirst("ref: ".count)
+            let label = ref.hasPrefix("refs/heads/") ? ref.dropFirst("refs/heads/".count) : ref
+            guard !label.isEmpty else { return nil }
+            return BranchState(label: String(label), isDetached: false)
         }
         // Detached HEAD (rebase in progress, or checked out at a bare commit): show
         // the short SHA so the node still reads as "somewhere specific".
-        guard let commit = git(["rev-parse", "--short", "HEAD"], in: folder) else { return nil }
-        return BranchState(label: commit, isDetached: true)
+        guard head.count >= 7, head.allSatisfy(\.isHexDigit) else { return nil }
+        return BranchState(label: String(head.prefix(7)), isDetached: true)
     }
+
+    /// The linked-worktree entry names under the primary checkout's git dir. Empty for
+    /// a linked worktree's own HEAD directory (which has no `worktrees` child) and for
+    /// a repo with no linked worktrees — both fine, the value only has to be *stable*
+    /// so a change in it is a real add/remove.
+    private func readWorktreeNames(headDirectory: String) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: headDirectory + "/worktrees")) ?? [])
+            .sorted()
+    }
+
+    // MARK: - Git (watch setup only)
 
     /// The directory that contains the folder's `HEAD` file. `git-path` resolves the
     /// linked-worktree case (`…/.git/worktrees/<name>/HEAD`) as well as the primary
-    /// checkout (`…/.git/HEAD`). Returns `nil` for a non-repo.
+    /// checkout (`…/.git/HEAD`). Returns `nil` for a non-repo. The one place this
+    /// model still runs git — once per folder, when its watch is armed.
     private func headDirectory(for folder: String) -> String? {
         guard let headPath = git(["rev-parse", "--git-path", "HEAD"], in: folder) else { return nil }
         let absolute = headPath.hasPrefix("/")
@@ -156,9 +227,9 @@ final class BranchModel: ObservableObject {
         return (absolute as NSString).deletingLastPathComponent
     }
 
-    /// Runs `git -C <folder> <arguments…>` synchronously (callers are already off the
-    /// main thread), returning trimmed stdout on success or `nil` on any failure —
-    /// the same no-trap, degrade-gracefully stance the rest of the app takes.
+    /// Runs `git -C <folder> <arguments…>` synchronously, returning trimmed stdout on
+    /// success or `nil` on any failure — the same no-trap, degrade-gracefully stance
+    /// the rest of the app takes.
     private func git(_ arguments: [String], in folder: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")

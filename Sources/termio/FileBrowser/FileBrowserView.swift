@@ -65,8 +65,15 @@ struct FileBrowserView: View {
                 if let repoRoot = projectPath {
                     // Fresh identity per repo, so the panel model (selection, draft message,
                     // PR status) resets cleanly when the selected project moves.
-                    GitChangesView(repoRoot: repoRoot, changeCount: $store.gitChangeCount)
-                        .id(repoRoot)
+                    // The visibility closure reads the store live (weakly — the model may
+                    // outlive a closing window), so a collapsed inspector parks the pane's
+                    // auto-refresh even while this view stays in the hierarchy.
+                    GitChangesView(
+                        repoRoot: repoRoot,
+                        changeCount: $store.gitChangeCount,
+                        isPaneVisible: { [weak store] in store?.inspectorVisible ?? true }
+                    )
+                    .id(repoRoot)
                 } else {
                     content
                 }

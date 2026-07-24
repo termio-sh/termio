@@ -69,6 +69,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // KVO on the sidebar's collapse state, so every collapse path (toolbar toggle, View menu,
     // divider drag) empties/refills the sidebar's toolbar region (see `setNavigatorItemsVisible`).
     private var sidebarCollapseObserver: NSKeyValueObservation?
+    // KVO on the inspector's collapse state, mirrored onto `store.inspectorVisible` so
+    // hosted panes (the git pane's auto-refresh) can stand down while hidden.
+    private var inspectorCollapseObserver: NSKeyValueObservation?
     // KVO on the window's effective appearance, so a *system-driven* light↔dark flip (macOS auto
     // day/night, Control Center) re-resolves the window background. In `.system` appearance mode
     // nothing else re-runs `applyWindowTransparency` on an OS flip — the settings never change —
@@ -162,6 +165,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // divider drag). No `.initial`: the launch-time sync below runs after the autosave restore.
         sidebarCollapseObserver = sidebarSplitItem?.observe(\.isCollapsed, options: [.new]) { [weak self] item, _ in
             MainActor.assumeIsolated { self?.setNavigatorItemsVisible(!item.isCollapsed) }
+        }
+        // Mirror the inspector's live collapse state onto the store, so panes it hosts
+        // can idle while hidden (a collapsed item keeps its view hierarchy alive — the
+        // git pane's watcher would otherwise keep spawning `git status` unseen). KVO
+        // catches every collapse path; `.initial` seeds the restored autosave state.
+        inspectorCollapseObserver = filesInspectorItem?.observe(
+            \.isCollapsed, options: [.initial, .new]
+        ) { [weak self] item, _ in
+            let visible = !item.isCollapsed
+            MainActor.assumeIsolated {
+                guard let store = self?.store, store.inspectorVisible != visible else { return }
+                store.inspectorVisible = visible
+            }
         }
         // Re-resolve the window background whenever the OS flips light↔dark under `.system` mode
         // (see `appearanceObserver`). Pinned Light/Dark modes never see the effective appearance

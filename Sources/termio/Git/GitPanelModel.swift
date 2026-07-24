@@ -30,8 +30,29 @@ final class GitPanelModel: ObservableObject {
     /// Monotonic ticket for `load()` — only the newest pass may publish.
     private var loadGeneration = 0
 
-    init(repoRoot: String) {
+    /// Whether the pane is actually on screen, read live at refresh time. A collapsed
+    /// inspector keeps this model alive (the hosting view stays in the hierarchy), and
+    /// before this gate the file-system watch kept re-running `git status` — four git
+    /// spawns a burst — for a pane nobody could see. `nil` when the caller has no
+    /// visibility signal; treated as visible.
+    private let isPaneVisible: (() -> Bool)?
+    /// A refresh that arrived while hidden, replayed on the next `flushDeferredRefresh`.
+    /// Deferred, not dropped — the pane must be correct the moment it shows.
+    private var deferredRefreshIncludesHistory: Bool?
+
+    /// Directory names whose events can't change what the pane shows: build products
+    /// and package caches that are gitignored in practice. An agent's `swift build`
+    /// writes thousands of files under `.build`, and every burst was a full change-list
+    /// pass; dropping these keeps the watch quiet through builds. A repo that actually
+    /// tracks one of these still stays honest — any event outside the list, and app
+    /// re-activation, reload from git, the source of truth.
+    private static let ignoredEventComponents: Set<String> = [
+        ".build", "node_modules", "DerivedData", ".venv", ".gradle", ".turbo", ".next",
+    ]
+
+    init(repoRoot: String, isPaneVisible: (() -> Bool)? = nil) {
         self.repoRoot = repoRoot
+        self.isPaneVisible = isPaneVisible
         // Re-activation catches whatever happened while termio was in the background
         // (a rebase in another app, a pull on another machine's shared folder…).
         appActiveObserver = NotificationCenter.default
@@ -67,6 +88,14 @@ final class GitPanelModel: ObservableObject {
         isLoadingHistory = false
     }
 
+    /// Replays a refresh that was deferred while the pane was hidden. Called by the
+    /// view when the pane (re)appears, so the shown list is never stale.
+    func flushDeferredRefresh() {
+        guard let includeHistory = deferredRefreshIncludesHistory else { return }
+        deferredRefreshIncludesHistory = nil
+        scheduleRefresh(includeHistory: includeHistory)
+    }
+
     // MARK: Auto-refresh
 
     /// The pane has no refresh button for the same reason IDEs don't: an invalidation
@@ -85,7 +114,13 @@ final class GitPanelModel: ObservableObject {
             paths: paths, latency: 0.4,
             queue: DispatchQueue(label: "sh.termio.gitpane.fsevents", qos: .utility)
         ) { [weak self] eventPaths in
-            let touchesGitDir = eventPaths.contains { path in
+            // Build-product churn can't change the pane; don't let it spawn git.
+            let relevant = eventPaths.filter { path in
+                !path.split(separator: "/")
+                    .contains { Self.ignoredEventComponents.contains(String($0)) }
+            }
+            guard !relevant.isEmpty else { return }
+            let touchesGitDir = relevant.contains { path in
                 gitDirs.contains { path.hasPrefix($0) } || path.contains("/.git/") || path.hasSuffix("/.git")
             }
             Task { @MainActor [weak self] in
@@ -97,7 +132,12 @@ final class GitPanelModel: ObservableObject {
     /// Coalesces a burst of events (FSEvents latency already batches most) into one
     /// reload a beat later. `git status` itself may refresh the index once, which
     /// echoes back as a git-dir event — the second pass reads clean and the chain ends.
+    /// While the pane is hidden the reload is parked instead (see `flushDeferredRefresh`).
     private func scheduleRefresh(includeHistory: Bool) {
+        if let isPaneVisible, !isPaneVisible() {
+            deferredRefreshIncludesHistory = (deferredRefreshIncludesHistory ?? false) || includeHistory
+            return
+        }
         refreshDebounce?.cancel()
         refreshDebounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)

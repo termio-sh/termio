@@ -43,10 +43,11 @@ struct GitChangesView: View {
     /// several become the targets of the batch context-menu actions.
     @State private var selection = Set<String>()
 
-    init(repoRoot: String, changeCount: Binding<Int>) {
+    init(repoRoot: String, changeCount: Binding<Int>, isPaneVisible: (() -> Bool)? = nil) {
         self.repoRoot = repoRoot
         self._changeCount = changeCount
-        self._model = StateObject(wrappedValue: GitPanelModel(repoRoot: repoRoot))
+        self._model = StateObject(
+            wrappedValue: GitPanelModel(repoRoot: repoRoot, isPaneVisible: isPaneVisible))
     }
 
     private var chrome: ChromeTheme? { settings.chromeTheme(for: colorScheme) }
@@ -64,6 +65,13 @@ struct GitChangesView: View {
         }
         .task(id: repoRoot) { await model.load() }
         .task(id: mode) { if mode == .history { await model.loadHistory() } }
+        // Replay any refresh that arrived while the inspector was collapsed, the
+        // moment the pane is actually shown again (either signal can fire first
+        // depending on how the view was re-attached).
+        .onAppear { model.flushDeferredRefresh() }
+        .onChange(of: store.inspectorVisible) { _, visible in
+            if visible { model.flushDeferredRefresh() }
+        }
         .onChange(of: model.changes.count) { _, count in changeCount = count }
         .onChange(of: selection) { _, selected in
             if selected.count == 1, let change = model.changes.first(where: { $0.path == selected.first }) {

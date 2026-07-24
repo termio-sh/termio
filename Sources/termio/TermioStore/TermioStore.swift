@@ -143,6 +143,13 @@ final class TermioStore: ObservableObject {
     /// changes" without the inspector being open.
     @Published var gitChangeCount = 0
 
+    /// Whether the trailing inspector panel is expanded. Mirrored from the AppKit
+    /// split item — the owner of collapse state — via KVO in `App.swift`, so hosted
+    /// panes can stand down while hidden: a collapsed item keeps its view hierarchy
+    /// (and any `@StateObject` in it) alive, which left the git pane's auto-refresh
+    /// spawning `git status` for a pane nobody could see.
+    @Published var inspectorVisible = false
+
     /// Per-session high-frequency live state (status, running tool, live title, cwd),
     /// each held in its own `@Observable` `SessionRuntime` so a change re-renders only
     /// the owning sidebar row rather than the whole tree. Deliberately **not**
@@ -339,6 +346,12 @@ final class TermioStore: ObservableObject {
     /// Debounces the worktree re-scan so a burst of git-dir events (a rebase, a fetch)
     /// coalesces into one `git worktree list`.
     private var worktreeReconcileWork: DispatchWorkItem?
+    /// The folders whose git state changed since the last reconcile pass, plus whether
+    /// a full pass (app activation) was requested meanwhile. One `.git` change used to
+    /// re-scan *every* folder project — N git spawns for one repo's event; scoping the
+    /// pass to the projects that own the changed folder removes that amplification.
+    private var pendingReconcileFolders: Set<String> = []
+    private var reconcileAllPending = false
     private var linkClickMonitor: Any?
     private let stateFile = StateFile()
     /// Coalesces the ratio-drag flood of `splitGroups` writes into one save.
@@ -505,10 +518,13 @@ final class TermioStore: ObservableObject {
         syncWatchedFolders()
 
         // Keep the worktree list honest against git, so worktrees made on the CLI show up
-        // and ones removed drop out. Re-scan when the app regains focus (covers a `git
-        // worktree add` run in another terminal) and when a watched git dir changes (covers
-        // one run inside termio). See `reconcileWorktrees`.
-        branchModel.onGitDirectoryChange = { [weak self] in self?.scheduleWorktreeReconcile() }
+        // and ones removed drop out. Re-scan the affected project when a watched folder's
+        // git *state* changes (covers a `git worktree add` run inside termio), and
+        // everything when the app regains focus (covers one run in another terminal
+        // while termio was in the background). See `reconcileWorktrees`.
+        branchModel.onGitStateChange = { [weak self] folder in
+            self?.scheduleWorktreeReconcile(for: folder)
+        }
         appActiveObserver = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
             .sink { [weak self] _ in self?.scheduleWorktreeReconcile() }
         reconcileWorktrees()
@@ -543,20 +559,36 @@ final class TermioStore: ObservableObject {
         branchModel.setWatched(folders)
     }
 
-    /// Coalesces a burst of git-directory events into a single re-scan a beat later.
-    private func scheduleWorktreeReconcile() {
+    /// Coalesces a burst of git-state events into a single re-scan a beat later,
+    /// remembering *which* folders moved so the pass stays scoped. No folder means
+    /// "everything" (app activation).
+    private func scheduleWorktreeReconcile(for folder: String? = nil) {
+        if let folder {
+            pendingReconcileFolders.insert(folder)
+        } else {
+            reconcileAllPending = true
+        }
         worktreeReconcileWork?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.reconcileWorktrees() }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let folders = self.reconcileAllPending ? nil : self.pendingReconcileFolders
+            self.reconcileAllPending = false
+            self.pendingReconcileFolders = []
+            self.reconcileWorktrees(limitedTo: folders)
+        }
         worktreeReconcileWork = item
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: item)
     }
 
-    /// Reconciles every folder project's `worktrees` with what git actually reports:
+    /// Reconciles folder projects' `worktrees` with what git actually reports:
     /// worktrees created outside termio (`git worktree add` on the CLI) get added, ones
     /// removed on the CLI drop out, and termio's own keep their id/metadata. Git is the
     /// source of truth — the sidebar mirrors the repo rather than a private list.
-    func reconcileWorktrees() {
+    /// `limitedTo` scopes the pass to the projects owning those folders (a project
+    /// path or one of its worktree paths); `nil` re-scans every folder project.
+    func reconcileWorktrees(limitedTo folders: Set<String>? = nil) {
         for project in projects where project.kind == .folder {
+            if let folders, !projectOwns(project, anyOf: folders) { continue }
             let id = project.id
             let path = project.path
             Task { [weak self] in
@@ -565,6 +597,20 @@ final class TermioStore: ObservableObject {
                 await MainActor.run { self?.applyDiscoveredWorktrees(discovered, to: id) }
             }
         }
+    }
+
+    /// Whether any of `folders` (standardized paths from the branch watcher) is this
+    /// project's checkout or one of its worktrees — i.e. whether a git change there
+    /// can alter this project's worktree list.
+    private func projectOwns(_ project: Project, anyOf folders: Set<String>) -> Bool {
+        if folders.contains(Self.standardizedPath(project.path)) { return true }
+        for worktree in project.worktrees
+        where folders.contains(Self.standardizedPath(worktree.path)) { return true }
+        for session in project.sessions {
+            if let path = session.worktreePath,
+               folders.contains(Self.standardizedPath(path)) { return true }
+        }
+        return false
     }
 
     /// Merges git's linked-worktree paths into one project's `worktrees`, in git's order.
