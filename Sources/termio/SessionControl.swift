@@ -17,6 +17,10 @@ import Foundation
 ///   bare id / id prefix / title. Empty for `send` means "start a fresh session".
 /// - `text` — the prompt (`send`) or menu answer (`answer`).
 /// - `agent` — the agent for a fresh session (`send` with no target).
+/// - `wait` — for `send`: block until the driven session finishes its turn (or
+///   blocks on the user) before replying, instead of returning the instant the
+///   prompt is typed. Collapses the "send then poll `list`" loop into one call.
+/// - `timeoutMs` — the `wait` cap in milliseconds; server-clamped.
 struct ControlRequest: Decodable {
     let op: String
     let format: String?
@@ -26,14 +30,18 @@ struct ControlRequest: Decodable {
     let text: String?
     let lines: Int?
     let agent: String?
+    let wait: Bool?
+    let timeoutMs: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case op, format, target, text, lines, agent
+        case op, format, target, text, lines, agent, wait
         case callerSession = "caller_session"
         case callerCwd = "caller_cwd"
+        case timeoutMs = "timeout_ms"
     }
 
     var wantsJSON: Bool { format == "json" }
+    var wantsWait: Bool { wait == true }
 }
 
 /// A local Unix-domain socket the `termio sessions` CLI connects to. Unlike
@@ -218,9 +226,12 @@ enum SessionSkillInstaller {
           the prompt (`--agent codex` picks the agent; default: your own kind). The
           reply contains the new session's handle — use it for every follow-up.
         - `termio sessions send <agent>@<id> "<prompt>"` — type a prompt into that
-          existing sibling and submit it (a real Return keypress, so it actually runs)
+          existing sibling and submit it (a real Return keypress, so it actually runs).
+          Add `--wait` to block until it finishes and get the reply pointer back.
         - `termio sessions answer <agent>@<id> "<choice>"` — answer a sibling's
           menu/permission prompt (e.g. `"1"`, `"yes"`)
+        - `termio sessions read <agent>@<id>` — print what's on that session's screen
+          right now (look before you `answer`)
         - `termio sessions close <agent>@<id> …` — close session tabs;
           `termio sessions focus <agent>@<id>` — bring one to the front in the app
 
@@ -236,20 +247,21 @@ enum SessionSkillInstaller {
 
         ### Reading a sibling's response
 
-        Don't scrape the terminal. `send` returns the sibling's **transcript** — the
-        agent's own structured Q&A log (Claude Code: a JSONL file) — plus a **cursor**
-        (its line count at send time). To read the reply:
+        Don't scrape the terminal. The reply lives in the sibling's **transcript** —
+        the agent's own structured Q&A log (Claude Code: a JSONL file). Two ways in:
 
-        1. `send` and note `transcript` + `cursor` from the output. (A just-started
-           session has no transcript yet; it appears in `list --json` once the agent
-           reports it — read that file from the start.)
-        2. Poll `termio sessions list` until that session's status is `done` (or
-           `needs-you` if it's blocked waiting on input — then `answer` it).
-        3. Read the transcript file from line `cursor` onward; the `assistant` entries
-           after it are the reply. (Each line is a JSON object with a `type`/`role`.)
+        - **Preferred: `send --wait`.** It blocks until the turn ends and returns the
+          final `status` plus the exact transcript range to read (`cursor`→`cursor_end`).
+          Read just that line range; the `assistant` entries are the reply. If `status`
+          is `needs-you`, the reply includes the on-screen prompt — `answer` it, then
+          `send --wait` again to continue.
+        - **Manual:** plain `send` returns `transcript` + `cursor`; poll
+          `termio sessions list` until the session is `done` (or `needs-you`), then read
+          the transcript from `cursor` onward. (A just-started session's transcript path
+          only appears in `list --json` once its first hook fires — read it from line 0.)
 
-        Workflow: send → wait for `done` via `list` → read the transcript tail. Prefer
-        this over assuming a sibling is finished.
+        Each transcript line is a JSON object with a `type`/`role`. Prefer `--wait` over
+        assuming a sibling is finished.
         \(endMarker)
         """
     }

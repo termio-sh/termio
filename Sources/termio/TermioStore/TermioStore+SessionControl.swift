@@ -28,12 +28,9 @@ extension TermioStore {
         switch request.op {
         case "list": return listSessions(in: project, request: request)
         case "send", "answer": return await sendText(request, in: project)
+        case "read": return await readScreen(request, in: project)
         case "close": return closeTab(request, in: project)
         case "focus": return focusSession(request, in: project)
-        case "read":
-            return controlError(request, "read_unavailable",
-                "Reading a session's output isn't available in this build yet — it needs a "
-                + "terminal-core buffer API. list / send / answer / close / focus work today.")
         default:
             return controlError(request, "bad_op", "Unknown op '\(request.op)'.")
         }
@@ -103,7 +100,8 @@ extension TermioStore {
                     "\(displayTitle(for: session)) is a browser pane — it accepts no input.")
             }
             let state = surface(for: session, in: project)
-            return await deliver(payload, to: session, state: state, request: request, created: false)
+            return await deliverAndReply(payload, to: session, state: state,
+                                         request: request, in: project, created: false)
         case .notFound:
             return controlError(request, "not_found", targetNotFoundMessage(request.target))
         case .ambiguous:
@@ -144,14 +142,17 @@ extension TermioStore {
         }
         let state = surface(for: fresh, in: project)
         await waitForBootSettle(of: state)
-        return await deliver(payload, to: fresh, state: state, request: request, created: true)
+        return await deliverAndReply(payload, to: fresh, state: state,
+                                     request: request, in: project, created: true)
     }
 
-    /// Types `payload` into a session's live surface and submits it. Shared by
-    /// the existing-sibling and fresh-spawn paths.
-    private func deliver(
+    /// Types `payload` into a session's live surface and submits it, then builds
+    /// the reply — either the immediate "sent" acknowledgement or, when the caller
+    /// passed `--wait`, the outcome of the turn it kicked off. Shared by the
+    /// existing-sibling and fresh-spawn paths.
+    private func deliverAndReply(
         _ payload: String, to session: Session, state: TerminalViewState,
-        request: ControlRequest, created: Bool
+        request: ControlRequest, in project: Project, created: Bool
     ) async -> Data {
         // The libghostty surface attaches lazily on the pane's first render, so a
         // session never shown in the UI has no surface yet. Selecting it adds it to
@@ -175,7 +176,83 @@ extension TermioStore {
         _ = state.send(payload)
         try? await Task.sleep(for: .milliseconds(40))
         Self.pressReturn(on: surfaceHandle)
-        return sentReply(request, session, created: created)
+
+        guard request.wantsWait else { return sentReply(request, session, created: created) }
+        // The cursor to read the reply from: wherever the transcript stands right
+        // after submitting, before the agent has answered. A fresh session's
+        // transcript often isn't known until its first hook fires mid-turn, so this
+        // is nil for now and filled in after the wait.
+        let cursorAtSend = transcriptPaths[session.id].map(Self.lineCount)
+        return await waitForReply(request, session: session, in: project,
+                                  cursorAtSend: cursorAtSend, created: created)
+    }
+
+    /// Blocks until the session the prompt was sent to finishes its turn — or stops
+    /// to ask the user (`needs-you`) — or the timeout elapses, then reports the
+    /// outcome. This is what lets a caller issue one `send --wait` instead of
+    /// sending and then polling `list` in a loop.
+    ///
+    /// Completion is read primarily from the **status resting**: the turn is done once
+    /// the session, having been seen `working`, drops back off `working` and stays there
+    /// for `settleWindow` (`needs-you` short-circuits immediately). Status is the signal
+    /// every real agent drives — built-ins via hooks, rule-based agents via the screen
+    /// classifier — and unlike a raw screen watch it is immune to a TUI footer that keeps
+    /// animating after the reply (Claude Code's hint line), which otherwise never "goes
+    /// quiet". A poll every 300ms always catches the `working` span of a real turn (an
+    /// LLM round-trip is far longer), so the fast-turn blip that defeats a pure status
+    /// *edge* watch isn't a problem for a status *rest* watch. Only a session with no
+    /// status signal at all — a plain terminal driven by `send --wait` — falls back to
+    /// the screen going still after it first changed.
+    private func waitForReply(
+        _ request: ControlRequest, session: Session, in project: Project,
+        cursorAtSend: Int?, created: Bool
+    ) async -> Data {
+        let cap = min(max(request.timeoutMs ?? 300_000, 1_000), 600_000)
+        let deadline = Date().addingTimeInterval(Double(cap) / 1_000)
+        let settleWindow = 1.5
+
+        let backend: InMemoryTerminalSession? = {
+            guard case .inMemory(let terminal) = surface(for: session, in: project).configuration.backend
+            else { return nil }
+            return terminal
+        }()
+
+        var sawWorking = false
+        var restingSince: Date?
+        var lastFrame = backend?.readViewportText()
+        var lastChangeAt = Date()
+        var changedSinceSend = false
+        var settled: SessionStatus?
+
+        while Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(300))
+            let current = status(for: session.id)
+            if current == .working {
+                sawWorking = true
+                restingSince = nil
+            } else if restingSince == nil {
+                restingSince = Date()
+            }
+            if current == .needsAttention { settled = .needsAttention; break }
+
+            let now = Date()
+            let frame = backend?.readViewportText()
+            if frame != lastFrame {
+                lastFrame = frame
+                lastChangeAt = now
+                changedSinceSend = true
+            }
+            guard current != .working else { continue }
+            let rested = restingSince.map { now.timeIntervalSince($0) >= settleWindow } ?? false
+            let screenQuiet = now.timeIntervalSince(lastChangeAt) >= settleWindow
+            // Status-tracked agent: seen working, now rested. (Footer animation can't
+            // fool this — it doesn't touch status.)
+            if sawWorking, rested { settled = current; break }
+            // No status signal at all (a plain terminal): the screen changed, then stilled.
+            if !sawWorking, changedSinceSend, screenQuiet { settled = current; break }
+        }
+        return waitReply(request, session: session, in: project,
+                         cursorAtSend: cursorAtSend, created: created, settled: settled)
     }
 
     /// Waits for a freshly launched agent TUI to finish booting before keystrokes
@@ -261,6 +338,96 @@ extension TermioStore {
             text += "\n  (transcript path appears in `termio sessions list --json` once the agent reports it)"
         }
         return control(request, ok: true, text: text, json: json)
+    }
+
+    /// The reply for a completed (or timed-out) `send --wait`. Hands back the turn's
+    /// final status and the exact transcript range to read — `cursor` (where the reply
+    /// begins, captured at send) through `cursor_end` (the log's length now) — so the
+    /// caller's own file tools read precisely the new content, no polling. When the
+    /// session is blocked on the user (`needs-you`), the current screen rides along so
+    /// the caller can see the prompt it must `answer`.
+    private func waitReply(
+        _ request: ControlRequest, session: Session, in project: Project,
+        cursorAtSend: Int?, created: Bool, settled: SessionStatus?
+    ) -> Data {
+        let handle = sessionHandle(for: session)
+        let statusToken = Self.statusToken(status(for: session.id))
+        var json: [String: Any] = [
+            "target": handle,
+            "title": displayTitle(for: session),
+            "status": statusToken,
+            "timed_out": settled == nil,
+        ]
+        if created { json["created"] = true }
+
+        let headline: String
+        switch settled {
+        case .needsAttention: headline = "\(handle) is waiting on you"
+        case .some: headline = "\(handle) finished (\(statusToken))"
+        case nil: headline = "\(handle) still \(statusToken) after the wait — timed out"
+        }
+        var text = headline
+
+        // The transcript may only have become known during the wait (a fresh
+        // session's first hook), so re-read it here rather than trusting the
+        // send-time snapshot.
+        if let transcript = transcriptPaths[session.id] {
+            let start = cursorAtSend ?? 0
+            let end = Self.lineCount(of: transcript)
+            json["transcript"] = transcript
+            json["cursor"] = start
+            json["cursor_end"] = end
+            text += "\n  transcript: \(transcript)\n  reply: lines \(start)–\(end) (read this range)"
+        }
+        if settled == .needsAttention, let screen = viewportText(for: session, in: project) {
+            json["screen"] = screen
+            text += "\n  on screen:\n\(screen)"
+        }
+        return control(request, ok: true, text: text, json: json)
+    }
+
+    /// `read`: hands back what is currently on a session's screen — the live viewport
+    /// (visible rows, following the user's scroll). Its first purpose is looking at a
+    /// menu or free-text prompt *before* `answer`ing it, so a caller isn't answering
+    /// blind; it also works for a plain terminal, which has no transcript to read.
+    private func readScreen(_ request: ControlRequest, in project: Project) async -> Data {
+        switch resolveTarget(request.target, in: project) {
+        case .found(let session):
+            if session.isBrowser {
+                return controlError(request, "not_terminal",
+                    "\(displayTitle(for: session)) is a browser pane — it has no text screen.")
+            }
+            // Mount the surface if this session has never been shown, and give a
+            // never-rendered one a cycle to paint before the read (mirrors `send`).
+            let state = surface(for: session, in: project)
+            if state.surface == nil {
+                selectedSessionID = session.id
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+            guard let screen = viewportText(for: session, in: project) else {
+                return controlError(request, "not_live",
+                    "\(displayTitle(for: session)) has no live terminal yet — open it once in termio.")
+            }
+            return control(request, ok: true, text: screen,
+                json: ["handle": sessionHandle(for: session), "screen": screen])
+        case .notFound:
+            return controlError(request, "not_found", targetNotFoundMessage(request.target))
+        case .ambiguous:
+            return controlError(request, "ambiguous",
+                "'\(request.target ?? "")' matches more than one session; use a longer id.")
+        case .mismatch(let expected):
+            return controlError(request, "wrong_agent",
+                "That id belongs to \(expected) — use that handle (copied verbatim from `list`).")
+        }
+    }
+
+    /// The current viewport text of a session's terminal, or nil when it has no
+    /// live in-memory backend yet (never rendered). Reads through the backend's own
+    /// lock (`readViewportText`), so it's safe from this actor.
+    private func viewportText(for session: Session, in project: Project) -> String? {
+        let state = surfaces[session.id] ?? surface(for: session, in: project)
+        guard case .inMemory(let terminal) = state.configuration.backend else { return nil }
+        return terminal.readViewportText()
     }
 
     /// Lines currently in a file, counted cheaply by newline bytes — the cursor a

@@ -27,15 +27,19 @@ usage:
   termio sessions list                       sibling sessions in this project + status
   termio sessions send "<prompt>"            start a NEW agent session and send it the prompt
   termio sessions send <agent>@<id> "<prompt>"   send to an existing session
+  termio sessions send --wait "<prompt>"     send, then block until the turn ends + report
   termio sessions answer <agent>@<id> "<choice>" answer a session's menu/permission prompt
+  termio sessions read <agent>@<id>          print what's on a session's screen right now
   termio sessions close <agent>@<id> [...]   close session tabs
   termio sessions focus <agent>@<id>         select the session in the app
 
   termio agent report <state>                report this agent's activity (hook contract)
 
 options:
-  --json           machine-readable output (any `sessions` command)
-  --agent <name>   agent for a new session (send without a handle; default: caller's)
+  --json            machine-readable output (any `sessions` command)
+  --agent <name>    agent for a new session (send without a handle; default: caller's)
+  --wait            send: block until the session finishes its turn (or blocks on you)
+  --timeout <secs>  cap for --wait (default 300)
   --help, --version
 
 `<agent>@<id>` handles come from `termio sessions list` or a `send` reply.
@@ -70,19 +74,46 @@ is_handle() {
     printf '%s' "$1" | grep -qE '^[A-Za-z][A-Za-z0-9._-]*@[0-9a-fA-F]{4,32}$'
 }
 
+# Send one request to the control socket and echo the app's reply. Feeds the
+# request through a FIFO whose write end we hold open until `nc` exits, rather than
+# `printf | nc`: piping closes nc's stdin immediately, and on that EOF nc half-closes
+# the socket — which drops a reply the app sends seconds later (a `send --wait` turn),
+# and also races a SIGPIPE on a fast error reply. Holding the write end open keeps the
+# socket full-duplex until the app closes it after replying, so both the instant and
+# the delayed responses arrive intact.
+socket_roundtrip() {
+    fifo=$(mktemp -u "${TMPDIR:-/tmp}/termio.XXXXXX") || return 1
+    mkfifo "$fifo" 2>/dev/null || return 1
+    nc -U "$SOCKET" < "$fifo" &
+    ncpid=$!
+    # Opening the write end blocks until nc (the reader) opens its end — no race.
+    exec 3>"$fifo"
+    printf '%s' "$1" >&3
+    wait "$ncpid"; rc=$?
+    exec 3>&-
+    rm -f "$fifo"
+    return $rc
+}
+
 # One request/response round-trip. Prints the app's reply and returns nonzero when
 # it reports failure, so callers (and `set -e`) surface errors through the exit
-# code — agents check `$?`, not prose.
+# code — agents check `$?`, not prose. `req_wait` ("true"/"") and `req_timeout`
+# (milliseconds/"") are appended only when set, so ordinary commands send the same
+# object as before.
 request_once() {
     req_op="$1"; req_format="$2"; req_target="$3"; req_agent="$4"; req_text="$5"
-    request=$(printf '{"op":"%s","format":"%s","caller_session":"%s","caller_cwd":"%s","target":"%s","agent":"%s","text":"%s"}' \
+    req_wait="${6:-}"; req_timeout="${7:-}"
+    request=$(printf '{"op":"%s","format":"%s","caller_session":"%s","caller_cwd":"%s","target":"%s","agent":"%s","text":"%s"' \
         "$req_op" "$req_format" \
         "$(json_escape "${TERMIO_SESSION:-}")" \
         "$(json_escape "$PWD")" \
         "$(json_escape "$req_target")" \
         "$(json_escape "$req_agent")" \
         "$(json_escape "$req_text")")
-    response=$(printf '%s' "$request" | nc -U "$SOCKET")
+    [ "$req_wait" = "true" ] && request="$request,\"wait\":true"
+    [ -n "$req_timeout" ] && request="$request,\"timeout_ms\":$req_timeout"
+    request="$request}"
+    response=$(socket_roundtrip "$request")
     printf '%s\n' "$response"
     case "$response" in
         error:*|*'"ok":false'*) return 1 ;;
@@ -100,7 +131,7 @@ sessions() {
     [ $# -gt 0 ] && shift || true
 
     case "$op" in
-        list|send|answer|close|focus) ;;
+        list|send|answer|read|close|focus) ;;
         -h|--help|help) usage; exit 0 ;;
         *)
             echo "termio: unknown sessions command '$op'" >&2
@@ -113,10 +144,19 @@ sessions() {
     agent=""
     targets=""
     text=""
+    wait=""
+    timeout=""
     seen_positional=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --json) format=json ;;
+            --wait) wait=true ;;
+            --timeout)
+                [ $# -ge 2 ] || { echo "termio: --timeout needs seconds" >&2; exit 1; }
+                case "$2" in
+                    ''|*[!0-9]*) echo "termio: --timeout needs a whole number of seconds" >&2; exit 1 ;;
+                esac
+                timeout=$(( $2 * 1000 )); shift ;;
             --agent)
                 [ $# -ge 2 ] || { echo "termio: --agent needs a value" >&2; exit 1; }
                 agent="$2"; shift ;;
@@ -124,7 +164,8 @@ sessions() {
                 if [ "$op" = close ]; then
                     # Every positional is a tab to close.
                     targets="${targets:+$targets }$1"
-                elif [ "$seen_positional" -eq 0 ] && { [ "$op" = answer ] || [ "$op" = focus ]; }; then
+                elif [ "$seen_positional" -eq 0 ] && \
+                    { [ "$op" = answer ] || [ "$op" = focus ] || [ "$op" = read ]; }; then
                     targets="$1"
                 elif [ "$seen_positional" -eq 0 ] && [ "$op" = send ] && is_handle "$1"; then
                     # `send` alone takes an *optional* leading handle — absent, the
@@ -139,8 +180,14 @@ sessions() {
         shift
     done
 
+    # `--wait`/`--timeout` only mean anything to `send`.
+    if [ "$op" != send ] && { [ -n "$wait" ] || [ -n "$timeout" ]; }; then
+        echo "termio: --wait/--timeout apply to \`send\` only" >&2
+        exit 1
+    fi
+
     case "$op" in
-        answer|focus)
+        answer|focus|read)
             if [ -z "$targets" ]; then
                 echo "termio: $op needs a session handle (see \`termio sessions list\`)" >&2
                 exit 1
@@ -164,7 +211,7 @@ sessions() {
         exit "$failed"
     fi
 
-    request_once "$op" "$format" "$targets" "$agent" "$text"
+    request_once "$op" "$format" "$targets" "$agent" "$text" "$wait" "$timeout"
 }
 
 # The public hook contract:
