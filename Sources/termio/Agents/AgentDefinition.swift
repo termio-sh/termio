@@ -158,10 +158,12 @@ struct AgentDefinition: Identifiable {
             /// agent's private cwd encoding.
             var name: String
             /// For a directory-based store: the filename of the transcript inside the
-            /// session directory, e.g. `"conversation.jsonl"`. When set,
-            /// `resolveTranscriptPath` looks for this exact file. `nil` (the default)
-            /// falls back to scanning for a single `.jsonl` file in the directory.
-            /// Only meaningful when `isDirectory` is true.
+            /// session directory, e.g. `"chat_history.jsonl"`. When set,
+            /// `resolveTranscriptPath` looks for this exact file and returns `nil` if
+            /// it is absent (no sole-jsonl guess — multi-file session dirs would pin
+            /// the wrong sibling). `nil` (the default) falls back to scanning for a
+            /// single `.jsonl` file in the directory. Only meaningful when
+            /// `isDirectory` is true.
             var transcriptName: String? = nil
         }
 
@@ -850,7 +852,8 @@ struct AgentManifest: Decodable {
             /// may contain a `*` glob (e.g. `dir:{id}`, `file:{id}.jsonl`, `file:*_{id}.jsonl`).
             var storeMatch: String?
             /// For a directory-based store: the name of the transcript file inside the
-            /// session directory, e.g. `"conversation.jsonl"`.
+            /// session directory, e.g. `"chat_history.jsonl"`. When present, path
+            /// resolution is exact-name only (no sole-jsonl fallback).
             var transcriptName: String?
             var discover: DiscoverFields?
             var seed: String?

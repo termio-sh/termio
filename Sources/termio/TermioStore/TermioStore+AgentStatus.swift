@@ -385,17 +385,16 @@ extension TermioStore {
         if let store = session.agent.resumeSpec.store, store.isDirectory,
            let resumeID = session.resumeID,
            let dirPath = SessionStore.locate(store, id: resumeID) {
-            // Directory-based store: scan the session directory for a transcript file.
-            // The manifest may declare a specific filename via `transcriptName`;
-            // otherwise, look for any `.jsonl` file — but only when there is exactly
-            // one, to avoid guessing.
-            if let name = store.transcriptName,
-               let candidate = transcriptFile(in: dirPath, named: name) {
-                return candidate
+            // Directory-based store: the session is a directory of files. Prefer the
+            // manifest's `transcriptName` when set (Grok: `chat_history.jsonl`). Do not
+            // fall through to sole-jsonl when a name is declared — Grok dirs routinely
+            // hold several `.jsonl` files (`updates.jsonl`, `events.jsonl`, …), and a
+            // briefly-missing named file must not pin a sibling. Sole-jsonl is only for
+            // undeclared names where exactly one candidate exists.
+            if let name = store.transcriptName {
+                return transcriptFile(in: dirPath, named: name)
             }
-            if let candidate = soleJSONLFile(in: dirPath) {
-                return candidate
-            }
+            return soleJSONLFile(in: dirPath)
         }
         if session.agent.resumeSpec.discover != nil, let resumeID = session.resumeID {
             return AgentSessionStore.transcript(agent: session.agent, id: resumeID)

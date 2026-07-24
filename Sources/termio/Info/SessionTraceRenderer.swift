@@ -44,12 +44,11 @@ enum SessionTraceRenderer {
                 return obj
             }
 
-        // Codex rollouts open with a `session_meta` header; Grok's chat_history
-        // carries `model_id` at the top level (not nested under `message`). The
-        // first assistant-type entry picks the parser — the three schemas share
-        // nothing below the header.
+        // Codex rollouts open with a `session_meta` header. Grok is detected without
+        // waiting for an assistant row (early sessions are system + synthetic users
+        // only) — see `isGrokTranscript`. Everything else falls through to Claude.
         let isCodex = rows.first?["type"] as? String == "session_meta"
-        let isGrok = !isCodex && (rows.first(where: { ($0["type"] as? String) == "assistant" })?["model_id"] != nil)
+        let isGrok = !isCodex && isGrokTranscript(rows: rows, jsonlPath: jsonlPath)
         // Grok's chat_history.jsonl has no cwd/version/timestamps — those live in
         // the sibling `summary.json` in the same session directory.
         let grokMeta = isGrok ? grokSessionMeta(jsonlPath: jsonlPath) : nil
@@ -151,6 +150,37 @@ enum SessionTraceRenderer {
 
     // MARK: Grok
 
+    /// Whether `jsonlPath` / `rows` look like a Grok `chat_history.jsonl`.
+    /// Prefer path and sibling metadata over waiting for an assistant with
+    /// `model_id` — real sessions open with `system` + synthetic `user` rows
+    /// and only later append an assistant.
+    private static func isGrokTranscript(rows: [[String: Any]], jsonlPath: String) -> Bool {
+        // Manifest-declared transcript name (and the only name Grok writes).
+        if (jsonlPath as NSString).lastPathComponent == "chat_history.jsonl" {
+            return true
+        }
+        // Sibling `summary.json` with Grok session fields.
+        if grokSessionMeta(jsonlPath: jsonlPath) != nil {
+            return true
+        }
+        // Row heuristics for paths that are not the declared name (e.g. a
+        // hand-copied file): top-level assistant `model_id`, or ConversationItem
+        // shape (user/assistant with top-level `content`, no Claude `message`
+        // envelope) plus a system row.
+        if rows.contains(where: {
+            ($0["type"] as? String) == "assistant" && $0["model_id"] != nil
+        }) {
+            return true
+        }
+        let hasSystem = rows.contains { ($0["type"] as? String) == "system" }
+        let hasFlatUser = rows.contains {
+            ($0["type"] as? String) == "user"
+                && $0["message"] == nil
+                && $0["content"] != nil
+        }
+        return hasSystem && hasFlatUser
+    }
+
     /// Grok's `chat_history.jsonl` schema: no `message` wrapper, `model_id` at
     /// top level, standalone `tool_result`/`reasoning` entries, and no token usage
     /// or timestamp fields — so the dashboard omits Tokens and Duration when
@@ -187,19 +217,21 @@ enum SessionTraceRenderer {
                 // The system prompt is huge and not useful as metadata — skip.
                 break
             case "user":
-                // Only count turns that carry user-visible content (a `<user_query>`
-                // or non-system text). Pure system-injection blocks don't count.
-                if let blocks = entry["content"] as? [[String: Any]] {
-                    let fullText = blocks.compactMap { b -> String? in
-                        guard (b["type"] as? String) == "text" else { return nil }
-                        return b["text"] as? String
-                    }.joined()
-                    if !grokExtractUserQuery(fullText).isEmpty {
-                        s.userTurns += 1
-                    }
+                // Runtime injections carry `synthetic_reason`; skip them for the
+                // turn counter. Genuine turns (and the untagged `<user_info>`
+                // preamble) are filtered by visible-content extraction below.
+                if entry["synthetic_reason"] != nil { break }
+                if let fullText = grokUserText(entry),
+                   !grokExtractUserQuery(fullText).isEmpty {
+                    s.userTurns += 1
                 }
             case "assistant":
-                s.assistantTurns += 1
+                // Mirror Claude: only text-bearing assistant rows count as turns.
+                // Tool-only steps (empty `content` + `tool_calls`) still contribute
+                // to the tool-call chart below.
+                let text = (entry["content"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !text.isEmpty { s.assistantTurns += 1 }
                 if let toolCalls = entry["tool_calls"] as? [[String: Any]] {
                     for tc in toolCalls {
                         let name = tc["name"] as? String ?? "tool"
@@ -207,7 +239,9 @@ enum SessionTraceRenderer {
                     }
                 }
             case "tool_result":
-                break
+                if let content = entry["content"] as? String, grokToolResultFailed(content) {
+                    s.toolErrors += 1
+                }
             case "reasoning":
                 break
             default:
@@ -540,24 +574,31 @@ enum SessionTraceRenderer {
         case "user": return renderGrokUser(entry)
         case "assistant": return renderGrokAssistant(entry)
         case "tool_result": return renderGrokToolResult(entry)
-        case "reasoning": return "" // internal reasoning — not part of the conversation
+        case "reasoning": return renderGrokReasoning(entry)
         default: return ""
         }
     }
 
     private static func renderGrokUser(_ entry: [String: Any]) -> String {
-        guard let blocks = entry["content"] as? [[String: Any]] else { return "" }
-        // Join all text blocks and extract the user-visible content. Grok injects
-        // system-level context (`<user_info>`, `<system-reminder>`, `<git_status>`)
-        // as separate text blocks alongside the actual `<user_query>`; only the
-        // query (or, when there isn't one, any non-system text) belongs in the trace.
+        // Prefer the structured flag Grok writes for runtime injections
+        // (`project_instructions`, `system_reminder`, …). Untagged preambles
+        // such as `<user_info>` still fall through to tag stripping below.
+        if entry["synthetic_reason"] != nil { return "" }
+        guard let fullText = grokUserText(entry) else { return "" }
+        let visible = grokExtractUserQuery(fullText)
+        guard !visible.isEmpty else { return "" }
+        return turnCard(role: "user", label: "You", body: textBlock(visible))
+    }
+
+    /// Joined text of a Grok user entry's content blocks (ConversationItem
+    /// `UserItem.content: Vec<ContentPart>`).
+    private static func grokUserText(_ entry: [String: Any]) -> String? {
+        guard let blocks = entry["content"] as? [[String: Any]] else { return nil }
         let fullText = blocks.compactMap { b -> String? in
             guard (b["type"] as? String) == "text" else { return nil }
             return b["text"] as? String
         }.joined()
-        let visible = grokExtractUserQuery(fullText)
-        guard !visible.isEmpty else { return "" }
-        return turnCard(role: "user", label: "You", body: textBlock(visible))
+        return fullText.isEmpty ? nil : fullText
     }
 
     /// Extracts the user-visible content from a Grok user turn's concatenated text.
@@ -567,6 +608,7 @@ enum SessionTraceRenderer {
     private static func grokExtractUserQuery(_ text: String) -> String {
         // First, strip every known system-injection block — tags AND content — from
         // the joined text, regardless of whether they span multiple original blocks.
+        // Covers the untagged `<user_info>` preamble (synthetic_reason is nil there).
         let systemTags = ["user_info", "system-reminder", "git_status",
                           "action_safety", "tool_calling", "background_tasks",
                           "output_efficiency", "formatting", "user_guide"]
@@ -580,9 +622,8 @@ enum SessionTraceRenderer {
                 cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(location: 0, length: ns.length), withTemplate: "")
             }
         }
-        // Now extract the user-visible query. When `<user_query>…</user_query>` is
-        // present, only its inner content is returned (the tags themselves are stripped
-        // by the loop above, but the content remains — so extract only that).
+        // `<user_query>` is intentionally not in `systemTags` so the delimiters remain
+        // for this range extraction; only the inner text is returned.
         if let start = cleaned.range(of: "<user_query>"),
            let end = cleaned.range(of: "</user_query>", range: start.upperBound..<cleaned.endIndex) {
             return String(cleaned[start.upperBound..<end.lowerBound])
@@ -620,7 +661,16 @@ enum SessionTraceRenderer {
     private static func renderGrokToolResult(_ entry: [String: Any]) -> String {
         let out = entry["content"] as? String ?? ""
         guard !out.isEmpty else { return "" }
-        return "<details class=\"tool-result\"><summary>◀ result</summary><pre>\(escaped(out))</pre></details>"
+        // Grok's ToolResultItem has no `is_error` flag; failed tools typically
+        // prefix the content with `Error:` (mirrors what the model sees).
+        let failed = grokToolResultFailed(out)
+        return "<details class=\"tool-result\(failed ? " error" : "")\"><summary>\(failed ? "⚠ result" : "◀ result")</summary><pre>\(escaped(out))</pre></details>"
+    }
+
+    /// Heuristic for Grok tool failures — content often begins with `Error:`.
+    private static func grokToolResultFailed(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("Error:") || trimmed.hasPrefix("error:")
     }
 
     private static func renderGrokReasoning(_ entry: [String: Any]) -> String {

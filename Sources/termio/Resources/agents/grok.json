@@ -21,7 +21,6 @@
     "type": "json",
     "file": "~/.grok/hooks/termio.json",
     "dialect": "grok",
-    "capturesTranscript": true,
     "conversation": "sessionId",
     "events": [
       { "on": "SessionStart", "state": "idle" },
