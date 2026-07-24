@@ -243,8 +243,10 @@ extension TermioStore {
     /// no 12s sweep wait, no promotion evidence-gathering. Transitions only
     /// (`lastTitleActivity`), with hooks kept senior where they are more precise:
     /// a title-working never overrides `needsAttention` (a blocked agent's title
-    /// can keep spinning), and a title-idle only ends a turn — an arbitrary title
-    /// (which classifies idle by no-match) must not clear hook-set states.
+    /// can keep spinning), and a title-idle only clears the state the title's own
+    /// channel last raised (its spinner stopping, or its "Action Required"
+    /// clearing) — an arbitrary title (which classifies idle by no-match) must not
+    /// clear hook-set states.
     func applyTitleActivity(_ activity: AgentStatusRules.Activity, for id: Session.ID) {
         guard lastTitleActivity[id] != activity else { return }
         let previous = lastTitleActivity[id]
@@ -261,9 +263,23 @@ extension TermioStore {
             clearWorking(id)
             if selectedSessionID != id { statuses[id] = .needsAttention }
         case .idle:
-            guard previous == .working, statuses[id] == .working else { return }
-            clearWorking(id)
-            statuses[id] = (selectedSessionID == id) ? .idle : .done
+            // A title that fell quiet ends the state its own channel last raised:
+            // a spinner that stopped (`previous == .working`) ends the turn, and an
+            // "Action Required" that cleared (`previous == .attention`) ends the
+            // block — the failure the yellow-stays-yellow Grok bug came from, since
+            // Grok's only title rule is the attention one and its `done` hook is
+            // unreliable. We gate on the *current* status still matching so a hook
+            // that re-lit `.working` mid-turn is never clobbered, and on `previous`
+            // being title-raised so an arbitrary unmatched title can't clear a
+            // hook-set state. Mirrors `applyScreenDetectedActivity`'s idle case.
+            switch previous {
+            case .working where statuses[id] == .working,
+                 .attention where statuses[id] == .needsAttention:
+                clearWorking(id)
+                statuses[id] = (selectedSessionID == id) ? .idle : .done
+            default:
+                return
+            }
         }
     }
 

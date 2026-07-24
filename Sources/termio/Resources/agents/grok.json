@@ -19,6 +19,7 @@
       { "on": "UserPromptSubmit", "state": "working" },
       { "on": "PreToolUse", "state": "working" },
       { "on": "PostToolUse", "state": "working" },
+      { "on": "Notification", "state": "attention" },
       { "on": "Stop", "state": "done" }
     ]
   }
