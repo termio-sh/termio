@@ -621,7 +621,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         settingsWindow?.contentView = NSHostingView(rootView: SettingsView(
             settings: settings,
             usage: usageMonitor,
-            initialTab: initialTab
+            initialTab: initialTab,
+            onSSHConnect: { [weak self] host in
+                guard let self else { return }
+                self.store.addSSHSession(host: host)
+                // The new session is selected in the store; surface the main
+                // window over Settings so the connection is immediately visible.
+                self.window.makeKeyAndOrderFront(nil)
+            }
         ).frame(minWidth: 640, minHeight: 480))
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

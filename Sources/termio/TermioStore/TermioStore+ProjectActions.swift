@@ -380,7 +380,7 @@ extension TermioStore {
 
         let combo = NSComboBox(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
         combo.completes = true
-        combo.addItems(withObjectValues: CompanionServer.parseSSHConfigHosts().map(\.alias))
+        combo.addItems(withObjectValues: SSHConfigFile.hosts().map(\.alias))
         alert.accessoryView = combo
         alert.window.initialFirstResponder = combo
 

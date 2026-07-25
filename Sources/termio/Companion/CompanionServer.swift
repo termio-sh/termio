@@ -344,50 +344,14 @@ final class CompanionServer {
         }
     }
 
-    /// Read the Mac user's `~/.ssh/config` and flatten its concrete `Host`
-    /// blocks for the phone's SSH import. Wildcard patterns (`Host *`, globs)
-    /// are skipped — they're defaults, not connectable destinations. Keys
-    /// (`IdentityFile`) are deliberately not forwarded: they live on the Mac,
-    /// and a phone→server SSH authenticates with a phone-side key or password.
+    /// The Mac user's connectable `~/.ssh/config` hosts (see `SSHConfigFile`),
+    /// flattened for the phone's SSH import. Keys (`IdentityFile`) are
+    /// deliberately not forwarded: they live on the Mac, and a phone→server SSH
+    /// authenticates with a phone-side key or password.
     nonisolated static func parseSSHConfigHosts() -> [WireSSHHost] {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".ssh/config")
-        guard let text = try? String(contentsOf: path, encoding: .utf8) else { return [] }
-
-        var hosts: [WireSSHHost] = []
-        var aliases: [String] = []
-        var hostName = "", user = "", port = 22
-
-        func flush() {
-            for alias in aliases where !alias.contains("*") && !alias.contains("?") {
-                hosts.append(WireSSHHost(
-                    alias: alias, hostName: hostName.isEmpty ? alias : hostName,
-                    user: user, port: port
-                ))
-            }
+        SSHConfigFile.hosts().map {
+            WireSSHHost(alias: $0.alias, hostName: $0.hostName, user: $0.user, port: $0.port)
         }
-
-        for rawLine in text.split(whereSeparator: \.isNewline) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
-            // `Keyword value…` — the keyword match is case-insensitive per ssh_config(5).
-            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "=" })
-                .map(String.init).filter { !$0.isEmpty }
-            guard let keyword = parts.first?.lowercased() else { continue }
-            let values = Array(parts.dropFirst())
-            switch keyword {
-            case "host":
-                flush()
-                aliases = values
-                hostName = ""; user = ""; port = 22
-            case "hostname": hostName = values.first ?? ""
-            case "user": user = values.first ?? ""
-            case "port": port = values.first.flatMap(Int.init) ?? 22
-            default: break
-            }
-        }
-        flush()
-        return hosts
     }
 
     /// Render a session's agent transcript to the same HTML trace the desktop

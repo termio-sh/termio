@@ -12,15 +12,21 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var usage: UsageMonitor
+    /// Opens an SSH terminal to a `~/.ssh/config` alias in the main window — the
+    /// SSH tab's Connect action, injected by the app delegate so the settings
+    /// window doesn't hold the store.
+    let onSSHConnect: (String) -> Void
     @State private var selection: SettingsTab
 
     init(
         settings: AppSettings,
         usage: UsageMonitor,
-        initialTab: SettingsTab = .appearance
+        initialTab: SettingsTab = .appearance,
+        onSSHConnect: @escaping (String) -> Void
     ) {
         self.settings = settings
         self.usage = usage
+        self.onSSHConnect = onSSHConnect
         _selection = State(initialValue: initialTab)
     }
 
@@ -59,6 +65,7 @@ struct SettingsView: View {
         case .appearance: AppearanceSettingsTab(settings: settings)
         case .interface: InterfaceSettingsTab(settings: settings)
         case .terminal: TerminalSettingsTab(settings: settings)
+        case .ssh: SSHSettingsTab(settings: settings, onConnect: onSSHConnect)
         case .keyboard: KeybindingsSettingsTab()
         case .agents: AgentSettingsTab(settings: settings)
         case .usage: UsageSettingsTab(settings: settings, usage: usage)
