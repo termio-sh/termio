@@ -114,33 +114,13 @@ struct SidebarView: View {
     // default system look untouched.
     private var chrome: ChromeTheme? { settings.chromeTheme(for: colorScheme) }
 
-    /// Bridges List's native `selection:` to the store's `selectedSessionID`. Only
-    /// session rows carry a `.tag` (`SidebarSelection.session`), so headers and
-    /// section labels stay unselectable — and the dedicated enum tag means a
-    /// project's UUID can never be mistaken for a session's (both are `UUID`). A
-    /// click selects the session, returns to its terminal (closing any open editor),
-    /// and clears its resting done/attention dot, matching the old tap handler; a
-    /// `nil` (deselection) is ignored so clicking blank space keeps the session up.
-    private var listSelection: Binding<SidebarSelection?> {
-        Binding(
-            get: { store.selectedSessionID.map(SidebarSelection.session) },
-            set: { selection in
-                guard case let .session(id)? = selection else { return }
-                store.openFileURL = nil
-                store.selectedSessionID = id
-                store.markSeen(id)
-            }
-        )
-    }
-
     var body: some View {
-        // Selection uses List's native `selection:` binding (see `listSelection`),
-        // not a row `.onTapGesture` — a SwiftUI tap gesture on a row silently kills the
-        // row drag (it never starts), so drag-reorder needs the tap out of the way.
-        // Native selection is handled at the AppKit layer and coexists with drag; its
-        // edge-to-edge blue accent fill is stripped by `OutlineSelectionStyleStripper`
-        // (already mounted per row), leaving our own frosted-grey `SidebarRowHighlight`
-        // as the only selection cue. Same trick the file tree uses (see `FileTreeList`).
+        // Selection is driven by a *simultaneous* tap on each session row (see
+        // `SessionRow`), never by List's `selection:` binding: with `.onDrag` mounted
+        // on the rows, NSTableView's native click-to-select doesn't commit until
+        // seconds later (the drag machinery swallows the mouseDown) — that shipped as
+        // v0.19.0's dead sidebar clicks. The store stays the single source of
+        // selection truth and `SidebarRowHighlight` its only visual cue.
         // A flat list rather than `Section`s: the sidebar's section spacing leaves
         // a big empty band between a collapsed project's header and the next, and
         // macOS has no `listSectionSpacing`. So the pinned grouping is hand-rolled
@@ -178,7 +158,7 @@ struct SidebarView: View {
         let hasPinned = !pinnedProjects.isEmpty || !pinnedWorktrees.isEmpty || !pinnedSessions.isEmpty
         let hasTerminals = terminals.contains { !$0.sessions.isEmpty }
         let hasChats = chats.contains { !$0.sessions.isEmpty }
-        return List(selection: listSelection) {
+        return List {
             // The top "Pinned" working set, under its own section header: pinned projects
             // as full blocks, then pinned worktrees as mini-blocks (header + their
             // sessions), then pinned sessions as shortcut rows — each nested entry tagged
@@ -431,13 +411,6 @@ struct SidebarView: View {
         closeRun()
         return marks
     }
-}
-
-/// The List's native selection value. A dedicated case (rather than a bare
-/// `Session.ID`) keeps the selection type distinct from the project/worktree UUIDs
-/// that also flow through the sidebar, so only tagged session rows are selectable.
-enum SidebarSelection: Hashable {
-    case session(Session.ID)
 }
 
 /// A session row's segment of the split-group bracket: the corner opening the
@@ -1071,8 +1044,8 @@ private struct SessionRow: View {
         // SwiftUI drag settles its preview over ~0.3s on release, while an AppKit drag
         // image just vanishes on a successful drop — so the row moves crisply. The
         // drag only carries the session id; nothing reorders until the drop commits
-        // it (see the drop below). It starts at all only because selection is the
-        // List's native binding, not a row tap — a SwiftUI tap gesture kills a drag.
+        // it (see the drop below). It starts at all only because selection rides a
+        // *simultaneous* tap (below) — an exclusive `.onTapGesture` kills the drag.
         .onDrag {
             store.draggingSessionID = session.id
             return NSItemProvider(object: (Self.dragPrefix + session.id.uuidString) as NSString)
@@ -1117,17 +1090,26 @@ private struct SessionRow: View {
             isDropTarget = targeted
                 && (store.draggingSessionID.map { store.canReorder($0, relativeTo: session.id) } ?? false)
         }
-        // Tag the row for the List's native `selection:` binding (see `listSelection`);
-        // only session rows are tagged, so headers/labels stay unselectable. Native
-        // selection (not a row tap) is also what lets the drag start at all.
-        .tag(SidebarSelection.session(session.id))
         .onHover { isHovering = $0 }
+        // Click-to-select rides a *simultaneous* tap, not `.onTapGesture`: an
+        // exclusive tap gesture preempts the row drag (it never starts), while a
+        // simultaneous one fires only when the mouse goes down and up in place, so
+        // click-select and drag-reorder coexist. List's native `selection:` binding
+        // can't carry the click instead — with `.onDrag` mounted, NSTableView's
+        // click-to-select doesn't commit for seconds (the drag machinery swallows
+        // the mouseDown), which shipped as v0.19.0's dead sidebar clicks.
+        .simultaneousGesture(TapGesture().onEnded {
+            // Tapping a session always returns to its terminal — close the file
+            // editor even when this row is already selected (no change to react to).
+            store.openFileURL = nil
+            store.selectedSessionID = session.id
+            // Re-tapping the row you're already on still clears a resting
+            // done/attention dot (the selection didSet only reacts to a change).
+            store.markSeen(session.id)
+        })
         // NSMenu rather than SwiftUI's `.contextMenu` so right-click leaves no blue
         // accent ring on the row (see `SidebarRowContextMenu`).
         .background(SidebarRowContextMenu(items: menuItems))
-        // Strip the source list's native blue selection fill at the AppKit layer, so
-        // the only selection cue stays our `SidebarRowHighlight` (as the file tree does).
-        .background(OutlineSelectionStyleStripper())
         // The reorder drop target (VS Code's `Over` effect) reuses the *hover* lift
         // verbatim — same frosted-grey fill, same row-sized region and insets — so the
         // drop cue never introduces a second background shape; it reads as a hover.
