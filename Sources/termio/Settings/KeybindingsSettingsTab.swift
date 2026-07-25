@@ -6,89 +6,87 @@ import SwiftUI
 /// default + user override), so a change here updates the main menu and the
 /// command palette immediately. Only ⌘-based combos are accepted — anything
 /// without Command could shadow a key an agent TUI or the shell needs.
+///
+/// The pane is a single grouped `Form`, System Settings style: search lives in
+/// the window toolbar, the reset-all affordance is the list's last section, and
+/// a refused recording answers with a shake + transient popover instead of an
+/// inline error row that would push the list around.
 struct KeybindingsSettingsTab: View {
     @ObservedObject private var keys = KeybindingStore.shared
     @State private var query = ""
-    /// The command whose last recording was refused, plus why — shown inline.
-    @State private var rejection: (id: KeyCommandID, message: String)?
+    /// The command whose last recording was refused, plus why. `shake` increments
+    /// per refusal so a repeated attempt re-triggers the recorder's shake even
+    /// while the popover is already up.
+    @State private var rejection: Rejection?
+    /// Auto-dismisses the rejection popover after a beat, cancelled and re-armed
+    /// on each refusal.
+    @State private var rejectionDismissTask: Task<Void, Never>?
+
+    private struct Rejection {
+        let id: KeyCommandID
+        let message: String
+        let shake: Int
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            searchField
-            Form {
-                ForEach(matchingCategories, id: \.self) { category in
-                    Section {
-                        ForEach(commands(in: category)) { info in
-                            row(info)
-                        }
-                    } header: {
-                        SectionHeaderLabel(title: category)
+        Form {
+            ForEach(matchingCategories, id: \.self) { category in
+                Section {
+                    ForEach(commands(in: category)) { info in
+                        row(info)
                     }
-                }
-                if matchingCategories.isEmpty {
-                    Text("No commands match “\(query)”.")
-                        .foregroundStyle(.secondary)
+                } header: {
+                    SectionHeaderLabel(title: category)
                 }
             }
-            .formStyle(.grouped)
-            Divider()
-            footer
+            if matchingCategories.isEmpty {
+                ContentUnavailableView.search(text: query)
+            } else if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                restoreSection
+            }
         }
+        .formStyle(.grouped)
+        .searchable(text: $query, placement: .toolbar, prompt: "Search commands")
     }
 
     // MARK: - Pieces
 
-    private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Filter commands", text: $query)
-                .textFieldStyle(.plain)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
     private func row(_ info: KeyCommandInfo) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            LabeledContent(info.title) {
-                HStack(spacing: 6) {
-                    KeyRecorderField(display: keys.display(for: info.id)) { captured in
-                        handle(captured, for: info.id)
-                    }
-                    Button {
-                        keys.reset(info.id)
-                        clearRejection(for: info.id)
-                    } label: {
-                        Image(systemName: "arrow.uturn.backward")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Reset to default")
-                    .disabled(!keys.isCustomized(info.id))
-                    .opacity(keys.isCustomized(info.id) ? 1 : 0.25)
-                }
-            }
-            if let rejection, rejection.id == info.id {
-                Text(rejection.message)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+        LabeledContent(info.title) {
+            KeyRecorderField(
+                display: keys.display(for: info.id),
+                isCustomized: keys.isCustomized(info.id),
+                shake: rejection?.id == info.id ? (rejection?.shake ?? 0) : 0,
+                onCapture: { handle($0, for: info.id) }
+            )
+            // A representable stretches to whatever width SwiftUI proposes, so
+            // the uniform footprint must be pinned here — the field's intrinsic
+            // size alone doesn't hold against a flexible row.
+            .frame(width: 130)
+            .popover(isPresented: rejectionShown(for: info.id), arrowEdge: .bottom) {
+                Text(rejection?.message ?? "")
+                    .font(.callout)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: 280)
             }
         }
     }
 
-    private var footer: some View {
-        HStack {
-            Text("Press ⌫ while recording to revert a row. Shortcuts must include ⌘.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
+    /// The reset-all row, in the list where System Settings keeps such actions —
+    /// with the recording hints as its footer, replacing the old pinned bottom bar.
+    private var restoreSection: some View {
+        Section {
             Button("Restore Defaults") {
                 keys.resetAll()
-                rejection = nil
+                clearRejection()
             }
             .disabled(keys.overrides.isEmpty)
+        } footer: {
+            Text("Shortcuts must include ⌘ so they can't shadow a key an agent or the shell needs. While recording, press ⌫ to remove a shortcut, or esc to cancel.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 
     // MARK: - Data
@@ -118,124 +116,232 @@ struct KeybindingsSettingsTab: View {
             return
         }
         if let message = keys.rejection(for: shortcut, assigning: id) {
-            rejection = (id, message)
+            NSSound.beep()
+            rejection = Rejection(id: id, message: message, shake: (rejection?.shake ?? 0) + 1)
+            rejectionDismissTask?.cancel()
+            rejectionDismissTask = Task {
+                try? await Task.sleep(for: .seconds(2.5))
+                guard !Task.isCancelled else { return }
+                rejection = nil
+            }
             return
         }
         clearRejection(for: id)
         keys.setShortcut(shortcut, for: id)
     }
 
-    private func clearRejection(for id: KeyCommandID) {
-        if rejection?.id == id { rejection = nil }
+    /// Whether the rejection popover shows on this row; setting it false (the
+    /// user clicking away) clears the rejection early.
+    private func rejectionShown(for id: KeyCommandID) -> Binding<Bool> {
+        Binding(
+            get: { rejection?.id == id },
+            set: { shown in
+                if !shown, rejection?.id == id { clearRejection() }
+            }
+        )
+    }
+
+    private func clearRejection(for id: KeyCommandID? = nil) {
+        guard id == nil || rejection?.id == id else { return }
+        rejectionDismissTask?.cancel()
+        rejection = nil
     }
 }
 
 // MARK: - Recorder
 
-/// A push button that records the next key chord. AppKit, not SwiftUI, because
-/// only a live NSView can intercept ⌘-combos via `performKeyEquivalent` *before*
-/// the main menu claims them — a SwiftUI key handler never sees ⌘D.
+/// The recorder pattern borrowed from the de-facto standard implementation of
+/// this control, sindresorhus/KeyboardShortcuts' `RecorderCocoa`: an
+/// `NSSearchField` dressed as a plain rounded field — centered text, fixed
+/// width, no magnifier, the built-in cancel (⨯) button as the "remove
+/// customization" affordance — recording driven by focus plus a local event
+/// monitor, the only way to see ⌘-combos before the main menu claims them.
+/// Being a real system control, hover/press rendering is AppKit's own — no
+/// hand-rolled tracking areas to go stale when the list scrolls.
 struct KeyRecorderField: NSViewRepresentable {
     /// Current shortcut glyphs (`⌥⌘←`), or nil when the command is unbound.
     let display: String?
-    /// Captured chord, or nil when the user pressed ⌫ to clear.
+    /// Whether the shortcut is a user override — shows the ⨯ (reset) button.
+    let isCustomized: Bool
+    /// A monotonically increasing token; each new value shakes the field once
+    /// (a refused recording). Zero means "no shake pending".
+    let shake: Int
+    /// Captured chord, or nil when the user cleared the customization.
     let onCapture: (Shortcut?) -> Void
 
-    func makeNSView(context: Context) -> RecorderButton {
-        let button = RecorderButton()
-        button.onCapture = onCapture
-        button.refresh(display: display)
-        return button
+    func makeNSView(context: Context) -> RecorderSearchField {
+        let field = RecorderSearchField()
+        field.onCapture = onCapture
+        field.refresh(display: display, isCustomized: isCustomized)
+        return field
     }
 
-    func updateNSView(_ button: RecorderButton, context: Context) {
-        button.onCapture = onCapture
-        button.refresh(display: display)
+    func updateNSView(_ field: RecorderSearchField, context: Context) {
+        field.onCapture = onCapture
+        field.refresh(display: display, isCustomized: isCustomized)
+        if shake > 0, shake != field.lastShake {
+            field.lastShake = shake
+            field.shake()
+        }
     }
 }
 
-final class RecorderButton: NSButton {
+final class RecorderSearchField: NSSearchField, NSSearchFieldDelegate {
     var onCapture: ((Shortcut?) -> Void)?
-    private var currentDisplay: String?
-    private var isRecording = false
+    /// The last shake token consumed, so a SwiftUI re-render doesn't replay it.
+    var lastShake = 0
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        bezelStyle = .rounded
-        setButtonType(.momentaryPushIn)
-        target = self
-        action = #selector(toggle)
+    private var currentDisplay: String?
+    private var currentCustomized = false
+    private var isRecording = false
+    private var eventMonitor: Any?
+    private var cancelCell: NSButtonCell?
+    private var windowObserver: NSObjectProtocol?
+
+    init() {
+        super.init(frame: .zero)
+        delegate = self
+        alignment = .center
+        wantsLayer = true
+        placeholderString = "Record Shortcut"
+        // The magnifier and the ⨯ hide via transparency, never by detaching the
+        // cells: macOS 26's accessibility builds this cell's AX children by
+        // inserting both button cells into an array without a nil check, so a
+        // nil'd-out cell crashes the app the moment any AX client (VoiceOver, a
+        // window manager, an input method) walks the focused field.
+        if let cell = cell as? NSSearchFieldCell {
+            cell.searchButtonCell?.isTransparent = true
+            cell.searchButtonCell?.isEnabled = false
+            cancelCell = cell.cancelButtonCell
+        }
+        // The ⨯ resets the row instead of merely emptying the text.
+        cancelCell?.target = self
+        cancelCell?.action = #selector(clearCustomization)
+        setShowsCancel(false)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
-    override var acceptsFirstResponder: Bool { true }
+    deinit {
+        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+        if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) }
+    }
 
-    /// Fixed width so the column doesn't jump between "Add Shortcut" and a glyph.
+    /// The upstream control's fixed footprint, one width for every row.
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 128, height: super.intrinsicContentSize.height)
+        var size = super.intrinsicContentSize
+        size.width = 130
+        return size
     }
 
-    func refresh(display: String?) {
+    func refresh(display: String?, isCustomized: Bool) {
         currentDisplay = display
-        updateTitle()
+        currentCustomized = isCustomized
+        guard !isRecording else { return }
+        stringValue = display ?? ""
+        setShowsCancel(isCustomized)
     }
 
-    private func updateTitle() {
-        if isRecording {
-            title = "Type shortcut…"
-            contentTintColor = .controlAccentColor
-        } else {
-            title = currentDisplay ?? "Add Shortcut"
-            contentTintColor = currentDisplay == nil ? .tertiaryLabelColor : nil
-        }
+    /// One bounce left-right — the refused-recording signal, paired with the beep.
+    func shake() {
+        let animation = CAKeyframeAnimation(keyPath: "transform.translation.x")
+        animation.values = [0, -5, 5, -4, 4, -2, 2, 0]
+        animation.duration = 0.35
+        layer?.add(animation, forKey: "shake")
     }
 
-    @objc private func toggle() {
-        isRecording ? endRecording() : beginRecording()
+    // MARK: Recording lifecycle
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { beginRecording() }
+        return accepted
     }
 
     private func beginRecording() {
+        guard !isRecording else { return }
         isRecording = true
-        updateTitle()
-        window?.makeFirstResponder(self)
+        // The current glyphs stay visible while recording (as upstream does) —
+        // writing `stringValue` here would end the just-started editing session,
+        // whose did-end notification tears the recording straight back down.
+        placeholderString = "Press Shortcut…"
+        // The field editor attaches just after focus lands; hide its caret then
+        // (there is nothing to type — the monitor consumes every key).
+        DispatchQueue.main.async { [weak self] in
+            (self?.currentEditor() as? NSTextView)?.insertionPointColor = .clear
+        }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handle(event)
+        }
+        windowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.blur() }
+        }
+    }
+
+    /// Every keystroke while recording routes through here — *before* the main
+    /// menu, which is what lets an already-taken ⌘-combo be captured at all.
+    private func handle(_ event: NSEvent) -> NSEvent? {
+        guard isRecording else { return event }
+        switch event.keyCode {
+        case 53:                       // esc — cancel, binding unchanged
+            blur()
+            return nil
+        case 51, 117:                  // ⌫ / fwd-delete — remove the customization
+            onCapture?(nil)
+            blur()
+            return nil
+        case 48:                       // tab — stop recording, let focus move on
+            blur()
+            return event
+        default: break
+        }
+        guard let shortcut = Shortcut(event: event) else { return nil } // lone modifiers wait
+        onCapture?(shortcut)
+        blur()
+        return nil
+    }
+
+    @objc private func clearCustomization() {
+        onCapture?(nil)
+        blur()
+    }
+
+    private func blur() {
+        endRecording()
+        if window?.firstResponder === currentEditor() || window?.firstResponder === self {
+            window?.makeFirstResponder(nil)
+        }
     }
 
     private func endRecording() {
         guard isRecording else { return }
         isRecording = false
-        updateTitle()
-        if window?.firstResponder === self { window?.makeFirstResponder(nil) }
-    }
-
-    // Intercept ⌘-combos before the menu; only while actively recording.
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard isRecording else { return false }
-        capture(event)
-        return true
-    }
-
-    override func keyDown(with event: NSEvent) {
-        guard isRecording else { super.keyDown(with: event); return }
-        capture(event)
-    }
-
-    private func capture(_ event: NSEvent) {
-        switch event.keyCode {
-        case 53: endRecording(); return                        // esc cancels, no change
-        case 51, 117: onCapture?(nil); endRecording(); return  // delete/fwd-delete clears
-        default: break
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
         }
-        guard let shortcut = Shortcut(event: event) else { return } // ignore lone modifiers
-        onCapture?(shortcut)
+        if let windowObserver {
+            NotificationCenter.default.removeObserver(windowObserver)
+            self.windowObserver = nil
+        }
+        placeholderString = "Record Shortcut"
+        stringValue = currentDisplay ?? ""
+        setShowsCancel(currentCustomized)
+    }
+
+    /// Clicking away ends the recording (the window's field editor moves on).
+    func controlTextDidEndEditing(_ notification: Notification) {
         endRecording()
     }
 
-    override func resignFirstResponder() -> Bool {
-        if isRecording {
-            isRecording = false
-            updateTitle()
-        }
-        return super.resignFirstResponder()
+    /// A hidden ⨯ stays transparent *and* disabled — a transparent NSButtonCell
+    /// still tracks clicks, which would make an invisible spot of the field
+    /// silently reset the row.
+    private func setShowsCancel(_ shows: Bool) {
+        cancelCell?.isTransparent = !shows
+        cancelCell?.isEnabled = shows
+        needsDisplay = true
     }
 }
