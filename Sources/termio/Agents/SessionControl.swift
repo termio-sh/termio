@@ -460,7 +460,10 @@ enum SessionSkillInstaller {
           `cursor`..`cursor_end` line range holding the response — one call instead
           of send-then-poll. A sibling that stops to ask you something short-circuits
           the wait: the reply is `status:"needs-you"` with the on-screen question in
-          `prompt` — answer it with another `send`.
+          `prompt` — answer it with another `send`. Exit codes: 0 settled, 1 error
+          (`prompt_stalled` = the input showed no effect within 5s; `session_closed`
+          / `agent_gone` = the target vanished mid-wait), 3 timed out (session still
+          running — re-arm or read its transcript).
         - `termio sessions close <agent>@<id> …` — close session tabs;
           `termio sessions focus <agent>@<id>` — bring one to the front in the app
 

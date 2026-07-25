@@ -322,23 +322,54 @@ extension TermioStore {
     /// — a plain terminal driven by `send --wait` — falls back to the screen first changing
     /// and then going still. Each poll awaits off the actor, so a long wait never blocks
     /// other control requests (§4.2 stays true even mid-wait).
+    ///
+    /// Two failure modes end the wait early instead of burning the whole timeout,
+    /// both adopted from herdr's agent-wait design:
+    /// - **Stalled prompt**: from a non-`working` start, *some* effect — a status
+    ///   move or a screen change — must appear within `stallWindow`, or the
+    ///   keystrokes were eaten (a half-booted TUI, a program that ignores typed
+    ///   text) and no turn is coming: `prompt_stalled`, immediately. A `--timeout`
+    ///   at or under the window keeps the plain timeout reply instead.
+    /// - **Occupant gone**: the wait is pinned to the session and agent it started
+    ///   on. The session closing mid-wait is `session_closed`; its agent exiting
+    ///   back to a plain shell is `agent_gone`. (A plain-terminal target is exempt
+    ///   from the pin — a sent command line may legitimately start an agent in the
+    ///   pane, which is progress, not replacement.)
     private func waitForReply(
         _ request: ControlRequest, session: Session,
         cursorAtSend: Int?, created: Bool
     ) async -> Data {
         let cap = min(max(request.timeoutMs ?? 300_000, 1_000), 600_000)
-        let deadline = Date().addingTimeInterval(Double(cap) / 1_000)
+        let started = Date()
+        let deadline = started.addingTimeInterval(Double(cap) / 1_000)
         let settleWindow = 1.5
+        let stallWindow = 5.0
 
+        let statusAtSend = status(for: session.id)
+        let occupantAtSend = effectiveAgent(for: session)
         var sawWorking = false
         var restingSince: Date?
         var lastFrame = viewportText(for: session.id)
-        var lastChangeAt = Date()
+        var lastChangeAt = started
         var changedSinceSend = false
         var settled: SessionStatus?
 
         while Date() < deadline {
             try? await Task.sleep(for: .milliseconds(300))
+            guard let live = self.session(session.id) else {
+                return controlError(request, "session_closed",
+                    "\(sessionHandle(for: session)) was closed while waiting on it.")
+            }
+            let occupant = effectiveAgent(for: live)
+            if occupantAtSend != .terminal, occupant.id != occupantAtSend.id {
+                var message = "The \(occupantAtSend.displayName) agent in "
+                    + "\(sessionHandle(for: session)) exited mid-wait; no reply is coming."
+                if let transcript = transcriptPaths[session.id] {
+                    message += " Its transcript (\(transcript)) holds whatever it did first."
+                }
+                return controlError(request, "agent_gone", message)
+            }
+
             let current = status(for: session.id)
             if current == .working {
                 sawWorking = true
@@ -346,7 +377,6 @@ extension TermioStore {
             } else if restingSince == nil {
                 restingSince = Date()
             }
-            if current == .needsAttention { settled = .needsAttention; break }
 
             let now = Date()
             let frame = viewportText(for: session.id)
@@ -355,6 +385,28 @@ extension TermioStore {
                 lastChangeAt = now
                 changedSinceSend = true
             }
+
+            // needs-you settles the wait immediately — but only as *new* evidence.
+            // A session already blocked at send time (the caller is answering its
+            // menu) must not read as "still waiting on you" on the first poll,
+            // before the agent has had a chance to react to the answer.
+            if current == .needsAttention,
+               statusAtSend != .needsAttention || sawWorking || changedSinceSend {
+                settled = .needsAttention
+                break
+            }
+
+            if statusAtSend != .working, !sawWorking, !changedSinceSend,
+               current == statusAtSend,
+               Double(cap) / 1_000 > stallWindow,
+               now.timeIntervalSince(started) >= stallWindow {
+                return controlError(request, "prompt_stalled",
+                    "The prompt showed no effect in \(sessionHandle(for: session)) within "
+                    + "\(Int(stallWindow))s — no status change, no screen change. The input "
+                    + "was likely eaten (agent still booting, or a program that ignores "
+                    + "typed text); check the pane before resending.")
+            }
+
             guard current != .working else { continue }
             let rested = restingSince.map { now.timeIntervalSince($0) >= settleWindow } ?? false
             let screenQuiet = now.timeIntervalSince(lastChangeAt) >= settleWindow

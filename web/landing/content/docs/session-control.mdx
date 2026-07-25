@@ -97,8 +97,19 @@ reads exactly the new content with its own file tools. Two special cases:
 - A plain terminal with no status signal falls back to screen settling: the
   screen changed after the send, then went still.
 
+Waits also **fail fast instead of burning the timeout** when no outcome can
+come:
+
+- A prompt that shows no effect within 5 seconds — no status move, no screen
+  change — errors as `prompt_stalled`: the input was eaten (an agent still
+  booting, a program that ignores typed text), and no turn is coming.
+- A session that closes mid-wait errors as `session_closed`; an agent that
+  exits back to its shell mid-wait errors as `agent_gone`.
+
 On timeout the reply still comes back (`timed_out: true`) with whatever the
-current status is; the session keeps running.
+current status is; the session keeps running. The exit code splits the three
+outcomes so scripts can branch without parsing: **0** settled, **1** error
+(including stalled/vanished), **3** timed out.
 
 ### Supervising with `watch`
 
@@ -154,7 +165,8 @@ Every error, on any verb, has one shape — and the exit code is nonzero:
 
 The stable codes: `disabled`, `no_scope`, `bad_op`, `bad_request`, `no_text`,
 `no_target`, `not_found`, `ambiguous`, `wrong_agent`, `bad_agent`, `no_agent`,
-`start_failed`, `not_live`, `read_unavailable`.
+`start_failed`, `not_live`, `read_unavailable` — plus, on `--wait` only,
+`prompt_stalled`, `session_closed`, and `agent_gone`.
 
 Success replies, per verb (`schema_version` and `"ok": true` omitted below for
 brevity):

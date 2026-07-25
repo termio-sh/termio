@@ -38,6 +38,7 @@ options:
   --agent <id>     agent for `spawn` (e.g. claudeCode, codex, grok, pi; default: caller's kind)
   --wait           for `spawn`/`send`: block until the turn settles; the reply carries
                    the final status and the transcript line range to read
+                   (exit 0 settled, 1 error — including a stalled/vanished session, 3 timed out)
   --timeout <ms>   cap for --wait (default 300000, clamped 1000–600000); implies --wait
   --state <s,…>    for `watch`: comma-separated states to report (working, idle, done, needs-you)
   --no-snapshot    for `watch`: skip the initial per-session status snapshot
@@ -90,6 +91,12 @@ pi); the default is the calling agent's own kind.
 carries the final status, the transcript path, and the cursor..cursor_end
 line range holding the response. A session that stops to ask you something
 returns immediately as needs-you, with the on-screen question in `prompt`.
+
+A prompt that shows no effect within 5s fails fast as prompt_stalled (the
+input was eaten) rather than burning the timeout; a session that closes or
+whose agent exits mid-wait fails as session_closed / agent_gone.
+
+exit codes: 0 settled, 1 error (including stalled/vanished), 3 timed out.
 EOF
             ;;
         send|answer) cat <<'EOF'
@@ -105,6 +112,12 @@ reply; copy them verbatim.
 carries the final status, the transcript path, and the cursor..cursor_end
 line range holding the response. A session that stops to ask you something
 returns immediately as needs-you, with the on-screen question in `prompt`.
+
+A prompt that shows no effect within 5s fails fast as prompt_stalled (the
+input was eaten) rather than burning the timeout; a session that closes or
+whose agent exits mid-wait fails as session_closed / agent_gone.
+
+exit codes: 0 settled, 1 error (including stalled/vanished), 3 timed out.
 
 `answer` is a deprecated alias; `send` without a handle aliases `spawn`.
 EOF
@@ -194,6 +207,22 @@ request_once() {
     case "$response" in
         error:*|*'"ok":false'*) return 1 ;;
     esac
+    # A --wait that expired is its own outcome, on its own exit code (3): the
+    # session is still running and the caller decides whether to re-arm — distinct
+    # from success (0) and from hard errors (1), so scripts can branch without
+    # parsing. JSON mode keys off the contract field, text mode off the headline;
+    # both checks are scoped to wait requests so no other reply can trip them.
+    if [ -n "${6:-}" ]; then
+        if [ "$2" = json ]; then
+            case "$response" in
+                *'"timed_out":true'*) return 3 ;;
+            esac
+        else
+            case "$(printf '%s\n' "$response" | head -1)" in
+                *'— timed out'*) return 3 ;;
+            esac
+        fi
+    fi
     return 0
 }
 
