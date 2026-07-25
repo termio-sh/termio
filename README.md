@@ -2,7 +2,7 @@
 
 <img alt="termio" src="web/landing/public/logo.png" width="88" />
 
-### The native Mac terminal for AI coding agents
+### The Terminal-first Agentic Development Environment
 
 [![Release](https://img.shields.io/github/v/release/termio-sh/termio?style=flat&logo=github)](https://github.com/termio-sh/termio/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat)](LICENSE)
@@ -10,7 +10,7 @@
 
 <br />
 
-Run Claude Code, Codex, and any CLI agent side by side —<br />
+Run Claude Code, Codex, and any CLI agent side by side in a native Mac app —<br />
 every session live in the sidebar, and a menu-bar dot that tells you who needs you.
 
 <br />
@@ -25,9 +25,13 @@ every session live in the sidebar, and a menu-bar dot that tells you who needs y
 
 ## Built for watching agents work
 
-Coding agents live in the terminal, but terminals were built for one shell and
-your full attention. termio is built for the new shape of the work: several
-agents going at once, most of them fine without you, one of them stuck.
+The IDE was built around a person typing code. When agents write most of the
+code, the environment's job changes: it's where agents work and where you
+direct, review, and unblock them. termio is that environment — Terminal-first,
+because that's where the agents already live — built for the new
+shape of the work: several agents going at once, most of them fine without
+you, one of them stuck. (The longer argument:
+[*From IDE to ADE*](docs/essays/from-ide-to-ade.md).)
 
 - **A real terminal, not a web view.** Swift + AppKit on
   [libghostty](https://ghostty.org) (Ghostty's terminal core), rendered with
