@@ -1,6 +1,7 @@
 import { SiteNav } from "@/components/site-nav";
 import { Hero } from "@/components/sections/hero";
 import { AgentShowcase } from "@/components/sections/agent-showcase";
+import { FeatureGrid } from "@/components/sections/feature-grid";
 import { Faq } from "@/components/sections/faq";
 import { CtaBand } from "@/components/sections/cta-band";
 import { SiteFooter } from "@/components/site-footer";
@@ -34,6 +35,7 @@ export default function Home() {
       <main className="flex-1">
         <Hero />
         <AgentShowcase />
+        <FeatureGrid />
         <Faq />
       </main>
       {/* Shaded outro — mirrors the hero. The CTA band and footer share one slow

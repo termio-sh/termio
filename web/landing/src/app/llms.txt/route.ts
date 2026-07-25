@@ -17,7 +17,7 @@ export function GET() {
   const body = [
     "# Termio",
     "",
-    "> Termio is a free, native macOS terminal built for running AI coding agents — Claude Code, Codex, Gemini, and friends — side by side. Sessions are organized by project, each with a live status, a built-in inspector, and an iPhone companion app. No account, no payment.",
+    "> Termio is the Terminal-first Agentic Development Environment — a free, native macOS app for running AI coding agents (Claude Code, Codex, Gemini, and friends) side by side. Sessions are organized by project, each with a live status, a built-in inspector, and an iPhone companion app. No account, no payment.",
     "",
     "## Docs",
     "",
