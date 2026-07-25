@@ -206,12 +206,17 @@ final class TermioStore: ObservableObject {
         // to this session's project. The hub does the socket writes off the main
         // thread, so a watcher never slows the agent tick that produced the event.
         if let session = session(id), let project = project(for: id) {
-            SessionWatchHub.shared.broadcast(SessionWatchEvent(
+            var event = SessionWatchEvent(
                 projectID: project.id,
                 handle: sessionHandle(for: session),
                 status: Self.statusToken(status),
                 title: displayTitle(for: session),
-                cwd: runtimes[id]?.workingDirectory ?? ""))
+                cwd: runtimes[id]?.workingDirectory ?? "")
+            // A `needs-you` event carries the on-screen question, a `done` event the
+            // transcript cursor — what a supervisor needs to act on the transition
+            // without a second round-trip (design doc §4.3).
+            attachActionablePayload(to: &event, for: id)
+            SessionWatchHub.shared.broadcast(event)
         }
         // A session *entering* `.working` is the "this project is active" signal that
         // floats its project up the Recent-Activity sort. Bumping here, on the genuine

@@ -36,6 +36,9 @@ usage:
 options:
   --json           machine-readable output (any `sessions` command)
   --agent <id>     agent for `spawn` (e.g. claudeCode, codex, grok, pi; default: caller's kind)
+  --wait           for `spawn`/`send`: block until the turn settles; the reply carries
+                   the final status and the transcript line range to read
+  --timeout <ms>   cap for --wait (default 300000, clamped 1000–600000); implies --wait
   --state <s,…>    for `watch`: comma-separated states to report (working, idle, done, needs-you)
   --no-snapshot    for `watch`: skip the initial per-session status snapshot
   --help, --version
@@ -75,21 +78,33 @@ closes from the app side (termio quit or died).
 EOF
             ;;
         spawn) cat <<'EOF'
-usage: termio sessions spawn "<prompt>" [--agent <id>] [--json]
+usage: termio sessions spawn "<prompt>" [--agent <id>] [--wait [--timeout <ms>]] [--json]
 
 Start a NEW agent session on the prompt. Replies immediately with the new
 session's <agent>@<id> handle; the prompt is typed in once the agent
 finishes booting. --agent picks the agent (e.g. claudeCode, codex, grok,
 pi); the default is the calling agent's own kind.
+
+--wait holds the reply until the spawned agent's first turn settles (or
+--timeout ms elapse; default 300000, clamped 1000–600000). The reply then
+carries the final status, the transcript path, and the cursor..cursor_end
+line range holding the response. A session that stops to ask you something
+returns immediately as needs-you, with the on-screen question in `prompt`.
 EOF
             ;;
         send|answer) cat <<'EOF'
-usage: termio sessions send <agent>@<id> "<text>" [--json]
+usage: termio sessions send <agent>@<id> "<text>" [--wait [--timeout <ms>]] [--json]
 
 Type text into an existing session and submit it with a real Return
 keypress — a prompt to drive it, or a menu choice ("1", "yes") to answer a
 permission prompt. Handles come from `termio sessions list` or a `spawn`
 reply; copy them verbatim.
+
+--wait holds the reply until the turn the text kicked off settles (or
+--timeout ms elapse; default 300000, clamped 1000–600000). The reply then
+carries the final status, the transcript path, and the cursor..cursor_end
+line range holding the response. A session that stops to ask you something
+returns immediately as needs-you, with the on-screen question in `prompt`.
 
 `answer` is a deprecated alias; `send` without a handle aliases `spawn`.
 EOF
@@ -164,12 +179,15 @@ build_request() {
 # it reports failure, so callers (and `set -e`) surface errors through the exit
 # code — agents check `$?`, not prose. `nc -w` bounds the wait when the app is
 # wedged, and an empty reply is a hard error, never a silent success: a control
-# CLI must fail loud.
+# CLI must fail loud. An optional 6th argument is raw JSON appended to the request
+# (the --wait fields); CLIENT_TIMEOUT is the read bound, widened by `sessions`
+# when a --wait reply is legitimately slow.
+CLIENT_TIMEOUT="${TERMIO_CLI_TIMEOUT:-15}"
 request_once() {
-    request=$(build_request "$1" "$2" "$3" "$4" "$5")
-    response=$(printf '%s' "$request" | nc -w "${TERMIO_CLI_TIMEOUT:-15}" -U "$SOCKET") || true
+    request=$(build_request "$1" "$2" "$3" "$4" "$5" "${6:-}")
+    response=$(printf '%s' "$request" | nc -w "$CLIENT_TIMEOUT" -U "$SOCKET") || true
     if [ -z "$response" ]; then
-        echo "termio: no reply from the app within ${TERMIO_CLI_TIMEOUT:-15}s — it may be busy or wedged; check the app, or raise TERMIO_CLI_TIMEOUT" >&2
+        echo "termio: no reply from the app within ${CLIENT_TIMEOUT}s — it may be busy or wedged; check the app, or raise TERMIO_CLI_TIMEOUT" >&2
         return 1
     fi
     printf '%s\n' "$response"
@@ -211,11 +229,20 @@ sessions() {
     text=""
     states=""
     no_snapshot=0
+    wait=false
+    timeout_ms=""
     seen_positional=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --json) format=json ;;
             --no-snapshot) no_snapshot=1 ;;
+            --wait) wait=true ;;
+            --timeout)
+                [ $# -ge 2 ] || { echo "termio: --timeout needs a value in ms" >&2; exit 1; }
+                case "$2" in
+                    ''|*[!0-9]*) echo "termio: --timeout needs whole milliseconds" >&2; exit 1 ;;
+                esac
+                timeout_ms="$2"; wait=true; shift ;;
             --agent)
                 [ $# -ge 2 ] || { echo "termio: --agent needs a value" >&2; exit 1; }
                 agent="$2"; shift ;;
@@ -266,6 +293,24 @@ sessions() {
             fi
             ;;
     esac
+
+    # One sync vocabulary: --wait/--timeout mean the same thing on every verb that
+    # accepts them (spawn + send), and nothing else silently ignores them.
+    wait_extra=""
+    if [ "$wait" = true ]; then
+        case "$op" in
+            spawn|send|answer) ;;
+            *) echo "termio: --wait applies to spawn and send only" >&2; exit 1 ;;
+        esac
+        wait_extra='"wait":true'
+        [ -n "$timeout_ms" ] && wait_extra="$wait_extra,\"timeout_ms\":$timeout_ms"
+        # The client read bound must outlive the server-side wait (which the app
+        # clamps to 1s–600s), or nc would hang up mid-wait and report a false
+        # timeout. An explicit TERMIO_CLI_TIMEOUT still wins — the escape hatch.
+        if [ -z "${TERMIO_CLI_TIMEOUT:-}" ]; then
+            CLIENT_TIMEOUT=$(( ${timeout_ms:-300000} / 1000 + 30 ))
+        fi
+    fi
 
     if [ "$op" = watch ]; then
         # Streaming: the app holds the connection open and pushes one line per scoped
@@ -322,7 +367,7 @@ sessions() {
     case "$op" in
         spawn|answer) wire_op=send ;;
     esac
-    request_once "$wire_op" "$format" "$targets" "$agent" "$text"
+    request_once "$wire_op" "$format" "$targets" "$agent" "$text" "$wait_extra"
 }
 
 # The public hook contract:

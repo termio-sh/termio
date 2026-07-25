@@ -69,16 +69,36 @@ extension TermioStore {
                 "Couldn't tell which project you're in. Run this from inside a termio session."), [])
         }
         guard request.snapshot != false else { return (project.id, nil, []) }
-        let snapshot = project.sessions.map { session in
-            SessionWatchEvent(
+        let snapshot = project.sessions.map { session -> SessionWatchEvent in
+            var event = SessionWatchEvent(
                 projectID: project.id,
                 handle: sessionHandle(for: session),
                 status: Self.statusToken(status(for: session.id)),
                 title: displayTitle(for: session),
                 cwd: runtimes[session.id]?.workingDirectory ?? "",
                 snapshot: true)
+            attachActionablePayload(to: &event, for: session.id)
+            return event
         }
         return (project.id, nil, snapshot)
+    }
+
+    /// Fills in what makes an event actionable without a second round-trip (design
+    /// doc §4.3): the on-screen question for `needs-you`, the transcript address +
+    /// current length for `done`. Shared by the watch snapshot and the live
+    /// `setStatus` broadcast.
+    func attachActionablePayload(to event: inout SessionWatchEvent, for id: Session.ID) {
+        switch event.status {
+        case "needs-you":
+            event.prompt = promptExcerpt(for: id)
+        case "done":
+            if let transcript = transcriptPaths[id] {
+                event.transcript = transcript
+                event.cursorEnd = Self.lineCount(of: transcript)
+            }
+        default:
+            break
+        }
     }
 
     /// The address a caller drives a session by. The id half is the stable key
@@ -139,7 +159,7 @@ extension TermioStore {
         switch resolveTarget(token, in: project) {
         case .found(let session):
             let state = surface(for: session, in: project)
-            return await deliver(payload, to: session, state: state, request: request)
+            return await deliver(payload, to: session, state: state, request: request, in: project)
         case .notFound:
             return controlError(request, "not_found", targetNotFoundMessage(request.target))
         case .ambiguous:
@@ -182,6 +202,20 @@ extension TermioStore {
             return controlError(request, "start_failed", "Could not start the session.")
         }
         let state = surface(for: fresh, in: project)
+        let delivered = (callerEnvelope(for: request) ?? "") + payload
+        // With `--wait`, the caller opted back into blocking — but for the *outcome*
+        // (§4.4), never just the plumbing: boot-settle, deliver, then hold the reply
+        // until the spawned agent's first turn settles.
+        if request.wantsWait {
+            await waitForBootSettle(of: state)
+            guard await performDelivery(delivered, to: fresh, state: state) else {
+                return controlError(request, "not_live",
+                    "\(displayTitle(for: fresh)) has no live terminal yet — open it once in termio.")
+            }
+            let cursorAtSend = transcriptPaths[fresh.id].map(Self.lineCount)
+            return await waitForReply(request, session: fresh,
+                                      cursorAtSend: cursorAtSend, created: true)
+        }
         // Reply with the handle now; boot-settle + prompt delivery continue off the
         // reply path so no verb silently blocks (§4.2). A delivery failure has no
         // caller left to tell — it surfaces through the session's own status and
@@ -190,7 +224,7 @@ extension TermioStore {
         Task { [weak self] in
             guard let self else { return }
             await self.waitForBootSettle(of: state)
-            if await !self.performDelivery(payload, to: fresh, state: state) {
+            if await !self.performDelivery(delivered, to: fresh, state: state) {
                 FileHandle.standardError.write(Data(
                     "termio: session control could not deliver the queued prompt to \(handle)\n".utf8))
             }
@@ -198,16 +232,52 @@ extension TermioStore {
         return spawnQueuedReply(request, fresh)
     }
 
+    /// The provenance envelope prepended to a spawned session's prompt when the
+    /// spawner is itself a termio session (design doc §4.6) — without it the new
+    /// agent has no idea who spawned it and can only stop as `needs-you` and hope.
+    /// It opens exactly one back-channel: a mid-task question, or a one-line
+    /// completion ping, via `sessions send` to the caller. The hard limits ride in
+    /// the envelope text itself because agent↔agent messaging invites loops and
+    /// injection — no conversation, no delegating work back, and completion stays
+    /// transcript-as-truth (the supervisor's `watch`/transcript path remains the
+    /// reliable backstop). A plain-shell caller resolves no session → no envelope.
+    private func callerEnvelope(for request: ControlRequest) -> String? {
+        guard let callerID = request.callerSession, let uuid = UUID(uuidString: callerID),
+              let caller = session(uuid) else { return nil }
+        let callerHandle = sessionHandle(for: caller)
+        return """
+        [termio] You were spawned by the sibling agent session \(callerHandle). \
+        If you hit a question only they can answer, ask it mid-task with: \
+        termio sessions send \(callerHandle) "QUESTION: <your question>" — and when \
+        you finish you may send at most one line: \
+        termio sessions send \(callerHandle) "DONE: <one line>". \
+        Use this channel for nothing else: no conversation, no status updates, and \
+        never delegate tasks back to them. They read your actual results from your \
+        transcript, so put everything that matters in your normal replies. \
+        Your task follows.
+
+        """
+    }
+
     /// Types `payload` into an existing sibling's surface and builds the reply.
+    /// Without `--wait` the reply is the send acknowledgement (the transcript path
+    /// + a cursor to read the response from); with it, the call blocks until the
+    /// turn settles and reports the outcome plus the transcript range it landed in.
     private func deliver(
         _ payload: String, to session: Session, state: TerminalViewState,
-        request: ControlRequest
+        request: ControlRequest, in project: Project
     ) async -> Data {
         guard await performDelivery(payload, to: session, state: state) else {
             return controlError(request, "not_live",
                 "\(displayTitle(for: session)) has no live terminal yet — open it once in termio.")
         }
-        return sentReply(request, session)
+        guard request.wantsWait else { return sentReply(request, session) }
+        // The cursor to read the reply from: wherever the transcript stands right
+        // after submitting. A session's transcript often isn't known until a hook
+        // fires mid-turn, so this can be nil and is re-read after the wait.
+        let cursorAtSend = transcriptPaths[session.id].map(Self.lineCount)
+        return await waitForReply(request, session: session,
+                                  cursorAtSend: cursorAtSend, created: false)
     }
 
     /// Types `payload` into a session's live surface and submits it. Shared by
@@ -235,6 +305,141 @@ extension TermioStore {
         try? await Task.sleep(for: .milliseconds(40))
         Self.pressReturn(on: surfaceHandle)
         return true
+    }
+
+    /// Blocks until the session the prompt was sent to finishes its turn — or stops
+    /// to ask the user (`needs-you`) — or the timeout elapses, then reports the
+    /// outcome. This is what lets a caller issue one `send --wait` instead of
+    /// sending and then polling `list` in a loop.
+    ///
+    /// Completion is read primarily from the **status resting**: the turn is done once
+    /// the session, having been seen `working`, drops back off `working` and stays there
+    /// for `settleWindow` (`needs-you` short-circuits immediately). Status is the signal
+    /// every real agent drives — built-ins via hooks, rule-based agents via the screen
+    /// classifier — and unlike a raw screen watch it is immune to a TUI footer that keeps
+    /// animating after the reply. A 300ms poll always catches the `working` span of a real
+    /// turn (an LLM round-trip is far longer). Only a session with no status signal at all
+    /// — a plain terminal driven by `send --wait` — falls back to the screen first changing
+    /// and then going still. Each poll awaits off the actor, so a long wait never blocks
+    /// other control requests (§4.2 stays true even mid-wait).
+    private func waitForReply(
+        _ request: ControlRequest, session: Session,
+        cursorAtSend: Int?, created: Bool
+    ) async -> Data {
+        let cap = min(max(request.timeoutMs ?? 300_000, 1_000), 600_000)
+        let deadline = Date().addingTimeInterval(Double(cap) / 1_000)
+        let settleWindow = 1.5
+
+        var sawWorking = false
+        var restingSince: Date?
+        var lastFrame = viewportText(for: session.id)
+        var lastChangeAt = Date()
+        var changedSinceSend = false
+        var settled: SessionStatus?
+
+        while Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(300))
+            let current = status(for: session.id)
+            if current == .working {
+                sawWorking = true
+                restingSince = nil
+            } else if restingSince == nil {
+                restingSince = Date()
+            }
+            if current == .needsAttention { settled = .needsAttention; break }
+
+            let now = Date()
+            let frame = viewportText(for: session.id)
+            if frame != lastFrame {
+                lastFrame = frame
+                lastChangeAt = now
+                changedSinceSend = true
+            }
+            guard current != .working else { continue }
+            let rested = restingSince.map { now.timeIntervalSince($0) >= settleWindow } ?? false
+            let screenQuiet = now.timeIntervalSince(lastChangeAt) >= settleWindow
+            // Status-tracked agent: seen working, now rested. (Footer animation can't
+            // fool this — it doesn't touch status.)
+            if sawWorking, rested { settled = current; break }
+            // No status signal at all (a plain terminal): the screen changed, then stilled.
+            if !sawWorking, changedSinceSend, screenQuiet { settled = current; break }
+        }
+        return waitReply(request, session: session,
+                         cursorAtSend: cursorAtSend, created: created, settled: settled)
+    }
+
+    /// The reply for a completed (or timed-out) `--wait`. Every wait reply — `send`
+    /// or `spawn` — shares one shape (§4.4): the turn's final `status` and the exact
+    /// transcript range to read, `cursor` (where the reply begins, captured at send)
+    /// through `cursor_end` (the log's length now), so the caller's own file tools
+    /// read precisely the new content, no polling. When the session is blocked on
+    /// the user (`needs-you`), the on-screen question rides along as `prompt` so the
+    /// caller can answer without scraping the viewport.
+    private func waitReply(
+        _ request: ControlRequest, session: Session,
+        cursorAtSend: Int?, created: Bool, settled: SessionStatus?
+    ) -> Data {
+        let handle = sessionHandle(for: session)
+        let statusToken = Self.statusToken(status(for: session.id))
+        var json: [String: Any] = [
+            "target": handle,
+            "title": displayTitle(for: session),
+            "status": statusToken,
+            "timed_out": settled == nil,
+        ]
+        if created { json["created"] = true }
+
+        let headline: String
+        switch settled {
+        case .needsAttention: headline = "\(handle) is waiting on you"
+        case .some: headline = "\(handle) finished (\(statusToken))"
+        case nil: headline = "\(handle) still \(statusToken) after the wait — timed out"
+        }
+        var text = headline
+
+        // The transcript may only have become known during the wait (a fresh
+        // session's first hook), so re-read it here rather than trusting the
+        // send-time snapshot.
+        if let transcript = transcriptPaths[session.id] {
+            let start = cursorAtSend ?? 0
+            let end = Self.lineCount(of: transcript)
+            json["transcript"] = transcript
+            json["cursor"] = start
+            json["cursor_end"] = end
+            text += "\n  transcript: \(transcript)\n  reply: lines \(start)–\(end) (read this range)"
+        }
+        if settled == .needsAttention, let prompt = promptExcerpt(for: session.id) {
+            json["prompt"] = prompt
+            text += "\n  on screen:\n\(prompt)"
+        }
+        return control(request, ok: true, text: text, json: json)
+    }
+
+    /// The current viewport text of a session's terminal, or nil when it has no live
+    /// in-memory backend yet (never rendered). Reads only an already-mounted surface —
+    /// deliberately no `surface(for:in:)` fallback, so a status broadcast can never
+    /// create a surface as a side effect. Reads through the backend's own lock
+    /// (`readViewportText`), so it's safe from this actor.
+    func viewportText(for id: Session.ID) -> String? {
+        guard let state = surfaces[id],
+              case .inMemory(let terminal) = state.configuration.backend else { return nil }
+        return terminal.readViewportText()
+    }
+
+    /// The tail of a session's screen — the question or menu the agent stopped on —
+    /// for `needs-you` payloads. The last dozen non-blank rows (right-trimmed, size-
+    /// capped) are enough to answer from; the leading rows are the conversation the
+    /// caller already has via the transcript.
+    func promptExcerpt(for id: Session.ID) -> String? {
+        guard let screen = viewportText(for: id) else { return nil }
+        var lines = screen.components(separatedBy: "\n").map { line -> String in
+            var trimmed = Substring(line)
+            while trimmed.last == " " { trimmed.removeLast() }
+            return String(trimmed)
+        }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        guard !lines.isEmpty else { return nil }
+        return String(lines.suffix(12).joined(separator: "\n").suffix(1_200))
     }
 
     /// Waits for a freshly launched agent TUI to finish booting before keystrokes
@@ -333,7 +538,7 @@ extension TermioStore {
 
     /// Lines currently in a file, counted cheaply by newline bytes — the cursor a
     /// caller resumes a transcript read from.
-    private static func lineCount(of path: String) -> Int {
+    static func lineCount(of path: String) -> Int {
         guard let data = FileManager.default.contents(atPath: path) else { return 0 }
         return data.reduce(into: 0) { count, byte in if byte == 0x0A { count += 1 } }
     }
@@ -475,6 +680,9 @@ extension TermioStore {
         if request.wantsJSON {
             var object = json
             object["ok"] = ok
+            // Every JSON reply pins the contract it speaks (§4.5) — agents are
+            // coding against these shapes, and versioning them beats breaking them.
+            object["schema_version"] = 1
             let data = (try? JSONSerialization.data(
                 withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
             return data + Data("\n".utf8)

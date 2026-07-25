@@ -74,6 +74,32 @@ and the prompt itself is typed in once the agent finishes booting. Add
 `--agent <id>` (e.g. `codex`, `grok`, `pi`) to choose the agent; it defaults to
 the caller's own kind.
 
+### Waiting for the outcome: `--wait`
+
+Waiting is always explicit, and it means the same thing everywhere: `--wait`
+waits for the *outcome* of the turn, never for plumbing. Both `send` and `spawn`
+accept it (with an optional `--timeout <ms>`, default 300000, clamped
+1000–600000):
+
+```bash
+termio sessions send claude@ab12cd34 "run the tests" --wait
+termio sessions spawn "summarize the failing CI job" --wait --timeout 120000
+```
+
+The call blocks until the turn settles — the session was seen `working` and has
+rested off it — and the reply carries the final `status`, the `transcript` path,
+and the `cursor`..`cursor_end` line range the response landed in, so the caller
+reads exactly the new content with its own file tools. Two special cases:
+
+- A session that stops to ask something short-circuits the wait immediately:
+  the reply is `status: "needs-you"` with the on-screen question in `prompt` —
+  answer it with another `send`.
+- A plain terminal with no status signal falls back to screen settling: the
+  screen changed after the send, then went still.
+
+On timeout the reply still comes back (`timed_out: true`) with whatever the
+current status is; the session keeps running.
+
 ### Supervising with `watch`
 
 `watch` is built so an agent can supervise a fleet without polling:
@@ -85,18 +111,79 @@ the caller's own kind.
 - **Filtered by default.** Live events default to the two states a supervisor
   acts on, `done` and `needs-you`; widen with
   `--state working,idle,done,needs-you`.
+- **Actionable events.** A `needs-you` event carries the on-screen question in
+  `prompt`; a `done` event carries the session's `transcript` path and
+  `cursor_end` — enough to answer, or to read the result, without another
+  round-trip.
 - **Heartbeat.** In `--json` mode the app writes `{"heartbeat":true}` after 30
   seconds of silence, so a quiet stream is distinguishable from a dead one.
 - **Exit codes.** `0` after Ctrl-C (the normal end of supervision), `2` when
   the stream closed from the app side — "I chose to stop" and "termio went
   away" are different outcomes.
 
+### Spawned sessions know their caller
+
+When one termio session spawns another, the delivered prompt opens with a short
+provenance envelope: it names the caller's handle and allows exactly one
+back-channel — a mid-task question, or a one-line completion ping, via
+`termio sessions send <caller-handle> …`. Nothing else travels that way: no
+conversation, no delegating tasks back. Results stay transcript-as-truth — the
+supervisor reads the worker's transcript, with `watch` as the backstop. A
+`spawn` from a plain shell (outside any termio session) gets no envelope.
+
 ### Fail loud
 
 The CLI is built for callers that trust exit codes, not prose. Every one-shot
 command exits `1` on an error or an empty reply, and gives up after a
 15-second client timeout rather than hanging on a busy app (override with the
-`TERMIO_CLI_TIMEOUT` environment variable).
+`TERMIO_CLI_TIMEOUT` environment variable; a `--wait` call widens the client
+timeout automatically to outlive the server-side wait).
+
+## JSON contract
+
+Agents code against `--json` output, so its shapes are pinned, not
+reverse-engineered. Every JSON reply carries `"schema_version": 1`; fields may
+be *added* within a version, never renamed or removed. Optional fields are
+omitted when unknown (never emitted as `""` or `null`).
+
+Every error, on any verb, has one shape — and the exit code is nonzero:
+
+```json
+{"ok": false, "error": "<code>", "message": "<human-readable next step>", "schema_version": 1}
+```
+
+The stable codes: `disabled`, `no_scope`, `bad_op`, `bad_request`, `no_text`,
+`no_target`, `not_found`, `ambiguous`, `wrong_agent`, `bad_agent`, `no_agent`,
+`start_failed`, `not_live`, `read_unavailable`.
+
+Success replies, per verb (`schema_version` and `"ok": true` omitted below for
+brevity):
+
+| Verb | Reply fields |
+| --- | --- |
+| `list` | `project`, `sessions: [{handle, id, title, agent, status, description, transcript?}]` |
+| `spawn` | `target`, `title`, `created: true`, `queued: true` — the prompt is still being delivered |
+| `send` | `target`, `title`, `transcript?`, `cursor?` — read the response from `cursor` onward |
+| `send`/`spawn` `--wait` | `target`, `title`, `status`, `timed_out`, `created?`, `transcript?`, `cursor?`, `cursor_end?`, `prompt?` |
+| `close` | `closed`, `title` |
+| `focus` | `focused` |
+
+The two wait verbs share one reply shape (`--wait` means the same thing
+everywhere): the final `status`, and the transcript line range
+`cursor`..`cursor_end` holding the response. `prompt` appears only on a
+`needs-you` outcome — the question the session is showing on screen.
+
+`watch` streams newline-delimited JSON events rather than one reply:
+
+```json
+{"schema_version": 1, "handle": "claude@ab12cd34", "status": "done", "title": "…",
+ "cwd": "…", "snapshot": true, "prompt": "…", "transcript": "…", "cursor_end": 42}
+```
+
+`cwd` is omitted until the shell reports one; `snapshot` marks the on-attach
+roster lines; `prompt` rides on `needs-you` events and `transcript` +
+`cursor_end` on `done` events, exactly as in wait replies. After 30 seconds of
+silence the app writes `{"heartbeat": true}`.
 
 <Callout type="tip">
   This is what lets one agent hand work to another — `spawn` a task in a sibling

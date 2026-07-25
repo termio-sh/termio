@@ -19,6 +19,9 @@ import Foundation
 /// - `agent` — the agent for a fresh session (`send` with no target).
 /// - `snapshot` — `watch` only: `false` skips the initial per-session status
 ///   snapshot (absent means snapshot on).
+/// - `wait` / `timeoutMs` — `send`/`spawn` only: block until the turn the prompt
+///   kicked off settles (or the timeout elapses) and report the outcome, instead
+///   of replying the instant the keystrokes are delivered.
 struct ControlRequest: Decodable {
     let op: String
     let format: String?
@@ -29,14 +32,19 @@ struct ControlRequest: Decodable {
     let lines: Int?
     let agent: String?
     let snapshot: Bool?
+    let wait: Bool?
+    /// The `--wait` cap in milliseconds; clamped server-side. Nil uses the default.
+    let timeoutMs: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case op, format, target, text, lines, agent, snapshot
+        case op, format, target, text, lines, agent, snapshot, wait
         case callerSession = "caller_session"
         case callerCwd = "caller_cwd"
+        case timeoutMs = "timeout_ms"
     }
 
     var wantsJSON: Bool { format == "json" }
+    var wantsWait: Bool { wait == true }
 }
 
 /// A local Unix-domain socket the `termio sessions` CLI connects to. Unlike
@@ -150,7 +158,11 @@ final class SessionControlListener {
         }
         let decoded = request ?? Self.decode(data)
         guard let decoded else {
-            Self.writeAll(descriptor, Data("error: malformed request\n".utf8))
+            // The request never decoded, so its `format` is unknowable — reply in the
+            // documented JSON error shape, which the text-mode CLI also recognizes
+            // (it matches on `"ok":false`). Only hand-rolled clients ever hit this.
+            Self.writeAll(descriptor, Data(
+                "{\"ok\":false,\"error\":\"bad_request\",\"message\":\"malformed request\",\"schema_version\":1}\n".utf8))
             close(descriptor)
             return
         }
@@ -235,6 +247,13 @@ struct SessionWatchEvent {
     /// Marks the initial current-status lines emitted on subscribe, so a JSON
     /// consumer can tell "already was" from a live transition.
     var snapshot = false
+    /// `needs-you` only: the on-screen question excerpt, so a supervisor can act
+    /// without a round-trip to scrape the viewport (design doc §4.3).
+    var prompt: String? = nil
+    /// `done` only: the transcript address plus its line count now, so the reply
+    /// is readable without another `list --json` round-trip.
+    var transcript: String? = nil
+    var cursorEnd: Int? = nil
 }
 
 /// Holds the open `watch` connections and fans status transitions out to them. A
@@ -375,6 +394,9 @@ private extension SessionWatchEvent {
         // empty string reads like a real (broken) path to a JSON consumer.
         if !cwd.isEmpty { object["cwd"] = cwd }
         if snapshot { object["snapshot"] = true }
+        if let prompt { object["prompt"] = prompt }
+        if let transcript { object["transcript"] = transcript }
+        if let cursorEnd { object["cursor_end"] = cursorEnd }
         let data = (try? JSONSerialization.data(
             withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
         return data + Data("\n".utf8)
@@ -433,6 +455,12 @@ enum SessionSkillInstaller {
         - `termio sessions send <agent>@<id> "<text>"` — type text into that existing
           sibling and submit it with a real Return keypress. Send a prompt to drive
           it, or a menu choice (`"1"`, `"yes"`) to answer a permission prompt.
+        - `--wait [--timeout <ms>]` on `send` or `spawn` — block until that turn
+          settles and reply with the final `status`, the `transcript` path, and the
+          `cursor`..`cursor_end` line range holding the response — one call instead
+          of send-then-poll. A sibling that stops to ask you something short-circuits
+          the wait: the reply is `status:"needs-you"` with the on-screen question in
+          `prompt` — answer it with another `send`.
         - `termio sessions close <agent>@<id> …` — close session tabs;
           `termio sessions focus <agent>@<id>` — bring one to the front in the app
 
@@ -461,9 +489,13 @@ enum SessionSkillInstaller {
            after it are the reply. (Each line is a JSON object with a `type`/`role`.)
 
         Workflow: send → wait for `done` via `list` → read the transcript tail. Prefer
-        this over assuming a sibling is finished. Supervising several at once? Block on
+        this over assuming a sibling is finished — or collapse steps 1–2 into one call
+        with `send --wait`, whose reply carries the final status and the exact
+        `cursor`..`cursor_end` range to read. Supervising several at once? Block on
         `termio sessions watch` instead of polling — it prints the handle the moment any
-        sibling turns `done` or `needs-you`, so you act on the transition, not a spin loop.
+        sibling turns `done` or `needs-you`, so you act on the transition, not a spin
+        loop; its `--json` `needs-you` events carry the question in `prompt`, and `done`
+        events carry `transcript` + `cursor_end`, so you can act straight from the event.
         \(endMarker)
         """
     }
