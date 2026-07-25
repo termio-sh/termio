@@ -3,12 +3,12 @@ import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const siteDescription =
-  "Termio is a native Mac workspace for your AI coding agents — Claude Code, Codex, OpenCode, Pi Agent and more. Run them side by side, each in a real terminal, switch between them instantly, and nothing ever leaves your machine.";
+  "Termio is the Terminal-first Agentic Development Environment — a native Mac app for your AI coding agents: Claude Code, Codex, OpenCode, Pi Agent and more. Run them side by side, each in a real terminal, switch between them instantly, and nothing ever leaves your machine.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.termio.sh"),
   title: {
-    default: "Termio — the terminal home for your AI coding agents",
+    default: "Termio — the Terminal-first Agentic Development Environment",
     template: "%s — Termio",
   },
   description: siteDescription,
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     canonical: "/",
   },
   openGraph: {
-    title: "Termio — the terminal home for your AI coding agents",
+    title: "Termio — the Terminal-first Agentic Development Environment",
     description: siteDescription,
     type: "website",
     siteName: "Termio",
@@ -44,7 +44,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Termio — the terminal home for your AI coding agents",
+    title: "Termio — the Terminal-first Agentic Development Environment",
     description: siteDescription,
     images: ["/og.webp"],
   },
