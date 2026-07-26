@@ -129,39 +129,70 @@ struct FileSearchView: View {
         }
     }
 
+    /// One flat row of the results list, with a globally unique, stable id.
+    /// The list is deliberately a single `ForEach` over these: the previous
+    /// shape — a per-file `ForEach` nesting a per-hit `ForEach` keyed by bare
+    /// line number — mis-diffed inside `LazyVStack` when typing replaced the
+    /// whole match set (line-number ids collide across files, so SwiftUI
+    /// stitched rows from different files under one header, or rendered them
+    /// empty). Flat rows keyed by `path` / `path:line` make the diff
+    /// unambiguous.
+    private enum ResultRow: Identifiable {
+        case header(relative: String, url: URL, count: Int, firstLine: Int, isExpanded: Bool)
+        case match(ContentMatch)
+
+        var id: String {
+            switch self {
+            case .header(let relative, _, _, _, _): return relative
+            case .match(let match): return "\(match.relative):\(match.line)"
+            }
+        }
+    }
+
+    private var rows: [ResultRow] {
+        var out: [ResultRow] = []
+        for group in groups {
+            let isExpanded = !collapsedFiles.contains(group.relative)
+            out.append(.header(relative: group.relative, url: group.url, count: group.items.count,
+                               firstLine: group.items[0].line, isExpanded: isExpanded))
+            if isExpanded {
+                for match in group.items { out.append(.match(match)) }
+            }
+        }
+        return out
+    }
+
     @ViewBuilder
     private var resultList: some View {
-        let grouped = groups
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: []) {
-                ForEach(grouped, id: \.relative) { group in
-                    let isExpanded = !collapsedFiles.contains(group.relative)
-                    FileHeaderRow(
-                        url: group.url,
-                        relative: group.relative,
-                        count: group.items.count,
-                        isExpanded: isExpanded,
-                        chrome: chrome,
-                        toggleExpanded: {
-                            withAnimation(.easeInOut(duration: 0.12)) {
-                                if isExpanded {
-                                    collapsedFiles.insert(group.relative)
-                                } else {
-                                    collapsedFiles.remove(group.relative)
+                ForEach(rows) { row in
+                    switch row {
+                    case .header(let relative, let url, let count, let firstLine, let isExpanded):
+                        FileHeaderRow(
+                            url: url,
+                            relative: relative,
+                            count: count,
+                            isExpanded: isExpanded,
+                            chrome: chrome,
+                            toggleExpanded: {
+                                withAnimation(.easeInOut(duration: 0.12)) {
+                                    if isExpanded {
+                                        collapsedFiles.insert(relative)
+                                    } else {
+                                        collapsedFiles.remove(relative)
+                                    }
                                 }
-                            }
-                        },
-                        open: { onOpen(group.url, group.items[0].line) }
-                    )
-                    if isExpanded {
-                        ForEach(group.items, id: \.line) { match in
-                            MatchRow(
-                                match: match,
-                                query: trimmedQuery,
-                                chrome: chrome,
-                                open: { onOpen(match.url, match.line) }
-                            )
-                        }
+                            },
+                            open: { onOpen(url, firstLine) }
+                        )
+                    case .match(let match):
+                        MatchRow(
+                            match: match,
+                            query: trimmedQuery,
+                            chrome: chrome,
+                            open: { onOpen(match.url, match.line) }
+                        )
                     }
                 }
             }
