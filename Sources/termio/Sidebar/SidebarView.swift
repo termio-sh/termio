@@ -954,10 +954,14 @@ private struct SessionRow: View {
             // muted grey from AgentIconView.
             Group {
                 if session.isSSH, store.status(for: session.id) != .working {
-                    // An SSH terminal reads as a remote link — a globe glyph in the
-                    // terminal grey — except while a detected remote agent is working,
-                    // when it falls through to the spinner below.
-                    HugeIconView(icon: .network, size: 11, color: .secondary)
+                    // An SSH terminal is a machine, so it carries the same server
+                    // glyph as its host row in Settings ▸ SSH (a globe reads as
+                    // "web", not "that box") — except while a detected remote
+                    // agent is working, when it falls through to the spinner below.
+                    // Size 15 like the folder and agent marks sharing this
+                    // 16-wide column — HugeIconShape normalizes ink width, so
+                    // equal size is what makes the glyphs read as one family.
+                    HugeIconView(icon: .serverStack, size: 15, color: .secondary)
                 } else if store.status(for: session.id) == .working {
                     // The spinner carries no status color — its motion already
                     // says "working", so color stays reserved for the states
