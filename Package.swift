@@ -58,6 +58,11 @@ let package = Package(
                 // session kind, not a manageable agent, so its manifest sits apart at
                 // the bundle root, loaded by name (see AgentCatalog.loadBundledShell).
                 .process("Resources/assets"),
+                // The Markdown reader's prose face (iA Writer Quattro V, variable
+                // wght 400–700), embedded into the reader HTML as base64 @font-face
+                // by `MarkdownReaderRenderer`. `.process` flattens the woff2s to the
+                // bundle root, where the name-based lookup expects them.
+                .process("Resources/Fonts"),
                 .copy("Resources/agents"),
                 .copy("Resources/terminal.json"),
                 // Devicon language/tool logos (one SVG per file type), loaded by name

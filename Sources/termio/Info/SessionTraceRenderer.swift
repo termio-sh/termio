@@ -849,6 +849,11 @@ enum SessionTraceRenderer {
     .text.md pre code { background: none; border: none; padding: 0; }
     .text.md ul, .text.md ol { margin: 8px 0; padding-left: 22px; }
     .text.md li { margin: 3px 0; }
+    /* Task-list items (MarkdownHTML emits the Hugeicons box): box instead of bullet. */
+    .text.md li.task { list-style: none; }
+    .text.md li.task .task-box { width: 1.05em; height: 1.05em; vertical-align: -0.16em;
+      margin: 0 0.4em 0 -1.5em; color: var(--muted); }
+    .text.md li.task .task-box.checked { color: var(--accent); }
     .text.md blockquote { margin: 10px 0; padding-left: 12px;
       border-left: 3px solid var(--line); color: var(--muted); }
     .text.md table { border-collapse: collapse; margin: 10px 0; font-size: 12.5px; display: block; overflow-x: auto; }

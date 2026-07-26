@@ -28,6 +28,8 @@ struct FileEditorView: View {
     private enum Mode: Hashable { case edit, preview }
     /// Markdown opens in Preview (a doc you mostly read); source stays one click away.
     @State private var mode: Mode
+    /// Slides the mode toggle's glass pill between Edit and Preview.
+    @Namespace private var modePillNamespace
 
     @State private var text = ""
     /// The text last written to disk, so auto-save only writes on a genuine change.
@@ -225,45 +227,72 @@ struct FileEditorView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        // One explicit height for EVERY file type: the mode pill is taller than the text
+        // row, so without the clamp a markdown header outgrew plain files' (44 vs ~31).
+        .frame(height: Self.headerHeight)
         .background(Color(nsColor: settings.terminalBackgroundColor))
         .animation(.easeOut(duration: 0.15), value: isDirty)
     }
 
-    /// A two-segment Edit/Preview toggle, drawn by hand (a segmented `Picker` only renders
-    /// `Text`/`Image`, not the stroked `HugeIconView`) so it matches termio's own chrome —
-    /// a faint track with the active segment lifted onto the terminal background.
+    /// Uniform header height across file types; the toggle's 26pt outer track sits
+    /// centered inside it with breathing room.
+    private static let headerHeight: CGFloat = 32
+
+    /// The Edit/Preview switch in the app's glass-pill language — the same construction
+    /// as `InspectorTabsToolbar` (own capsule track, Liquid Glass selection pill sliding
+    /// between segments via `matchedGeometryEffect`, flat fills pre-Tahoe), scaled to the
+    /// slim header. Hand-drawn for the same reason: a native segmented control has no
+    /// track to sit on over termio's transparent chrome.
     private var modeToggle: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             modeSegment(.edit, icon: .edit, help: "Edit source")
             modeSegment(.preview, icon: .view, help: "Preview")
         }
+        .background { modePill }
         .padding(2)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
-        )
+        .background { modeTrack }
+        // The pill's slide is animated locally here; the mode is set WITHOUT
+        // `withAnimation` so the editor/preview content swaps instantly instead of
+        // cross-fading for the pill's whole duration (the InspectorTabsToolbar lesson).
+        .animation(.snappy(duration: 0.25), value: mode)
     }
 
     private func modeSegment(_ segment: Mode, icon: HugeIcon, help: String) -> some View {
         let selected = mode == segment
-        return Button { withAnimation(.easeOut(duration: 0.12)) { mode = segment } } label: {
-            HugeIconView(
-                icon: icon, size: 14,
-                color: selected ? (chrome?.accent ?? .primary) : .secondary
-            )
-            .frame(width: 34, height: 24)
+        return HugeIconView(icon: icon, size: 13, color: selected ? .primary : .secondary,
+                            lineWidthOverride: 1.4)
+            .frame(width: 30, height: 22)
+            .matchedGeometryEffect(id: segment, in: modePillNamespace)
             // A filled hit shape so the whole segment — not just the icon's thin
-            // stroke — takes the click, which is what made the toggle feel unresponsive.
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(selected ? Color(nsColor: settings.terminalBackgroundColor) : .clear)
-                    .shadow(color: .black.opacity(selected ? 0.12 : 0), radius: 1, y: 0.5)
-            )
+            // stroke — takes the click.
+            .contentShape(.capsule)
+            .onTapGesture { mode = segment }
+            .help(help)
+    }
+
+    @ViewBuilder private var modePill: some View {
+        if #available(macOS 26.0, *) {
+            Capsule()
+                .fill(.clear)
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .matchedGeometryEffect(id: mode, in: modePillNamespace, isSource: false)
+        } else {
+            Capsule(style: .continuous)
+                .fill(Color(nsColor: .controlColor))
+                .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
+                .matchedGeometryEffect(id: mode, in: modePillNamespace, isSource: false)
         }
-        .buttonStyle(.plain)
-        .help(help)
+    }
+
+    @ViewBuilder private var modeTrack: some View {
+        if #available(macOS 26.0, *) {
+            // Faint whitened glass so the brighter selected pill reads as raised above it.
+            Capsule()
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
+        } else {
+            Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
+        }
     }
 
     /// A slim VS Code-style footer: language on the left, cursor position and file facts on the
