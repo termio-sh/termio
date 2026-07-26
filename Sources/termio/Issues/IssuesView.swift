@@ -80,9 +80,7 @@ struct IssuesView: View {
                 set: { model.query.assignedToMe = $0 }
             ))
         } label: {
-            Image(systemName: "line.3.horizontal.decrease")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
+            HugeIconView(icon: .filter, size: 13, color: .secondary, lineWidthOverride: 1.5)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -317,7 +315,7 @@ private struct IssueDetailView: View {
     /// pane header instead of bare 11pt glyphs.
     private var header: some View {
         HStack(spacing: 6) {
-            TreeHeaderButton(symbol: "chevron.left", help: "Back", action: onBack)
+            TreeHeaderButton(huge: .chevronLeft, help: "Back", action: onBack)
             Circle()
                 .fill(item.state.tint)
                 .frame(width: 7, height: 7)
@@ -334,7 +332,7 @@ private struct IssueDetailView: View {
                         .frame(width: 22, height: 22)
                 } else {
                     TreeHeaderButton(
-                        symbol: "arrow.triangle.branch",
+                        huge: .gitPullRequest,
                         help: "Check Out \(model.prInfo?.headRef ?? "Branch")"
                     ) {
                         Task { await model.checkout() }
@@ -342,7 +340,7 @@ private struct IssueDetailView: View {
                 }
             }
             if let url = item.url {
-                TreeHeaderButton(symbol: "arrow.up.right.square", help: "Open on GitHub") {
+                TreeHeaderButton(huge: .squareArrowUpRight, help: "Open on GitHub") {
                     NSWorkspace.shared.open(url)
                 }
             }

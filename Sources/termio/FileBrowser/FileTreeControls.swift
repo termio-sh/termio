@@ -6,11 +6,12 @@ import SwiftUI
 /// VS Code; the Changes pane uses SF Symbols. Both render quiet `.secondary` at rest,
 /// brightening to primary on hover over a faint rounded fill.
 struct TreeHeaderButton: View {
-    /// Either an SF Symbol name or a VS Code codicon — the two icon sources the two
-    /// header toolbars draw from.
+    /// An SF Symbol, a VS Code codicon, or a Hugeicons stroke glyph — the icon
+    /// sources the pane header toolbars draw from.
     enum Source {
         case symbol(String)
         case codicon(Codicon)
+        case huge(HugeIcon)
     }
 
     let source: Source
@@ -26,6 +27,12 @@ struct TreeHeaderButton: View {
 
     init(symbol: String, help: String, action: @escaping () -> Void) {
         self.source = .symbol(symbol)
+        self.help = help
+        self.action = action
+    }
+
+    init(huge: HugeIcon, help: String, action: @escaping () -> Void) {
+        self.source = .huge(huge)
         self.help = help
         self.action = action
     }
@@ -55,6 +62,11 @@ struct TreeHeaderButton: View {
                 .foregroundStyle(isHovering ? Color.primary : Color.secondary)
         case .codicon(let codicon):
             CodiconView(icon: codicon, size: 15, color: isHovering ? .primary : .secondary)
+        case .huge(let icon):
+            // 1.5pt override matches the inspector switch's optical weight — the
+            // size-derived default reads hairline next to SF Symbols.
+            HugeIconView(icon: icon, size: 15, color: isHovering ? .primary : .secondary,
+                         lineWidthOverride: 1.5)
         }
     }
 }
