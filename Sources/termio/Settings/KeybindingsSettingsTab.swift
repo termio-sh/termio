@@ -18,6 +18,10 @@ struct KeybindingsSettingsTab: View {
     /// per refusal so a repeated attempt re-triggers the recorder's shake even
     /// while the popover is already up.
     @State private var rejection: Rejection?
+    /// Monotonic shake token — never reset, so a row's recorder (which remembers
+    /// the last token it consumed) shakes again on a fresh refusal even after
+    /// the previous rejection was dismissed.
+    @State private var shakeCounter = 0
     /// Auto-dismisses the rejection popover after a beat, cancelled and re-armed
     /// on each refusal.
     @State private var rejectionDismissTask: Task<Void, Never>?
@@ -117,7 +121,8 @@ struct KeybindingsSettingsTab: View {
         }
         if let message = keys.rejection(for: shortcut, assigning: id) {
             NSSound.beep()
-            rejection = Rejection(id: id, message: message, shake: (rejection?.shake ?? 0) + 1)
+            shakeCounter += 1
+            rejection = Rejection(id: id, message: message, shake: shakeCounter)
             rejectionDismissTask?.cancel()
             rejectionDismissTask = Task {
                 try? await Task.sleep(for: .seconds(2.5))

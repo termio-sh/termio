@@ -48,6 +48,12 @@ enum SSHConfigFile {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh/config")
     }
 
+    /// The config with symlinks resolved — dotfile managers commonly symlink
+    /// `~/.ssh/config`, and an atomic write aimed at the link path would replace
+    /// the link with a plain file, orphaning the managed target. Every write
+    /// (and the in-app editor) goes through this.
+    static var writableConfigURL: URL { configURL.resolvingSymlinksInPath() }
+
     /// The connectable hosts from `~/.ssh/config` and any `Include`d files.
     /// Wildcard patterns (`Host *`, globs, negations) are skipped — they are
     /// defaults, not destinations.
@@ -68,7 +74,7 @@ enum SSHConfigFile {
         var aliases: [String] = []
         var hostName = "", user = ""
         var identityFile: String?
-        var port = 22
+        var port = 22, portSet = false
         var blockLine = 0
 
         func flush() {
@@ -88,20 +94,32 @@ enum SSHConfigFile {
             guard !line.isEmpty, !line.hasPrefix("#") else { continue }
             // `Keyword value…` — the keyword match is case-insensitive per
             // ssh_config(5), and `=` is a valid keyword/value separator.
-            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "=" })
+            var parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "=" })
                 .map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
                 .filter { !$0.isEmpty }
+            // ssh itself has no trailing comments, but a stray `# note` after a
+            // value should degrade to ignoring the note, not to bogus hosts.
+            if let hash = parts.firstIndex(where: { $0.hasPrefix("#") }) {
+                parts = Array(parts[..<hash])
+            }
             guard let keyword = parts.first?.lowercased() else { continue }
             let values = Array(parts.dropFirst())
             switch keyword {
             case "host":
                 flush()
                 aliases = values
-                hostName = ""; user = ""; port = 22; identityFile = nil
+                hostName = ""; user = ""; port = 22; portSet = false; identityFile = nil
                 blockLine = index + 1
-            case "hostname": hostName = values.first ?? ""
-            case "user": user = values.first ?? ""
-            case "port": port = values.first.flatMap(Int.init) ?? 22
+            case "match":
+                // A Match block's settings belong to its condition, not to the
+                // preceding Host — close that block and ignore lines until the
+                // next Host.
+                flush()
+                aliases = []
+            // ssh keeps the *first* obtained value per key; duplicates lose.
+            case "hostname": if hostName.isEmpty { hostName = values.first ?? "" }
+            case "user": if user.isEmpty { user = values.first ?? "" }
+            case "port": if !portSet, let parsed = values.first.flatMap(Int.init) { port = parsed; portSet = true }
             case "identityfile": if identityFile == nil { identityFile = values.first }
             case "include":
                 for value in values {
@@ -148,9 +166,10 @@ enum SSHConfigFile {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        if !manager.fileExists(atPath: configURL.path) {
+        let target = writableConfigURL
+        if !manager.fileExists(atPath: target.path) {
             manager.createFile(
-                atPath: configURL.path, contents: Data(),
+                atPath: target.path, contents: Data(),
                 attributes: [.posixPermissions: 0o600]
             )
         }
@@ -162,20 +181,26 @@ enum SSHConfigFile {
     static func appendHost(
         alias: String, hostName: String, user: String, port: String, identityFile: String
     ) throws {
-        var block = "Host \(alias)\n  HostName \(hostName)\n"
-        if !user.isEmpty { block += "  User \(user)\n" }
+        // ssh_config quotes arguments that contain spaces (a picked key file
+        // under "My Drive" must not split into two tokens).
+        func quoted(_ value: String) -> String {
+            value.contains(" ") ? "\"\(value)\"" : value
+        }
+        var block = "Host \(quoted(alias))\n  HostName \(quoted(hostName))\n"
+        if !user.isEmpty { block += "  User \(quoted(user))\n" }
         if let portNumber = Int(port), portNumber != 22 { block += "  Port \(portNumber)\n" }
-        if !identityFile.isEmpty { block += "  IdentityFile \(identityFile)\n" }
+        if !identityFile.isEmpty { block += "  IdentityFile \(quoted(identityFile))\n" }
 
         try ensureConfigExists()
-        var text = try String(contentsOf: configURL, encoding: .utf8)
+        let target = writableConfigURL
+        var text = try String(contentsOf: target, encoding: .utf8)
         if !text.isEmpty, !text.hasSuffix("\n") { text += "\n" }
         if !text.isEmpty { text += "\n" }
-        try (text + block).write(to: configURL, atomically: true, encoding: .utf8)
+        try (text + block).write(to: target, atomically: true, encoding: .utf8)
         // The atomic write lands as a fresh temp file, so re-assert the 0600 ssh
         // expects rather than inheriting the process umask.
         try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: configURL.path
+            [.posixPermissions: 0o600], ofItemAtPath: target.path
         )
     }
 
@@ -197,7 +222,9 @@ enum SSHConfigFile {
             case let raw where raw.hasPrefix("sk-ssh-ed25519"): algorithm = "ED25519-SK"
             case let raw where raw.hasPrefix("sk-ecdsa"): algorithm = "ECDSA-SK"
             case let raw where raw.hasPrefix("ecdsa"): algorithm = "ECDSA"
-            case let raw: algorithm = raw
+            // Anything else isn't a public key line — including a `.pub`-named
+            // symlink at a private key, which must never reach the clipboard.
+            default: return nil
             }
             return SSHPublicKey(
                 url: url, algorithm: algorithm,

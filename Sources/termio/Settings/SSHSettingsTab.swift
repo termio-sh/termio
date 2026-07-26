@@ -119,11 +119,13 @@ struct SSHSettingsTab: View {
     /// `~/.ssh/config` itself. The config is created empty first when missing so
     /// the editor never opens onto a nonexistent file.
     private func presentEditor(for host: SSHConfigHost?) {
+        // Symlinks resolve before the editor opens: its atomic auto-save would
+        // otherwise replace a dotfile-managed link with a plain file.
         if let host {
-            configEditor = ConfigEditorTarget(url: host.file, line: host.line)
+            configEditor = ConfigEditorTarget(url: host.file.resolvingSymlinksInPath(), line: host.line)
         } else {
             try? SSHConfigFile.ensureConfigExists()
-            configEditor = ConfigEditorTarget(url: SSHConfigFile.configURL, line: nil)
+            configEditor = ConfigEditorTarget(url: SSHConfigFile.writableConfigURL, line: nil)
         }
     }
 
@@ -207,7 +209,7 @@ private struct AddSSHHostSheet: View {
         !trimmedAlias.isEmpty && !trimmedAlias.contains(" ")
             && !hostName.trimmingCharacters(in: .whitespaces).isEmpty
             && !aliasTaken
-            && (port.isEmpty || Int(port) != nil)
+            && (port.isEmpty || Int(port).map { (1...65535).contains($0) } == true)
     }
 
     var body: some View {
