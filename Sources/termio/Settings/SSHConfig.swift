@@ -154,11 +154,14 @@ enum SSHConfigFile {
         in url: URL, visited: inout Set<String>, depth: Int, context: inout Block?
     ) -> [Block] {
         let path = url.standardizedFileURL.path
-        // The depth cap breaks Include chains that self-reference through a glob
-        // the visited set can't catch (e.g. re-listing a rewritten temp file).
+        // `visited` is the active recursion *stack*, not a permanent memo: a
+        // shared file legitimately included under several Host blocks parses
+        // once per inclusion; only a file currently being parsed (a cycle) is
+        // refused. The depth cap breaks chains the stack can't catch.
         guard depth <= 3, !visited.contains(path),
               let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         visited.insert(path)
+        defer { visited.remove(path) }
 
         var blocks: [Block] = []
         // While true, the parse sits inside a Match block: its directives (and
