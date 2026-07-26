@@ -79,8 +79,27 @@ struct IssuesView: View {
                 get: { model.query.assignedToMe },
                 set: { model.query.assignedToMe = $0 }
             ))
+            // Label filter, GitHub's own semantics (multi-select = AND). The
+            // repo's full label set, checkmarked from the current query.
+            if !model.availableLabels.isEmpty {
+                Divider()
+                Section("Labels") {
+                    ForEach(model.availableLabels, id: \.name) { label in
+                        Toggle(label.name, isOn: Binding(
+                            get: { model.query.labels.contains(label.name) },
+                            set: { _ in model.toggleLabelFilter(label.name) }
+                        ))
+                    }
+                }
+            }
         } label: {
-            HugeIconView(icon: .filter, size: 13, color: .secondary, lineWidthOverride: 1.5)
+            // The funnel takes the accent color while any label filter narrows
+            // the list, so a filtered view can't be mistaken for the full one.
+            HugeIconView(
+                icon: .filter, size: 13,
+                color: model.query.labels.isEmpty ? .secondary : .accentColor,
+                lineWidthOverride: 1.5
+            )
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -212,7 +231,7 @@ private struct IssueRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(item.state.tint)
+                .fill(item.state.tint(for: item.kind))
                 .frame(width: 7, height: 7)
                 .help(item.state.label)
             // Never wraps or compresses — without this, a narrow pane stacks the
@@ -317,7 +336,7 @@ private struct IssueDetailView: View {
         HStack(spacing: 6) {
             TreeHeaderButton(huge: .chevronLeft, help: "Back", action: onBack)
             Circle()
-                .fill(item.state.tint)
+                .fill(item.state.tint(for: item.kind))
                 .frame(width: 7, height: 7)
             Text(item.identifier)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))

@@ -31,12 +31,15 @@ enum IssueKind: Hashable, Sendable {
 enum IssueItemState: Hashable, Sendable {
     case open, closed, merged, draft
 
-    /// The state dot's color: open green (GitHub's open), closed & merged
-    /// purple (GitHub renders both done-states purple), draft grey.
-    var tint: Color {
+    /// The state color, following GitHub's own convention: open green; closed
+    /// issue and merged PR purple (done-states); a closed *unmerged* PR red —
+    /// rejected is the opposite outcome of merged, so they must not share a
+    /// color; draft grey.
+    func tint(for kind: IssueKind) -> Color {
         switch self {
         case .open: return .green
-        case .closed, .merged: return .purple
+        case .closed: return kind == .pullRequest ? .red : .purple
+        case .merged: return .purple
         case .draft: return .gray
         }
     }
@@ -80,10 +83,12 @@ struct IssueContainer: Hashable, Sendable {
 }
 
 /// The list request: which kind, and the light filters the top bar offers.
+/// Selected labels combine as AND, GitHub's own filter semantics.
 struct IssueQuery: Hashable, Sendable {
     var kind: IssueKind = .issue
     var openOnly = true
     var assignedToMe = false
+    var labels: Set<String> = []
 }
 
 /// One row of the list. `identifier` is the provider-native short handle —

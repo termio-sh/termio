@@ -99,8 +99,25 @@ final class IssuesPanelModel: ObservableObject {
         }
     }
 
+    /// The repo's labels, for the filter menu — loaded once per pane.
+    @Published private(set) var availableLabels: [IssueLabel] = []
+
+    func toggleLabelFilter(_ name: String) {
+        if query.labels.contains(name) {
+            query.labels.remove(name)
+        } else {
+            query.labels.insert(name)
+        }
+    }
+
+    private func loadLabels() async {
+        guard let provider, let container, availableLabels.isEmpty else { return }
+        availableLabels = (try? await provider.availableLabels(in: container)) ?? []
+    }
+
     func loadList() async {
         guard let provider, let container, phase == .ready else { return }
+        if availableLabels.isEmpty { Task { await loadLabels() } }
         isLoading = true
         errorMessage = nil
         do {

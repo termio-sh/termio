@@ -39,6 +39,10 @@ struct GitHubIssueProvider: IssueProvider {
         if query.assignedToMe, let login = try await login() {
             items.append(URLQueryItem(name: "assignee", value: login))
         }
+        if !query.labels.isEmpty {
+            // Comma-joined = AND on this endpoint, matching GitHub's own filter.
+            items.append(URLQueryItem(name: "labels", value: query.labels.sorted().joined(separator: ",")))
+        }
         components.queryItems = items
         let raw: [RawIssue] = try await get(components.url!)
         return raw
@@ -66,6 +70,19 @@ struct GitHubIssueProvider: IssueProvider {
                 )
             }
         )
+    }
+
+    /// The repo's label set, for the filter menu. (Becomes the protocol's
+    /// `availableLabels` when the write milestone lands — it's already needed
+    /// read-only here.)
+    func availableLabels(in container: IssueContainer) async throws -> [IssueLabel] {
+        struct RawLabel: Decodable {
+            let name: String
+            let color: String?
+        }
+        let raw: [RawLabel] = try await get(
+            URL(string: "https://api.github.com/repos/\(container.id)/labels?per_page=100")!)
+        return raw.map { IssueLabel(name: $0.name, colorHex: $0.color ?? "") }
     }
 
     // MARK: Pull-request extras (GitHub-specific, outside the tracker protocol)
