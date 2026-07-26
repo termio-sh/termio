@@ -37,6 +37,7 @@ from the real front matter).
 |  |  | [](talks/shaogefenhao-20260725/shaogefenhao-ai-product-termio.md) |
 | active | backlog | [Backlog](backlog/backlog.md) |
 | active | bug | [iOS libghostty "non-functional" panel + surface-teardown crash — fix journey](bug/ios-ghostty-renderer-panic-and-teardown-uaf.md) |
+| active | design | ["Issue tracker 集成：inspector Issues tab（GitHub / Linear，per-project provider）"](design/issue-tracker-integration.md) |
 | active | design | ["Remote-access design lessons: sleep reachability, stable domains, identity, monetization"](design/remote-access-lessons.md) |
 | active | design | [iOS libghostty "non-functional" panel + teardown UAF — root-cause findings](design/ios-ghostty-renderer-panic-investigation-findings.md) |
 | active | design | [iOS terminal input & attachments](design/ios-terminal-input.md) |
@@ -74,7 +75,6 @@ from the real front matter).
 | draft | design | [调研：下一批 AgentAdapter 的落盘格式（OpenCode / Pi / Amp / Cursor / Kimi）](design/agent-transcript-survey.md) |
 | draft | design | ["Markdown preview — Apple-grade reading typography"](design/markdown-preview-reading-typography.md) |
 | draft | design | [Issue Triage → 本地 agent（GitHub / Linear 事件驱动 termio session）](design/issue-triage-local-agent.md) |
-| draft | design | [Issue tracker 集成：inspector Issues tab（GitHub / Linear，per-project provider）](design/issue-tracker-integration.md) |
 | draft | design | [Mac retention analytics (no app changes)](design/mac-retention-analytics.md) |
 | draft | design | [Remote Projects (open an SSH/VPS box like a local project)](design/remote-projects.md) |
 | draft | design | [Session Daemon Architecture (termiod — one model for local, remote, mobile)](design/session-daemon-architecture.md) |

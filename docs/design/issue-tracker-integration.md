@@ -1,6 +1,6 @@
 ---
 title: "Issue tracker 集成：inspector Issues tab（GitHub / Linear，per-project provider）"
-status: draft
+status: active
 type: design
 created: 2026-07-26
 updated: 2026-07-26
