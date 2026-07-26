@@ -350,7 +350,9 @@ struct AddSSHHostSheet: View {
                 Spacer()
                 Button("Cancel") { finish(nil) }
                     .keyboardShortcut(.cancelAction)
-                Button("Add", action: add)
+                // On the menu path adding also opens the connection — the button
+                // must promise both (HIG: the label describes the result).
+                Button(completion == nil ? "Add" : "Add & Connect", action: add)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canAdd)
             }
