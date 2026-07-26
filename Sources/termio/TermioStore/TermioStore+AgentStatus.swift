@@ -139,6 +139,9 @@ extension TermioStore {
             else { break }
             setStatus(.working, for: id)
             setCurrentTool(report.tool, for: id)
+            // A named tool marks this turn as real work — the notifier's
+            // task-vs-chat gate keys off it (an answer-only turn stays silent).
+            if report.tool != nil { TaskNotificationCenter.shared.sessionDidUseTool(id) }
             // Remember when work was last seen, so a turn that ends abnormally
             // (the agent crashed and never sent `done`) can be swept back to calm
             // instead of spinning forever — the failure mode cmux's own tracker

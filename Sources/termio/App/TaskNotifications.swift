@@ -57,10 +57,29 @@ final class TaskNotificationCenter: NSObject {
     /// as long: better a surplus banner than a silent finished agent.
     private var workingSince: [Session.ID: Date] = [:]
 
+    /// Sessions whose agent has ever reported a tool, proving tool telemetry
+    /// exists for them (the hook path is the only source — a screen-promoted
+    /// agent never reports one). The task-vs-chat gate below applies only to
+    /// these; for a session with no tool visibility, silence would mean *never*
+    /// notifying, so unknown counts as work.
+    private var toolCapable: Set<Session.ID> = []
+
+    /// Sessions whose current turn has used at least one tool — the signal that
+    /// the turn produced work to come back to, not just a streamed answer the
+    /// user read as it rendered.
+    private var sawToolThisTurn: Set<Session.ID> = []
+
     /// A session's turn began. Called from the status choke point on the
     /// genuine transition into `.working`.
     func sessionDidStartWorking(_ id: Session.ID) {
         workingSince[id] = Date()
+        sawToolThisTurn.remove(id)
+    }
+
+    /// The agent reported running a tool this turn (hook path only).
+    func sessionDidUseTool(_ id: Session.ID) {
+        toolCapable.insert(id)
+        sawToolThisTurn.insert(id)
     }
 
     /// A session's status settled on a "your turn" state. Called from the status
@@ -83,6 +102,15 @@ final class TaskNotificationCenter: NSObject {
         if status == .done, let turnDuration, turnDuration < Self.minimumTurnDuration {
             return
         }
+        // Task vs chat: a turn that ran no tools produced an answer, not work —
+        // and streamed prose is read as it renders, so its author is present
+        // even past the duration gate. Applied only to sessions with proven
+        // tool telemetry; a blocked agent (`.needsAttention`) is exempt, as a
+        // question demands you whatever kind of turn asked it.
+        if status == .done, toolCapable.contains(id), !sawToolThisTurn.contains(id) {
+            return
+        }
+        sawToolThisTurn.remove(id)
 
         let content = UNMutableNotificationContent()
         content.title = status == .needsAttention
@@ -146,6 +174,8 @@ final class TaskNotificationCenter: NSObject {
     /// longer exists.
     func forget(_ id: Session.ID) {
         workingSince[id] = nil
+        sawToolThisTurn.remove(id)
+        toolCapable.remove(id)
         withdraw(for: id)
     }
 
