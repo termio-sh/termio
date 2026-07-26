@@ -93,6 +93,17 @@ struct IssuesView: View {
                 }
             }
         } label: {
+            // macOS flattens a Menu label to Text/Image and drops shape-drawn
+            // views — so the label is only a clear hit-area, and the funnel is
+            // painted behind it (see .background below).
+            Color.clear
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .background {
             // The funnel takes the accent color while any label filter narrows
             // the list, so a filtered view can't be mistaken for the full one.
             HugeIconView(
@@ -100,10 +111,8 @@ struct IssuesView: View {
                 color: model.query.labels.isEmpty ? .secondary : .accentColor,
                 lineWidthOverride: 1.5
             )
+            .allowsHitTesting(false)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
         .help("Filter")
     }
 
