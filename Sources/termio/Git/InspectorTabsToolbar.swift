@@ -47,7 +47,7 @@ struct InspectorTabsToolbar: View {
         (.files, .listBullet, "Project Files"),
         (.search, .search, "Search Files"),
         (.changes, .gitBranch, "Changes"),
-        (.issues, .issueCircle, "Issues"),
+        (.issues, .github, "Issues"),
         (.info, .infoCircle, "Info"),
     ]
 

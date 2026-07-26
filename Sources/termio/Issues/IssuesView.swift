@@ -132,7 +132,7 @@ struct IssuesView: View {
         title: String, message: String, @ViewBuilder actions: () -> Actions
     ) -> some View {
         VStack(spacing: 10) {
-            HugeIconView(icon: .issueCircle, size: 34, color: .secondary)
+            HugeIconView(icon: .github, size: 34, color: .secondary)
             Text(title).font(.system(size: 13, weight: .semibold))
             Text(message)
                 .font(.system(size: 11))
@@ -160,7 +160,7 @@ struct IssuesView: View {
         } else if let error = model.errorMessage {
             ContentUnavailableView(
                 "Couldn’t Load",
-                huge: .issueCircle,
+                huge: .github,
                 description: Text(error)
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -311,50 +311,43 @@ private struct IssueDetailView: View {
         }
     }
 
+    /// Back on the left; the item identity in the middle; actions on the right —
+    /// all buttons are `TreeHeaderButton`s (the explorer header's quiet hover
+    /// style), so they share the 22pt hit target and hover fill of every other
+    /// pane header instead of bare 11pt glyphs.
     private var header: some View {
-        HStack(spacing: 8) {
-            Button(action: onBack) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Back")
+        HStack(spacing: 6) {
+            TreeHeaderButton(symbol: "chevron.left", help: "Back", action: onBack)
             Circle()
                 .fill(item.state.tint)
                 .frame(width: 7, height: 7)
             Text(item.identifier)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
             Spacer(minLength: 6)
             if item.kind == .pullRequest, model.prInfo != nil {
                 if model.isCheckingOut {
-                    ProgressView().controlSize(.mini)
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 22, height: 22)
                 } else {
-                    Button {
+                    TreeHeaderButton(
+                        symbol: "arrow.triangle.branch",
+                        help: "Check Out \(model.prInfo?.headRef ?? "Branch")"
+                    ) {
                         Task { await model.checkout() }
-                    } label: {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 11, weight: .medium))
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Check Out \(model.prInfo?.headRef ?? "Branch")")
                 }
             }
             if let url = item.url {
-                Button {
+                TreeHeaderButton(symbol: "arrow.up.right.square", help: "Open on GitHub") {
                     NSWorkspace.shared.open(url)
-                } label: {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Open on GitHub")
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 8)
         .frame(height: GitChangesView.topBarHeight)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
@@ -391,7 +384,7 @@ private struct IssueDetailView: View {
                 background: settings.terminalBackgroundColor
             )
         } else if let error = model.detailError {
-            ContentUnavailableView("Couldn’t Load", huge: .issueCircle, description: Text(error))
+            ContentUnavailableView("Couldn’t Load", huge: .github, description: Text(error))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ProgressView()
