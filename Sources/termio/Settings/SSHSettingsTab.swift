@@ -95,7 +95,7 @@ struct SSHSettingsTab: View {
                 Button("Edit") { presentEditor(for: nil) }
             } label: {
                 SettingsLabel(
-                    symbol: "doc.text",
+                    .huge(.fileDoc),
                     title: "~/.ssh/config",
                     subtext: "The OpenSSH client config is the single source of truth — termio keeps no separate host database. Edits show up here and in plain `ssh` alike."
                 )
@@ -109,7 +109,7 @@ struct SSHSettingsTab: View {
         Section {
             ForEach(publicKeys) { key in
                 HStack(spacing: 10) {
-                    IconBadge(.symbol("key"))
+                    IconBadge(.huge(.key))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(key.name)
                         Text(key.comment.isEmpty ? key.algorithm : "\(key.algorithm) · \(key.comment)")
@@ -178,7 +178,7 @@ private struct SSHHostRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            IconBadge(.symbol("server.rack"))
+            IconBadge(.huge(.serverStack))
             VStack(alignment: .leading, spacing: 2) {
                 Text(host.alias).font(.headline)
                 Text(host.destinationLabel)
@@ -189,9 +189,7 @@ private struct SSHHostRow: View {
             }
             Spacer(minLength: 8)
             if let identityFile = host.identityFile {
-                Image(systemName: "key.fill")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                HugeIconView(icon: .key, size: 11, color: Color(nsColor: .tertiaryLabelColor))
                     .help("Uses \(identityFile)")
             }
             probeControl
