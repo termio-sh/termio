@@ -641,7 +641,7 @@ extension TermioStore {
 
     /// Lines currently in a file, counted cheaply by newline bytes — the cursor a
     /// caller resumes a transcript read from.
-    static func lineCount(of path: String) -> Int {
+    nonisolated static func lineCount(of path: String) -> Int {
         guard let data = FileManager.default.contents(atPath: path) else { return 0 }
         return data.reduce(into: 0) { count, byte in if byte == 0x0A { count += 1 } }
     }

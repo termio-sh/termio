@@ -240,7 +240,9 @@ final class SessionControlListener {
 struct SessionWatchEvent {
     let projectID: UUID
     let handle: String
-    /// Wire status token (`working` / `idle` / `done` / `needs-you`).
+    /// Wire status token (`working` / `idle` / `done` / `needs-you`), or the
+    /// watch-plane `stalled` — a supervision judgment broadcast without ever
+    /// becoming the session's real status.
     let status: String
     let title: String
     let cwd: String
@@ -254,6 +256,11 @@ struct SessionWatchEvent {
     /// is readable without another `list --json` round-trip.
     var transcript: String? = nil
     var cursorEnd: Int? = nil
+    /// `stalled` only: the stall detector's reasoning ("working 42m, no repo
+    /// change, transcript +3 lines"). `stalled` is a watch-plane signal, never a
+    /// session's real status — see the loop-level stall detection in
+    /// `TermioStore+AgentStatus` (design doc §4.7).
+    var evidence: String? = nil
 }
 
 /// Holds the open `watch` connections and fans status transitions out to them. A
@@ -384,7 +391,8 @@ final class SessionWatchHub {
 private extension SessionWatchEvent {
     var wireLine: Data {
         let suffix = title.isEmpty ? "" : "  \(title)"
-        return Data("\(handle)  [\(status)]\(suffix)\n".utf8)
+        let detail = evidence.map { "  — \($0)" } ?? ""
+        return Data("\(handle)  [\(status)]\(suffix)\(detail)\n".utf8)
     }
     var jsonLine: Data {
         var object: [String: Any] = [
@@ -397,6 +405,7 @@ private extension SessionWatchEvent {
         if let prompt { object["prompt"] = prompt }
         if let transcript { object["transcript"] = transcript }
         if let cursorEnd { object["cursor_end"] = cursorEnd }
+        if let evidence { object["evidence"] = evidence }
         let data = (try? JSONSerialization.data(
             withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
         return data + Data("\n".utf8)
@@ -444,7 +453,11 @@ enum SessionSkillInstaller {
         - `termio sessions watch` — block and stream one line per sibling status
           change (`done` / `needs-you` by default) until you interrupt it — the push
           alternative to polling `list`. `--state working,idle,done,needs-you` widens
-          it. It opens with one snapshot line per sibling's current status
+          it, and `--state stalled` adds the runaway signal: a sibling still
+          `working` that has made no repo or transcript progress for 20+ minutes
+          (long builds streaming output don't trip it). A stalled event says why in
+          `evidence`, fires once, and re-arms when progress resumes. It opens with
+          one snapshot line per sibling's current status
           (`"snapshot":true` in `--json`; `--no-snapshot` skips), and in `--json`
           writes `{"heartbeat":true}` after 30s of silence so a dead stream is
           detectable. Exits 0 on your Ctrl-C, 2 if termio itself went away.

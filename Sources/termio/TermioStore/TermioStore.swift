@@ -199,7 +199,17 @@ final class TermioStore: ObservableObject {
     func setStatus(_ status: SessionStatus, for id: Session.ID) -> Bool {
         let runtime = runtime(for: id)
         guard runtime.status != status else { return false }
+        let previous = runtime.status
         runtime.status = status
+        // Stall detection (§4.7) keys off continuous time spent `.working`, so the
+        // window opens on the genuine transition in — this method is the single
+        // status choke point — and closes on the way out: a session that stopped
+        // working can no longer be stalled.
+        if status == .working {
+            beginStallWatch(for: id)
+        } else if previous == .working {
+            stallProbes[id] = nil
+        }
         // The tray and window title present status, so a real change pings them.
         sessionRuntimeDidChange.send()
         // Push the genuine transition to any `termio sessions watch` clients scoped
@@ -366,6 +376,13 @@ final class TermioStore: ObservableObject {
     /// Refreshed both by working hooks and by a *changed* rendered screen
     /// (`noteOutputActivity`).
     var lastWorkingAt: [Session.ID: Date] = [:]
+    /// Loop-level stall-detection state per continuously-working session (design
+    /// doc §4.7): when it entered `.working`, the current no-progress window, the
+    /// output-rate ticks, and the repo/transcript baseline the sweep compares
+    /// against. Created on the transition into `.working`, dropped on the way out
+    /// (both in `setStatus`); probed by `sweepStalledSessions` in
+    /// `TermioStore+AgentStatus`.
+    var stallProbes: [Session.ID: StallProbe] = [:]
     /// The last activity a screen-scrape-configured agent's viewport was classified
     /// into (see `AgentStatusRules` / `applyScreenDetectedActivity`), so status is only
     /// re-driven on a transition — not re-emitted every tick the screen sits idle.

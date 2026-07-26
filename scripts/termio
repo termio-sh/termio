@@ -43,7 +43,8 @@ options:
                    (exit 0 settled, 1 error — including a stalled/vanished session, 3 timed out)
   --timeout <ms>   cap for --wait (default 300000, clamped 1000–600000); implies --wait
   --lines <n>      for `read`: keep only the last n screen rows
-  --state <s,…>    for `watch`: comma-separated states to report (working, idle, done, needs-you)
+  --state <s,…>    for `watch`: comma-separated states to report (working, idle, done,
+                   needs-you, stalled; default done,needs-you)
   --no-snapshot    for `watch`: skip the initial per-session status snapshot
   --help, --version
 
@@ -72,10 +73,19 @@ usage: termio sessions watch [--state <s,…>] [--no-snapshot] [--json]
 Block and stream one line per session status transition until interrupted.
 On attach it first prints a snapshot line per session with its current
 status (tagged "snapshot":true in --json); --no-snapshot skips that.
---state takes a comma-separated filter (working, idle, done, needs-you);
-the default reports the two states a supervisor acts on: done, needs-you.
+--state takes a comma-separated filter (working, idle, done, needs-you,
+stalled); the default reports the two states a supervisor acts on: done,
+needs-you.
 In --json mode the app writes {"heartbeat":true} after 30s of silence so a
 dead stream is distinguishable from a quiet one.
+
+`stalled` is a watch-plane signal, not a real status: the session is still
+working, but for 20+ minutes has made no repo change and next-to-no
+transcript growth — the unattended-runaway pattern. Sustained output (a
+long build streaming logs) suppresses it. The event carries the reasoning
+in `evidence` ("working 42m, no repo change, transcript +3 lines"), fires
+once per quiet stretch, and re-arms when progress resumes. Opt in with
+--state stalled; it is not in the default filter.
 
 exit codes: 0 after Ctrl-C (normal end of supervision), 2 when the stream
 closes from the app side (termio quit or died).

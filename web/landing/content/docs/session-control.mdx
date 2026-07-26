@@ -137,6 +137,14 @@ outcomes so scripts can branch without parsing: **0** settled, **1** error
 - **Filtered by default.** Live events default to the two states a supervisor
   acts on, `done` and `needs-you`; widen with
   `--state working,idle,done,needs-you`.
+- **Stall alarm, opt-in.** `--state stalled` adds a watch-plane signal for the
+  unattended runaway: a session still `working` that has made **no repo change
+  and next-to-no transcript growth for 20+ minutes**. Sustained output — a long
+  build streaming logs — suppresses it. The event carries the detector's
+  reasoning in `evidence` (`"working 42m, no repo change, transcript +3
+  lines"`), fires once per quiet stretch, and re-arms when progress resumes.
+  Termio only signals; it never kills — the session's real status stays
+  `working` and the sidebar is untouched. Not in the default filter.
 - **Actionable events.** A `needs-you` event carries the on-screen question in
   `prompt`; a `done` event carries the session's `transcript` path and
   `cursor_end` — enough to answer, or to read the result, without another
@@ -209,9 +217,12 @@ everywhere): the final `status`, and the transcript line range
 ```
 
 `cwd` is omitted until the shell reports one; `snapshot` marks the on-attach
-roster lines; `prompt` rides on `needs-you` events and `transcript` +
-`cursor_end` on `done` events, exactly as in wait replies. After 30 seconds of
-silence the app writes `{"heartbeat": true}`.
+roster lines; `prompt` rides on `needs-you` events, `transcript` +
+`cursor_end` on `done` events (exactly as in wait replies), and `evidence` on
+`stalled` events — the stall detector's reasoning, e.g.
+`"working 42m, no repo change, transcript +3 lines"`. `stalled` appears only
+on the watch stream, never as a session's `status` in `list` or wait replies.
+After 30 seconds of silence the app writes `{"heartbeat": true}`.
 
 <Callout type="tip">
   This is what lets one agent hand work to another — `spawn` a task in a sibling

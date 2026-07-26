@@ -593,6 +593,22 @@ enum GitService {
         return (host, path)
     }
 
+    // MARK: Stall detection
+
+    /// A cheap identity of a working tree for the stall detector (sessions-cli-v2
+    /// §4.7 probe 2): the HEAD commit plus a digest of the porcelain status, so
+    /// both a new commit and any tree change move it. The digest is process-local
+    /// (`hashValue` is seeded per launch), which is all the detector compares
+    /// across. Synchronous and blocking — callers must run it off the main thread
+    /// (the BranchModel main-thread-git freeze). A non-repo directory fingerprints
+    /// as a stable empty value, which still compares correctly across a window.
+    static func stallFingerprint(in repoRoot: String) -> String {
+        let head = run(["rev-parse", "HEAD"], in: repoRoot)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let status = run(["status", "--porcelain"], in: repoRoot) ?? ""
+        return "\(head)#\(status.hashValue)"
+    }
+
     // MARK: Process
 
     private static func offMain<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
