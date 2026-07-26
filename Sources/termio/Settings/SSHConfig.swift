@@ -1,5 +1,15 @@
 import Foundation
 
+/// The outcome of a non-interactive SSH reachability + auth probe (the Settings
+/// "Test Connection" action). Deliberately coarse: enough to tell "it works"
+/// from "the network's the problem" from "auth's the problem", each with a short
+/// human line for the row and the raw detail in a tooltip.
+enum SSHProbeResult: Equatable {
+    case reachable
+    case authFailed(String)
+    case unreachable(String)
+}
+
 /// One connectable `Host` block parsed from the user's OpenSSH client config —
 /// the same aliases `ssh <alias>` itself resolves. A block that lists several
 /// aliases yields one entry per alias. `file`/`line` locate the block's `Host`
@@ -325,5 +335,69 @@ enum SSHConfigFile {
                 comment: fields.count > 2 ? fields[2] : ""
             )
         }
+    }
+
+    /// Probes an alias non-interactively: connect, authenticate, run `true`,
+    /// exit — it never opens a shell or a prompt. `BatchMode=yes` blocks any
+    /// password/passphrase ask (so it can't hang waiting on stdin),
+    /// `ConnectTimeout` bounds the network wait, and running `true` makes a clean
+    /// exit mean "authenticated and the remote executed a command". Runs off the
+    /// main thread; the exact ssh resolution matches a real `ssh <alias>`.
+    static func testConnection(alias: String) async -> SSHProbeResult {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+                process.arguments = [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=6",
+                    // A never-seen host would otherwise fail the probe on the
+                    // host-key prompt BatchMode suppresses; accept-new records it
+                    // exactly as a first real connect would.
+                    "-o", "StrictHostKeyChecking=accept-new",
+                    alias, "true",
+                ]
+                let errorPipe = Pipe()
+                process.standardError = errorPipe
+                process.standardOutput = Pipe()
+                do {
+                    try process.run()
+                } catch {
+                    continuation.resume(returning: .unreachable("ssh unavailable"))
+                    return
+                }
+                // Drain before wait: a full stderr pipe would deadlock a process
+                // we're blocking on. EOF arrives when ssh exits and closes it.
+                let stderr = String(
+                    data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8
+                ) ?? ""
+                process.waitUntilExit()
+                continuation.resume(
+                    returning: process.terminationStatus == 0 ? .reachable : classify(stderr)
+                )
+            }
+        }
+    }
+
+    /// Buckets ssh's stderr into the probe outcomes, keeping the clearest line as
+    /// the detail. Auth failures (including BatchMode's "we won't ask for a
+    /// password") are told apart from the host being unreachable.
+    private static func classify(_ stderr: String) -> SSHProbeResult {
+        let lower = stderr.lowercased()
+        let lastLine = stderr
+            .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .last(where: { !$0.isEmpty }) ?? "Connection failed"
+        if lower.contains("permission denied")
+            || lower.contains("too many authentication failures")
+            || lower.contains("no supported authentication methods") {
+            return .authFailed(lastLine)
+        }
+        if lower.contains("could not resolve") || lower.contains("name or service not known") {
+            return .unreachable("Host not found")
+        }
+        if lower.contains("connection refused") { return .unreachable("Connection refused") }
+        if lower.contains("no route to host") { return .unreachable("No route to host") }
+        if lower.contains("timed out") { return .unreachable("Timed out") }
+        return .unreachable(lastLine)
     }
 }

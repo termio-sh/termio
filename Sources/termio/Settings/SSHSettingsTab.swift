@@ -45,6 +45,22 @@ struct SSHSettingsTab: View {
                 onClose: { configEditor = nil }
             )
             .frame(minWidth: 640, minHeight: 460)
+            // FileEditorView delegates its close to an external toolbar that only
+            // exists over the terminal pane — in a sheet there's none, so supply
+            // one. Escape closes too; the visible button is the guaranteed way out.
+            .overlay(alignment: .topTrailing) {
+                Button { configEditor = nil } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(.thinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help("Close (Esc)")
+                .padding(8)
+            }
         }
     }
 
@@ -67,7 +83,7 @@ struct SSHSettingsTab: View {
         } header: {
             SectionHeaderLabel(title: "Hosts")
         } footer: {
-            Text("The Host blocks from ~/.ssh/config (Include'd files too) — exactly the aliases `ssh` resolves. Connect opens the host as a terminal in the sidebar's Terminals section, same as File ▸ New SSH Connection.")
+            Text("The Host blocks from ~/.ssh/config (Include'd files too) — exactly the aliases `ssh` resolves. Test Connection probes reachability and auth without opening a session; right-click a host to Connect it as a terminal in the sidebar, same as File ▸ New SSH Connection.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -149,12 +165,16 @@ struct SSHSettingsTab: View {
 }
 
 /// One host row: alias over its `user@host` destination, a quiet key hint when
-/// the block pins an identity, and a Connect button. The context menu carries
-/// the secondary verbs so the row itself stays scannable.
+/// the block pins an identity, and a Test Connection probe. Live connecting is a
+/// launch, not a setting — it lives in the context menu (and the sidebar / File
+/// menu), keeping this pane about configuring and verifying hosts.
 private struct SSHHostRow: View {
     let host: SSHConfigHost
     let connect: () -> Void
     let editInConfig: () -> Void
+
+    private enum ProbeState { case idle, running, result(SSHProbeResult) }
+    @State private var probe: ProbeState = .idle
 
     var body: some View {
         HStack(spacing: 10) {
@@ -174,18 +194,86 @@ private struct SSHHostRow: View {
                     .foregroundStyle(.tertiary)
                     .help("Uses \(identityFile)")
             }
-            Button("Connect", action: connect)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            probeControl
         }
         .contentShape(Rectangle())
         .contextMenu {
             Button("Connect", action: connect)
+            Button("Test Connection", action: runProbe)
             Button("Edit in Config", action: editInConfig)
             Button("Copy ssh Command") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString("ssh \(host.alias)", forType: .string)
             }
+        }
+    }
+
+    /// The trailing control: a Test button that turns into a spinner while the
+    /// probe runs, then a tinted result badge that re-tests on click.
+    @ViewBuilder
+    private var probeControl: some View {
+        switch probe {
+        case .idle:
+            Button("Test", action: runProbe)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        case .running:
+            ProgressView()
+                .controlSize(.small)
+                .frame(minWidth: 44)
+        case .result(let outcome):
+            Button(action: runProbe) {
+                Label(outcome.label, systemImage: outcome.symbol)
+                    .foregroundStyle(outcome.tint)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("\(outcome.detail) — click to re-test")
+        }
+    }
+
+    /// Runs the non-interactive probe off the main thread, hopping back to update
+    /// the badge. A fresh click just re-arms it.
+    private func runProbe() {
+        probe = .running
+        Task { @MainActor in
+            probe = .result(await SSHConfigFile.testConnection(alias: host.alias))
+        }
+    }
+}
+
+/// How each probe outcome reads in the row: a short label + tinted glyph (never
+/// color alone), with the raw ssh detail in the tooltip.
+private extension SSHProbeResult {
+    var label: String {
+        switch self {
+        case .reachable: return "Reachable"
+        case .authFailed: return "Auth failed"
+        case .unreachable(let reason): return reason
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .reachable: return "checkmark.circle.fill"
+        case .authFailed: return "xmark.circle.fill"
+        case .unreachable: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .reachable: return .green
+        case .authFailed: return .orange
+        case .unreachable: return .red
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .reachable: return "Connected and authenticated"
+        case .authFailed(let message), .unreachable(let message): return message
         }
     }
 }
