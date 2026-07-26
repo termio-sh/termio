@@ -741,6 +741,10 @@ final class TermioStore: ObservableObject {
     func revealSession(_ id: Session.ID) {
         guard session(id) != nil else { return }
         selectedSessionID = id
+        // Explicit, because the didSet above skips a same-value write: revealing
+        // a session that was already selected (app in background) must still
+        // acknowledge its "your turn" dot and withdraw its banner.
+        markSeen(id)
         NSApp.activate(ignoringOtherApps: true)
         if let window = NSApp.windows.first(where: {
             $0.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName

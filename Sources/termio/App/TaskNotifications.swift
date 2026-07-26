@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 import TermioShared
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// Posts a native macOS notification when an agent turn settles — finished
 /// (`.done`) or blocked on the user (`.needsAttention`) — so the user can work
@@ -27,6 +27,13 @@ final class TaskNotificationCenter: NSObject {
     /// Sessions with a notification delivered this run, so engaging with a
     /// session withdraws its stale banner from Notification Center.
     private var delivered: Set<Session.ID> = []
+
+    /// Per-session generation counters that invalidate in-flight posts: the
+    /// authorization/settings round-trip is async, so a user who engages with
+    /// the session (or closes it) in that window must win over the pending
+    /// `add`. `withdraw` bumps the counter; the post re-checks it on the main
+    /// actor just before scheduling.
+    private var generations: [Session.ID: Int] = [:]
 
     private override init() { super.init() }
 
@@ -62,18 +69,8 @@ final class TaskNotificationCenter: NSObject {
         content.body = store.displayTitle(for: session)
         if store.settings.notificationSoundEnabled { content.sound = .default }
         content.userInfo = [Self.sessionKey: id.uuidString]
-        // The banner's leading icon is always termio's own (macOS reserves it for
-        // the posting app), so the agent's identity rides as the trailing
-        // thumbnail instead — which agent finished, at a glance.
-        if let attachment = agentIconAttachment(for: agent) {
-            content.attachments = [attachment]
-        }
 
-        // One identifier per session: a follow-up settle *replaces* the delivered
-        // banner rather than stacking, so a session never shows two at once.
-        let request = UNNotificationRequest(
-            identifier: Self.identifier(for: id), content: content, trigger: nil)
-
+        let generation = generations[id, default: 0]
         let center = UNUserNotificationCenter.current()
         // Idempotent after the user's first answer; asking here rather than at
         // launch means the prompt appears the moment it's explainable.
@@ -81,29 +78,58 @@ final class TaskNotificationCenter: NSObject {
         center.getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized
                 || settings.authorizationStatus == .provisional else { return }
-            center.add(request)
+            DispatchQueue.main.async {
+                // Re-validate on the main actor: the user may have engaged with
+                // the session (`withdraw` bumps the generation) or switched the
+                // setting off while the authorization round-trip was in flight.
+                guard self.generations[id, default: 0] == generation,
+                      self.store?.settings.notifyOnTaskCompletion == true else { return }
+                // The banner's leading icon is always termio's own (macOS
+                // reserves it for the posting app), so the agent's identity
+                // rides as the trailing thumbnail instead. Created only now,
+                // when the request is certain to be scheduled — the system
+                // *moves* the attached file, so a copy made before any of the
+                // bail-outs above would be orphaned in the temp directory.
+                if let attachment = self.agentIconAttachment(for: agent) {
+                    content.attachments = [attachment]
+                }
+                // One identifier per session: a follow-up settle *replaces* the
+                // delivered banner rather than stacking, so a session never
+                // shows two at once.
+                center.add(UNNotificationRequest(
+                    identifier: Self.identifier(for: id), content: content, trigger: nil))
+                self.delivered.insert(id)
+            }
         }
-        delivered.insert(id)
     }
 
-    /// Withdraws a session's delivered notification: the user engaged with the
-    /// session another way (clicked its row, closed it), so the banner is stale.
+    /// Withdraws a session's notification: the user engaged with the session
+    /// another way (clicked its row, closed it), so the banner is stale. Always
+    /// bumps the generation so a post still in its authorization round-trip is
+    /// invalidated too, and clears the pending queue alongside the delivered one
+    /// (they are separate stores).
     func withdraw(for id: Session.ID) {
-        guard Self.isSupported, delivered.remove(id) != nil else { return }
-        UNUserNotificationCenter.current()
-            .removeDeliveredNotifications(withIdentifiers: [Self.identifier(for: id)])
+        guard Self.isSupported else { return }
+        generations[id, default: 0] += 1
+        guard delivered.remove(id) != nil else { return }
+        let identifier = Self.identifier(for: id)
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+        center.removeDeliveredNotifications(withIdentifiers: [identifier])
     }
 
     /// Quit takes the sessions with it, so any banners left behind would point
     /// at nothing.
     func withdrawAll() {
         guard Self.isSupported else { return }
-        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        let center = UNUserNotificationCenter.current()
+        center.removeAllPendingNotificationRequests()
+        center.removeAllDeliveredNotifications()
     }
 
-    private static let sessionKey = "sessionID"
+    nonisolated private static let sessionKey = "sessionID"
 
-    private static func identifier(for id: Session.ID) -> String {
+    nonisolated private static func identifier(for id: Session.ID) -> String {
         "task-settled.\(id.uuidString)"
     }
 
@@ -124,6 +150,7 @@ final class TaskNotificationCenter: NSObject {
             try FileManager.default.copyItem(at: master, to: copy)
             return try UNNotificationAttachment(identifier: "agent-icon", url: copy)
         } catch {
+            try? FileManager.default.removeItem(at: copy)
             return nil
         }
     }
@@ -180,10 +207,7 @@ extension TaskNotificationCenter: UNUserNotificationCenterDelegate {
         let userInfo = response.notification.request.content.userInfo
         let id = (userInfo[Self.sessionKey] as? String).flatMap(UUID.init)
         DispatchQueue.main.async {
-            if let id {
-                self.delivered.remove(id)
-                self.store?.revealSession(id)
-            }
+            if let id { self.store?.revealSession(id) }
             completionHandler()
         }
     }
