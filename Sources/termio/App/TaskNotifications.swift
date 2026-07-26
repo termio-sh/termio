@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import TermioShared
 import UserNotifications
 
@@ -61,6 +62,12 @@ final class TaskNotificationCenter: NSObject {
         content.body = store.displayTitle(for: session)
         if store.settings.notificationSoundEnabled { content.sound = .default }
         content.userInfo = [Self.sessionKey: id.uuidString]
+        // The banner's leading icon is always termio's own (macOS reserves it for
+        // the posting app), so the agent's identity rides as the trailing
+        // thumbnail instead — which agent finished, at a glance.
+        if let attachment = agentIconAttachment(for: agent) {
+            content.attachments = [attachment]
+        }
 
         // One identifier per session: a follow-up settle *replaces* the delivered
         // banner rather than stacking, so a session never shows two at once.
@@ -98,6 +105,57 @@ final class TaskNotificationCenter: NSObject {
 
     private static func identifier(for id: Session.ID) -> String {
         "task-settled.\(id.uuidString)"
+    }
+
+    // MARK: Agent icon attachment
+
+    /// Rendered agent-icon PNGs by agent id, so each agent's mark is rasterized
+    /// once per run rather than per notification.
+    private var renderedIcons: [String: URL] = [:]
+
+    /// The agent's brand mark as a notification attachment. The system *moves*
+    /// an attached file into its own store, so the cached render is handed over
+    /// as a throwaway copy.
+    private func agentIconAttachment(for agent: AgentPreset) -> UNNotificationAttachment? {
+        guard let master = renderedIcon(for: agent) else { return nil }
+        let copy = FileManager.default.temporaryDirectory
+            .appendingPathComponent("termio-notification-\(UUID().uuidString).png")
+        do {
+            try FileManager.default.copyItem(at: master, to: copy)
+            return try UNNotificationAttachment(identifier: "agent-icon", url: copy)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Rasterizes the sidebar's own `AgentIconView` onto a white rounded tile —
+    /// pinned to light mode so the monochrome marks (Codex, Grok) resolve to
+    /// black ink that stays legible on a dark-appearance banner too.
+    private func renderedIcon(for agent: AgentPreset) -> URL? {
+        if let cached = renderedIcons[agent.id],
+           FileManager.default.fileExists(atPath: cached.path) {
+            return cached
+        }
+        let side: CGFloat = 96
+        let renderer = ImageRenderer(
+            content: AgentIconView(agent: agent, size: side * 0.58)
+                .frame(width: side, height: side)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: side * 0.22, style: .continuous))
+                .environment(\.colorScheme, .light)
+        )
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+        else { return nil }
+        let slug = agent.id.map { $0.isLetter || $0.isNumber ? $0 : "-" }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("termio-agent-icon-\(String(slug)).png")
+        do { try png.write(to: url) } catch { return nil }
+        renderedIcons[agent.id] = url
+        return url
     }
 }
 
