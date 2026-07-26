@@ -74,6 +74,7 @@ from the real front matter).
 | draft | design | [调研：下一批 AgentAdapter 的落盘格式（OpenCode / Pi / Amp / Cursor / Kimi）](design/agent-transcript-survey.md) |
 | draft | design | ["Markdown preview — Apple-grade reading typography"](design/markdown-preview-reading-typography.md) |
 | draft | design | [Issue Triage → 本地 agent（GitHub / Linear 事件驱动 termio session）](design/issue-triage-local-agent.md) |
+| draft | design | [Issue tracker 集成：inspector Issues tab（GitHub / Linear，per-project provider）](design/issue-tracker-integration.md) |
 | draft | design | [Mac retention analytics (no app changes)](design/mac-retention-analytics.md) |
 | draft | design | [Remote Projects (open an SSH/VPS box like a local project)](design/remote-projects.md) |
 | draft | design | [Session Daemon Architecture (termiod — one model for local, remote, mobile)](design/session-daemon-architecture.md) |
