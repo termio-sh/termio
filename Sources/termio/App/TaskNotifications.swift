@@ -123,7 +123,14 @@ final class TaskNotificationCenter: NSObject {
         // chaining on it (rather than a parallel `getNotificationSettings` read,
         // which would race the prompt and report `.notDetermined`) is what saves
         // that first banner.
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            // Failures here are otherwise invisible and cost a real investigation
+            // once: an ad-hoc-signed dev build is rejected outright by usernoted
+            // (UNErrorDomain 1 — dev builds can NEVER banner; test on a release
+            // build), and a user denial just reads `granted == false`.
+            if let error {
+                Log.app.error("notification authorization failed: \(error.localizedDescription, privacy: .public)")
+            }
             guard granted else { return }
             DispatchQueue.main.async {
                 // Re-validate on the main actor: the user may have engaged with
@@ -144,8 +151,13 @@ final class TaskNotificationCenter: NSObject {
                 // One identifier per session: a follow-up settle *replaces* the
                 // delivered banner rather than stacking, so a session never
                 // shows two at once.
-                center.add(UNNotificationRequest(
-                    identifier: Self.identifier(for: id), content: content, trigger: nil))
+                let request = UNNotificationRequest(
+                    identifier: Self.identifier(for: id), content: content, trigger: nil)
+                center.add(request) { error in
+                    if let error {
+                        Log.app.error("notification post failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
             }
         }
     }
