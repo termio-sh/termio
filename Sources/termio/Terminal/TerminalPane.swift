@@ -645,9 +645,7 @@ private final class TerminalFocusDriver {
     }
 
     private func mainWindow() -> NSWindow? {
-        NSApp.windows.first {
-            $0.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName
-        }
+        AppDelegate.mainWindow
     }
 
     private func terminalView(

@@ -262,7 +262,7 @@ enum AgentStatusHooks {
     /// hook-failure noise.
     static func reportCommand(
         state: String, withTranscript: Bool = false, conversationField: String? = nil,
-        dialect: HookDialect = .claudeNested
+        toolField: String? = nil, dialect: HookDialect = .claudeNested
     ) -> String {
         var command = "\(shellQuote(cliPath)) agent report \(state)"
         // Claude feeds each hook a JSON blob on stdin carrying `transcript_path`; the
@@ -275,6 +275,10 @@ enum AgentStatusHooks {
         // caveat as `--transcript`. The field name is validated at manifest load to be
         // a bare identifier, so it embeds safely.
         if let conversationField { command += " --conversation-from \(conversationField)" }
+        // Tool events' stdin blob names the running tool (Claude `tool_name`); the
+        // CLI mines it so reports can tell real work from a prose-only turn. Events
+        // whose blob lacks the field simply omit it — same stdin caveat as above.
+        if let toolField { command += " --tool-from \(toolField)" }
         // Cursor reads the hook's stdout as its JSON reply, so the CLI must stay silent
         // and print a benign `{}`. (Claude/Codex ignore hook stdout, so they don't.)
         // The fallback keeps that contract even when the CLI itself couldn't run.
@@ -348,6 +352,9 @@ private struct JSONHookFile: AgentStatusInstaller {
     /// in the manifest), or `nil` for identity-blind hooks. Same stdin caveat as
     /// `capturesTranscript`.
     var conversationField: String?
+    /// The stdin JSON field naming the tool a hook event fires for (`hooks.tool`
+    /// in the manifest), or `nil` when the agent exposes none. Same stdin caveat.
+    var toolField: String?
     /// The file's structural shape (see `HookDialect`). Defaults to Claude's, which
     /// Codex also uses; Cursor overrides it.
     var dialect: HookDialect = .claudeNested
@@ -374,6 +381,7 @@ private struct JSONHookFile: AgentStatusInstaller {
             label: id,
             capturesTranscript: spec.capturesTranscript,
             conversationField: spec.conversation,
+            toolField: spec.tool,
             dialect: spec.dialect,
             removesFileWhenEmpty: isDedicatedTermioFile,
             legacyURLs: legacyURLs)
@@ -408,7 +416,7 @@ private struct JSONHookFile: AgentStatusInstaller {
             var groups = hooks[event.name] as? [[String: Any]] ?? []
             let command = AgentStatusHooks.reportCommand(
                 state: event.state, withTranscript: capturesTranscript,
-                conversationField: conversationField, dialect: dialect)
+                conversationField: conversationField, toolField: toolField, dialect: dialect)
             let group: [String: Any]
             if dialect == .cursorFlat {
                 group = ["command": command]

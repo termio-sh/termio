@@ -250,6 +250,11 @@ final class TermioStore: ObservableObject {
     /// No runtime ping: the tool shows only in the sidebar row's own tooltip, which
     /// tracks its session's runtime directly — no AppKit observer reads it.
     func setCurrentTool(_ tool: String?, for id: Session.ID) {
+        // A named tool is the "this turn did real work" signal the notifier's
+        // task-vs-chat gate keys on. Recorded at this choke point — before the
+        // no-op guard, since the gate cares about the turn, not the value change —
+        // so any future tool source feeds the gate without extra wiring.
+        if tool != nil { TaskNotificationCenter.shared.sessionDidUseTool(id) }
         let runtime = runtime(for: id)
         guard runtime.currentTool != tool else { return }
         runtime.currentTool = tool
@@ -729,6 +734,15 @@ final class TermioStore: ObservableObject {
     /// alone — its spinner isn't a cue to dismiss. Idempotent, and unlike the
     /// `selectedSessionID` didSet it doesn't require the selection to *change*, so
     /// re-clicking the session you're already on still clears the dot.
+    /// Whether the user is plausibly looking at this session right now: termio is
+    /// the active app and the session is selected. The status paths use it to pick
+    /// between a quiet in-place settle and a "your turn" cue — with termio in the
+    /// background, even the selected session isn't being watched, and the cue is
+    /// what lets the desktop notification fire (it only hears real transitions).
+    func isViewing(_ id: Session.ID) -> Bool {
+        NSApp.isActive && selectedSessionID == id
+    }
+
     func markSeen(_ id: Session.ID) {
         // Engaging with the session makes any delivered banner stale too.
         TaskNotificationCenter.shared.withdraw(for: id)
@@ -749,9 +763,7 @@ final class TermioStore: ObservableObject {
         // acknowledge its "your turn" dot and withdraw its banner.
         markSeen(id)
         NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: {
-            $0.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName
-        }) {
+        if let window = AppDelegate.mainWindow {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
         }

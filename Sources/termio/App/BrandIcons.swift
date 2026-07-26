@@ -125,6 +125,16 @@ extension Color {
     })
 }
 
+extension NSImage {
+    /// PNG-encodes via the TIFF → bitmap round-trip AppKit requires. Shared by
+    /// the notification attachment and the companion icon wire format.
+    func pngData() -> Data? {
+        guard let tiff = tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
+    }
+}
+
 /// A `Shape` that draws a `BrandLogo` from its embedded SVG path, scaled to fit
 /// the available rect (preserving the source 24×24 aspect, centered).
 struct BrandLogoShape: Shape {

@@ -850,7 +850,7 @@ extension TermioStore {
     /// state, so "Action Required" after a turn ends is a real question to you.
     private func monitor(_ state: TerminalViewState, for id: Session.ID) {
         let flag: () -> Void = { [weak self] in
-            guard let self, self.selectedSessionID != id, self.status(for: id) != .done
+            guard let self, !self.isViewing(id), self.status(for: id) != .done
             else { return }
             self.setStatus(.needsAttention, for: id)
         }

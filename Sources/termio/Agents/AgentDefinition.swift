@@ -446,6 +446,10 @@ struct AgentHookSpec: Hashable {
     /// key path in the event object for the OpenCode plugin, or the named
     /// `context` mechanism for the Pi plugin. `nil` for identity-blind hooks.
     let conversation: String?
+    /// The stdin JSON field naming the tool a hook event fires for (Claude
+    /// `tool_name`), so reports can distinguish real work from a prose-only turn.
+    /// `nil` when the agent's hooks expose no tool identity.
+    let tool: String?
     let events: [AgentHookEvent]
 }
 
@@ -896,6 +900,8 @@ struct AgentManifest: Decodable {
         /// Dialect-interpreted locator of the live conversation id (see
         /// `AgentHookSpec.conversation`).
         var conversation: String?
+        /// Stdin JSON field naming the running tool (see `AgentHookSpec.tool`).
+        var tool: String?
         var events: [Event]
         struct Event: Decodable {
             var on: String?
@@ -1029,17 +1035,18 @@ struct AgentManifest: Decodable {
             throw ManifestError.invalid("\(id): \(typeName) hooks require 'file'")
         }
 
-        // The conversation locator is embedded in generated hook commands and plugin
-        // source, so it must be a bare token: a JSON field name for shell hooks, a
-        // dot path of JS identifiers for the OpenCode plugin, or the one named
-        // mechanism (`context`) for the Pi plugin. Anything else is a manifest error,
-        // never rendered.
+        // Locators are embedded in generated hook commands and plugin source, so
+        // each must be a bare token: a JSON field name for shell hooks, a dot path
+        // of JS identifiers for the OpenCode plugin, or the one named mechanism
+        // (`context`) for the Pi plugin. Anything else is a manifest error, never
+        // rendered.
+        func isIdentifier(_ value: Substring) -> Bool {
+            guard let first = value.first, first.isLetter || first == "_" else { return false }
+            return value.dropFirst().allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+        }
+
         var conversation: String?
         if let raw = hooks.conversation?.trimmingCharacters(in: .whitespaces), !raw.isEmpty {
-            func isIdentifier(_ value: Substring) -> Bool {
-                guard let first = value.first, first.isLetter || first == "_" else { return false }
-                return value.dropFirst().allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
-            }
             switch dialect {
             case .claudeNested, .cursorFlat:
                 guard isIdentifier(raw[...]) else {
@@ -1064,6 +1071,24 @@ struct AgentManifest: Decodable {
             conversation = raw
         }
 
+        // The tool locator names the stdin JSON field carrying the running tool's
+        // name (Claude `tool_name`), so shell-hook reports can identify real work.
+        // Only meaningful for the stdin-fed shell-hook dialects.
+        var tool: String?
+        if let raw = hooks.tool?.trimmingCharacters(in: .whitespaces), !raw.isEmpty {
+            switch dialect {
+            case .claudeNested, .cursorFlat:
+                guard isIdentifier(raw[...]) else {
+                    throw ManifestError.invalid(
+                        "\(id): hook tool must name a stdin JSON field, not '\(raw)'")
+                }
+            default:
+                throw ManifestError.invalid(
+                    "\(id): hook tool is not supported for this dialect")
+            }
+            tool = raw
+        }
+
         let validStates: Set<String> = ["working", "attention", "done", "idle"]
         let events = try hooks.events.map { event -> AgentHookEvent in
             guard let name = event.on ?? event.event, !name.isEmpty else {
@@ -1081,6 +1106,7 @@ struct AgentManifest: Decodable {
             dialect: dialect,
             capturesTranscript: hooks.capturesTranscript ?? false,
             conversation: conversation,
+            tool: tool,
             events: events)
     }
 
@@ -1178,10 +1204,7 @@ struct AgentManifest: Decodable {
     /// cross the wire as real PNG bytes regardless of their source format. Failure
     /// degrades to the same visible question-mark fallback as a missing local icon.
     private static func inlineImageReference(at url: URL) -> TermioShared.IconRef {
-        guard let image = NSImage(contentsOf: url),
-              let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let png = bitmap.representation(using: .png, properties: [:])
+        guard let image = NSImage(contentsOf: url), let png = image.pngData()
         else { return TermioShared.IconRef(symbol: "questionmark.app") }
         return TermioShared.IconRef(png: png.base64EncodedString())
     }

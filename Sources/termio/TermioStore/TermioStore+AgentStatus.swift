@@ -139,9 +139,6 @@ extension TermioStore {
             else { break }
             setStatus(.working, for: id)
             setCurrentTool(report.tool, for: id)
-            // A named tool marks this turn as real work — the notifier's
-            // task-vs-chat gate keys off it (an answer-only turn stays silent).
-            if report.tool != nil { TaskNotificationCenter.shared.sessionDidUseTool(id) }
             // Remember when work was last seen, so a turn that ends abnormally
             // (the agent crashed and never sent `done`) can be swept back to calm
             // instead of spinning forever — the failure mode cmux's own tracker
@@ -160,9 +157,10 @@ extension TermioStore {
         case "attention":
             // The agent is blocked waiting on the user (a permission prompt or a
             // free-text answer). Mirror the bell path: only flag a session the user
-            // isn't already looking at.
+            // isn't actually watching — with termio backgrounded, even the selected
+            // session needs the cue (it's what fires the desktop notification).
             clearWorking(id)
-            if selectedSessionID != id { setStatus(.needsAttention, for: id) }
+            if !isViewing(id) { setStatus(.needsAttention, for: id) }
         case "idle":
             clearWorking(id)
             setStatus(.idle, for: id)
@@ -303,11 +301,11 @@ extension TermioStore {
             setStatus(.working, for: id)
         case .attention:
             clearWorking(id)
-            if selectedSessionID != id { setStatus(.needsAttention, for: id) }
+            if !isViewing(id) { setStatus(.needsAttention, for: id) }
         case .idle:
             clearWorking(id)
             if previous == .working || previous == .attention {
-                setStatus(selectedSessionID == id ? .idle : .done, for: id)
+                setStatus(isViewing(id) ? .idle : .done, for: id)
             } else {
                 setStatus(.idle, for: id)
             }
@@ -338,11 +336,11 @@ extension TermioStore {
             lastWorkingAt[id] = Date()
         case .attention:
             clearWorking(id)
-            if selectedSessionID != id { setStatus(.needsAttention, for: id) }
+            if !isViewing(id) { setStatus(.needsAttention, for: id) }
         case .idle:
             guard previous == .working, status(for: id) == .working else { return }
             clearWorking(id)
-            setStatus(selectedSessionID == id ? .idle : .done, for: id)
+            setStatus(isViewing(id) ? .idle : .done, for: id)
         }
     }
 

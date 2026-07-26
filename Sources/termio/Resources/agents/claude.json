@@ -21,6 +21,7 @@
     "file": "~/.claude/settings.json",
     "dialect": "claude",
     "capturesTranscript": true,
+    "tool": "tool_name",
     "events": [
       { "on": "SessionStart", "state": "idle", "matcher": "clear" },
       { "on": "UserPromptSubmit", "state": "working" },

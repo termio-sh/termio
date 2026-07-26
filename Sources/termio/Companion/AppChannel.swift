@@ -24,6 +24,12 @@ enum AppChannel {
     /// shipped release app.
     static var isDev: Bool { !suffix.isEmpty }
 
+    /// True when running from a real `.app` bundle (either channel). A bare SwiftPM
+    /// binary (`swift run`, the test runner) has no bundle identifier, and
+    /// bundle-dependent frameworks — `UNUserNotificationCenter` aborts with
+    /// "bundleProxyForCurrentProcess is nil" — must not be touched without one.
+    static let isBundledApp = Bundle.main.bundleIdentifier != nil
+
     /// Internal state — control/status sockets, `state.json`, custom themes, and
     /// downloaded tunnel binaries: `~/Library/Application Support/termio[-dev]`.
     /// Falls back to a home dotfolder if Application Support can't be resolved.

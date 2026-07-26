@@ -11,6 +11,12 @@ import TermioShared
 /// id rides in `userInfo` so a click can focus the originating session, and a
 /// delivered notification is withdrawn the moment the user engages with its
 /// session some other way.
+///
+/// The policy stack for a finished turn: setting on → real agent → termio in
+/// the background → the turn ran ≥ `minimumTurnDuration` → the turn used at
+/// least one tool (when the session has tool telemetry). A blocked agent skips
+/// the last two gates — blocked stalls all progress no matter how fast it got
+/// there.
 @MainActor
 final class TaskNotificationCenter: NSObject {
     static let shared = TaskNotificationCenter()
@@ -19,21 +25,34 @@ final class TaskNotificationCenter: NSObject {
     /// app's object graph, not the notifier.
     private weak var store: TermioStore?
 
-    /// `UNUserNotificationCenter.current()` aborts ("bundleProxyForCurrentProcess
-    /// is nil") outside a real app bundle, so every entry point bails in a bare
-    /// `swift run` executable or the test runner.
-    private static let isSupported = Bundle.main.bundleIdentifier != nil
+    /// Per-session turn and notification bookkeeping, one struct per session so
+    /// the lifecycle paths can't half-clear it — `forget` drops the whole entry.
+    private struct TurnState {
+        /// When the current turn entered `.working`. Absent at settle (no
+        /// observed start) counts as long: better a surplus banner than a
+        /// silent finished agent.
+        var workingSince: Date?
+        /// Whether the current turn has run at least one tool — the signal
+        /// that it produced work to come back to, not just a streamed answer
+        /// the user read as it rendered.
+        var sawTool = false
+        /// Whether this session has *ever* reported a tool, proving tool
+        /// telemetry exists for it (the hook path is the only source — a
+        /// screen-promoted agent never reports one). The task-vs-chat gate
+        /// applies only then; with no visibility, silence would mean never
+        /// notifying, so unknown counts as work.
+        var toolCapable = false
+        /// Bumped by `withdraw` to invalidate a post whose authorization
+        /// round-trip is still in flight when the user engages the session.
+        var generation = 0
+    }
+    private var states: [Session.ID: TurnState] = [:]
 
-    /// Sessions with a notification delivered this run, so engaging with a
-    /// session withdraws its stale banner from Notification Center.
-    private var delivered: Set<Session.ID> = []
-
-    /// Per-session generation counters that invalidate in-flight posts: the
-    /// authorization/settings round-trip is async, so a user who engages with
-    /// the session (or closes it) in that window must win over the pending
-    /// `add`. `withdraw` bumps the counter; the post re-checks it on the main
-    /// actor just before scheduling.
-    private var generations: [Session.ID: Int] = [:]
+    /// A turn shorter than this settles without a notification: a quick
+    /// conversational reply means the user is still in the loop, and banner-ing
+    /// every exchange while they glance at a browser is spam (Ghostty's
+    /// `notify-on-command-finish-after` idea, tuned for agent turns).
+    private static let minimumTurnDuration: TimeInterval = 10
 
     private override init() { super.init() }
 
@@ -41,54 +60,31 @@ final class TaskNotificationCenter: NSObject {
     /// any notification is clicked — including one whose click launches the app.
     func activate(store: TermioStore) {
         self.store = store
-        guard Self.isSupported else { return }
+        guard AppChannel.isBundledApp else { return }
         UNUserNotificationCenter.current().delegate = self
     }
-
-    /// A turn shorter than this settles without a notification: a quick
-    /// conversational reply means the user is still in the loop, and banner-ing
-    /// every exchange while they glance at a browser is spam (Ghostty's
-    /// `notify-on-command-finish-after` idea, tuned for agent turns). A blocked
-    /// agent is exempt — it stalls all progress no matter how fast it got there.
-    private static let minimumTurnDuration: TimeInterval = 10
-
-    /// When each session's current turn entered `.working`, for the
-    /// minimum-duration gate. Absent (a settle with no observed start) counts
-    /// as long: better a surplus banner than a silent finished agent.
-    private var workingSince: [Session.ID: Date] = [:]
-
-    /// Sessions whose agent has ever reported a tool, proving tool telemetry
-    /// exists for them (the hook path is the only source — a screen-promoted
-    /// agent never reports one). The task-vs-chat gate below applies only to
-    /// these; for a session with no tool visibility, silence would mean *never*
-    /// notifying, so unknown counts as work.
-    private var toolCapable: Set<Session.ID> = []
-
-    /// Sessions whose current turn has used at least one tool — the signal that
-    /// the turn produced work to come back to, not just a streamed answer the
-    /// user read as it rendered.
-    private var sawToolThisTurn: Set<Session.ID> = []
 
     /// A session's turn began. Called from the status choke point on the
     /// genuine transition into `.working`.
     func sessionDidStartWorking(_ id: Session.ID) {
-        workingSince[id] = Date()
-        sawToolThisTurn.remove(id)
+        states[id, default: TurnState()].workingSince = Date()
+        states[id]?.sawTool = false
     }
 
-    /// The agent reported running a tool this turn (hook path only).
+    /// The session reported a running tool (via `TermioStore.setCurrentTool`,
+    /// the tool observations' choke point).
     func sessionDidUseTool(_ id: Session.ID) {
-        toolCapable.insert(id)
-        sawToolThisTurn.insert(id)
+        states[id, default: TurnState()].sawTool = true
+        states[id]?.toolCapable = true
     }
 
     /// A session's status settled on a "your turn" state. Called from the status
     /// choke point (`TermioStore.setStatus`) on genuine transitions only, which
     /// is what keeps one completion to one notification.
     func sessionDidSettle(_ id: Session.ID, status: SessionStatus) {
-        let turnDuration = workingSince.removeValue(forKey: id)
-            .map { Date().timeIntervalSince($0) }
-        guard Self.isSupported, let store, store.settings.notifyOnTaskCompletion else { return }
+        let turn = states[id]
+        states[id]?.workingSince = nil
+        guard AppChannel.isBundledApp, let store, store.settings.notifyOnTaskCompletion else { return }
         guard let session = store.session(id) else { return }
         let agent = store.effectiveAgent(for: session)
         // Only real agent turns notify; a plain terminal's bell/OSC noise doesn't.
@@ -98,19 +94,16 @@ final class TaskNotificationCenter: NSObject {
         // frontmost, the sidebar dot and menu-bar pulse are the completion
         // channel; a banner would duplicate them in a louder one.
         guard !NSApp.isActive else { return }
-        // A quick reply isn't worth an interruption; a blocked agent always is.
-        if status == .done, let turnDuration, turnDuration < Self.minimumTurnDuration {
-            return
+        if status == .done {
+            // A quick reply isn't worth an interruption; a blocked agent always is.
+            if let since = turn?.workingSince,
+               Date().timeIntervalSince(since) < Self.minimumTurnDuration {
+                return
+            }
+            // Task vs chat: a turn that ran no tools produced an answer, not work.
+            // Applied only to sessions with proven tool telemetry.
+            if let turn, turn.toolCapable, !turn.sawTool { return }
         }
-        // Task vs chat: a turn that ran no tools produced an answer, not work —
-        // and streamed prose is read as it renders, so its author is present
-        // even past the duration gate. Applied only to sessions with proven
-        // tool telemetry; a blocked agent (`.needsAttention`) is exempt, as a
-        // question demands you whatever kind of turn asked it.
-        if status == .done, toolCapable.contains(id), !sawToolThisTurn.contains(id) {
-            return
-        }
-        sawToolThisTurn.remove(id)
 
         let content = UNMutableNotificationContent()
         content.title = status == .needsAttention
@@ -121,27 +114,31 @@ final class TaskNotificationCenter: NSObject {
         if store.settings.notificationSoundEnabled { content.sound = .default }
         content.userInfo = [Self.sessionKey: id.uuidString]
 
-        let generation = generations[id, default: 0]
+        let generation = states[id, default: TurnState()].generation
         let center = UNUserNotificationCenter.current()
         // Idempotent after the user's first answer; asking here rather than at
-        // launch means the prompt appears the moment it's explainable.
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
-        center.getNotificationSettings { settings in
-            guard settings.authorizationStatus == .authorized
-                || settings.authorizationStatus == .provisional else { return }
+        // launch means the prompt appears the moment it's explainable. On the
+        // very first settle the completion fires only once the user answers, so
+        // the notification that triggered the prompt still gets delivered —
+        // chaining on it (rather than a parallel `getNotificationSettings` read,
+        // which would race the prompt and report `.notDetermined`) is what saves
+        // that first banner.
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
             DispatchQueue.main.async {
                 // Re-validate on the main actor: the user may have engaged with
-                // the session (`withdraw` bumps the generation) or switched the
-                // setting off while the authorization round-trip was in flight.
-                guard self.generations[id, default: 0] == generation,
+                // the session (`withdraw` bumps the generation), closed it, or
+                // switched the setting off while the round-trip was in flight.
+                guard self.states[id]?.generation == generation,
+                      self.store?.session(id) != nil,
                       self.store?.settings.notifyOnTaskCompletion == true else { return }
                 // The banner's leading icon is always termio's own (macOS
                 // reserves it for the posting app), so the agent's identity
                 // rides as the trailing thumbnail instead. Created only now,
                 // when the request is certain to be scheduled — the system
-                // *moves* the attached file, so a copy made before any of the
-                // bail-outs above would be orphaned in the temp directory.
-                if let attachment = self.agentIconAttachment(for: agent) {
+                // *moves* the attached file, so an earlier copy would be
+                // orphaned in the temp directory by any bail-out above.
+                if let attachment = Self.agentIconAttachment(for: agent) {
                     content.attachments = [attachment]
                 }
                 // One identifier per session: a follow-up settle *replaces* the
@@ -149,43 +146,35 @@ final class TaskNotificationCenter: NSObject {
                 // shows two at once.
                 center.add(UNNotificationRequest(
                     identifier: Self.identifier(for: id), content: content, trigger: nil))
-                self.delivered.insert(id)
             }
         }
     }
 
     /// Withdraws a session's notification: the user engaged with the session
-    /// another way (clicked its row, closed it), so the banner is stale. Always
-    /// bumps the generation so a post still in its authorization round-trip is
-    /// invalidated too, and clears the pending queue alongside the delivered one
-    /// (they are separate stores).
+    /// another way (clicked its row, answered from the phone), so the banner is
+    /// stale. The removal is unconditional — identifiers are deterministic, so
+    /// this also clears a banner delivered by a previous run that crashed past
+    /// `withdrawAll`, and removing an absent identifier is a no-op.
     func withdraw(for id: Session.ID) {
-        guard Self.isSupported else { return }
-        generations[id, default: 0] += 1
-        guard delivered.remove(id) != nil else { return }
-        let identifier = Self.identifier(for: id)
-        let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [identifier])
-        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+        states[id, default: TurnState()].generation += 1
+        guard AppChannel.isBundledApp else { return }
+        UNUserNotificationCenter.current()
+            .removeDeliveredNotifications(withIdentifiers: [Self.identifier(for: id)])
     }
 
     /// Full per-session reset for the teardown paths (close, relaunch): the
-    /// banner goes, and so does the turn clock — whatever turn was running no
-    /// longer exists.
+    /// banner goes, and so does the turn bookkeeping — whatever turn was running
+    /// no longer exists. An in-flight post dies on its session-exists re-check.
     func forget(_ id: Session.ID) {
-        workingSince[id] = nil
-        sawToolThisTurn.remove(id)
-        toolCapable.remove(id)
         withdraw(for: id)
+        states.removeValue(forKey: id)
     }
 
     /// Quit takes the sessions with it, so any banners left behind would point
     /// at nothing.
     func withdrawAll() {
-        guard Self.isSupported else { return }
-        let center = UNUserNotificationCenter.current()
-        center.removeAllPendingNotificationRequests()
-        center.removeAllDeliveredNotifications()
+        guard AppChannel.isBundledApp else { return }
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
 
     nonisolated private static let sessionKey = "sessionID"
@@ -194,36 +183,13 @@ final class TaskNotificationCenter: NSObject {
         "task-settled.\(id.uuidString)"
     }
 
-    // MARK: Agent icon attachment
-
-    /// Rendered agent-icon PNGs by agent id, so each agent's mark is rasterized
-    /// once per run rather than per notification.
-    private var renderedIcons: [String: URL] = [:]
-
-    /// The agent's brand mark as a notification attachment. The system *moves*
-    /// an attached file into its own store, so the cached render is handed over
-    /// as a throwaway copy.
-    private func agentIconAttachment(for agent: AgentPreset) -> UNNotificationAttachment? {
-        guard let master = renderedIcon(for: agent) else { return nil }
-        let copy = FileManager.default.temporaryDirectory
-            .appendingPathComponent("termio-notification-\(UUID().uuidString).png")
-        do {
-            try FileManager.default.copyItem(at: master, to: copy)
-            return try UNNotificationAttachment(identifier: "agent-icon", url: copy)
-        } catch {
-            try? FileManager.default.removeItem(at: copy)
-            return nil
-        }
-    }
-
-    /// Rasterizes the sidebar's own `AgentIconView` onto a white rounded tile —
-    /// pinned to light mode so the monochrome marks (Codex, Grok) resolve to
-    /// black ink that stays legible on a dark-appearance banner too.
-    private func renderedIcon(for agent: AgentPreset) -> URL? {
-        if let cached = renderedIcons[agent.id],
-           FileManager.default.fileExists(atPath: cached.path) {
-            return cached
-        }
+    /// The agent's brand mark as a notification attachment: the sidebar's own
+    /// `AgentIconView` rasterized onto a white rounded tile — pinned to light
+    /// mode so the monochrome marks (Codex, Grok) resolve to black ink that
+    /// stays legible on a dark-appearance banner too. Rendered fresh per
+    /// notification (human-paced, so caching would buy nothing) into a unique
+    /// temp file the system then moves into its own store.
+    private static func agentIconAttachment(for agent: AgentPreset) -> UNNotificationAttachment? {
         let side: CGFloat = 96
         let renderer = ImageRenderer(
             content: AgentIconView(agent: agent, size: side * 0.58)
@@ -233,32 +199,31 @@ final class TaskNotificationCenter: NSObject {
                 .environment(\.colorScheme, .light)
         )
         renderer.scale = 2
-        guard let image = renderer.nsImage,
-              let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let png = bitmap.representation(using: .png, properties: [:])
-        else { return nil }
-        let slug = agent.id.map { $0.isLetter || $0.isNumber ? $0 : "-" }
+        guard let png = renderer.nsImage?.pngData() else { return nil }
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("termio-agent-icon-\(String(slug)).png")
-        do { try png.write(to: url) } catch { return nil }
-        renderedIcons[agent.id] = url
-        return url
+            .appendingPathComponent("termio-notification-\(UUID().uuidString).png")
+        do {
+            try png.write(to: url)
+            return try UNNotificationAttachment(identifier: "agent-icon", url: url)
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
     }
 }
 
 extension TaskNotificationCenter: UNUserNotificationCenterDelegate {
     /// `willPresent` only fires while termio is frontmost — which under the
     /// background-only policy means the user came back between the post and its
-    /// presentation. Attention has returned, so the in-app signals own it again
-    /// and the banner is suppressed (it stays in Notification Center until the
-    /// session's `withdraw`).
+    /// presentation. Attention has returned, so the banner and sound are
+    /// suppressed; `.list` keeps the notification quietly findable in
+    /// Notification Center until the session's `withdraw`.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([])
+        completionHandler([.list])
     }
 
     /// A click focuses the originating session — same verb as `termio sessions focus`.

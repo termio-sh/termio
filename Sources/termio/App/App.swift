@@ -29,6 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// elsewhere in the app (`TerminalPane` filters key-window notifications with it,
     /// so the settings window never triggers the terminal refocus rescue).
     static let mainWindowFrameAutosaveName = "TermioMainWindow"
+    /// The main window, resolved by that autosave name — for code that can't hold
+    /// the delegate's own reference (the store's reveal verb, pane focus rescue).
+    static var mainWindow: NSWindow? {
+        NSApp.windows.first { $0.frameAutosaveName == mainWindowFrameAutosaveName }
+    }
     private var window: NSWindow!
     private let settings = AppSettings()
     private lazy var store = TermioStore.restored(settings: settings)
@@ -231,12 +236,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         terminalContextMenu = TerminalContextMenu(store: store)
 
         menuBar = MenuBarController(store: store) { [weak self] id in
-            self?.store.selectedSessionID = id
-            // Picking a done/blocked row acknowledges it, even if that session was
-            // already selected (the selection didSet only reacts to a change).
-            self?.store.markSeen(id)
-            NSApp.activate(ignoringOtherApps: true)
-            self?.window.makeKeyAndOrderFront(nil)
+            // The tray's "come look at this" — same verb as a notification click
+            // and `termio sessions focus` (select + acknowledge + raise).
+            self?.store.revealSession(id)
         }
 
         // Serve the iOS companion app: the live roster, plus PTY bridging for

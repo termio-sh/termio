@@ -923,11 +923,9 @@ extension TermioStore {
         // so a resting "needs you" / unseen "done" marker has been acknowledged.
         // Without this, permission prompts answered through the raw PTY can stay
         // orange forever because menu keystrokes don't necessarily produce a new
-        // agent hook event to overwrite the old attention state.
-        let current = status(for: session.id)
-        if current == .needsAttention || current == .done {
-            setStatus(.idle, for: session.id)
-        }
+        // agent hook event to overwrite the old attention state. Routed through
+        // `markSeen` so the Mac's delivered task banner is withdrawn too.
+        markSeen(session.id)
         // A deliberate attach from the phone, like desktop selection — float it now.
         noteProjectActivity(project.id, force: true)
         if let pty = ptyProcesses[session.id] { return pty }
