@@ -217,7 +217,7 @@ final class ProjectDetailViewController: UIViewController {
         emptyState.isHidden = !project.sessions.isEmpty
         guard !emptyState.isHidden else { return }
         emptyState.configure(
-            symbol: "tray",
+            icon: .inbox,
             title: "No sessions",
             message: addButton.isHidden
                 ? "Start a session on your Mac and it'll show up here."

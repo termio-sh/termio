@@ -269,7 +269,7 @@ final class ProjectListViewController: UIViewController {
             stopConnectingGraceTimer()
             reconnectStalled = false
             emptyState.configure(
-                symbol: "macbook.and.iphone",
+                icon: .devicePair,
                 title: "No Mac connected",
                 message: "Open termio on your Mac, then pair this phone to see and drive your projects from here.",
                 actionTitle: "Connect a Mac",
@@ -280,7 +280,7 @@ final class ProjectListViewController: UIViewController {
             // asleep or off-network. Say so, and let the user force a retry —
             // the link keeps trying on its slow heartbeat regardless.
             emptyState.configure(
-                symbol: "wifi.exclamationmark",
+                icon: .wifiError,
                 title: "Can't reach your Mac",
                 message: "It may be asleep or off your network. termio keeps trying — reopen the lid, or tap to retry now.",
                 actionTitle: "Try Again",
@@ -289,7 +289,7 @@ final class ProjectListViewController: UIViewController {
         case .connecting:
             startConnectingGraceTimer()
             emptyState.configure(
-                symbol: nil,
+                icon: nil,
                 title: "Connecting…",
                 message: "Reaching your Mac over the companion link.",
                 actionTitle: nil,
@@ -299,7 +299,7 @@ final class ProjectListViewController: UIViewController {
             stopConnectingGraceTimer()
             reconnectStalled = false
             emptyState.configure(
-                symbol: "folder",
+                icon: .folder,
                 title: "No projects open",
                 message: "Open a project in termio on your Mac and it'll show up here.",
                 actionTitle: nil,

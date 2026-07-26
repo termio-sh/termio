@@ -168,9 +168,9 @@ final class ListEmptyStateView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(symbol: String?, title: String, message: String, actionTitle: String?, busy: Bool) {
-        if let symbol {
-            icon.image = UIImage(systemName: symbol)
+    func configure(icon glyph: HugeIcon?, title: String, message: String, actionTitle: String?, busy: Bool) {
+        if let glyph {
+            icon.image = glyph.strokeImage(boxSize: 44)
             icon.isHidden = false
         } else {
             icon.isHidden = true

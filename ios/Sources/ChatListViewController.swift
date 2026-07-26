@@ -165,7 +165,7 @@ final class ChatListViewController: UIViewController {
         emptyState.isHidden = !chats.isEmpty
         guard !emptyState.isHidden else { return }
         emptyState.configure(
-            symbol: "bubble.left.and.bubble.right",
+            icon: .bubbleChat,
             title: "No chats yet",
             message: "Chats are agent sessions that aren't tied to a project. Start one with ＋, or on your Mac.",
             actionTitle: nil,

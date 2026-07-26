@@ -1,5 +1,6 @@
 import GhosttyTheme
 import SwiftUI
+import TermioShared
 import UIKit
 
 /// The app's settings sheet — ChatGPT-style two-level: this root is a small
@@ -23,11 +24,13 @@ final class SettingsViewController: UITableViewController {
             }
         }
 
-        var icon: String {
+        /// The row glyph, from the shared Hugeicons set so the Settings page
+        /// matches the tab pill and the Mac settings sidebar.
+        var icon: HugeIcon {
             switch self {
-            case .connectivity: "antenna.radiowaves.left.and.right"
-            case .appearance: "paintbrush"
-            case .terminalKeyboard: "keyboard"
+            case .connectivity: .wireless
+            case .appearance: .paintBrush
+            case .terminalKeyboard: .keyboard
             }
         }
 
@@ -156,7 +159,7 @@ final class SettingsViewController: UITableViewController {
         case .pages:
             let row = Row.allCases[indexPath.row]
             cell.textLabel?.text = row.title
-            cell.imageView?.image = UIImage(systemName: row.icon)
+            cell.imageView?.image = row.icon.strokeImage(boxSize: 22)
             cell.imageView?.tintColor = .label
             cell.accessoryType = .disclosureIndicator
             if row == .connectivity {
@@ -543,12 +546,12 @@ final class ConnectivitySettingsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
-        // Every row leads with an SF Symbol, matching the root Settings page.
+        // Every row leads with a Hugeicons glyph, matching the root Settings page.
         cell.imageView?.tintColor = .label
         switch (Section(rawValue: indexPath.section), MacRow(rawValue: indexPath.row)) {
         case (.mac, .status):
             cell.textLabel?.text = "Status"
-            cell.imageView?.image = UIImage(systemName: "link")
+            cell.imageView?.image = HugeIcon.link.strokeImage(boxSize: 22)
             cell.selectionStyle = .none
             // The dot rides right before the state word ("● Connected"), not
             // out front as the row's icon — same rendering as the root page.
@@ -557,7 +560,7 @@ final class ConnectivitySettingsViewController: UITableViewController {
             cell.accessoryType = .disclosureIndicator
             if let url = CompanionLink.savedURL {
                 cell.textLabel?.text = "Address"
-                cell.imageView?.image = UIImage(systemName: "network")
+                cell.imageView?.image = HugeIcon.network.strokeImage(boxSize: 22)
                 // Host + port only: the scheme is noise and the pairing token
                 // riding the query is a secret — and the full URL overflows the
                 // row. The edit alert still carries the complete URL.
@@ -567,11 +570,11 @@ final class ConnectivitySettingsViewController: UITableViewController {
                 // Empty state: a plain "Not Set" is a dead end. Make the row
                 // the invitation to type the address itself.
                 cell.textLabel?.text = "Enter Address Manually"
-                cell.imageView?.image = UIImage(systemName: "keyboard")
+                cell.imageView?.image = HugeIcon.keyboard.strokeImage(boxSize: 22)
             }
         case (.mac, .scan):
             cell.textLabel?.text = "Scan QR Code"
-            cell.imageView?.image = UIImage(systemName: "qrcode.viewfinder")
+            cell.imageView?.image = HugeIcon.qrCode.strokeImage(boxSize: 22)
         default:
             cell.textLabel?.text = "Forget This Mac"
             cell.textLabel?.textColor = .systemRed

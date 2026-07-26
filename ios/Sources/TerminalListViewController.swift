@@ -158,7 +158,7 @@ final class TerminalListViewController: UIViewController {
         guard !emptyState.isHidden else { return }
         let canStart = store.terminalsProject?.rosterID != nil
         emptyState.configure(
-            symbol: "terminal",
+            icon: .terminal,
             title: "No terminals yet",
             message: canStart
                 ? "Terminals are plain shells that aren't tied to a project. Start one with ＋, or on your Mac."
