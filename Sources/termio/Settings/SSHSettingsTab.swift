@@ -164,10 +164,11 @@ struct SSHSettingsTab: View {
     }
 }
 
-/// One host row: alias over its `user@host` destination, a quiet key hint when
-/// the block pins an identity, and a Test Connection probe. Live connecting is a
-/// launch, not a setting — it lives in the context menu (and the sidebar / File
-/// menu), keeping this pane about configuring and verifying hosts.
+/// One host row: alias over its `user@host` destination (with the pinned key's
+/// filename when the block sets one), and a Test Connection probe. Live
+/// connecting is a launch, not a setting — it lives in the context menu (and
+/// the sidebar / File menu), keeping this pane about configuring and verifying
+/// hosts.
 private struct SSHHostRow: View {
     let host: SSHConfigHost
     let connect: () -> Void
@@ -176,22 +177,27 @@ private struct SSHHostRow: View {
     private enum ProbeState { case idle, running, result(SSHProbeResult) }
     @State private var probe: ProbeState = .idle
 
+    /// `user@host`, plus the identity file's name when the block pins one — the
+    /// full path stays in the tooltip.
+    private var subtitle: String {
+        guard let identityFile = host.identityFile else { return host.destinationLabel }
+        let keyName = (identityFile as NSString).lastPathComponent
+        return "\(host.destinationLabel) · \(keyName)"
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             IconBadge(.huge(.serverStack))
             VStack(alignment: .leading, spacing: 2) {
                 Text(host.alias).font(.headline)
-                Text(host.destinationLabel)
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .help(host.identityFile.map { "Uses \($0)" } ?? "")
             }
             Spacer(minLength: 8)
-            if let identityFile = host.identityFile {
-                HugeIconView(icon: .key, size: 11, color: Color(nsColor: .tertiaryLabelColor))
-                    .help("Uses \(identityFile)")
-            }
             probeControl
         }
         .contentShape(Rectangle())
@@ -221,7 +227,7 @@ private struct SSHHostRow: View {
                 .frame(minWidth: 44)
         case .result(let outcome):
             Button(action: runProbe) {
-                Label(outcome.label, systemImage: outcome.symbol)
+                Text(outcome.label)
                     .foregroundStyle(outcome.tint)
                     .lineLimit(1)
             }
@@ -241,22 +247,15 @@ private struct SSHHostRow: View {
     }
 }
 
-/// How each probe outcome reads in the row: a short label + tinted glyph (never
-/// color alone), with the raw ssh detail in the tooltip.
+/// How each probe outcome reads in the row: a short tinted label — the wording
+/// itself distinguishes outcomes, so color is reinforcement, not the only
+/// signal — with the raw ssh detail in the tooltip.
 private extension SSHProbeResult {
     var label: String {
         switch self {
         case .reachable: return "Reachable"
         case .authFailed: return "Auth failed"
         case .unreachable(let reason): return reason
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .reachable: return "checkmark.circle.fill"
-        case .authFailed: return "xmark.circle.fill"
-        case .unreachable: return "exclamationmark.triangle.fill"
         }
     }
 
