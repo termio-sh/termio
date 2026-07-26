@@ -45,10 +45,7 @@ extension TermioStore {
         case "send", "answer": return await sendText(request, in: project)
         case "close": return closeTab(request, in: project)
         case "focus": return focusSession(request, in: project)
-        case "read":
-            return controlError(request, "read_unavailable",
-                "Reading a session's output isn't available in this build yet — it needs a "
-                + "terminal-core buffer API. list / send / answer / close / focus work today.")
+        case "read": return readScreen(request, in: project)
         default:
             return controlError(request, "bad_op", "Unknown op '\(request.op)'.")
         }
@@ -178,10 +175,13 @@ extension TermioStore {
     private func spawnAndSend(_ request: ControlRequest, in project: Project, payload: String) async -> Data {
         let preset: AgentDefinition
         if let name = request.agent, !name.isEmpty {
-            guard let resolved = AgentPreset.resolve(name), !resolved.isShell else {
+            // An explicit name may be the plain shell — that is `run`, a terminal
+            // session typing a command. Only the *defaults* below are agent-only:
+            // nobody asks for a shell by omission.
+            guard let resolved = AgentPreset.resolve(name) else {
                 let names = AgentPreset.codingAgents.map(\.rawValue).joined(separator: ", ")
                 return controlError(request, "bad_agent",
-                    "Unknown agent '\(name)'. Try one of: \(names).")
+                    "Unknown agent '\(name)'. Try one of: \(names), or terminal.")
             }
             preset = resolved
         } else if let callerID = request.callerSession, let uuid = UUID(uuidString: callerID),
@@ -202,7 +202,11 @@ extension TermioStore {
             return controlError(request, "start_failed", "Could not start the session.")
         }
         let state = surface(for: fresh, in: project)
-        let delivered = (callerEnvelope(for: request) ?? "") + payload
+        // The envelope is agent guidance — typed into a shell it would *execute*
+        // as commands, so a `run` session gets the bare command line only.
+        let delivered = preset.isShell
+            ? payload
+            : (callerEnvelope(for: request) ?? "") + payload
         // With `--wait`, the caller opted back into blocking — but for the *outcome*
         // (§4.4), never just the plumbing: boot-settle, deliver, then hold the reply
         // until the spawned agent's first turn settles.
@@ -287,11 +291,15 @@ extension TermioStore {
     ) async -> Bool {
         // The libghostty surface attaches lazily on the pane's first render, so a
         // session never shown in the UI has no surface yet. Selecting it adds it to
-        // the mounted set; give the render one cycle. (A session shown even once
-        // stays mounted, so this only foregrounds on the very first drive.)
-        if state.surface == nil {
-            selectedSessionID = session.id
-            try? await Task.sleep(for: .milliseconds(400))
+        // the mounted set, then poll for the attach rather than betting on one
+        // render cycle: right after app launch several panes render at once and one
+        // cycle isn't enough — a `run` session's near-instant boot-settle hit that
+        // window as a spurious not_live. (A session shown even once stays mounted,
+        // so this only foregrounds on the very first drive.)
+        if state.surface == nil { selectedSessionID = session.id }
+        let attachDeadline = Date().addingTimeInterval(3)
+        while state.surface == nil, Date() < attachDeadline {
+            try? await Task.sleep(for: .milliseconds(150))
         }
         guard let surfaceHandle = Self.rawSurface(from: state) else { return false }
 
@@ -483,6 +491,14 @@ extension TermioStore {
     /// capped) are enough to answer from; the leading rows are the conversation the
     /// caller already has via the transcript.
     func promptExcerpt(for id: Session.ID) -> String? {
+        guard let lines = screenLines(for: id), !lines.isEmpty else { return nil }
+        return String(lines.suffix(12).joined(separator: "\n").suffix(1_200))
+    }
+
+    /// A session's viewport as display rows — right-trimmed, trailing blank rows
+    /// dropped — or nil when it has no live surface. The shared source for the
+    /// `needs-you` excerpt and the `read` verb.
+    private func screenLines(for id: Session.ID) -> [String]? {
         guard let screen = viewportText(for: id) else { return nil }
         var lines = screen.components(separatedBy: "\n").map { line -> String in
             var trimmed = Substring(line)
@@ -490,8 +506,36 @@ extension TermioStore {
             return String(trimmed)
         }
         while lines.last?.isEmpty == true { lines.removeLast() }
-        guard !lines.isEmpty else { return nil }
-        return String(lines.suffix(12).joined(separator: "\n").suffix(1_200))
+        return lines
+    }
+
+    /// `read`: a sibling's current screen. This is the result channel for a `run`
+    /// session — a plain command has no transcript, its output *is* the screen —
+    /// and a focus-free peek at any agent's live TUI. Viewport only (what a glance
+    /// at the pane would show); scrollback needs a terminal-core buffer API this
+    /// build doesn't have. `--lines` keeps just the tail.
+    private func readScreen(_ request: ControlRequest, in project: Project) -> Data {
+        switch resolveTarget(request.target, in: project) {
+        case .found(let session):
+            guard var lines = screenLines(for: session.id) else {
+                return controlError(request, "not_live",
+                    "\(displayTitle(for: session)) has no live terminal yet — open it once in termio.")
+            }
+            if let cap = request.lines, cap > 0 { lines = Array(lines.suffix(cap)) }
+            let screen = lines.joined(separator: "\n")
+            let handle = sessionHandle(for: session)
+            return control(request, ok: true,
+                text: screen.isEmpty ? "(blank screen)" : screen,
+                json: ["target": handle, "title": displayTitle(for: session), "screen": screen])
+        case .notFound:
+            return controlError(request, "not_found", targetNotFoundMessage(request.target))
+        case .ambiguous:
+            return controlError(request, "ambiguous",
+                "'\(request.target ?? "")' matches more than one session; use a longer id.")
+        case .mismatch(let expected):
+            return controlError(request, "wrong_agent",
+                "That id belongs to \(expected) — use that handle (copied verbatim from `list`).")
+        }
     }
 
     /// Waits for a freshly launched agent TUI to finish booting before keystrokes
@@ -574,7 +618,8 @@ extension TermioStore {
 
     /// The immediate reply for a fresh spawn: the handle is the payload, delivery is
     /// still in flight (`queued`). A just-spawned session has no transcript yet — it
-    /// appears in `list --json` once the agent's hook reports one.
+    /// appears in `list --json` once the agent's hook reports one. A `run` session
+    /// never will: a plain command's results are read off its screen (`read`).
     private func spawnQueuedReply(_ request: ControlRequest, _ session: Session) -> Data {
         let handle = sessionHandle(for: session)
         let json: [String: Any] = [
@@ -583,8 +628,14 @@ extension TermioStore {
             "created": true,
             "queued": true,
         ]
-        let text = "started \(handle) — prompt queued; use this handle for follow-ups"
-            + "\n  (transcript path appears in `termio sessions list --json` once the agent reports it)"
+        let text: String
+        if effectiveAgent(for: session).isShell {
+            text = "started \(handle) — command queued; use this handle for follow-ups"
+                + "\n  (read its output with `termio sessions read \(handle)`)"
+        } else {
+            text = "started \(handle) — prompt queued; use this handle for follow-ups"
+                + "\n  (transcript path appears in `termio sessions list --json` once the agent reports it)"
+        }
         return control(request, ok: true, text: text, json: json)
     }
 

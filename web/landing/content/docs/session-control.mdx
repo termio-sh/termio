@@ -54,7 +54,9 @@ for machine-readable output.
 | `termio sessions list` | List the sessions in this project with their live status. |
 | `termio sessions watch` | Block and stream one line per status change — the push alternative to polling `list`. |
 | `termio sessions spawn "<prompt>"` | Start a new agent session on the prompt; replies immediately with its `<agent>@<id>` handle. |
+| `termio sessions run "<command>"` | Start a new plain terminal session typing that shell command — a dev server, a test run — in a visible pane, no LLM. |
 | `termio sessions send <agent>@<id> "<text>"` | Type text into an existing session and submit it with a real Return keypress — a prompt to drive it, or a menu choice (`"1"`, `"yes"`) to answer a permission prompt. |
+| `termio sessions read <agent>@<id>` | Print the session's current screen without focusing it (`--lines N` keeps the tail) — the result channel for `run` sessions. |
 | `termio sessions close <agent>@<id>` | Close one or more session tabs. |
 | `termio sessions focus <agent>@<id>` | Bring a session to the front in the app. |
 
@@ -73,6 +75,19 @@ Commands are scoped to the current project automatically, and `termio sessions
 and the prompt itself is typed in once the agent finishes booting. Add
 `--agent <id>` (e.g. `codex`, `grok`, `pi`) to choose the agent; it defaults to
 the caller's own kind.
+
+### Running plain commands
+
+Not everything in a fleet is an agent. `run` starts a *terminal* session on a
+shell command — a dev server, a test watcher, a build — in a visible pane you
+can watch and take over, and `read` prints any session's current screen
+without focusing it. A plain command has no transcript, so its screen is its
+result channel; agent results keep flowing through transcripts.
+
+```bash
+termio sessions run "pnpm test"
+termio sessions read terminal@1a2b3c4d --lines 40
+```
 
 ### Waiting for the outcome: `--wait`
 
@@ -165,8 +180,8 @@ Every error, on any verb, has one shape — and the exit code is nonzero:
 
 The stable codes: `disabled`, `no_scope`, `bad_op`, `bad_request`, `no_text`,
 `no_target`, `not_found`, `ambiguous`, `wrong_agent`, `bad_agent`, `no_agent`,
-`start_failed`, `not_live`, `read_unavailable` — plus, on `--wait` only,
-`prompt_stalled`, `session_closed`, and `agent_gone`.
+`start_failed`, `not_live` — plus, on `--wait` only, `prompt_stalled`,
+`session_closed`, and `agent_gone`.
 
 Success replies, per verb (`schema_version` and `"ok": true` omitted below for
 brevity):
@@ -174,9 +189,10 @@ brevity):
 | Verb | Reply fields |
 | --- | --- |
 | `list` | `project`, `sessions: [{handle, id, title, agent, status, description, transcript?}]` |
-| `spawn` | `target`, `title`, `created: true`, `queued: true` — the prompt is still being delivered |
+| `spawn` / `run` | `target`, `title`, `created: true`, `queued: true` — the payload is still being delivered |
 | `send` | `target`, `title`, `transcript?`, `cursor?` — read the response from `cursor` onward |
-| `send`/`spawn` `--wait` | `target`, `title`, `status`, `timed_out`, `created?`, `transcript?`, `cursor?`, `cursor_end?`, `prompt?` |
+| `read` | `target`, `title`, `screen` — the current viewport, right-trimmed, trailing blank rows dropped |
+| `send`/`spawn`/`run` `--wait` | `target`, `title`, `status`, `timed_out`, `created?`, `transcript?`, `cursor?`, `cursor_end?`, `prompt?` |
 | `close` | `closed`, `title` |
 | `focus` | `focused` |
 

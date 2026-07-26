@@ -27,7 +27,9 @@ usage:
   termio sessions list                       sessions in this project + status
   termio sessions watch [--state <s,…>]      stream status transitions until Ctrl-C (default: done,needs-you)
   termio sessions spawn "<prompt>"           start a NEW agent session on the prompt
+  termio sessions run "<command>"            start a NEW terminal session running a shell command
   termio sessions send <agent>@<id> "<text>"     type a prompt (or menu answer) into a session
+  termio sessions read <agent>@<id> [--lines N]  print a session's current screen
   termio sessions close <agent>@<id> [...]   close session tabs
   termio sessions focus <agent>@<id>         select the session in the app
 
@@ -36,10 +38,11 @@ usage:
 options:
   --json           machine-readable output (any `sessions` command)
   --agent <id>     agent for `spawn` (e.g. claudeCode, codex, grok, pi; default: caller's kind)
-  --wait           for `spawn`/`send`: block until the turn settles; the reply carries
+  --wait           for `spawn`/`run`/`send`: block until the turn settles; the reply carries
                    the final status and the transcript line range to read
                    (exit 0 settled, 1 error — including a stalled/vanished session, 3 timed out)
   --timeout <ms>   cap for --wait (default 300000, clamped 1000–600000); implies --wait
+  --lines <n>      for `read`: keep only the last n screen rows
   --state <s,…>    for `watch`: comma-separated states to report (working, idle, done, needs-you)
   --no-snapshot    for `watch`: skip the initial per-session status snapshot
   --help, --version
@@ -97,6 +100,30 @@ input was eaten) rather than burning the timeout; a session that closes or
 whose agent exits mid-wait fails as session_closed / agent_gone.
 
 exit codes: 0 settled, 1 error (including stalled/vanished), 3 timed out.
+EOF
+            ;;
+        run) cat <<'EOF'
+usage: termio sessions run "<command>" [--wait [--timeout <ms>]] [--json]
+
+Start a NEW plain terminal session and type the shell command into it — a
+dev server, a test run, a build — visible in a split pane, no LLM involved.
+Replies immediately with the session's terminal@<id> handle; drive it
+further with `send`, read its output with `read` (a plain command has no
+transcript; its screen is the result), close it with `close`.
+
+--wait settles when the screen goes still after the command's output (or
+returns needs-you / times out, exactly as with send).
+
+exit codes: 0 settled, 1 error (including stalled/vanished), 3 timed out.
+EOF
+            ;;
+        read) cat <<'EOF'
+usage: termio sessions read <agent>@<id> [--lines N] [--json]
+
+Print the session's current screen (its viewport, right-trimmed, trailing
+blank rows dropped) without focusing it. The result channel for `run`
+sessions, and a quick peek at any agent's live TUI. --lines keeps only
+the last N rows. Scrollback is not included.
 EOF
             ;;
         send|answer) cat <<'EOF'
@@ -211,8 +238,9 @@ request_once() {
     # session is still running and the caller decides whether to re-arm — distinct
     # from success (0) and from hard errors (1), so scripts can branch without
     # parsing. JSON mode keys off the contract field, text mode off the headline;
-    # both checks are scoped to wait requests so no other reply can trip them.
-    if [ -n "${6:-}" ]; then
+    # both checks are scoped to wait requests (never `read`, whose payload is an
+    # arbitrary screen) so no other reply can trip them.
+    case "${6:-}" in *'"wait":true'*)
         if [ "$2" = json ]; then
             case "$response" in
                 *'"timed_out":true'*) return 3 ;;
@@ -222,7 +250,7 @@ request_once() {
                 *'— timed out'*) return 3 ;;
             esac
         fi
-    fi
+    ;; esac
     return 0
 }
 
@@ -231,7 +259,7 @@ sessions() {
     [ $# -gt 0 ] && shift || true
 
     case "$op" in
-        list|watch|spawn|send|answer|close|focus) ;;
+        list|watch|spawn|run|send|answer|read|close|focus) ;;
         -h|--help|help) usage; exit 0 ;;
         *)
             echo "termio: unknown sessions command '$op'" >&2
@@ -260,6 +288,7 @@ sessions() {
     no_snapshot=0
     wait=false
     timeout_ms=""
+    lines=""
     seen_positional=0
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -278,14 +307,20 @@ sessions() {
             --state)
                 [ $# -ge 2 ] || { echo "termio: --state needs a value" >&2; exit 1; }
                 states="$2"; shift ;;
+            --lines)
+                [ $# -ge 2 ] || { echo "termio: --lines needs a value" >&2; exit 1; }
+                case "$2" in
+                    ''|*[!0-9]*) echo "termio: --lines needs a whole number" >&2; exit 1 ;;
+                esac
+                lines="$2"; shift ;;
             *)
                 if [ "$op" = close ]; then
                     # Every positional is a tab to close.
                     targets="${targets:+$targets }$1"
-                elif [ "$op" = spawn ]; then
-                    # `spawn` takes no handle — every positional is the prompt.
+                elif [ "$op" = spawn ] || [ "$op" = run ]; then
+                    # `spawn`/`run` take no handle — every positional is the payload.
                     text="${text:+$text }$1"
-                elif [ "$seen_positional" -eq 0 ] && { [ "$op" = answer ] || [ "$op" = focus ]; }; then
+                elif [ "$seen_positional" -eq 0 ] && { [ "$op" = answer ] || [ "$op" = focus ] || [ "$op" = read ]; }; then
                     targets="$1"
                 elif [ "$seen_positional" -eq 0 ] && [ "$op" = send ] && is_handle "$1"; then
                     # A leading handle targets an existing session. Without one, `send`
@@ -303,7 +338,7 @@ sessions() {
     done
 
     case "$op" in
-        answer|focus)
+        answer|focus|read)
             if [ -z "$targets" ]; then
                 echo "termio: $op needs a session handle (see \`termio sessions list\`)" >&2
                 exit 1
@@ -321,18 +356,24 @@ sessions() {
                 exit 1
             fi
             ;;
+        run)
+            if [ -z "$text" ]; then
+                echo "termio: run needs a command (e.g. \`termio sessions run \"pnpm dev\"\`)" >&2
+                exit 1
+            fi
+            ;;
     esac
 
     # One sync vocabulary: --wait/--timeout mean the same thing on every verb that
-    # accepts them (spawn + send), and nothing else silently ignores them.
-    wait_extra=""
+    # accepts them (spawn/run + send), and nothing else silently ignores them.
+    extra_json=""
     if [ "$wait" = true ]; then
         case "$op" in
-            spawn|send|answer) ;;
-            *) echo "termio: --wait applies to spawn and send only" >&2; exit 1 ;;
+            spawn|run|send|answer) ;;
+            *) echo "termio: --wait applies to spawn, run, and send only" >&2; exit 1 ;;
         esac
-        wait_extra='"wait":true'
-        [ -n "$timeout_ms" ] && wait_extra="$wait_extra,\"timeout_ms\":$timeout_ms"
+        extra_json='"wait":true'
+        [ -n "$timeout_ms" ] && extra_json="$extra_json,\"timeout_ms\":$timeout_ms"
         # The client read bound must outlive the server-side wait (which the app
         # clamps to 1s–600s), or nc would hang up mid-wait and report a false
         # timeout. An explicit TERMIO_CLI_TIMEOUT still wins — the escape hatch.
@@ -389,14 +430,17 @@ sessions() {
     fi
 
     # `spawn` and the no-handle `send` alias both start a fresh session: the app
-    # spawns whenever a `send` request carries an empty target. `answer` is a thin
-    # alias for sending to an existing session. So both fold onto the wire `send`;
-    # every other verb maps straight through.
+    # spawns whenever a `send` request carries an empty target. `run` is the same
+    # spawn with the agent pinned to the plain shell — the payload is a command
+    # line, not a prompt. `answer` is a thin alias for sending to an existing
+    # session. All fold onto the wire `send`; every other verb maps straight through.
     wire_op="$op"
     case "$op" in
         spawn|answer) wire_op=send ;;
+        run) wire_op=send; agent="terminal" ;;
+        read) [ -n "$lines" ] && extra_json="\"lines\":$lines" ;;
     esac
-    request_once "$wire_op" "$format" "$targets" "$agent" "$text" "$wait_extra"
+    request_once "$wire_op" "$format" "$targets" "$agent" "$text" "$extra_json"
 }
 
 # The public hook contract:

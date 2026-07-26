@@ -452,10 +452,18 @@ enum SessionSkillInstaller {
           prompt (`--agent codex` picks the agent; default: your own kind). Replies
           immediately with the new session's handle — use it for every follow-up;
           the prompt itself is typed in once the agent finishes booting.
+        - `termio sessions run "<command>"` — start a NEW plain terminal session
+          typing that shell command (a dev server, a test run) into a visible pane —
+          no LLM. Use it instead of your own background shell when the user should
+          be able to see and take over the process.
         - `termio sessions send <agent>@<id> "<text>"` — type text into that existing
           sibling and submit it with a real Return keypress. Send a prompt to drive
           it, or a menu choice (`"1"`, `"yes"`) to answer a permission prompt.
-        - `--wait [--timeout <ms>]` on `send` or `spawn` — block until that turn
+        - `termio sessions read <agent>@<id> [--lines N]` — the session's current
+          screen. The result channel for `run` sessions (a plain command has no
+          transcript; its screen is the result) — for agent replies keep using the
+          transcript, not the screen.
+        - `--wait [--timeout <ms>]` on `send`, `spawn`, or `run` — block until that turn
           settles and reply with the final `status`, the `transcript` path, and the
           `cursor`..`cursor_end` line range holding the response — one call instead
           of send-then-poll. A sibling that stops to ask you something short-circuits
