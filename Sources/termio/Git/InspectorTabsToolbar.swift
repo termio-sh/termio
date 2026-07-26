@@ -73,7 +73,11 @@ struct InspectorTabsToolbar: View {
                 let selected = store.inspectorTab == seg.tab
                 // Active glyph lifts to full-strength; the rest stay muted — so the selected
                 // pane is legible even before you notice the pill.
-                HugeIconView(icon: seg.icon, size: 15, color: selected ? .primary : .secondary)
+                // Heavier than the size-derived 1.1pt default: at 15pt the Hugeicons stroke
+                // reads hairline next to the SF Symbol toolbar buttons flanking the track,
+                // so match their optical weight instead.
+                HugeIconView(icon: seg.icon, size: 15, color: selected ? .primary : .secondary,
+                             lineWidthOverride: 1.5)
                     .frame(width: Self.segmentWidth, height: Self.glyphHeight)
                     // Each segment is a matched-geometry *source*; the pill (non-source, below)
                     // snaps to whichever one is selected and animates across on change.
