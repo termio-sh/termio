@@ -21,7 +21,7 @@ struct SettingsView: View {
     init(
         settings: AppSettings,
         usage: UsageMonitor,
-        initialTab: SettingsTab = .appearance,
+        initialTab: SettingsTab = .general,
         onSSHConnect: @escaping (String) -> Void
     ) {
         self.settings = settings
@@ -60,6 +60,12 @@ struct SettingsView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .labeledContentStyle(.settingsCentered)
+        // Remember where the user is, so the next ⌘, reopens the same tab
+        // (see `AppDelegate.showSettings`). Written on every switch — cheap,
+        // and it must also capture the initial deep-linked tab a user stays on.
+        .onChange(of: selection, initial: true) { _, tab in
+            UserDefaults.standard.set(tab.rawValue, forKey: SettingsTab.lastOpenKey)
+        }
     }
 
     @ViewBuilder

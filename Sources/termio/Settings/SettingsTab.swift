@@ -16,6 +16,10 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// UserDefaults key remembering the last tab the user had open, so ⌘,
+    /// reopens where they left off (see `AppDelegate.showSettings`).
+    static let lastOpenKey = "settings.lastTab"
+
     var title: String {
         switch self {
         case .general: return "General"

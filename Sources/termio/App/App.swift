@@ -582,8 +582,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Opens (or refocuses) the preferences window. Reached via the responder
     /// chain from the menu item, which targets `nil`. The window is kept alive
     /// (not released on close) so reopening preserves nothing-to-rebuild state.
+    /// ⌘, lands on whatever tab the user last had open (the platform convention
+    /// — Safari, Xcode), falling back to the first tab on a fresh install;
+    /// deep-linked opens (`openSettings(initialTab:)`) still pick their own.
     @objc func showSettings(_ sender: Any?) {
-        openSettings(initialTab: .appearance)
+        let remembered = UserDefaults.standard.string(forKey: SettingsTab.lastOpenKey)
+            .flatMap(SettingsTab.init(rawValue:))
+        openSettings(initialTab: remembered ?? .general)
     }
 
     /// Opens (or refocuses) the preferences window on a specific tab. The content
