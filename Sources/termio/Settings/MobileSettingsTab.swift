@@ -13,9 +13,14 @@ struct MobileSettingsTab: View {
     @State private var hosts: [String] = []
     @State private var selectedHost = ""
     @State private var copied = false
+    @State private var confirmRotate = false
     @State private var token = PairingToken.current
     @ObservedObject private var tunnel = TunnelManager.shared
     @ObservedObject private var mobile = MobileAccess.shared
+
+    /// A tunnel is up (or coming up): the QR carries the public URL, not the LAN
+    /// address, and the LAN host picker no longer applies.
+    private var onTunnel: Bool { tunnel.provider != .off }
 
     /// What the QR encodes: the tunnel's public URL while one is running,
     /// the LAN address otherwise — either way carrying the pairing token the
@@ -38,67 +43,70 @@ struct MobileSettingsTab: View {
             Section {
                 Toggle("Mobile Access", isOn: $mobile.isEnabled)
             } footer: {
-                Text("Turn off to disconnect your iPhone; pairing is kept.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                footnote("Turn off to disconnect your iPhone; pairing is kept.")
             }
 
             // Everything below only means anything while we're serving, so the
             // master switch reveals it — a dimmed, unscannable QR (and an
             // address nothing is listening on) is more misleading than absent.
             if mobile.isEnabled {
+                // One section, one job: connect a phone. The QR is the hero, so
+                // it leads; the controls that rewrite it (Tunnel, LAN address)
+                // sit as its immediate neighbours below — adjacent enough that
+                // there's no "the QR above…" indirection to hold in your head.
                 Section {
                     if hosts.isEmpty, !tunnelRunning {
-                        Text("No network address found. Join a network, then reopen this tab.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                        footnote("No network address found. Join a network, then reopen this tab.")
                     } else {
-                        qrCard
-                        if hosts.count > 1, !tunnelRunning {
-                            Picker("Address", selection: $selectedHost) {
-                                ForEach(hosts, id: \.self) { host in
-                                    Text(host).tag(host)
-                                }
-                            }
-                        }
-                        addressRow
+                        // QR + its URL are one unit ("scan this, or copy the same
+                        // thing") — kept in a single row so no divider splits them.
+                        scanBlock
                     }
-                } header: {
-                    SectionHeaderLabel(title: "Pair iPhone")
-                } footer: {
-                    Text(tunnelRunning
-                        ? "On the iPhone app, tap the Mac pill on the session list (or Settings ▸ Connectivity) and choose Scan QR Code. The tunnel address works from anywhere."
-                        : "On the iPhone app, tap the Mac pill on the session list (or Settings ▸ Connectivity) and choose Scan QR Code. Both devices must be on the same network.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
 
-                Section {
+                    // One precise control: where the companion is reachable —
+                    // LAN only, or fronted by a named tunnel.
                     Picker("Tunnel", selection: Binding(
                         get: { tunnel.provider },
                         set: { tunnel.setProvider($0) }
                     )) {
                         ForEach(TunnelManager.Provider.allCases) { provider in
-                            Text(provider.label).tag(provider)
+                            Text(provider == .off ? "Off — LAN only" : provider.label).tag(provider)
                         }
                     }
-                    statusRow
+                    if !onTunnel, hosts.count > 1 {
+                        Picker("Address", selection: $selectedHost) {
+                            ForEach(hosts, id: \.self) { host in
+                                Text(host).tag(host)
+                            }
+                        }
+                    }
+                    if onTunnel { statusRow }
                 } header: {
-                    SectionHeaderLabel(title: "Remote Access")
+                    SectionHeaderLabel(title: "Connect iPhone")
                 } footer: {
-                    Text("Gives this Mac a public URL so your iPhone can connect away from home; connections still require this Mac's pairing token.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    footnote(onTunnel
+                        ? "On iPhone, tap the Mac pill ▸ Scan QR Code. The tunnel address works from any network."
+                        : "On iPhone, tap the Mac pill ▸ Scan QR Code. Both devices must share a LAN.")
                 }
 
                 Section {
-                    Button("Reset Pairing…", role: .destructive) {
-                        token = PairingToken.regenerate()
-                    }
+                    // A rare, destructive maintenance action: it rests as a plain
+                    // button and lets the confirmation dialog carry the red.
+                    Button("Rotate Pairing Token…") { confirmRotate = true }
+                        .confirmationDialog(
+                            "Rotate the pairing token?",
+                            isPresented: $confirmRotate,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Rotate Token", role: .destructive) {
+                                token = PairingToken.regenerate()
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("Every paired iPhone is signed out and must re-scan the new QR to reconnect.")
+                        }
                 } footer: {
-                    Text("Generates a new pairing token. Every previously paired phone is signed out until it scans the new QR.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    footnote("Issues a new token and revokes every paired iPhone.")
                 }
             }
         }
@@ -106,6 +114,14 @@ struct MobileSettingsTab: View {
         .onAppear(perform: refreshHosts)
     }
 
+    private func footnote(_ text: String) -> some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+
+    /// Just the tunnel's health — the public host already shows in the address
+    /// row above, so this line carries state, not a second copy of the URL.
     @ViewBuilder
     private var statusRow: some View {
         HStack {
@@ -113,7 +129,7 @@ struct MobileSettingsTab: View {
             Spacer()
             switch tunnel.status {
             case .off:
-                Text("Off — LAN only")
+                Text("Starting…")
                     .foregroundStyle(.secondary)
             case .installing:
                 ProgressView().controlSize(.small)
@@ -123,25 +139,28 @@ struct MobileSettingsTab: View {
                 ProgressView().controlSize(.small)
                 Text("Starting tunnel…")
                     .foregroundStyle(.secondary)
-            case .running(let publicURL):
+            case .running:
                 Image(systemName: "circle.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(.green)
-                Text(publicURL.host ?? publicURL.absoluteString)
-                    .font(.system(.callout, design: .monospaced))
+                Text("Connected")
                     .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
             case .failed(let message):
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
                 Text(message)
                     .font(.callout)
                     .foregroundStyle(.red)
+                    .multilineTextAlignment(.trailing)
             }
         }
     }
 
-    private var qrCard: some View {
-        HStack {
-            Spacer()
+    /// The hero unit: the QR to scan with its own URL captioned directly beneath
+    /// it. One row (no divider between) so the pair reads as a single thing.
+    private var scanBlock: some View {
+        VStack(spacing: 12) {
             if let qr = Self.qrImage(for: url) {
                 Image(nsImage: qr)
                     .interpolation(.none)
@@ -151,8 +170,9 @@ struct MobileSettingsTab: View {
                     .background(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            Spacer()
+            addressRow
         }
+        .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
     }
 
