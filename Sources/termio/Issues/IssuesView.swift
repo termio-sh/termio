@@ -51,14 +51,17 @@ struct IssuesView: View {
     }
 
     /// The kind switch (only when the provider has PRs at all) and the filter
-    /// menu, at the git pane's shared 34pt top-bar height.
+    /// menu, at the git pane's shared 34pt top-bar height. Trailing padding is
+    /// deeper than leading so the funnel's right edge lines up under the
+    /// toolbar's collapse button instead of hugging the pane edge.
     private var topBar: some View {
         HStack(spacing: 0) {
             if model.capabilities?.pullRequests == true { kindSwitch }
             Spacer(minLength: 0)
             filterMenu
         }
-        .padding(.horizontal, 8)
+        .padding(.leading, 8)
+        .padding(.trailing, 12)
         .frame(height: GitChangesView.topBarHeight)
     }
 
@@ -227,8 +230,10 @@ struct IssuesView: View {
 
 // MARK: - Row
 
-/// One list row: state dot, monospace identifier, title (the flexible element),
-/// and the labels as color-dot chips.
+/// One list row: state dot, monospace identifier, title (the flexible element).
+/// The trailing metadata — label chips and the updated age — appears on hover
+/// (the GitChangeRow pattern): bare color dots at rest carried no meaning, so
+/// the resting row is clean and the hover answers "what is this, how fresh".
 private struct IssueRow: View {
     let item: IssueSummary
     let font: Font
@@ -256,15 +261,28 @@ private struct IssueRow: View {
                 .truncationMode(.tail)
                 .layoutPriority(1)
             Spacer(minLength: 6)
-            HStack(spacing: 3) {
-                ForEach(item.labels.prefix(4), id: \.name) { label in
-                    Circle()
-                        .fill(label.color)
-                        .frame(width: 6, height: 6)
-                        .help(label.name)
+            if isHovering {
+                HStack(spacing: 4) {
+                    ForEach(item.labels.prefix(3), id: \.name) { label in
+                        HStack(spacing: 3) {
+                            Circle()
+                                .fill(label.color)
+                                .frame(width: 5, height: 5)
+                            Text(label.name)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(Color.primary.opacity(0.07)))
+                    }
+                    Text(item.updatedAt.issueRowAge)
+                        .font(.system(size: 9.5, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.tertiary)
                 }
+                .fixedSize()
             }
-            .fixedSize()
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
@@ -714,6 +732,19 @@ private struct IssueWebView: NSViewRepresentable {
             } else {
                 decisionHandler(.allow)
             }
+        }
+    }
+}
+
+private extension Date {
+    /// Compact age for the row's hover metadata — "5m", "3h", "2d", "6w".
+    var issueRowAge: String {
+        let seconds = max(0, -timeIntervalSinceNow)
+        switch seconds {
+        case ..<3600: return "\(max(1, Int(seconds / 60)))m"
+        case ..<86_400: return "\(Int(seconds / 3600))h"
+        case ..<(86_400 * 28): return "\(Int(seconds / 86_400))d"
+        default: return "\(Int(seconds / (86_400 * 7)))w"
         }
     }
 }
