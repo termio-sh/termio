@@ -177,6 +177,23 @@ final class TaskNotificationCenter: NSObject {
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
 
+    /// The macOS-side authorization for termio's notifications, for the Settings
+    /// row. `nil` outside a bundled app (the framework can't be touched there).
+    static func authorizationStatus() async -> UNAuthorizationStatus? {
+        guard AppChannel.isBundledApp else { return nil }
+        return await UNUserNotificationCenter.current().notificationSettings()
+            .authorizationStatus
+    }
+
+    /// An explicit permission request from Settings — the same idempotent call
+    /// the first notification makes, just user-initiated. Returns whether the
+    /// user granted it.
+    static func requestPermission() async -> Bool {
+        guard AppChannel.isBundledApp else { return false }
+        return (try? await UNUserNotificationCenter.current()
+            .requestAuthorization(options: [.alert, .sound])) ?? false
+    }
+
     nonisolated private static let sessionKey = "sessionID"
 
     nonisolated private static func identifier(for id: Session.ID) -> String {
