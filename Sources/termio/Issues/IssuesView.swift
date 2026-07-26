@@ -217,9 +217,13 @@ private struct IssueRow: View {
                 .fill(item.state.tint)
                 .frame(width: 7, height: 7)
                 .help(item.state.label)
+            // Never wraps or compresses — without this, a narrow pane stacks the
+            // identifier one character per line and the row balloons.
             Text(item.identifier)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
             Text(item.title)
                 .font(font)
                 .lineLimit(1)
