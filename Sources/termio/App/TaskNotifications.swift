@@ -45,19 +45,42 @@ final class TaskNotificationCenter: NSObject {
         UNUserNotificationCenter.current().delegate = self
     }
 
+    /// A turn shorter than this settles without a notification: a quick
+    /// conversational reply means the user is still in the loop, and banner-ing
+    /// every exchange while they glance at a browser is spam (Ghostty's
+    /// `notify-on-command-finish-after` idea, tuned for agent turns). A blocked
+    /// agent is exempt — it stalls all progress no matter how fast it got there.
+    private static let minimumTurnDuration: TimeInterval = 10
+
+    /// When each session's current turn entered `.working`, for the
+    /// minimum-duration gate. Absent (a settle with no observed start) counts
+    /// as long: better a surplus banner than a silent finished agent.
+    private var workingSince: [Session.ID: Date] = [:]
+
+    /// A session's turn began. Called from the status choke point on the
+    /// genuine transition into `.working`.
+    func sessionDidStartWorking(_ id: Session.ID) {
+        workingSince[id] = Date()
+    }
+
     /// A session's status settled on a "your turn" state. Called from the status
     /// choke point (`TermioStore.setStatus`) on genuine transitions only, which
     /// is what keeps one completion to one notification.
     func sessionDidSettle(_ id: Session.ID, status: SessionStatus) {
+        let turnDuration = workingSince.removeValue(forKey: id)
+            .map { Date().timeIntervalSince($0) }
         guard Self.isSupported, let store, store.settings.notifyOnTaskCompletion else { return }
         guard let session = store.session(id) else { return }
         let agent = store.effectiveAgent(for: session)
         // Only real agent turns notify; a plain terminal's bell/OSC noise doesn't.
         guard agent != .terminal else { return }
-        // The user is already looking at this session — the banner would only
-        // echo the sidebar dot already in front of them.
-        if NSApp.isActive,
-           store.selectedSessionID == id || store.splitRoot?.contains(id) == true {
+        // The notification's one job is "you stepped away, come back" — the
+        // policy Cursor and Codex both ship (`unfocused`-only). While termio is
+        // frontmost, the sidebar dot and menu-bar pulse are the completion
+        // channel; a banner would duplicate them in a louder one.
+        guard !NSApp.isActive else { return }
+        // A quick reply isn't worth an interruption; a blocked agent always is.
+        if status == .done, let turnDuration, turnDuration < Self.minimumTurnDuration {
             return
         }
 
@@ -116,6 +139,14 @@ final class TaskNotificationCenter: NSObject {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [identifier])
         center.removeDeliveredNotifications(withIdentifiers: [identifier])
+    }
+
+    /// Full per-session reset for the teardown paths (close, relaunch): the
+    /// banner goes, and so does the turn clock — whatever turn was running no
+    /// longer exists.
+    func forget(_ id: Session.ID) {
+        workingSince[id] = nil
+        withdraw(for: id)
     }
 
     /// Quit takes the sessions with it, so any banners left behind would point
@@ -187,15 +218,17 @@ final class TaskNotificationCenter: NSObject {
 }
 
 extension TaskNotificationCenter: UNUserNotificationCenterDelegate {
-    /// Show the banner even while termio is frontmost — the send path already
-    /// suppressed the session the user is looking at, so a banner that reaches
-    /// here is always about some *other* session.
+    /// `willPresent` only fires while termio is frontmost — which under the
+    /// background-only policy means the user came back between the post and its
+    /// presentation. Attention has returned, so the in-app signals own it again
+    /// and the banner is suppressed (it stays in Notification Center until the
+    /// session's `withdraw`).
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        completionHandler([])
     }
 
     /// A click focuses the originating session — same verb as `termio sessions focus`.

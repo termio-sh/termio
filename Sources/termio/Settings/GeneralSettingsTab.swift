@@ -13,7 +13,7 @@ struct GeneralSettingsTab: View {
                     SettingsLabel(
                         .huge(.checkCircle),
                         title: "Task completion",
-                        subtext: "Posts a macOS notification when an agent finishes a task — or stops to ask you something — in a session you aren't looking at. Click it to jump to that session. macOS asks for notification permission the first time."
+                        subtext: "Posts a macOS notification when an agent finishes a task — or stops to ask you something — while termio is in the background. Quick replies under ten seconds stay quiet; a blocked agent always notifies. Click the notification to jump to that session. macOS asks for permission the first time."
                     )
                 }
                 .toggleStyle(.switch)

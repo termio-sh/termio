@@ -236,8 +236,11 @@ final class TermioStore: ObservableObject {
         // Settling on a "your turn" state is the one transition worth a desktop
         // notification. Firing from the choke point (no-op writes never reach here)
         // is what keeps one completion to one notification; the notifier applies
-        // its own gates (setting off, plain terminal, session already on screen).
-        if status == .done || status == .needsAttention {
+        // its own gates (setting off, plain terminal, app frontmost, short turn).
+        // The working transition starts the turn clock those gates measure against.
+        if status == .working {
+            TaskNotificationCenter.shared.sessionDidStartWorking(id)
+        } else if status == .done || status == .needsAttention {
             TaskNotificationCenter.shared.sessionDidSettle(id, status: status)
         }
         return true
