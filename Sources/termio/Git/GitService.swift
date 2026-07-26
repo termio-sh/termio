@@ -571,6 +571,20 @@ enum GitService {
         return RemotePage(forge: forge, url: branchURL)
     }
 
+    /// The `owner/repo` slug when the origin remote points at github.com — the
+    /// Issues pane's zero-config binding (docs/design/issue-tracker-integration.md).
+    /// `nil` for non-GitHub remotes or a repo with no origin.
+    static func gitHubRepoSlug(in dir: String) async -> String? {
+        await offMain {
+            guard let remote = run(["remote", "get-url", "origin"], in: dir)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                let (host, path) = parseRemote(remote),
+                host == "github.com" || host == "www.github.com"
+            else { return nil }
+            return path
+        }
+    }
+
     /// Splits a remote into web-addressable host + repo path, from either the scp-like
     /// form (`git@host:owner/repo.git`) or a real URL (`https://…`, `ssh://…`). Ports
     /// and userinfo are dropped — the web UI lives on plain https.

@@ -77,6 +77,15 @@ struct FileBrowserView: View {
                 } else {
                     content
                 }
+            case .issues:
+                if let repoRoot = projectPath {
+                    // Fresh identity per repo, like Changes: the panel model (connection
+                    // phase, binding, list, pushed-in detail) resets when the project moves.
+                    IssuesView(repoRoot: repoRoot)
+                        .id(repoRoot)
+                } else {
+                    noProject
+                }
             case .info:
                 SessionInfoView()
             }

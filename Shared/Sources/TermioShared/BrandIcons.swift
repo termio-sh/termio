@@ -219,6 +219,7 @@ public enum HugeIcon: Hashable, Sendable {
     case devicePair
     case wifiError
     case inbox
+    case issueCircle
 
     /// Side length of the source SVG's square viewBox (Hugeicons uses 24).
     public var viewBox: CGFloat { 24 }
@@ -390,6 +391,11 @@ public enum HugeIcon: Hashable, Sendable {
         case .wifiError:
             // Hugeicons "wifi-error-01": radio waves with a warning — the iOS unreachable empty state.
             return "M18.5 9.99761C14.7324 6.66535 9.5 6.66535 5.5 9.99761 M2 6.9986C8.31579 1.66699 15.6842 1.66698 22 6.99849 M11.9933 14.9853V16.4964M11.9933 18.4673V18.4984M12.1444 12.0075C12.4933 11.9942 13.375 12.163 14.2349 13.6825L16.3884 17.3742C17.2109 18.5922 17.6154 20.7778 14.5873 20.9418L12 21.0002L9.3841 20.926C6.35606 20.7621 6.82207 18.5938 7.58302 17.3585L9.73652 13.6667C10.5964 12.1473 11.4781 11.9784 11.8271 11.9918L12.1444 12.0075Z"
+        case .issueCircle:
+            // GitHub's issue-opened mark (a circle with a center dot), redrawn in the
+            // Hugeicons stroke language — the inspector Issues segment. The dot is a
+            // small stroked circle so the 1.5 line weight matches its ring.
+            return "M22 12a10 10 0 1 0 -20 0a10 10 0 0 0 20 0Z M13.25 12a1.25 1.25 0 1 0 -2.5 0a1.25 1.25 0 0 0 2.5 0Z"
         case .inbox:
             // Hugeicons "inbox": a rounded tray — the iOS no-sessions empty state.
             return "M2.5 12C2.5 7.52166 2.5 5.28249 3.89124 3.89124C5.28249 2.5 7.52166 2.5 12 2.5C16.4783 2.5 18.7175 2.5 20.1088 3.89124C21.5 5.28249 21.5 7.52166 21.5 12C21.5 16.4783 21.5 18.7175 20.1088 20.1088C18.7175 21.5 16.4783 21.5 12 21.5C7.52166 21.5 5.28249 21.5 3.89124 20.1088C2.5 18.7175 2.5 16.4783 2.5 12Z M21.5 13.5H16.5743C15.7322 13.5 15.0706 14.2036 14.6995 14.9472C14.2963 15.7551 13.4889 16.5 12 16.5C10.5111 16.5 9.70373 15.7551 9.30054 14.9472C8.92942 14.2036 8.26777 13.5 7.42566 13.5H2.5"
