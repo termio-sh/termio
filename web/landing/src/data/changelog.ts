@@ -17,6 +17,150 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.20.0",
+    date: "2026-07-26",
+    title: "Your agents can tap you on the shoulder",
+    changes: {
+      new: [
+        "Task notifications: when an agent finishes a task — or stops to ask you something — while termio is in the background, a native macOS notification appears with the agent's icon; click it to jump straight to that session. Quick replies and answer-only chat turns stay quiet, and a blocked agent always gets through. Toggle it (and its sound) in Settings › General.",
+        "Issues: a new inspector pane lists the project's GitHub issues and pull requests, readable without leaving the terminal.",
+        "SSH: an SSH settings tab reads ~/.ssh/config as the source of truth, with Test Connection probes — and New SSH Connection now lists your config hosts, one click to connect.",
+        "Sessions CLI: send and spawn take --wait to block until the turn settles, and watch emits stalled events when a working session stops making progress.",
+      ],
+      improved: [
+        "Markdown preview renders GitHub-compatible.",
+        "Settings reopens on the tab you last used, and the Keyboard pane is redesigned System Settings style.",
+        "Large files open faster in the editor, and branch watching no longer spawns a git subprocess storm.",
+      ],
+      fixed: [
+        "Search results survive multi-byte text at the output cap.",
+        "SSH sessions draw with the server glyph at the right size.",
+      ],
+    },
+  },
+  {
+    version: "0.19.2",
+    date: "2026-07-25",
+    title: "Cold starts and a louder CLI",
+    changes: {
+      improved: [
+        "The sessions CLI fails loudly instead of silently: spawn stopped blocking, and watch gained a v2 event stream.",
+      ],
+      fixed: [
+        "The shell's first prompt renders on a cold start.",
+        "Sidebar session clicks are instant again (0.19.1).",
+      ],
+    },
+  },
+  {
+    version: "0.19.0",
+    date: "2026-07-25",
+    title: "Drag to reorder",
+    changes: {
+      new: [
+        "Sidebar sessions reorder by dragging the row — within a project, worktree, Terminals, or Chats bucket. Split-pane grouping moved to the row's context menu and ⌘D.",
+      ],
+      improved: [
+        "Opening projects and scrolling the sidebar stay off blocking I/O, and every working spinner shares one indicator.",
+      ],
+      fixed: [
+        "Per-session state is retired with its session instead of lingering.",
+      ],
+    },
+  },
+  {
+    version: "0.18.0",
+    date: "2026-07-24",
+    title: "Supervise sessions from the CLI",
+    changes: {
+      new: [
+        "Sessions CLI: spawn a new agent on a prompt, send follow-ups, and watch status transitions stream by — enough to let one agent supervise its siblings.",
+        "Grok transcripts render in the session trace.",
+      ],
+      improved: [
+        "iOS: home chrome redrawn with Hugeicons, and loose terminals get their own tab.",
+      ],
+      fixed: [
+        "iOS: the phone mirror no longer echoes terminal query replies, and slow agent TUIs reflow when entering the alternate screen.",
+      ],
+    },
+  },
+  {
+    version: "0.17.0",
+    date: "2026-07-24",
+    title: "Split panes, MIT",
+    changes: {
+      new: [
+        "Split panes: agents started from the CLI auto-split beside their caller, and any two sessions can be grouped or ungrouped by hand.",
+        "termio is now MIT-licensed.",
+      ],
+      improved: [
+        "Sidebar scrolling stays smooth with many busy sessions.",
+        "The git pane survives floods of untracked files, and its ignore actions match GitHub Desktop verbatim.",
+      ],
+    },
+  },
+  {
+    version: "0.16.0",
+    date: "2026-07-23",
+    title: "Sessions that know what they run",
+    changes: {
+      new: [
+        "Persistent agent identity: hand-start claude in a plain terminal and the session becomes a Claude Code session — for real, surviving restarts; a clean /quit returns it to a shell, and an in-pane self-update relaunches the agent in place.",
+      ],
+      improved: [
+        "The menu-bar roster shows only sessions that need you, with the sidebar's comet for working ones.",
+        "The file explorer's row menu grew, and the tree auto-refreshes.",
+      ],
+    },
+  },
+  {
+    version: "0.15.2",
+    date: "2026-07-21",
+    title: "Green stays green",
+    changes: {
+      fixed: [
+        "A finished turn keeps its green dot when a trailing turn-complete notification arrives (Grok).",
+      ],
+    },
+  },
+  {
+    version: "0.15.1",
+    date: "2026-07-21",
+    title: "History chips",
+    changes: {
+      improved: [
+        "History rows carry tag chips and unpushed markers; the commit-count bar is gone.",
+      ],
+    },
+  },
+  {
+    version: "0.15.0",
+    date: "2026-07-21",
+    title: "Git pane polish",
+    changes: {
+      improved: [
+        "The git pane gets a glass mode switch, aligned headers, and GitHub-Desktop-style single-line history rows.",
+      ],
+    },
+  },
+  {
+    version: "0.14.0",
+    date: "2026-07-21",
+    title: "A real diff viewer",
+    changes: {
+      new: [
+        "The diff is one continuous view: selection flows across hunks, ⌘F searches it, keyboard walks it, and changed words highlight within lines.",
+        "Docs: termio.sh gained a documentation site, served for agents too (llms.txt and raw-Markdown routes).",
+        "iOS: worktree branches, Chats, and Markdown previews sync to the phone.",
+      ],
+      improved: [
+        "Add Agent replaces the More-agents drawer, gated on what's actually installed.",
+        "Status tracking follows in-process conversation rotation (/new, /clear) for Claude, Codex, OpenCode, Pi, and Grok.",
+      ],
+    },
+  },
+  {
     version: "0.13.0",
     date: "2026-07-19",
     title: "Agent status you can trust",
