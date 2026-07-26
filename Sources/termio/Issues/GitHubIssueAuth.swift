@@ -9,12 +9,12 @@ import Security
 /// server. The token asks for `repo` scope so the write milestone (issue #100)
 /// won't need a re-auth.
 enum GitHubIssueAuth {
-    /// The termio OAuth App's public client id ("Enable Device Flow" must be
-    /// checked on the app). Overridable for development via the environment
-    /// until the production app is registered (issue #99's open question).
+    /// The termio OAuth App's public client id (owned by the termio-sh org,
+    /// "Enable Device Flow" checked). Public by design — device flow needs no
+    /// secret. Overridable via the environment for testing against another app.
     static var clientID: String {
         ProcessInfo.processInfo.environment["TERMIO_GITHUB_CLIENT_ID"]
-            ?? "Ov23liTERMIO_UNREGISTERED"
+            ?? "Ov23lipSynmaEBOQR1cM"
     }
 
     // MARK: Keychain
