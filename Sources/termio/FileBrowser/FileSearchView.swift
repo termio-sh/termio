@@ -94,7 +94,6 @@ struct FileSearchView: View {
                 .padding(.bottom, 5)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder
