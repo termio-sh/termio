@@ -43,12 +43,26 @@ final class GitPanelModel: ObservableObject {
     /// Directory names whose events can't change what the pane shows: build products
     /// and package caches that are gitignored in practice. An agent's `swift build`
     /// writes thousands of files under `.build`, and every burst was a full change-list
-    /// pass; dropping these keeps the watch quiet through builds. A repo that actually
-    /// tracks one of these still stays honest — any event outside the list, and app
-    /// re-activation, reload from git, the source of truth.
+    /// pass; dropping these keeps the watch quiet through builds. Only components
+    /// *below a watched root* count — a repo that itself lives under a directory
+    /// named like a build product must not go deaf to every event. A repo that
+    /// actually tracks one of these still stays honest — any event outside the list,
+    /// and app re-activation, reload from git, the source of truth.
     private static let ignoredEventComponents: Set<String> = [
         ".build", "node_modules", "DerivedData", ".venv", ".gradle", ".turbo", ".next",
     ]
+
+    /// Whether an event path sits under a build-product directory *inside* one of the
+    /// watched roots. The roots' own ancestry is deliberately not inspected.
+    private static func isBuildProductEvent(_ path: String, underAny roots: [String]) -> Bool {
+        for root in roots where path == root || path.hasPrefix(root + "/") {
+            return path.dropFirst(root.count).split(separator: "/")
+                .contains { ignoredEventComponents.contains(String($0)) }
+        }
+        // An event outside every watched root (FSEvents shouldn't produce one)
+        // stays relevant rather than being silently swallowed.
+        return false
+    }
 
     init(repoRoot: String, isPaneVisible: (() -> Bool)? = nil) {
         self.repoRoot = repoRoot
@@ -116,8 +130,7 @@ final class GitPanelModel: ObservableObject {
         ) { [weak self] eventPaths in
             // Build-product churn can't change the pane; don't let it spawn git.
             let relevant = eventPaths.filter { path in
-                !path.split(separator: "/")
-                    .contains { Self.ignoredEventComponents.contains(String($0)) }
+                !Self.isBuildProductEvent(path, underAny: paths)
             }
             guard !relevant.isEmpty else { return }
             let touchesGitDir = relevant.contains { path in

@@ -27,7 +27,15 @@ APP_PID=$(pgrep -f "termio-dev.app/Contents/MacOS/termio" | head -1)
 [[ -z "$APP_PID" ]] && { echo "dev app not running"; exit 1; }
 echo "app: $(ps -o args= -p "$APP_PID")"
 
+# The trace file counts every traced git, not just the app's — so start each run
+# from the current line offset and report the delta, and keep this script's own
+# workload out of the trace even when run from a traced shell.
+TRACE_FILE=$(launchctl getenv GIT_TRACE2_EVENT 2>/dev/null || true)
+trace_start=0
+[[ -n "$TRACE_FILE" && -f "$TRACE_FILE" ]] && trace_start=$(wc -l < "$TRACE_FILE")
+
 ( # workload: appends + index rewrites + a real commit every ~4s
+  unset GIT_TRACE2_EVENT
   cd "$REPO" || exit 1
   i=0
   end=$((EPOCHSECONDS + DURATION))
@@ -55,3 +63,7 @@ done
 wait $WORKLOAD 2>/dev/null
 
 echo "samples=$ticks git-child-sightings=$hits avg-app-cpu=$(( cpu_total / (ticks > 0 ? ticks : 1) ))%"
+if [[ -n "$TRACE_FILE" && -f "$TRACE_FILE" ]]; then
+  trace_end=$(wc -l < "$TRACE_FILE")
+  echo "trace-lines-this-run=$(( trace_end - trace_start ))  (analyze from line $(( trace_start + 1 )) of $TRACE_FILE)"
+fi

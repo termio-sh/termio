@@ -175,12 +175,12 @@ final class BranchModel: ObservableObject {
     /// same worktrees — is recognized as the no-op it is.
     private struct GitState: Equatable {
         var branch: BranchState?
-        var worktreeNames: [String]
+        var worktreeEntries: [String]
     }
 
     private func readGitState(headDirectory: String) -> GitState {
         GitState(branch: readBranch(headDirectory: headDirectory),
-                 worktreeNames: readWorktreeNames(headDirectory: headDirectory))
+                 worktreeEntries: readWorktreeEntries(headDirectory: headDirectory))
     }
 
     /// Parses `HEAD` directly instead of spawning `git rev-parse`: the file is either
@@ -204,13 +204,38 @@ final class BranchModel: ObservableObject {
         return BranchState(label: String(head.prefix(7)), isDetached: true)
     }
 
-    /// The linked-worktree entry names under the primary checkout's git dir. Empty for
-    /// a linked worktree's own HEAD directory (which has no `worktrees` child) and for
-    /// a repo with no linked worktrees — both fine, the value only has to be *stable*
-    /// so a change in it is a real add/remove.
-    private func readWorktreeNames(headDirectory: String) -> [String] {
-        ((try? FileManager.default.contentsOfDirectory(atPath: headDirectory + "/worktrees")) ?? [])
-            .sorted()
+    /// The primary checkout's git directory — where the `worktrees` listing lives.
+    /// A linked worktree's HEAD directory (`<common>/worktrees/<name>`) carries a
+    /// `commondir` file pointing back, usually relatively, at the common dir; the
+    /// primary checkout has no such file and is its own common dir.
+    private func commonDirectory(for headDirectory: String) -> String {
+        guard let raw = try? String(
+            contentsOfFile: headDirectory + "/commondir", encoding: .utf8) else {
+            return headDirectory
+        }
+        let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return headDirectory }
+        if path.hasPrefix("/") { return path }
+        return URL(fileURLWithPath: headDirectory)
+            .appendingPathComponent(path).standardizedFileURL.path
+    }
+
+    /// One line per linked worktree: the entry name plus its admin `gitdir` contents,
+    /// so an add, a remove, *and* a `git worktree move` (same name, new checkout path)
+    /// all read as changes. Resolved through the common dir, so a linked checkout's
+    /// events see the same listing the primary one does — its own HEAD directory has
+    /// no `worktrees` child. Empty for a repo with no linked worktrees.
+    private func readWorktreeEntries(headDirectory: String) -> [String] {
+        let root = commonDirectory(for: headDirectory) + "/worktrees"
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else {
+            return []
+        }
+        return names.sorted().map { name in
+            let gitdir = (try? String(
+                contentsOfFile: root + "/" + name + "/gitdir", encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return name + "\u{0}" + gitdir
+        }
     }
 
     // MARK: - Git (watch setup only)
