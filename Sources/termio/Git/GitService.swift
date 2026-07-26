@@ -24,12 +24,15 @@ enum GitService {
     /// and the overlay can collapse unchanged runs into expandable bands client-side;
     /// a pathological row count falls back to git's default 3-line context (the view
     /// then shows the inter-hunk gaps as fixed, non-expandable bands).
-    static func diffRows(for change: GitChange, in repoRoot: String, commit: String? = nil) async -> [DiffRow] {
+    static func diffRows(
+        for change: GitChange, in repoRoot: String, commit: String? = nil, range: String? = nil
+    ) async -> [DiffRow] {
         await offMain {
-            let full = loadDiffText(change, repoRoot, commit: commit, context: 999_999)
+            let full = loadDiffText(change, repoRoot, commit: commit, range: range, context: 999_999)
             // ~20k lines of average code ≈ 1.5 MB. Beyond that, re-fetch at git's
             // default 3-line context rather than parse (and render) a whole huge file.
-            let text = full.count <= 1_500_000 ? full : loadDiffText(change, repoRoot, commit: commit)
+            let text = full.count <= 1_500_000
+                ? full : loadDiffText(change, repoRoot, commit: commit, range: range)
             return parseDiff(text)
         }
     }
@@ -371,8 +374,15 @@ enum GitService {
     }
 
     private static func loadDiffText(_ change: GitChange, _ repoRoot: String,
-                                     commit: String? = nil, context: Int? = nil) -> String {
+                                     commit: String? = nil, range: String? = nil,
+                                     context: Int? = nil) -> String {
         let contextArguments = context.map { ["-U\($0)"] } ?? []
+        // PR file row: the file's change across a `base...head` range (three-dot, so
+        // git diffs from the merge base — the change the PR itself introduces).
+        if let range {
+            return run(["diff", "-M"] + contextArguments + [range, "--", change.path],
+                       in: repoRoot, ignoreStatus: true) ?? ""
+        }
         // History file row: the file's change within one commit. `--format=` strips the
         // commit header so parseDiff sees only the unified diff.
         if let commit {
@@ -582,6 +592,47 @@ enum GitService {
                 host == "github.com" || host == "www.github.com"
             else { return nil }
             return path
+        }
+    }
+
+    /// Fetches a pull request's head (`refs/pull/N/head` — GitHub serves every PR
+    /// there, fork or not) into `origin/pr/N`, plus the PR's base branch, so the
+    /// Files tab can show three-dot merge-base diffs without any checkout. Returns
+    /// the `base...head` range string to diff with, or `nil` when the fetch failed.
+    static func fetchPullRequestRef(number: Int, baseRef: String, in repoRoot: String) async -> String? {
+        await offMain {
+            guard run(["fetch", "--no-tags", "origin", baseRef,
+                       "+refs/pull/\(number)/head:refs/remotes/origin/pr/\(number)"],
+                      in: repoRoot) != nil
+            else { return nil }
+            return "origin/\(baseRef)...origin/pr/\(number)"
+        }
+    }
+
+    /// Checks the PR's branch out: a same-repo PR switches to its real head branch
+    /// (tracking `origin`); a fork PR materializes the pull ref as local `pr/N`.
+    /// Returns an error description, or `nil` on success.
+    static func checkoutPullRequest(
+        number: Int, headRef: String, crossRepository: Bool, in repoRoot: String
+    ) async -> String? {
+        await offMain {
+            if !crossRepository {
+                guard run(["fetch", "--no-tags", "origin", headRef], in: repoRoot) != nil else {
+                    return "Couldn’t fetch \(headRef) from origin."
+                }
+                // `switch` DWIMs a local tracking branch from origin/<headRef>.
+                guard run(["switch", headRef], in: repoRoot) != nil else {
+                    return "Couldn’t switch to \(headRef) — the working tree may have conflicting changes."
+                }
+                return nil
+            }
+            guard run(["fetch", "--no-tags", "origin",
+                       "+refs/pull/\(number)/head:refs/heads/pr/\(number)"], in: repoRoot) != nil
+            else { return "Couldn’t fetch the pull request from origin." }
+            guard run(["switch", "pr/\(number)"], in: repoRoot) != nil else {
+                return "Couldn’t switch to pr/\(number) — the working tree may have conflicting changes."
+            }
+            return nil
         }
     }
 

@@ -68,6 +68,59 @@ struct GitHubIssueProvider: IssueProvider {
         )
     }
 
+    // MARK: Pull-request extras (GitHub-specific, outside the tracker protocol)
+
+    /// The PR's branch facts, from `/pulls/{n}` — the fields the `/issues` view of
+    /// a PR doesn't carry.
+    func pullRequestGitInfo(_ number: Int, in container: IssueContainer) async throws -> PullRequestGitInfo {
+        struct RawPR: Decodable {
+            struct Side: Decodable {
+                struct Repo: Decodable { let fullName: String }
+                let ref: String
+                let repo: Repo?
+            }
+            let head: Side
+            let base: Side
+        }
+        let raw: RawPR = try await get(
+            URL(string: "https://api.github.com/repos/\(container.id)/pulls/\(number)")!)
+        return PullRequestGitInfo(
+            headRef: raw.head.ref,
+            baseRef: raw.base.ref,
+            // A deleted fork leaves `head.repo` null — only the pull ref remains.
+            crossRepository: raw.head.repo?.fullName != raw.base.repo?.fullName
+        )
+    }
+
+    /// The PR's changed files as `GitChange` rows (the git pane's own model), so
+    /// the Files tab and the diff overlay's sibling walk reuse everything.
+    func pullRequestFiles(_ number: Int, in container: IssueContainer) async throws -> [GitChange] {
+        struct RawFile: Decodable {
+            let filename: String
+            let status: String
+            let additions: Int
+            let deletions: Int
+            let previousFilename: String?
+        }
+        let raw: [RawFile] = try await get(
+            URL(string: "https://api.github.com/repos/\(container.id)/pulls/\(number)/files?per_page=100")!)
+        return raw.map { file in
+            let status: GitFileStatus
+            switch file.status {
+            case "added": status = .added
+            case "removed": status = .deleted
+            case "renamed": status = .renamed
+            case "copied": status = .copied
+            default: status = .modified
+            }
+            var change = GitChange(path: file.filename, status: status, isUntracked: false)
+            change.additions = file.additions
+            change.deletions = file.deletions
+            change.originalPath = file.previousFilename
+            return change
+        }
+    }
+
     /// The connected account's login, fetched once per app run — the `assignee`
     /// filter needs a username, not a token.
     private func login() async throws -> String? {

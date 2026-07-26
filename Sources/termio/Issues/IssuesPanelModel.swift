@@ -120,10 +120,54 @@ final class IssuesPanelModel: ObservableObject {
         guard let provider, let container else { return }
         detail = nil
         detailError = nil
+        prFiles = []
+        prInfo = nil
+        prDiffRange = nil
+        checkoutError = nil
         do {
-            detail = try await provider.detail(item.number, in: container)
+            if item.kind == .pullRequest {
+                async let loadedDetail = provider.detail(item.number, in: container)
+                async let info = provider.pullRequestGitInfo(item.number, in: container)
+                async let files = provider.pullRequestFiles(item.number, in: container)
+                (detail, prInfo, prFiles) = try await (loadedDetail, info, files)
+            } else {
+                detail = try await provider.detail(item.number, in: container)
+            }
         } catch {
             detailError = error.localizedDescription
         }
+    }
+
+    // MARK: Pull-request extras
+
+    /// The PR's changed files (empty for issues) and branch facts.
+    @Published private(set) var prFiles: [GitChange] = []
+    @Published private(set) var prInfo: PullRequestGitInfo?
+    /// The `base...head` range diffs run over, set once the refs are fetched —
+    /// the Files tab shows a spinner until this lands.
+    @Published private(set) var prDiffRange: String?
+    @Published private(set) var isFetchingDiffRefs = false
+    @Published private(set) var isCheckingOut = false
+    @Published var checkoutError: String?
+
+    /// Fetches the PR's refs once per opened detail, so file rows diff locally
+    /// (JetBrains' trick: read the code without checking anything out).
+    func prepareDiffRefs() async {
+        guard prDiffRange == nil, !isFetchingDiffRefs,
+              let item = openItem, let info = prInfo
+        else { return }
+        isFetchingDiffRefs = true
+        prDiffRange = await GitService.fetchPullRequestRef(
+            number: item.number, baseRef: info.baseRef, in: repoRoot)
+        isFetchingDiffRefs = false
+    }
+
+    func checkout() async {
+        guard let item = openItem, let info = prInfo, !isCheckingOut else { return }
+        isCheckingOut = true
+        checkoutError = await GitService.checkoutPullRequest(
+            number: item.number, headRef: info.headRef,
+            crossRepository: info.crossRepository, in: repoRoot)
+        isCheckingOut = false
     }
 }

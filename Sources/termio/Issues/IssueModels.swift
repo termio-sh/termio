@@ -121,6 +121,15 @@ struct IssueDetail: Sendable {
     let comments: [IssueComment]
 }
 
+/// The branch facts the Files tab and Checkout need from a pull request —
+/// which refs to fetch and diff, and whether the head lives in a fork (a fork's
+/// branch is only reachable through the `refs/pull/N/head` ref).
+struct PullRequestGitInfo: Sendable {
+    let headRef: String
+    let baseRef: String
+    let crossRepository: Bool
+}
+
 // MARK: - Provider protocol
 
 /// The read surface every tracker backend implements. Write operations

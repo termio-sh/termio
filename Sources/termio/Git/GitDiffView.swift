@@ -163,7 +163,8 @@ struct GitDiffView: View {
     // MARK: Loading + syntax colors
 
     private func load() async {
-        let parsed = await GitService.diffRows(for: request.change, in: request.repoRoot, commit: request.commit)
+        let parsed = await GitService.diffRows(
+            for: request.change, in: request.repoRoot, commit: request.commit, range: request.range)
         rows = parsed
         document = parsed.isEmpty
             ? nil
@@ -206,7 +207,7 @@ extension GitDiffRequest {
             let url = URL(fileURLWithPath: repoRoot).appendingPathComponent(candidate.path)
             if !FileActivation.previewsRatherThanDiff(url) {
                 return GitDiffRequest(repoRoot: repoRoot, change: candidate,
-                                      commit: commit, siblings: siblings)
+                                      commit: commit, range: range, siblings: siblings)
             }
             next += delta
         }

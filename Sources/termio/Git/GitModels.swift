@@ -120,6 +120,10 @@ struct GitDiffRequest: Hashable, Sendable {
     /// (`git show <sha>`) rather than the working-tree diff — the History tab's
     /// file rows carry the commit they belong to.
     var commit: String? = nil
+    /// When set, a `base...head` range: the overlay shows the file's three-dot
+    /// (merge-base) diff across it — the Issues pane's PR file rows, diffed over
+    /// fetched refs without a checkout.
+    var range: String? = nil
     /// The ordered set the overlay walks with ← / → — the whole Changes list, or
     /// the files of the commit being read. Also feeds the header's "n of m".
     var siblings: [GitChange] = []

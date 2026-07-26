@@ -18,7 +18,6 @@ struct IssuesView: View {
     let repoRoot: String
 
     @StateObject private var model: IssuesPanelModel
-    @Namespace private var pillNamespace
     @State private var selection: Int?
 
     init(repoRoot: String) {
@@ -64,52 +63,10 @@ struct IssuesView: View {
     }
 
     private var kindSwitch: some View {
-        HStack(spacing: 0) {
-            segment("Issues", .issue)
-            segment("Pull Requests", .pullRequest)
-        }
-        .background { selectionPill }
-        .padding(2.5)
-        .background { trackBackground }
-        .animation(.snappy(duration: 0.28), value: model.query.kind)
-    }
-
-    private func segment(_ title: String, _ value: IssueKind) -> some View {
-        let active = model.query.kind == value
-        return Text(title)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(active ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-            .padding(.horizontal, 10)
-            .frame(height: 21)
-            .matchedGeometryEffect(id: value, in: pillNamespace)
-            .contentShape(.capsule)
-            .onTapGesture { model.query.kind = value }
-    }
-
-    @ViewBuilder
-    private var selectionPill: some View {
-        if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.interactive(), in: .capsule)
-                .matchedGeometryEffect(id: model.query.kind, in: pillNamespace, isSource: false)
-        } else {
-            Capsule(style: .continuous)
-                .fill(Color(nsColor: .controlColor))
-                .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
-                .matchedGeometryEffect(id: model.query.kind, in: pillNamespace, isSource: false)
-        }
-    }
-
-    @ViewBuilder
-    private var trackBackground: some View {
-        if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
-        } else {
-            Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
-        }
+        CapsuleSwitch(
+            segments: [("Issues", IssueKind.issue), ("Pull Requests", .pullRequest)],
+            selection: Binding(get: { model.query.kind }, set: { model.query.kind = $0 })
+        )
     }
 
     private var filterMenu: some View {
@@ -298,41 +255,56 @@ private struct IssueRow: View {
 
 // MARK: - Detail (pushed in)
 
-/// The pushed-in detail: a native header (back, identifier, open-in-browser)
-/// over the body + comment thread rendered through `MarkdownHTML` in a themed
-/// web view — the trace's pipeline, restyled for one issue.
+/// The pushed-in detail: a native header (back, identifier, checkout for PRs,
+/// open-in-browser) over the content. An issue shows the conversation (body +
+/// comments through `MarkdownHTML` in a themed web view); a pull request adds
+/// the Conversation | Files switch — files diff natively in the `GitDiffView`
+/// overlay against the fetched PR refs, JetBrains-style, no checkout needed.
 private struct IssueDetailView: View {
     let item: IssueSummary
     @ObservedObject var model: IssuesPanelModel
     @ObservedObject var settings: AppSettings
     let onBack: () -> Void
 
+    @EnvironmentObject var store: TermioStore
     @Environment(\.colorScheme) private var colorScheme
+
+    private enum Tab: Hashable { case conversation, files }
+    @State private var tab: Tab = .conversation
+    /// The Files list's selected row, by path — selection IS the open gesture,
+    /// like the Changes list.
+    @State private var fileSelection: String?
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            Group {
-                if let detail = model.detail {
-                    IssueWebView(
-                        html: IssueDetailHTML.page(
-                            detail,
-                            theme: TraceTheme.resolve(settings: settings, colorScheme: colorScheme)
-                        ),
-                        background: settings.terminalBackgroundColor
-                    )
-                } else if let error = model.detailError {
-                    ContentUnavailableView("Couldn’t Load", huge: .issueCircle, description: Text(error))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+            if item.kind == .pullRequest { prTabBar }
+            switch tab {
+            case .conversation: conversationBody
+            case .files: filesBody
             }
         }
         .task(id: item.number) { await model.loadDetail(for: item) }
         .onExitCommand(perform: onBack)
+        // Follow the overlay both ways, like the Changes list: walking with ← / →
+        // chases the selection; closing releases it so the same row reopens.
+        .onChange(of: store.openDiff) { _, request in
+            if let request, request.range != nil, fileSelection != request.change.path {
+                fileSelection = request.change.path
+            }
+            if request == nil { fileSelection = nil }
+        }
+        .alert(
+            "Couldn’t Check Out",
+            isPresented: Binding(
+                get: { model.checkoutError != nil },
+                set: { if !$0 { model.checkoutError = nil } }
+            )
+        ) {
+            Button("OK") { model.checkoutError = nil }
+        } message: {
+            Text(model.checkoutError ?? "")
+        }
     }
 
     private var header: some View {
@@ -351,6 +323,21 @@ private struct IssueDetailView: View {
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 6)
+            if item.kind == .pullRequest, model.prInfo != nil {
+                if model.isCheckingOut {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Button {
+                        Task { await model.checkout() }
+                    } label: {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Check Out \(model.prInfo?.headRef ?? "Branch")")
+                }
+            }
             if let url = item.url {
                 Button {
                     NSWorkspace.shared.open(url)
@@ -367,6 +354,207 @@ private struct IssueDetailView: View {
         .frame(height: GitChangesView.topBarHeight)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+        }
+    }
+
+    /// The PR's inner switch, in the pane's shared miniature-track style. The
+    /// trailing count previews how many files the Files tab holds.
+    private var prTabBar: some View {
+        HStack(spacing: 0) {
+            CapsuleSwitch(
+                segments: [("Conversation", Tab.conversation), ("Files", .files)],
+                selection: $tab
+            )
+            Spacer(minLength: 0)
+            if !model.prFiles.isEmpty {
+                Text("\(model.prFiles.count)")
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: GitChangesView.topBarHeight)
+    }
+
+    @ViewBuilder
+    private var conversationBody: some View {
+        if let detail = model.detail {
+            IssueWebView(
+                html: IssueDetailHTML.page(
+                    detail,
+                    theme: TraceTheme.resolve(settings: settings, colorScheme: colorScheme)
+                ),
+                background: settings.terminalBackgroundColor
+            )
+        } else if let error = model.detailError {
+            ContentUnavailableView("Couldn’t Load", huge: .issueCircle, description: Text(error))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var filesBody: some View {
+        if model.prFiles.isEmpty {
+            ContentUnavailableView(
+                "No Files", huge: .fileDoc,
+                description: Text("This pull request changes no files.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(model.prFiles, selection: $fileSelection) { change in
+                PRFileRow(
+                    change: change,
+                    font: settings.interfaceFont,
+                    chrome: settings.chromeTheme(for: colorScheme),
+                    isSelected: fileSelection == change.path
+                )
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 1)
+            // Diffs need the fetched refs; a brief overlay spinner covers the fetch
+            // kicked off when the tab first appears.
+            .overlay {
+                if model.isFetchingDiffRefs {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .task { await model.prepareDiffRefs() }
+            .onChange(of: fileSelection) { _, selected in
+                guard let selected,
+                      let change = model.prFiles.first(where: { $0.path == selected })
+                else { return }
+                openDiff(change)
+            }
+            .onKeyPress(.leftArrow) { walkOverlay(-1) }
+            .onKeyPress(.rightArrow) { walkOverlay(+1) }
+        }
+    }
+
+    private func openDiff(_ change: GitChange) {
+        guard let range = model.prDiffRange else { return }
+        store.openDiff = GitDiffRequest(
+            repoRoot: model.repoRoot, change: change, range: range, siblings: model.prFiles)
+    }
+
+    private func walkOverlay(_ delta: Int) -> KeyPress.Result {
+        guard let next = store.openDiff?.neighbor(delta) else { return .ignored }
+        store.openDiff = next
+        return .handled
+    }
+}
+
+/// A PR file row: the Changes list's visual language (status letter, name,
+/// dimmed directory, `+A −D`) without the working-tree affordances (no drag,
+/// no discard — the files aren't local).
+private struct PRFileRow: View {
+    let change: GitChange
+    let font: Font
+    let chrome: ChromeTheme?
+    let isSelected: Bool
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(change.status.letter)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(change.status.tint)
+                .frame(width: 14)
+            Text(change.name)
+                .font(font)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(1)
+            if !change.directory.isEmpty {
+                Text(change.directory)
+                    .font(font)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 6)
+            HStack(spacing: 5) {
+                if change.additions > 0 { Text("+\(change.additions)").foregroundStyle(.green) }
+                if change.deletions > 0 { Text("−\(change.deletions)").foregroundStyle(.red) }
+            }
+            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+            .opacity(0.85)
+            .fixedSize()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .background(OutlineSelectionStyleStripper())
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(
+            SidebarRowHighlight(isSelected: isSelected, isHovering: isHovering, chrome: chrome)
+                .animation(.easeInOut(duration: 0.12), value: isSelected)
+                .animation(.easeInOut(duration: 0.12), value: isHovering)
+        )
+        .onHover { isHovering = $0 }
+        .help(change.originalPath.map { "\($0) → \(change.path)" } ?? change.path)
+    }
+}
+
+/// The pane's miniature capsule segmented switch — the git pane's Changes /
+/// History track generalized over any value: our own always-visible track with
+/// a Liquid Glass selection pill sliding between text segments.
+private struct CapsuleSwitch<Value: Hashable>: View {
+    let segments: [(title: String, value: Value)]
+    @Binding var selection: Value
+
+    @Namespace private var pillNamespace
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(segments, id: \.value) { seg in
+                let active = selection == seg.value
+                Text(seg.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(active ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .padding(.horizontal, 10)
+                    .frame(height: 21)
+                    .matchedGeometryEffect(id: seg.value, in: pillNamespace)
+                    .contentShape(.capsule)
+                    .onTapGesture { selection = seg.value }
+            }
+        }
+        .background { selectionPill }
+        .padding(2.5)
+        .background { trackBackground }
+        .animation(.snappy(duration: 0.28), value: selection)
+    }
+
+    @ViewBuilder
+    private var selectionPill: some View {
+        if #available(macOS 26.0, *) {
+            Capsule()
+                .fill(.clear)
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .matchedGeometryEffect(id: selection, in: pillNamespace, isSource: false)
+        } else {
+            Capsule(style: .continuous)
+                .fill(Color(nsColor: .controlColor))
+                .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
+                .matchedGeometryEffect(id: selection, in: pillNamespace, isSource: false)
+        }
+    }
+
+    @ViewBuilder
+    private var trackBackground: some View {
+        if #available(macOS 26.0, *) {
+            Capsule()
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
+        } else {
+            Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
         }
     }
 }
