@@ -106,6 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Sweep up session processes a previous instance stranded (crash,
         // force-quit, dev rebuild's kill -9) before this run adds its own.
         PTYProcess.reapStrayOrphans()
+        // Task-completion notifications: the delegate must be installed before a
+        // notification click can arrive, so wire it before any session runs.
+        TaskNotificationCenter.shared.activate(store: store)
         // Menu items cache their key equivalents at build time, so rebuild the
         // whole main menu whenever a user rebinds a shortcut in Settings.
         keybindingsObserver = NotificationCenter.default.addObserver(
@@ -326,6 +329,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// no teardown path at all on quit — the PTYs die with the process and
     /// agent children that ignore the resulting SIGHUP live on as orphans.
     func applicationWillTerminate(_ notification: Notification) {
+        // Delivered banners would outlive the sessions they point at.
+        TaskNotificationCenter.shared.withdrawAll()
         store.terminateAllSessions()
     }
 

@@ -671,8 +671,7 @@ extension TermioStore {
         switch resolveTarget(request.target, in: project) {
         case .found(let session):
             let handle = sessionHandle(for: session)
-            selectedSessionID = session.id
-            NSApp.activate(ignoringOtherApps: true)
+            revealSession(session.id)
             return control(request, ok: true, text: "focused \(handle)", json: ["focused": handle])
         case .notFound:
             return controlError(request, "not_found", targetNotFoundMessage(request.target))

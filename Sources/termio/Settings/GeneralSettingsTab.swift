@@ -1,13 +1,28 @@
 import SwiftUI
 
-/// App-level settings that aren't about a specific surface. Today that's the `termio`
-/// command-line tool — an app integration (install the binary to your PATH), not an
-/// agent feature, so it lives here rather than in the Agents tab.
+/// App-level settings that aren't about a specific surface: the `termio`
+/// command-line tool (an app integration, not an agent feature, so it lives here
+/// rather than in the Agents tab) and task-completion notifications.
 struct GeneralSettingsTab: View {
     @ObservedObject var settings: AppSettings
 
     var body: some View {
         Form {
+            Section {
+                Toggle(isOn: $settings.notifyOnTaskCompletion) {
+                    SettingsLabel(
+                        .huge(.checkCircle),
+                        title: "Task completion",
+                        subtext: "Posts a macOS notification when an agent finishes a task — or stops to ask you something — in a session you aren't looking at. Click it to jump to that session. macOS asks for notification permission the first time."
+                    )
+                }
+                .toggleStyle(.switch)
+                if settings.notifyOnTaskCompletion {
+                    Toggle("Play sound", isOn: $settings.notificationSoundEnabled)
+                }
+            } header: {
+                SectionHeaderLabel(title: "Notifications")
+            }
             Section {
                 CommandLineToolRow()
             } header: {

@@ -50,7 +50,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     /// matching macOS System Settings' navigation subtitle.
     var subtitle: String {
         switch self {
-        case .general: return "The termio command-line tool"
+        case .general: return "Notifications and the termio command-line tool"
         case .appearance: return "Terminal font, theme, cursor, and window"
         case .interface: return "The app's own sidebar font and density"
         case .terminal: return "Scrollback history and text selection"

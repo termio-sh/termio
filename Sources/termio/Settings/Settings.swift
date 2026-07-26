@@ -102,6 +102,8 @@ final class AppSettings: ObservableObject {
         static let sessionControlPrompted = "agents.sessionControlPrompted"
         static let usageAuthorizedAgents = "usage.authorizedAgents"
         static let claudeKeychainDeclined = "usage.claudeKeychainDeclined"
+        static let notifyTaskCompletion = "notifications.taskCompletion"
+        static let notificationSound = "notifications.sound"
         static let projectSortOrder = "sidebar.projectSortOrder"
         static let recentProjects = "welcome.recentProjects"
         static let lastChatAgent = "chats.lastAgent"
@@ -348,6 +350,22 @@ final class AppSettings: ObservableObject {
     }
 
 
+    // MARK: Notifications
+
+    /// Whether a settled agent turn — finished, or blocked waiting on your input —
+    /// in a session you aren't looking at posts a native macOS notification.
+    /// Clicking the notification focuses that session. The first notification is
+    /// what triggers the standard macOS permission prompt (see
+    /// `TaskNotificationCenter`).
+    @Published var notifyOnTaskCompletion: Bool {
+        didSet { defaults.set(notifyOnTaskCompletion, forKey: Key.notifyTaskCompletion) }
+    }
+
+    /// Whether those notifications also play the system alert sound.
+    @Published var notificationSoundEnabled: Bool {
+        didSet { defaults.set(notificationSoundEnabled, forKey: Key.notificationSound) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
@@ -393,6 +411,11 @@ final class AppSettings: ObservableObject {
             Key.agentHooksEnabled: false,
             Key.sessionControlEnabled: false,
             Key.projectSortOrder: "name",
+            // Notifications ship on (macOS's own permission prompt is the real
+            // gate); the sound stays opt-in so a finishing agent is never noisy
+            // by default.
+            Key.notifyTaskCompletion: true,
+            Key.notificationSound: false,
         ])
 
         fontFamily = defaults.string(forKey: Key.fontFamily) ?? ""
@@ -420,6 +443,8 @@ final class AppSettings: ObservableObject {
         sessionControlEnabled = defaults.bool(forKey: Key.sessionControlEnabled)
         usageAuthorizedAgents = Set(defaults.stringArray(forKey: Key.usageAuthorizedAgents) ?? [])
         claudeKeychainDeclined = defaults.bool(forKey: Key.claudeKeychainDeclined)
+        notifyOnTaskCompletion = defaults.bool(forKey: Key.notifyTaskCompletion)
+        notificationSoundEnabled = defaults.bool(forKey: Key.notificationSound)
         projectSortOrder = defaults.string(forKey: Key.projectSortOrder).flatMap(ProjectSortOrder.init) ?? .name
         recentProjects = defaults.data(forKey: Key.recentProjects)
             .flatMap { try? JSONDecoder().decode([RecentProject].self, from: $0) } ?? []

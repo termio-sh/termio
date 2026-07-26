@@ -191,6 +191,8 @@ extension TermioStore {
     /// `transcriptPaths` is deliberately not here: a relaunch resumes the same
     /// conversation, so only the close/remove paths clear it (inline).
     func clearActivityTracking(for id: Session.ID) {
+        // Whatever banner the session had delivered no longer describes a live turn.
+        TaskNotificationCenter.shared.withdraw(for: id)
         lastWorkingAt[id] = nil
         lastHookReportAt[id] = nil
         lastUserInputAt[id] = nil
