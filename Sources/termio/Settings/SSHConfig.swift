@@ -62,7 +62,11 @@ enum SSHConfigFile {
     /// `Include` splices at the top level rather than into a block's context.)
     static func hosts() -> [SSHConfigHost] {
         var visited: Set<String> = []
-        let blocks = blocks(in: configURL, visited: &visited, depth: 0)
+        // Directives before any Host/Match line apply unconditionally, exactly
+        // as if they sat under `Host *`.
+        var context: Block? = Block(patterns: ["*"], file: configURL, line: 0)
+        var blocks = blocks(in: configURL, visited: &visited, depth: 0, context: &context)
+        if let context { blocks.append(context) }
         var results: [SSHConfigHost] = []
         var seen: Set<String> = []
         for block in blocks {
@@ -78,8 +82,14 @@ enum SSHConfigFile {
                     if port == nil { port = candidate.port }
                     if identityFile == nil { identityFile = candidate.identityFile }
                 }
+                // ssh expands %h in HostName to the name given on the command
+                // line (the alias) — `Host *.cloud` + `HostName %h.internal`.
+                let expandedHostName = (hostName ?? alias)
+                    .replacingOccurrences(of: "%%", with: "\u{0}")
+                    .replacingOccurrences(of: "%h", with: alias)
+                    .replacingOccurrences(of: "\u{0}", with: "%")
                 results.append(SSHConfigHost(
-                    alias: alias, hostName: hostName ?? alias, user: user ?? "",
+                    alias: alias, hostName: expandedHostName, user: user ?? "",
                     port: port ?? 22, identityFile: identityFile,
                     file: block.file, line: block.line
                 ))
@@ -107,15 +117,42 @@ enum SSHConfigFile {
         var matched = false
         for pattern in patterns {
             if pattern.hasPrefix("!") {
-                if fnmatch(String(pattern.dropFirst()), alias, 0) == 0 { return false }
-            } else if fnmatch(pattern, alias, 0) == 0 {
+                if wildcardMatches(String(pattern.dropFirst()), alias) { return false }
+            } else if wildcardMatches(pattern, alias) {
                 matched = true
             }
         }
         return matched
     }
 
-    private static func blocks(in url: URL, visited: inout Set<String>, depth: Int) -> [Block] {
+    /// ssh's own pattern language: `*` and `?` only — deliberately not
+    /// `fnmatch`, whose bracket classes would make `web[1-3]` match here while
+    /// a real ssh treats the brackets literally.
+    private static func wildcardMatches(_ pattern: String, _ candidate: String) -> Bool {
+        let p = Array(pattern), c = Array(candidate)
+        var pi = 0, ci = 0, star = -1, mark = 0
+        while ci < c.count {
+            if pi < p.count, p[pi] == "?" || p[pi] == c[ci] {
+                pi += 1; ci += 1
+            } else if pi < p.count, p[pi] == "*" {
+                star = pi; mark = ci; pi += 1
+            } else if star >= 0 {
+                pi = star + 1; mark += 1; ci = mark
+            } else {
+                return false
+            }
+        }
+        while pi < p.count, p[pi] == "*" { pi += 1 }
+        return pi == p.count
+    }
+
+    /// Parses one file into blocks, threading the *current block* through
+    /// `context` the way ssh splices `Include`: an included file's leading
+    /// directives continue the including block, and a block left open at the
+    /// file's end resumes in the includer (the top level flushes the last one).
+    private static func blocks(
+        in url: URL, visited: inout Set<String>, depth: Int, context: inout Block?
+    ) -> [Block] {
         let path = url.standardizedFileURL.path
         // The depth cap breaks Include chains that self-reference through a glob
         // the visited set can't catch (e.g. re-listing a rewritten temp file).
@@ -124,14 +161,10 @@ enum SSHConfigFile {
         visited.insert(path)
 
         var blocks: [Block] = []
-        // Directives before any Host/Match line apply unconditionally, exactly
-        // as if they sat under `Host *`.
-        var current: Block? = Block(patterns: ["*"], file: url, line: 0)
-
-        func flush() {
-            if let block = current { blocks.append(block) }
-            current = nil
-        }
+        // While true, the parse sits inside a Match block: its directives (and
+        // its Includes, which ssh gates on the Match condition) are skipped
+        // until the next Host, since this parser doesn't evaluate conditions.
+        var inMatch = false
 
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         for (index, rawLine) in lines.enumerated() {
@@ -142,29 +175,29 @@ enum SSHConfigFile {
             let values = Array(parts.dropFirst())
             switch keyword {
             case "host":
-                flush()
-                current = Block(patterns: values, file: url, line: index + 1)
+                if let block = context { blocks.append(block) }
+                context = Block(patterns: values, file: url, line: index + 1)
+                inMatch = false
             case "match":
-                // A Match block's settings belong to its condition, which this
-                // parser doesn't evaluate — skip lines until the next Host.
-                flush()
-            case "include":
-                flush()
+                if let block = context { blocks.append(block) }
+                context = nil
+                inMatch = true
+            case "include" where !inMatch:
                 for value in values {
                     for included in resolveInclude(value) {
                         blocks.append(contentsOf: Self.blocks(
-                            in: included, visited: &visited, depth: depth + 1
+                            in: included, visited: &visited, depth: depth + 1,
+                            context: &context
                         ))
                     }
                 }
-            case "hostname": if current?.hostName == nil { current?.hostName = values.first }
-            case "user": if current?.user == nil { current?.user = values.first }
-            case "port": if current?.port == nil { current?.port = values.first.flatMap(Int.init) }
-            case "identityfile": if current?.identityFile == nil { current?.identityFile = values.first }
+            case "hostname": if context?.hostName == nil { context?.hostName = values.first }
+            case "user": if context?.user == nil { context?.user = values.first }
+            case "port": if context?.port == nil { context?.port = values.first.flatMap(Int.init) }
+            case "identityfile": if context?.identityFile == nil { context?.identityFile = values.first }
             default: break
             }
         }
-        flush()
         return blocks
     }
 
