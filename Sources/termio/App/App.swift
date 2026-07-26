@@ -660,11 +660,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         store.addScratchSession(agent: agent)
     }
 
-    /// File ▸ New SSH Connection… — prompts for a host (`~/.ssh/config` alias or
-    /// `user@host`) and opens a terminal running `ssh` to it, grouped under the same
-    /// Terminals section as loose shells. Reached via the responder chain.
-    @objc func newSSHConnection(_ sender: Any?) {
-        store.presentSSHConnectPanel()
+    /// A host row of the New SSH Connection submenu (File menu and the toolbar `+`
+    /// share it — see `menuNeedsUpdate`) — opens a terminal running `ssh` to the
+    /// picked alias, carried in `representedObject`, grouped under the same
+    /// Terminals section as loose shells.
+    @objc func newSSHHost(_ sender: NSMenuItem) {
+        guard let alias = sender.representedObject as? String else { return }
+        store.addSSHSession(host: alias)
+    }
+
+    /// The submenu's trailing "Add Host…" row — the same Add Host form Settings ▸
+    /// SSH carries, presented as a sheet over the main window, then connecting to
+    /// the host it just appended to `~/.ssh/config` (from this menu the point of
+    /// adding a machine is to open it). One-off connections that shouldn't touch
+    /// the config stay available as the command palette's New SSH Connection.
+    @objc func addSSHHost(_ sender: Any?) {
+        guard let presenter = window?.contentViewController else { return }
+        let hostVC = NSHostingController(rootView: AddSSHHostSheet(
+            existingAliases: Set(SSHConfigFile.hosts().map(\.alias))
+        ))
+        hostVC.rootView.completion = { [weak self, weak presenter, weak hostVC] alias in
+            guard let hostVC else { return }
+            presenter?.dismiss(hostVC)
+            if let alias { self?.store.addSSHSession(host: alias) }
+        }
+        presenter.presentAsSheet(hostVC)
     }
 
     /// View ▸ Show Project Files (and the toolbar's trailing inspector button) —
@@ -1008,14 +1028,36 @@ private func makeNewChatItem() -> NSMenuItem {
     return item
 }
 
+/// The "New SSH Connection ▸" parent item, shared the same way as `makeNewChatItem`.
+/// Its submenu lists the connectable `Host` aliases from `~/.ssh/config`, filled on
+/// every open, so a config edit shows up without any change-notification plumbing.
+@MainActor
+private func makeNewSSHItem() -> NSMenuItem {
+    let item = NSMenuItem(title: "New SSH Connection", action: nil, keyEquivalent: "")
+    let submenu = NSMenu(title: "New SSH Connection")
+    submenu.delegate = NSApp.delegate as? AppDelegate
+    item.submenu = submenu
+    return item
+}
+
 extension AppDelegate: NSMenuDelegate {
+    /// Fills the lazily-populated submenus this delegate serves, told apart by
+    /// title: New Chat and New SSH Connection.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        if menu.title == "New SSH Connection" {
+            fillNewSSHMenu(menu)
+        } else {
+            fillNewChatMenu(menu)
+        }
+    }
+
     /// Fills a New Chat submenu with one row per enabled agent — the user's own
     /// roster (built-ins plus any manifest in `~/.termio/config/agents/`), in
     /// Settings order. The resolved default (pinned, else last-used, else first)
     /// carries the ⌘N binding, so the menu always names what the shortcut opens
     /// and the binding follows the default as it migrates.
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
+    private func fillNewChatMenu(_ menu: NSMenu) {
         let agents = enabledAgentPresets(settings).filter { $0 != .terminal }
         guard !agents.isEmpty else {
             menu.addItem(withTitle: "No Agents Enabled", action: nil, keyEquivalent: "")
@@ -1033,6 +1075,31 @@ extension AppDelegate: NSMenuDelegate {
             item.image = agentMenuImage(for: agent)
             if agent.id == defaultID { item.applyShortcut(for: .newChat) }
         }
+    }
+
+    /// Fills a New SSH Connection submenu with one row per `~/.ssh/config` host —
+    /// the same aliases Settings ▸ SSH lists — each connecting directly, plus a
+    /// trailing "Add Host…" opening the same form as Settings' Add Host button
+    /// and connecting to the machine it adds (see `addSSHHost`). With an empty
+    /// config only "Add Host…" remains — the first-run path.
+    private func fillNewSSHMenu(_ menu: NSMenu) {
+        let hosts = SSHConfigFile.hosts()
+        for host in hosts {
+            let item = menu.addItem(
+                withTitle: host.alias,
+                action: #selector(newSSHHost(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = host.alias
+        }
+        if !hosts.isEmpty { menu.addItem(.separator()) }
+        let add = menu.addItem(
+            withTitle: "Add Host…",
+            action: #selector(addSSHHost(_:)),
+            keyEquivalent: ""
+        )
+        add.target = self
     }
 }
 
@@ -1131,17 +1198,16 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
     /// Builds the `+` pull-down for the `.newTerminal` toolbar item: the ways something
     /// new enters the sidebar without opening a folder — a loose terminal (Terminals
     /// section), a loose agent chat (Chats section), an SSH terminal, or a folder opened
-    /// as a project. "New Chat" opens the user's agent roster as a submenu (the same
-    /// one the File menu carries — see `makeNewChatItem`).
+    /// as a project. "New Chat" opens the user's agent roster and "New SSH Connection"
+    /// the config's hosts as submenus (the same ones the File menu carries — see
+    /// `makeNewChatItem` / `makeNewSSHItem`).
     func makeNewSessionMenu() -> NSMenu {
         let menu = NSMenu()
         let terminal = NSMenuItem(title: "New Terminal", action: #selector(newTerminal(_:)), keyEquivalent: "")
         terminal.target = self
         menu.addItem(terminal)
         menu.addItem(makeNewChatItem())
-        let ssh = NSMenuItem(title: "New SSH Connection…", action: #selector(newSSHConnection(_:)), keyEquivalent: "")
-        ssh.target = self
-        menu.addItem(ssh)
+        menu.addItem(makeNewSSHItem())
         let folder = NSMenuItem(title: "Open Project…", action: #selector(openFolder(_:)), keyEquivalent: "")
         folder.target = self
         menu.addItem(folder)
@@ -1149,7 +1215,6 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
     }
 
     @objc private func newTerminal(_ sender: Any?) { store.addScratchTerminal() }
-    @objc private func newSSHConnection(_ sender: Any?) { store.presentSSHConnectPanel() }
     @objc private func openFolder(_ sender: Any?) { store.presentOpenProjectPanel() }
 
     /// The `.inspectorTabs` item's menu form, shown in the toolbar's `»` overflow menu when the
@@ -1467,11 +1532,9 @@ private func buildMainMenu() -> NSMenu {
     // sits on the resolved default's row, so the shortcut stays one-press and the
     // menu names the agent it will open.
     fileMenu.addItem(makeNewChatItem())
-    fileMenu.addItem(
-        withTitle: "New SSH Connection…",
-        action: #selector(AppDelegate.newSSHConnection(_:)),
-        keyEquivalent: ""
-    )
+    // New SSH Connection ▸ one row per `~/.ssh/config` host, plus Add Host… for
+    // machines not in it yet (filled on open by the AppDelegate — see `makeNewSSHItem`).
+    fileMenu.addItem(makeNewSSHItem())
     fileMenu.addItem(.separator())
     fileMenu.addItem(
         withTitle: "Open Project…",

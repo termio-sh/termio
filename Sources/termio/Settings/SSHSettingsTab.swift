@@ -277,8 +277,14 @@ private extension SSHProbeResult {
 
 /// The Add Host sheet: the four fields a `Host` block actually needs, appended
 /// to `~/.ssh/config` as a block indistinguishable from a hand-written one.
-private struct AddSSHHostSheet: View {
+/// Shared by Settings ▸ SSH's Add Host button and the New SSH Connection ▸
+/// Add Host… menu row (which connects to the host right after adding it).
+struct AddSSHHostSheet: View {
     let existingAliases: Set<String>
+    /// When set (the AppKit-presented menu path), called with the added alias —
+    /// nil on Cancel — instead of the SwiftUI dismiss, since the environment's
+    /// DismissAction has no SwiftUI presentation to pop there.
+    var completion: ((String?) -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     @State private var alias = ""
@@ -342,7 +348,7 @@ private struct AddSSHHostSheet: View {
                         .lineLimit(2)
                 }
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel") { finish(nil) }
                     .keyboardShortcut(.cancelAction)
                 Button("Add", action: add)
                     .keyboardShortcut(.defaultAction)
@@ -362,10 +368,14 @@ private struct AddSSHHostSheet: View {
                 port: port.trimmingCharacters(in: .whitespaces),
                 identityFile: identityFile.trimmingCharacters(in: .whitespaces)
             )
-            dismiss()
+            finish(trimmedAlias)
         } catch {
             writeError = "Couldn't write ~/.ssh/config: \(error.localizedDescription)"
         }
+    }
+
+    private func finish(_ addedAlias: String?) {
+        if let completion { completion(addedAlias) } else { dismiss() }
     }
 
     /// A file picker starting in `~/.ssh` with hidden files visible (the whole
