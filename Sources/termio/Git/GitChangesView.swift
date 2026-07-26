@@ -217,7 +217,7 @@ struct GitChangesView: View {
             // centers the whole pane instead of pinning the header to the top.
             ContentUnavailableView(
                 "No Changes",
-                systemImage: "checkmark.circle",
+                huge: .checkCircle,
                 description: Text("The working tree is clean.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)

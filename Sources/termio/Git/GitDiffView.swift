@@ -153,7 +153,7 @@ struct GitDiffView: View {
         } else {
             ContentUnavailableView(
                 "No Diff",
-                systemImage: "doc",
+                huge: .fileDoc,
                 description: Text("No textual changes to show.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)

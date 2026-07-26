@@ -26,7 +26,7 @@ private struct CommandLineToolRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            SettingsLabel(symbol: "terminal", title: "Command-line tool", subtext: description)
+            SettingsLabel(.huge(.terminal), title: "Command-line tool", subtext: description)
             Spacer()
             if let title = buttonTitle {
                 Button(title) { status = CommandLineTool.install() }

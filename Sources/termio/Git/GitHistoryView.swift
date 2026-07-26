@@ -29,7 +29,7 @@ struct GitHistoryView: View {
             } else if model.commits.isEmpty {
                 ContentUnavailableView(
                     "No History",
-                    systemImage: "clock",
+                    huge: .clock,
                     description: Text("This branch has no commits yet.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

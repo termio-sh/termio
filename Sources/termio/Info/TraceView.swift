@@ -100,7 +100,7 @@ struct TraceView: View {
             if let html {
                 TraceWebView(html: html, background: settings.terminalBackgroundColor)
             } else if let loadError {
-                ContentUnavailableView("Couldn't build the trace", systemImage: "sparkles", description: Text(loadError))
+                ContentUnavailableView("Couldn't build the trace", huge: .bot, description: Text(loadError))
             } else {
                 ProgressView()
             }

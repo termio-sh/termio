@@ -43,11 +43,11 @@ struct InspectorTabsToolbar: View {
     /// uniform regardless of how wide each SF Symbol happens to draw.
     private static let segmentWidth: CGFloat = 34
 
-    private let segments: [(tab: InspectorTab, icon: String, help: String)] = [
-        (.files, "list.bullet.indent", "Project Files"),
-        (.search, "magnifyingglass", "Search Files"),
-        (.changes, "arrow.trianglehead.branch", "Changes"),
-        (.info, "info.circle", "Info"),
+    private let segments: [(tab: InspectorTab, icon: HugeIcon, help: String)] = [
+        (.files, .listBullet, "Project Files"),
+        (.search, .search, "Search Files"),
+        (.changes, .gitBranch, "Changes"),
+        (.info, .infoCircle, "Info"),
     ]
 
     var body: some View {
@@ -71,11 +71,9 @@ struct InspectorTabsToolbar: View {
         HStack(spacing: 0) {
             ForEach(segments, id: \.tab) { seg in
                 let selected = store.inspectorTab == seg.tab
-                Image(systemName: seg.icon)
-                    .font(.system(size: 15, weight: .medium))
-                    // Active glyph lifts to full-strength; the rest stay muted — so the selected
-                    // pane is legible even before you notice the pill.
-                    .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                // Active glyph lifts to full-strength; the rest stay muted — so the selected
+                // pane is legible even before you notice the pill.
+                HugeIconView(icon: seg.icon, size: 15, color: selected ? .primary : .secondary)
                     .frame(width: Self.segmentWidth, height: Self.glyphHeight)
                     // Each segment is a matched-geometry *source*; the pill (non-source, below)
                     // snaps to whichever one is selected and animates across on change.

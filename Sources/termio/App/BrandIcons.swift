@@ -1,4 +1,29 @@
+import AppKit
 import SwiftUI
+
+/// Renders an agent's brand mark as an `NSImage` for AppKit menu rows by reusing
+/// `AgentIconView`, so menus show the exact same glyphs as the sidebar. Rasterized
+/// lazily in a drawing-handler image: AppKit re-invokes the handler under the menu's
+/// own appearance at display time, so the monochrome marks (Codex, Grok) resolve
+/// to the right ink. Resolving eagerly against the caller's appearance is wrong —
+/// the menu bar tints from the wallpaper and can be dark while the dropdown menu
+/// (system theme) is light, which baked those marks in as invisible white-on-white.
+@MainActor
+func agentMenuImage(for agent: AgentPreset, side: CGFloat = 15) -> NSImage? {
+    NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+        let appearance = NSAppearance.currentDrawing()
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let renderer = ImageRenderer(
+            content: AgentIconView(agent: agent, size: side - 2)
+                .frame(width: side, height: side)
+                .environment(\.colorScheme, isDark ? .dark : .light)
+        )
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let rendered = renderer.nsImage else { return false }
+        rendered.draw(in: rect)
+        return true
+    }
+}
 
 /// Renders an `AgentPreset`'s glyph: a muted SF Symbol for the plain terminal, or
 /// a vendor's real brand mark for the coding agents, painted in that vendor's
@@ -28,6 +53,8 @@ struct AgentIconView: View {
             // paint it at full label strength (`.primary`) — anything less looks
             // washed out next to the row text and the opaque vendor marks.
             HugeIconView(icon: .terminal, size: size, color: .primary)
+        case .huge(let icon):
+            HugeIconView(icon: icon, size: size, color: .primary)
         case .vector(let logo):
             // A brand mark fills its whole box, where an SF Symbol's glyph sits
             // inside cap height with breathing room; shrinking the box a touch
@@ -108,56 +135,26 @@ struct BrandLogoShape: Shape {
     }
 }
 
-/// Renders a `HugeIcon` as a rounded stroke (Hugeicons' native line style) in the
-/// given color, sized to a square `size`-point box. The stroke width tracks the
-/// source's 1.5px-on-24 ratio so the line stays optically right at any size, with
-/// a small floor so it never thins to a hairline at sidebar sizes.
-struct HugeIconView: View {
-    let icon: HugeIcon
-    var size: CGFloat
-    var color: Color
-    /// Overrides the size-derived stroke width. Used where a mark reads too thin at a
-    /// small size (e.g. the section disclosure chevron), so it can be bumped heavier
-    /// without also growing the glyph.
-    var lineWidthOverride: CGFloat? = nil
-
-    var body: some View {
-        HugeIconShape(icon: icon)
-            .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
-            .frame(width: size, height: size)
-    }
-
-    private var lineWidth: CGFloat {
-        lineWidthOverride ?? max(1.1, size * 1.5 / icon.viewBox)
+extension ContentUnavailableView
+where Label == SwiftUI.Label<Text, HugeIconView>, Description == Text?, Actions == EmptyView {
+    /// The `ContentUnavailableView(_:systemImage:description:)` shorthand for a
+    /// Hugeicons glyph, so empty states share the app's icon language. The glyph is
+    /// drawn at the same optical size the system styles an SF Symbol to there.
+    init(_ title: String, huge icon: HugeIcon, description: Text? = nil) {
+        self.init {
+            SwiftUI.Label {
+                Text(title)
+            } icon: {
+                HugeIconView(icon: icon, size: 38, color: .secondary)
+            }
+        } description: {
+            description
+        }
     }
 }
 
-/// A `Shape` that draws a `HugeIcon`'s SVG path scaled to fit the rect, to be
-/// stroked (not filled) by `HugeIconView`.
-struct HugeIconShape: Shape {
-    let icon: HugeIcon
-
-    func path(in rect: CGRect) -> Path {
-        // Fit by the mark's actual ink box, not the nominal 24 viewBox: Hugeicons'
-        // marks fill their viewBox by different amounts across (the terminal glyph
-        // spans 18 of 24, a folder 20), so plain viewBox-fitting left them visibly
-        // unequal in width in the sidebar's shared icon column. Normalizing every
-        // mark's ink width to a fixed fraction of the box — the terminal mark's own
-        // 18/24 fill — keeps the terminal identical while pulling the wider folder
-        // marks in to match it, so same-`size` HugeIcons line up.
-        let glyph = SVGPath(icon.pathData).cgPath
-        let ink = glyph.boundingBoxOfPath
-        guard ink.width > 0, ink.height > 0 else { return Path(glyph) }
-        let targetWidth = rect.width * (18.0 / 24.0)
-        let scale = min(targetWidth / ink.width, rect.height / ink.height)
-        var transform = CGAffineTransform(
-            translationX: rect.midX - scale * ink.midX,
-            y: rect.midY - scale * ink.midY
-        )
-        .scaledBy(x: scale, y: scale)
-        return Path(glyph.copy(using: &transform) ?? glyph)
-    }
-}
+// `HugeIconView` / `HugeIconShape` live in `TermioShared` (shared with iOS);
+// see the typealiases in `Models.swift`.
 
 /// VS Code's "codicon" glyphs, used for the file-explorer header actions so termio's
 /// toolbar reads like VS Code's. The SVG path data is lifted verbatim from Microsoft's

@@ -17,6 +17,9 @@ struct FileIconView: View {
     /// Font size of the SF Symbol fallback (sized independently — a glyph sits inside
     /// its cap height, so it usually wants to run a touch larger than the logo box).
     var symbolSize: CGFloat = 13
+    /// Ink for the Hugeicons resource glyphs, so the file tree can pass the same
+    /// chrome foreground its folder rows use and the two read as one family.
+    var ink: Color = .primary
 
     var body: some View {
         if let resource = LangIconCatalog.resource(forFileName: url.lastPathComponent),
@@ -34,12 +37,35 @@ struct FileIconView: View {
                     .interpolation(.high)
                     .frame(width: size, height: size)
             }
+        } else if let kind = FileTypeIcon.resourceKind(for: url) {
+            // Resource files (images, PDF, media, plain text) and unmatched
+            // extensions draw in the app's own Hugeicons line style, in the same
+            // ink as the tree's folder glyphs — color in the tree stays reserved
+            // for real language logos. Drawn a step above the Devicon box: those
+            // marks fill their box edge-to-edge while Hugeicons ink only ~75% of
+            // theirs, so equal nominal sizes would read a step smaller. 1.15 (not
+            // the folder rows' full 12-vs-15 ratio) because these file-shaped
+            // marks are height-dominant and overshoot the Devicon cap height at
+            // 1.25. Only the code-shaped fallbacks below stay SF Symbols.
+            HugeIconView(icon: Self.hugeIcon(for: kind), size: size * 1.15, color: ink)
+                .frame(width: size)
         } else {
             let icon = FileTypeIcon.icon(for: url)
             Image(systemName: icon.symbol)
                 .font(.system(size: symbolSize))
                 .foregroundStyle(icon.color)
                 .frame(width: size)
+        }
+    }
+
+    private static func hugeIcon(for kind: FileTypeIcon.ResourceKind) -> HugeIcon {
+        switch kind {
+        case .image: return .image
+        case .pdf: return .filePdf
+        case .audio: return .fileAudio
+        case .video: return .fileVideo
+        case .plainText: return .fileText
+        case .generic: return .fileDoc
         }
     }
 }

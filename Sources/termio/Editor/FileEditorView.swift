@@ -111,7 +111,7 @@ struct FileEditorView: View {
             if loadFailed {
                 ContentUnavailableView(
                     "Can't Open as Text",
-                    systemImage: "doc.questionmark",
+                    huge: .fileQuestion,
                     description: Text("\(url.lastPathComponent) isn't a UTF-8 text file.")
                 )
             } else {

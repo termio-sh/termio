@@ -80,11 +80,15 @@ struct SessionInfoView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
-            ContentUnavailableView(
-                "No Session",
-                systemImage: "info.circle",
-                description: Text("Select a session to see its info.")
-            )
+            ContentUnavailableView {
+                Label {
+                    Text("No Session")
+                } icon: {
+                    HugeIconView(icon: .infoCircle, size: 38, color: .secondary)
+                }
+            } description: {
+                Text("Select a session to see its info.")
+            }
         }
     }
 
@@ -95,8 +99,8 @@ struct SessionInfoView: View {
             sectionLabel("Working Directory")
 
             VStack(alignment: .leading, spacing: 1) {
-                InfoRow(symbol: "doc.on.doc", title: "Copy Path") { copy(path) }
-                InfoRow(symbol: "folder", title: "Reveal in Finder") { revealInFinder(path) }
+                InfoRow(huge: .copy, title: "Copy Path") { copy(path) }
+                InfoRow(huge: .folder, title: "Reveal in Finder") { revealInFinder(path) }
                 if let remotePage {
                     InfoRow(forge: remotePage.forge, title: "View on \(remotePage.forge.name)") {
                         NSWorkspace.shared.open(remotePage.url)
@@ -129,9 +133,9 @@ struct SessionInfoView: View {
 
             if let transcriptPath {
                 VStack(alignment: .leading, spacing: 1) {
-                    InfoRow(symbol: "list.bullet.rectangle", title: "View Trace") { viewTrace(transcriptPath, session: session) }
-                    InfoRow(symbol: "doc.on.doc", title: "Copy Path") { copy(transcriptPath) }
-                    InfoRow(symbol: "folder", title: "Reveal in Finder") { revealInFinder(transcriptPath) }
+                    InfoRow(huge: .listView, title: "View Trace") { viewTrace(transcriptPath, session: session) }
+                    InfoRow(huge: .copy, title: "Copy Path") { copy(transcriptPath) }
+                    InfoRow(huge: .folder, title: "Reveal in Finder") { revealInFinder(transcriptPath) }
                 }
             } else {
                 Text("Waiting for the agent's first status report.")
@@ -183,13 +187,13 @@ struct SessionInfoView: View {
 
 /// A single action row in the Info pane: a leading glyph, a label, and a hover
 /// highlight — the same calm, borderless look as the actions in the reference Info
-/// panel. The leading glyph is either a muted SF Symbol (for termio's own actions —
-/// Copy Path, Reveal, View Trace) or an editor's real app icon (for "Open in …"),
-/// so an editor row is unmistakably that app. `.buttonStyle(.plain)` keeps it flat;
-/// the highlight is drawn on hover.
+/// panel. The leading glyph is either a muted Hugeicons mark (for termio's own
+/// actions — Copy Path, Reveal, View Trace) or an editor's real app icon (for
+/// "Open in …"), so an editor row is unmistakably that app. `.buttonStyle(.plain)`
+/// keeps it flat; the highlight is drawn on hover.
 private struct InfoRow: View {
     private enum Leading {
-        case symbol(String)
+        case huge(HugeIcon)
         case appIcon(NSImage?)
         case forge(GitService.Forge)
     }
@@ -200,8 +204,8 @@ private struct InfoRow: View {
 
     @State private var hovering = false
 
-    init(symbol: String, title: String, action: @escaping () -> Void) {
-        self.leading = .symbol(symbol)
+    init(huge icon: HugeIcon, title: String, action: @escaping () -> Void) {
+        self.leading = .huge(icon)
         self.title = title
         self.action = action
     }
@@ -243,10 +247,8 @@ private struct InfoRow: View {
     @ViewBuilder
     private var leadingGlyph: some View {
         switch leading {
-        case .symbol(let name):
-            Image(systemName: name)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+        case .huge(let icon):
+            HugeIconView(icon: icon, size: 13, color: .secondary)
         case .appIcon(let image):
             if let image {
                 Image(nsImage: image)

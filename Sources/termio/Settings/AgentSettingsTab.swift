@@ -22,7 +22,7 @@ struct AgentSettingsTab: View {
             Section {
                 Toggle(isOn: $settings.agentHooksEnabled) {
                     SettingsLabel(
-                        symbol: "dot.radiowaves.left.and.right",
+                        .huge(.wireless),
                         title: "Live agent status",
                         subtext: "Installs hooks for Claude Code, Codex, OpenCode, and Pi so termio can tell when an agent is working or waiting on you — shown as the spinning sidebar icon and the menu-bar pulse. Adds termio's own entries to each agent's config; turning this off removes them. (Codex needs a one-time /hooks trust.)"
                     )
@@ -39,7 +39,7 @@ struct AgentSettingsTab: View {
             Section {
                 Toggle(isOn: $settings.sessionControlEnabled) {
                     SettingsLabel(
-                        symbol: "arrow.triangle.branch",
+                        .huge(.gitBranch),
                         title: "Session control",
                         subtext: "Lets an agent see and drive its sibling sessions in the same project with the `termio sessions` command (list, send a prompt, answer a menu, start, stop). Scoped to the current project. Adds a short awareness note to the agents' instruction files; turning this off removes it."
                     )
@@ -146,7 +146,7 @@ private struct DefaultChatAgentRow: View {
             ForEach(chatAgents) { Text($0.displayName).tag($0.id) }
         } label: {
             SettingsLabel(
-                symbol: "plus.bubble",
+                .huge(.bubbleChatAdd),
                 title: "Default agent",
                 subtext: "The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with."
             )
@@ -246,7 +246,11 @@ private struct AgentManagerRow: View {
 
                     if available == false, let url = preset.installURL {
                         Link(destination: url) {
-                            Label("Install \(preset.displayName)", systemImage: "arrow.down.circle")
+                            Label {
+                                Text("Install \(preset.displayName)")
+                            } icon: {
+                                HugeIconView(icon: .download, size: 13, color: .accentColor)
+                            }
                         }
                     }
 

@@ -33,8 +33,12 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView {
             List(SettingsTab.allCases, selection: $selection) { tab in
-                Label(tab.title, systemImage: tab.symbol)
-                    .tag(tab)
+                Label {
+                    Text(tab.title)
+                } icon: {
+                    HugeIconView(icon: tab.icon, size: 15, color: .primary)
+                }
+                .tag(tab)
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 184, ideal: 204, max: 240)

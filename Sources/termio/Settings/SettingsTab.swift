@@ -30,17 +30,19 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         }
     }
 
-    var symbol: String {
+    /// The sidebar glyph, drawn from the app's Hugeicons set so the settings
+    /// window matches the main sidebar's line-icon style instead of SF Symbols.
+    var icon: HugeIcon {
         switch self {
-        case .general: return "gearshape"
-        case .appearance: return "paintbrush"
-        case .interface: return "sidebar.left"
-        case .terminal: return "terminal"
-        case .ssh: return "server.rack"
-        case .keyboard: return "keyboard"
-        case .agents: return "sparkles"
-        case .usage: return "gauge.medium"
-        case .mobile: return "iphone"
+        case .general: return .settings
+        case .appearance: return .paintBrush
+        case .interface: return .sidebarLeft
+        case .terminal: return .terminal
+        case .ssh: return .serverStack
+        case .keyboard: return .keyboard
+        case .agents: return .bot
+        case .usage: return .dashboardSpeed
+        case .mobile: return .smartPhone
         }
     }
 

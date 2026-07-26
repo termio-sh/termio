@@ -213,22 +213,22 @@ struct CommandPaletteView: View {
         let keys = KeybindingStore.shared
         if store.selectedSessionID != nil {
             actions.append(.init(id: "split-right", title: "Split Right",
-                                 symbol: "rectangle.split.2x1", shortcut: keys.display(for: .splitRight)) {
+                                 icon: .layoutColumns, shortcut: keys.display(for: .splitRight)) {
                 $0.splitSelectedPane(.horizontal)
             })
             actions.append(.init(id: "split-down", title: "Split Down",
-                                 symbol: "rectangle.split.1x2", shortcut: keys.display(for: .splitDown)) {
+                                 icon: .layoutRows, shortcut: keys.display(for: .splitDown)) {
                 $0.splitSelectedPane(.vertical)
             })
         }
         if store.splitRoot != nil {
             actions.append(.init(id: "zoom-split", title: "Zoom Split",
-                                 symbol: "arrow.up.left.and.arrow.down.right",
+                                 icon: .expand,
                                  shortcut: keys.display(for: .splitZoom)) {
                 $0.toggleSelectedPaneZoom()
             })
             actions.append(.init(id: "close-pane", title: "Close Pane",
-                                 symbol: "rectangle", shortcut: keys.display(for: .closePane)) {
+                                 icon: .square, shortcut: keys.display(for: .closePane)) {
                 $0.closeSelectedPane()
             })
             for (id, command, selector) in [
@@ -238,21 +238,21 @@ struct CommandPaletteView: View {
                 ("focus-down", .focusPaneDown, #selector(AppDelegate.focusPaneDown(_:))),
             ] {
                 actions.append(.init(id: id, title: KeyCommandCatalog.info(command).title,
-                                     symbol: "arrow.left.and.right.square",
+                                     icon: .arrowsLeftRight,
                                      shortcut: keys.display(for: command)) { _ in
                     NSApp.sendAction(selector, to: nil, from: nil)
                 })
             }
         }
         actions.append(.init(id: "new-terminal", title: "New Terminal",
-                             symbol: "plus.rectangle", shortcut: keys.display(for: .newTerminal)) {
+                             icon: .plusSquare, shortcut: keys.display(for: .newTerminal)) {
             $0.addScratchTerminal()
         })
         // The single "New Chat" verb (default agent, always the scratch Chats
         // funnel), carrying its ⌘N shortcut — the palette twin of File ▸ New Chat.
         if store.defaultChatAgent() != nil {
             actions.append(.init(id: "new-chat", title: "New Chat",
-                                 symbol: "plus.bubble", shortcut: keys.display(for: .newChat)) {
+                                 icon: .bubbleChatAdd, shortcut: keys.display(for: .newChat)) {
                 $0.addDefaultChat()
             })
         }
@@ -262,7 +262,7 @@ struct CommandPaletteView: View {
         for agent in enabledAgentPresets(store.settings) where agent != .terminal {
             actions.append(.init(id: "new-session-\(agent.id)",
                                  title: "New \(agent.displayName) Session",
-                                 symbol: nil, agent: agent, shortcut: nil) { store in
+                                 icon: nil, agent: agent, shortcut: nil) { store in
                 if let sid = store.selectedSessionID, let project = store.project(for: sid) {
                     store.addSession(to: project.id, agent: agent)
                 } else {
@@ -271,40 +271,42 @@ struct CommandPaletteView: View {
             })
         }
         actions.append(.init(id: "new-ssh", title: "New SSH Connection…",
-                             symbol: "network", shortcut: nil) {
+                             icon: .network, shortcut: nil) {
             $0.presentSSHConnectPanel()
         })
         actions.append(.init(id: "open-project", title: "Open Project…",
-                             symbol: "folder", shortcut: keys.display(for: .openProject)) {
+                             icon: .folder, shortcut: keys.display(for: .openProject)) {
             $0.presentOpenProjectPanel()
         })
-        for (id, title, symbol, command, selector) in [
-            ("font-increase", "Increase Font Size", "textformat.size.larger",
+        // One shared "Aa" glyph for the font-size trio: Hugeicons has no
+        // larger/smaller/reset variants, so the titles carry the distinction.
+        for (id, title, command, selector) in [
+            ("font-increase", "Increase Font Size",
              KeyCommandID.increaseFontSize, #selector(AppDelegate.increaseFontSize(_:))),
-            ("font-decrease", "Decrease Font Size", "textformat.size.smaller",
+            ("font-decrease", "Decrease Font Size",
              .decreaseFontSize, #selector(AppDelegate.decreaseFontSize(_:))),
-            ("font-reset", "Reset Font Size", "textformat.size",
+            ("font-reset", "Reset Font Size",
              .resetFontSize, #selector(AppDelegate.resetFontSize(_:))),
         ] {
-            actions.append(.init(id: id, title: title, symbol: symbol,
+            actions.append(.init(id: id, title: title, icon: .textFont,
                                  shortcut: keys.display(for: command)) { _ in
                 NSApp.sendAction(selector, to: nil, from: nil)
             })
         }
         actions.append(.init(id: "toggle-sidebar", title: "Toggle Sidebar",
-                             symbol: "sidebar.leading", shortcut: nil) { _ in
+                             icon: .sidebarLeft, shortcut: nil) { _ in
             NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
         })
         actions.append(.init(id: "toggle-files", title: "Toggle Project Files",
-                             symbol: "sidebar.trailing", shortcut: keys.display(for: .toggleProjectFiles)) { _ in
+                             icon: .sidebarRight, shortcut: keys.display(for: .toggleProjectFiles)) { _ in
             NSApp.sendAction(#selector(AppDelegate.toggleFilesInspector(_:)), to: nil, from: nil)
         })
         actions.append(.init(id: "settings", title: "Settings…",
-                             symbol: "gearshape", shortcut: "⌘,") { _ in
+                             icon: .settings, shortcut: "⌘,") { _ in
             NSApp.sendAction(#selector(AppDelegate.showSettings(_:)), to: nil, from: nil)
         })
         actions.append(.init(id: "check-updates", title: "Check for Updates…",
-                             symbol: "arrow.triangle.2.circlepath", shortcut: nil) { _ in
+                             icon: .refresh, shortcut: nil) { _ in
             NSApp.sendAction(#selector(AppDelegate.checkForUpdates(_:)), to: nil, from: nil)
         })
         if AppChannel.isDev {
@@ -314,7 +316,7 @@ struct CommandPaletteView: View {
             // key. Fix ON → focus is reasserted on the next runloop; fix OFF → the
             // cursor stays hollow. Watch the `focus` log category for both events.
             actions.append(.init(id: "debug-orphan-focus", title: "Debug: Orphan Terminal Focus",
-                                 symbol: "cursorarrow.slash", shortcut: nil) { _ in
+                                 icon: .cursorDisabled, shortcut: nil) { _ in
                 Log.focus.info("fault injector: invoked, posting first-responder orphan in 0.35s")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                     NotificationCenter.default.post(name: .termioDebugOrphanFocus, object: nil)
@@ -490,17 +492,17 @@ private struct PaletteItem: Identifiable {
 private struct PaletteAction: Identifiable {
     let id: String
     let title: String
-    /// SF Symbol name, or nil when `agent` supplies a brand icon instead.
-    let symbol: String?
+    /// Hugeicons glyph, or nil when `agent` supplies a brand icon instead.
+    let icon: HugeIcon?
     var agent: AgentPreset?
     let shortcut: String?
     let perform: @MainActor (TermioStore) -> Void
 
-    init(id: String, title: String, symbol: String?, agent: AgentPreset? = nil,
+    init(id: String, title: String, icon: HugeIcon?, agent: AgentPreset? = nil,
          shortcut: String?, perform: @escaping @MainActor (TermioStore) -> Void) {
         self.id = id
         self.title = title
-        self.symbol = symbol
+        self.icon = icon
         self.agent = agent
         self.shortcut = shortcut
         self.perform = perform
@@ -560,21 +562,19 @@ private struct PaletteRow: View {
         case .session(let session):
             AgentIconView(agent: session.agent, size: 14)
         case .recentProject:
-            symbolIcon("clock.arrow.circlepath")
+            hugeIcon(.clock)
         case .file:
-            symbolIcon("doc.text")
+            hugeIcon(.fileDoc)
         case .action(let action):
             if let agent = action.agent {
                 AgentIconView(agent: agent, size: 14)
             } else {
-                symbolIcon(action.symbol ?? "questionmark")
+                hugeIcon(action.icon ?? .terminal)
             }
         }
     }
 
-    private func symbolIcon(_ name: String) -> some View {
-        Image(systemName: name)
-            .font(.system(size: 12))
-            .foregroundStyle(isHighlighted ? Color.white : Color.secondary)
+    private func hugeIcon(_ icon: HugeIcon) -> some View {
+        HugeIconView(icon: icon, size: 13, color: isHighlighted ? .white : .secondary)
     }
 }

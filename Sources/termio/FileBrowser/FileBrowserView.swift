@@ -193,7 +193,7 @@ struct FileBrowserView: View {
     private var noProject: some View {
         ContentUnavailableView(
             "No Project",
-            systemImage: "folder",
+            huge: .folder,
             description: Text("Select a session to browse its files.")
         )
     }

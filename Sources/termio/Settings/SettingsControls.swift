@@ -23,6 +23,8 @@ struct IconBadge: View {
                 .foregroundStyle(.secondary)
         case .terminalGlyph:
             HugeIconView(icon: .terminal, size: 14, color: .secondary)
+        case .huge(let icon):
+            HugeIconView(icon: icon, size: 14, color: .secondary)
         case .vector(let logo):
             BrandLogoShape(logo: logo)
                 .fill(logo.tint, style: FillStyle(eoFill: logo.usesEvenOddFill))

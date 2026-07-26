@@ -617,9 +617,7 @@ private struct ProjectHeader: View {
             // "Pinned" group label is the cue. Muted, so it reads as quiet metadata; on
             // hover it falls under the quick-add cluster (masked out with the label tail).
             if worktree != nil {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
+                HugeIconView(icon: .gitBranch, size: 10, color: .secondary)
                     .help("Git worktree")
             }
         }
@@ -956,12 +954,10 @@ private struct SessionRow: View {
             // muted grey from AgentIconView.
             Group {
                 if session.isSSH, store.status(for: session.id) != .working {
-                    // An SSH terminal reads as a remote link — a network glyph in the
+                    // An SSH terminal reads as a remote link — a globe glyph in the
                     // terminal grey — except while a detected remote agent is working,
                     // when it falls through to the spinner below.
-                    Image(systemName: "network")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
+                    HugeIconView(icon: .network, size: 11, color: .secondary)
                 } else if store.status(for: session.id) == .working {
                     // The spinner carries no status color — its motion already
                     // says "working", so color stays reserved for the states

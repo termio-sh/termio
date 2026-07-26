@@ -89,7 +89,7 @@ private struct FileRow: View {
                 // ink only ~75% of theirs (the left sidebar's shared-column rule), so an
                 // equal nominal size made every file icon read a step LARGER than the
                 // folder and sidebar family — 12 brings their ink widths level.
-                FileIconView(url: node.url, size: 12, symbolSize: 11)
+                FileIconView(url: node.url, size: 12, symbolSize: 11, ink: chrome?.foreground ?? .primary)
                     .frame(width: 16, alignment: .leading)
             }
             Text(node.name)
