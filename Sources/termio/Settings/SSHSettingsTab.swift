@@ -210,6 +210,9 @@ private struct AddSSHHostSheet: View {
             && !hostName.trimmingCharacters(in: .whitespaces).isEmpty
             && !aliasTaken
             && (port.isEmpty || Int(port).map { (1...65535).contains($0) } == true)
+            // ssh_config has no escape for a literal double quote — such values
+            // can't be written faithfully, so refuse rather than corrupt.
+            && ![alias, hostName, user, identityFile].contains(where: { $0.contains("\"") })
     }
 
     var body: some View {

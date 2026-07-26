@@ -54,15 +54,68 @@ enum SSHConfigFile {
     /// (and the in-app editor) goes through this.
     static var writableConfigURL: URL { configURL.resolvingSymlinksInPath() }
 
-    /// The connectable hosts from `~/.ssh/config` and any `Include`d files.
-    /// Wildcard patterns (`Host *`, globs, negations) are skipped — they are
-    /// defaults, not destinations.
+    /// The connectable hosts from `~/.ssh/config` and any `Include`d files,
+    /// resolved the way ssh itself resolves them: blocks are replayed in file
+    /// order and the *first obtained* value per key wins, so `Host *` defaults
+    /// and wildcard blocks contribute exactly what a real `ssh <alias>` would
+    /// use. (Known simplifications: `Match` blocks are skipped, and an
+    /// `Include` splices at the top level rather than into a block's context.)
     static func hosts() -> [SSHConfigHost] {
         var visited: Set<String> = []
-        return hosts(in: configURL, visited: &visited, depth: 0)
+        let blocks = blocks(in: configURL, visited: &visited, depth: 0)
+        var results: [SSHConfigHost] = []
+        var seen: Set<String> = []
+        for block in blocks {
+            for alias in block.patterns
+            where !alias.contains("*") && !alias.contains("?") && !alias.hasPrefix("!")
+                && !seen.contains(alias) {
+                seen.insert(alias)
+                var hostName: String?, user: String?, identityFile: String?
+                var port: Int?
+                for candidate in blocks where matches(alias, patterns: candidate.patterns) {
+                    if hostName == nil { hostName = candidate.hostName }
+                    if user == nil { user = candidate.user }
+                    if port == nil { port = candidate.port }
+                    if identityFile == nil { identityFile = candidate.identityFile }
+                }
+                results.append(SSHConfigHost(
+                    alias: alias, hostName: hostName ?? alias, user: user ?? "",
+                    port: port ?? 22, identityFile: identityFile,
+                    file: block.file, line: block.line
+                ))
+            }
+        }
+        return results
     }
 
-    private static func hosts(in url: URL, visited: inout Set<String>, depth: Int) -> [SSHConfigHost] {
+    /// One `Host` block in file order: its patterns plus the values its own
+    /// lines set, kept unresolved so `hosts()` can replay ssh's
+    /// first-obtained-value rule across blocks.
+    private struct Block {
+        var patterns: [String]
+        var hostName: String?
+        var user: String?
+        var port: Int?
+        var identityFile: String?
+        var file: URL
+        var line: Int
+    }
+
+    /// ssh_config pattern-list matching for one alias: any negated (`!`)
+    /// pattern match excludes the block; otherwise any positive match includes.
+    private static func matches(_ alias: String, patterns: [String]) -> Bool {
+        var matched = false
+        for pattern in patterns {
+            if pattern.hasPrefix("!") {
+                if fnmatch(String(pattern.dropFirst()), alias, 0) == 0 { return false }
+            } else if fnmatch(pattern, alias, 0) == 0 {
+                matched = true
+            }
+        }
+        return matched
+    }
+
+    private static func blocks(in url: URL, visited: inout Set<String>, depth: Int) -> [Block] {
         let path = url.standardizedFileURL.path
         // The depth cap breaks Include chains that self-reference through a glob
         // the visited set can't catch (e.g. re-listing a rewritten temp file).
@@ -70,70 +123,73 @@ enum SSHConfigFile {
               let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         visited.insert(path)
 
-        var hosts: [SSHConfigHost] = []
-        var aliases: [String] = []
-        var hostName = "", user = ""
-        var identityFile: String?
-        var port = 22, portSet = false
-        var blockLine = 0
+        var blocks: [Block] = []
+        // Directives before any Host/Match line apply unconditionally, exactly
+        // as if they sat under `Host *`.
+        var current: Block? = Block(patterns: ["*"], file: url, line: 0)
 
         func flush() {
-            for alias in aliases
-            where !alias.contains("*") && !alias.contains("?") && !alias.hasPrefix("!") {
-                hosts.append(SSHConfigHost(
-                    alias: alias, hostName: hostName.isEmpty ? alias : hostName,
-                    user: user, port: port, identityFile: identityFile,
-                    file: url, line: blockLine
-                ))
-            }
+            if let block = current { blocks.append(block) }
+            current = nil
         }
 
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         for (index, rawLine) in lines.enumerated() {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty, !line.hasPrefix("#") else { continue }
-            // `Keyword value…` — the keyword match is case-insensitive per
-            // ssh_config(5), and `=` is a valid keyword/value separator.
-            var parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "=" })
-                .map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
-                .filter { !$0.isEmpty }
-            // ssh itself has no trailing comments, but a stray `# note` after a
-            // value should degrade to ignoring the note, not to bogus hosts.
-            if let hash = parts.firstIndex(where: { $0.hasPrefix("#") }) {
-                parts = Array(parts[..<hash])
-            }
+            let parts = tokens(of: line)
             guard let keyword = parts.first?.lowercased() else { continue }
             let values = Array(parts.dropFirst())
             switch keyword {
             case "host":
                 flush()
-                aliases = values
-                hostName = ""; user = ""; port = 22; portSet = false; identityFile = nil
-                blockLine = index + 1
+                current = Block(patterns: values, file: url, line: index + 1)
             case "match":
-                // A Match block's settings belong to its condition, not to the
-                // preceding Host — close that block and ignore lines until the
-                // next Host.
+                // A Match block's settings belong to its condition, which this
+                // parser doesn't evaluate — skip lines until the next Host.
                 flush()
-                aliases = []
-            // ssh keeps the *first* obtained value per key; duplicates lose.
-            case "hostname": if hostName.isEmpty { hostName = values.first ?? "" }
-            case "user": if user.isEmpty { user = values.first ?? "" }
-            case "port": if !portSet, let parsed = values.first.flatMap(Int.init) { port = parsed; portSet = true }
-            case "identityfile": if identityFile == nil { identityFile = values.first }
             case "include":
+                flush()
                 for value in values {
                     for included in resolveInclude(value) {
-                        hosts.append(contentsOf: Self.hosts(
+                        blocks.append(contentsOf: Self.blocks(
                             in: included, visited: &visited, depth: depth + 1
                         ))
                     }
                 }
+            case "hostname": if current?.hostName == nil { current?.hostName = values.first }
+            case "user": if current?.user == nil { current?.user = values.first }
+            case "port": if current?.port == nil { current?.port = values.first.flatMap(Int.init) }
+            case "identityfile": if current?.identityFile == nil { current?.identityFile = values.first }
             default: break
             }
         }
         flush()
-        return hosts
+        return blocks
+    }
+
+    /// Splits an ssh_config line into tokens: whitespace/`=` separated, with
+    /// double-quoted segments kept whole (ssh's own quoting for values that
+    /// contain spaces — so the app can read back the blocks it writes). A `#`
+    /// starting a token ends the line: ssh has no trailing comments, but a
+    /// stray note should degrade to being ignored, not to bogus hosts.
+    private static func tokens(of line: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var inQuotes = false
+        for character in line {
+            if character == "\"" { inQuotes.toggle(); continue }
+            if !inQuotes, character == " " || character == "\t" || character == "=" {
+                if !current.isEmpty { tokens.append(current); current = "" }
+                continue
+            }
+            current.append(character)
+        }
+        if !current.isEmpty { tokens.append(current) }
+        if let hash = tokens.firstIndex(where: { $0.hasPrefix("#") }) {
+            tokens = Array(tokens[..<hash])
+        }
+        return tokens
     }
 
     /// Expands one `Include` operand to concrete files: `~` and relative paths
@@ -182,7 +238,9 @@ enum SSHConfigFile {
         alias: String, hostName: String, user: String, port: String, identityFile: String
     ) throws {
         // ssh_config quotes arguments that contain spaces (a picked key file
-        // under "My Drive" must not split into two tokens).
+        // under "My Drive" must not split into two tokens). Values containing a
+        // double quote are unrepresentable in ssh_config and rejected upstream
+        // in the sheet.
         func quoted(_ value: String) -> String {
             value.contains(" ") ? "\"\(value)\"" : value
         }
