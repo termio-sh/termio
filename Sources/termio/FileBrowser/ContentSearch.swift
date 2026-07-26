@@ -24,6 +24,10 @@ enum ContentSearch {
     private static let perFileLimit = "20"
     /// Longest line text kept; minified bundles can put megabytes on one line.
     private static let lineCap = 500
+    /// Byte ceiling on buffered tool output. `maxLines` bounds complete lines,
+    /// but the reader only counts newlines — one minified bundle line could
+    /// otherwise grow the buffer without limit before its newline ever arrives.
+    private static let outputByteCap = 4 << 20
 
     nonisolated static func search(_ query: String, under root: URL, limit: Int) async -> [ContentMatch] {
         guard !query.isEmpty else { return [] }
@@ -114,14 +118,17 @@ enum ContentSearch {
                 if chunk.isEmpty { break }  // EOF: exited, or terminated by cancel
                 for byte in chunk where byte == UInt8(ascii: "\n") { newlines += 1 }
                 data.append(chunk)
-                if newlines >= maxLines {
+                if newlines >= maxLines || data.count >= outputByteCap {
                     stoppedEarly = true
                     process.terminate()
                     break
                 }
             }
             process.waitUntilExit()
-            guard let output = String(data: data, encoding: .utf8) else { return nil }
+            // Lossy on purpose: stopping at a cap can cut the final chunk
+            // mid-codepoint, and a strict decode would trade every hit already
+            // buffered for one dangling byte.
+            let output = String(decoding: data, as: UTF8.self)
             // Self-terminated = success with a full budget of lines; the real
             // exit status is just the SIGTERM we sent.
             return (stoppedEarly ? 0 : process.terminationStatus, output)
