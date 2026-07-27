@@ -1,5 +1,4 @@
 import AppKit
-import PDFKit
 import SwiftUI
 import WebKit
 
@@ -26,12 +25,14 @@ struct FilePreviewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
+            // The PDF reader draws its own toolbar with the filename inline (Preview.app style),
+            // so skip the outer header there to avoid two stacked title rows.
+            if kind != .pdf {
+                header
+                Divider()
+            }
             content
         }
-        // Opaque terminal-colored fill so the overlay fully covers the terminal, running up under
-        // the toolbar like the terminal itself.
         .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
         .onExitCommand(perform: onClose)
     }
@@ -59,7 +60,7 @@ struct FilePreviewView: View {
     private var content: some View {
         switch kind {
         case .pdf:
-            PDFPreview(url: url)
+            PDFReaderView(url: url)
         case .web:
             WebPreview(url: url)
         case .image:
@@ -75,25 +76,6 @@ struct FilePreviewView: View {
             } else {
                 WebPreview(url: url)
             }
-        }
-    }
-}
-
-/// A `PDFView` over a file URL, scaled to fit on the terminal background.
-private struct PDFPreview: NSViewRepresentable {
-    let url: URL
-
-    func makeNSView(context: Context) -> PDFView {
-        let view = PDFView()
-        view.document = PDFDocument(url: url)
-        view.autoScales = true
-        view.backgroundColor = .clear
-        return view
-    }
-
-    func updateNSView(_ view: PDFView, context: Context) {
-        if view.document?.documentURL != url {
-            view.document = PDFDocument(url: url)
         }
     }
 }
