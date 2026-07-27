@@ -53,9 +53,11 @@ enum ThemeLibrary {
     /// Light slot — so a slot can never offer a theme that renders the wrong way.
     /// Brightness is the theme's own `isDark` (background luminance), the same signal
     /// the row glyph and mismatch hint use.
-    static let darkBundledThemeNames: [String] = GhosttyThemeCatalog.search("")
+    // Read the whole catalog directly: `search("")` looks up the empty string,
+    // and Swift's `contains("")` is `false`, so it would return nothing.
+    static let darkBundledThemeNames: [String] = GhosttyThemeCatalog.allThemes
         .filter { $0.isDark }.map(\.name).sorted()
-    static let lightBundledThemeNames: [String] = GhosttyThemeCatalog.search("")
+    static let lightBundledThemeNames: [String] = GhosttyThemeCatalog.allThemes
         .filter { !$0.isDark }.map(\.name).sorted()
 
     /// A curated shortlist of widely-used DARK themes, surfaced at the top of the

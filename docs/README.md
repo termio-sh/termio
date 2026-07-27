@@ -58,6 +58,7 @@ from the real front matter).
 | done | design | ["Sandbox removal & restoration (Apple Seatbelt subsystem)"](design/sandbox-removal-and-restoration.md) |
 | done | design | [Agent Abstraction & Configuration](design/agent-abstraction-and-configuration.md) |
 | done | design | [Config-driven agent resume](design/config-driven-agent-resume.md) |
+| done | design | [Quick theme switching from the command palette](design/command-palette-theme-switching.md) |
 | done | design | [Vibe Island 式 Agent 状态层（Claude Code hooks）](design/vibe-island-status.md) |
 | done | research | ["ADE 赛道全景表（2026-07）：开源 + 闭源一张表，termio 亮点"](competitive-analysis/10-landscape-table-2026-07.md) |
 | done | research | ["Competitive analysis: claude-squad"](competitive-analysis/05-claude-squad.md) |

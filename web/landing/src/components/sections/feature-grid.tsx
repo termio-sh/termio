@@ -17,7 +17,7 @@ const features = [
   {
     title: "Command palette",
     blurb:
-      "Jump to any session, project, or action from one search box.",
+      "Jump to any session, project, or action from one search box — themes too, previewed live as you browse, Enter to keep or Esc to revert.",
     src: "/feature/pallette.png",
     alt: "The Termio command palette over a terminal session",
     width: 1120,
@@ -35,7 +35,7 @@ const features = [
   {
     title: "Native appearance",
     blurb:
-      "Light, dark, and a glass look that follows the system — a real Mac app, down to the chrome.",
+      "Light, dark, and a glass look that follows the system, with hundreds of built-in terminal themes or your own. A real Mac app, down to the chrome.",
     src: "/feature/appearance.png",
     alt: "Termio's appearance settings with light, dark, and glass modes",
     width: 1160,

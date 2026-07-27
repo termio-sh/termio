@@ -9,6 +9,10 @@ import SwiftUI
 enum PaletteMode {
     case openQuickly
     case commands
+    /// Live theme browsing (opened from the "Change Theme…" command). Edits only
+    /// the slot matching the current appearance, previews on highlight, commits on
+    /// Return, and reverts on Esc — the terminal is the preview surface.
+    case themes
 }
 
 /// The shared palette panel behind ⌘⇧O (Open Quickly) and ⌘⇧P (Command
@@ -48,6 +52,12 @@ struct CommandPaletteView: View {
     @State private var highlighted = 0
     @State private var keyMonitor: Any?
     @State private var projectFiles: [ProjectFile] = []
+    /// The slot theme in use when theme browsing began, restored on Esc/dismiss so
+    /// arrow-key preview is no-risk. `nil` whenever the palette isn't browsing themes.
+    @State private var themeSnapshot: String?
+    /// Set once the user commits a theme (Return/click) so leaving the mode keeps it
+    /// instead of reverting to the snapshot.
+    @State private var themeCommitted = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -66,14 +76,31 @@ struct CommandPaletteView: View {
             claimSearchFocus(attempt: 0)
             loadProjectFiles()
         }
-        .onDisappear(perform: removeKeyMonitor)
+        .onDisappear {
+            removeKeyMonitor()
+            // A live preview the panel is torn down mid-browse (dismissed by
+            // clicking away) still needs reverting.
+            endThemeBrowsing(commit: themeCommitted)
+        }
         .onChange(of: query) { _, _ in highlighted = 0 }
         // Pressing the other shortcut while open switches modes in place —
         // stale search text from the previous mode would just show "No matches".
-        .onChange(of: store.paletteMode) { _, _ in
+        .onChange(of: store.paletteMode) { old, new in
+            // Leaving themes without committing restores the snapshot.
+            if old == .themes, new != .themes { endThemeBrowsing(commit: themeCommitted) }
             query = ""
             highlighted = 0
+            if new == .themes { beginThemeBrowsing() }
             loadProjectFiles()
+        }
+        // Live-preview the highlighted theme on the open terminals as the user
+        // arrows/hovers through the list (same recolor path as Settings).
+        .onChange(of: highlighted) { _, index in
+            guard mode == .themes, themeSnapshot != nil else { return }
+            let items = filtered
+            guard items.indices.contains(index),
+                  case .theme(let name) = items[index].kind else { return }
+            setCurrentSlotTheme(name)
         }
     }
 
@@ -82,6 +109,14 @@ struct CommandPaletteView: View {
     /// during dismissal.
     private var mode: PaletteMode { store.paletteMode ?? .commands }
 
+    private var placeholder: String {
+        switch mode {
+        case .openQuickly: return "Jump to session, project, or file…"
+        case .commands: return "Run a command…"
+        case .themes: return "Search themes…"
+        }
+    }
+
     // MARK: - Pieces
 
     private var searchField: some View {
@@ -89,10 +124,7 @@ struct CommandPaletteView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 17))
                 .foregroundStyle(.secondary)
-            TextField(
-                mode == .openQuickly ? "Jump to session, project, or file…" : "Run a command…",
-                text: $query
-            )
+            TextField(placeholder, text: $query)
             .textFieldStyle(.plain)
             .font(.system(size: 20))
             .focused($searchFocused)
@@ -157,6 +189,7 @@ struct CommandPaletteView: View {
         switch mode {
         case .openQuickly: return openQuicklyItems
         case .commands: return commandItems
+        case .themes: return themeItems
         }
     }
 
@@ -301,6 +334,9 @@ struct CommandPaletteView: View {
                              icon: .sidebarRight, shortcut: keys.display(for: .toggleProjectFiles)) { _ in
             NSApp.sendAction(#selector(AppDelegate.toggleFilesInspector(_:)), to: nil, from: nil)
         })
+        actions.append(.init(id: "change-theme", title: "Change Theme…",
+                             icon: nil, symbol: "paintpalette", shortcut: nil,
+                             switchesMode: .themes) { _ in })
         actions.append(.init(id: "settings", title: "Settings…",
                              icon: .settings, shortcut: "⌘,") { _ in
             NSApp.sendAction(#selector(AppDelegate.showSettings(_:)), to: nil, from: nil)
@@ -324,6 +360,79 @@ struct CommandPaletteView: View {
             })
         }
         return actions
+    }
+
+    // MARK: - Themes
+
+    /// The theme selector's rows: a "Terminal default" reset, the user's own
+    /// same-brightness custom themes, then the bundled catalog with the popular
+    /// picks pulled to the front. Only themes matching the slot's brightness show,
+    /// so the palette can never apply one that renders the wrong way.
+    private var themeItems: [PaletteItem] {
+        let dark = slotIsDark
+        let popular = dark ? ThemeLibrary.popularDarkThemeNames : ThemeLibrary.popularLightThemeNames
+        let bundled = dark ? ThemeLibrary.darkBundledThemeNames : ThemeLibrary.lightBundledThemeNames
+        let custom = ThemeLibrary.userThemeNames.filter { ThemeLibrary.theme(named: $0)?.isDark == dark }
+
+        var items: [PaletteItem] = custom.map { themeItem(name: $0, section: .customThemes) }
+        // Return-to-default sits atop the main group; popular first, then the
+        // alphabetical remainder with popular removed so nothing repeats. The
+        // label names the slot being edited so "default" isn't ambiguous.
+        items.append(themeItem(name: "", title: dark ? "Default Dark Theme" : "Default Light Theme"))
+        items += popular.map { themeItem(name: $0) }
+        let popularSet = Set(popular)
+        items += bundled.filter { !popularSet.contains($0) }.map { themeItem(name: $0) }
+        return items
+    }
+
+    private func themeItem(name: String, title: String? = nil,
+                           section: PaletteSection = .themes) -> PaletteItem {
+        .init(id: "theme-\(name.isEmpty ? "__default__" : name)",
+              kind: .theme(name: name), section: section,
+              title: title ?? name, subtitle: nil)
+    }
+
+    /// Which slot the palette edits — the one the terminals render right now, so
+    /// changing "the theme" changes what's on screen. Mirrors how the surfaces pick
+    /// a slot: pinned modes are fixed, System follows the effective appearance.
+    private var slotIsDark: Bool {
+        switch store.settings.appearanceMode {
+        case .light: return false
+        case .dark: return true
+        case .system: return NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        }
+    }
+
+    private var currentSlotThemeName: String {
+        slotIsDark ? store.settings.darkThemeName : store.settings.lightThemeName
+    }
+
+    /// Writes the current slot's theme, which fires `AppSettings.objectWillChange`
+    /// and recolors every open surface (see `applyAppearanceToOpenSurfaces`).
+    private func setCurrentSlotTheme(_ name: String) {
+        if slotIsDark {
+            store.settings.darkThemeName = name
+        } else {
+            store.settings.lightThemeName = name
+        }
+    }
+
+    private func beginThemeBrowsing() {
+        themeSnapshot = currentSlotThemeName
+        themeCommitted = false
+        // Land the highlight on the theme already in use so browsing starts from the
+        // current look and the seed-preview is a no-op.
+        let current = currentSlotThemeName
+        highlighted = themeItems.firstIndex {
+            if case .theme(let name) = $0.kind { return name == current }
+            return false
+        } ?? 0
+    }
+
+    private func endThemeBrowsing(commit: Bool) {
+        if !commit, let snapshot = themeSnapshot { setCurrentSlotTheme(snapshot) }
+        themeSnapshot = nil
+        themeCommitted = false
     }
 
     /// Fuzzy filter + rank. Empty query shows the browsable sets (sessions,
@@ -356,6 +465,18 @@ struct CommandPaletteView: View {
     }
 
     private func run(_ item: PaletteItem, keepOpen: Bool = false) {
+        // Mode-switch commands (Change Theme…) re-drive the open panel into a new
+        // mode rather than closing it.
+        if case .action(let action) = item.kind, let target = action.switchesMode {
+            store.paletteMode = target
+            return
+        }
+        // Commit a theme before dismissing, so leaving the mode keeps it instead
+        // of reverting to the snapshot.
+        if case .theme(let name) = item.kind {
+            setCurrentSlotTheme(name)
+            themeCommitted = true
+        }
         if !keepOpen { onClose() }
         switch item.kind {
         case .session(let session):
@@ -368,6 +489,8 @@ struct CommandPaletteView: View {
             store.openFileInEditor(file.url)
         case .action(let action):
             action.perform(store)
+        case .theme:
+            break // already applied above
         }
     }
 
@@ -442,7 +565,7 @@ struct CommandPaletteView: View {
 /// Open Quickly's display groups, in rank order; `.commands` is the palette's
 /// single (headerless) group.
 private enum PaletteSection: Int, Hashable {
-    case sessions, recentProjects, files, commands
+    case sessions, recentProjects, files, commands, customThemes, themes
 
     var title: String? {
         switch self {
@@ -450,6 +573,10 @@ private enum PaletteSection: Int, Hashable {
         case .recentProjects: return "Recent"
         case .files: return "Files"
         case .commands: return nil
+        case .customThemes: return "Custom"
+        // No header when custom themes are absent (the common case) — a lone
+        // "Themes" banner over the whole list is noise (see `sectioned`).
+        case .themes: return "Themes"
         }
     }
 }
@@ -460,6 +587,8 @@ private struct PaletteItem: Identifiable {
         case recentProject(RecentProject)
         case file(ProjectFile)
         case action(PaletteAction)
+        /// A terminal theme name (empty = "Terminal default").
+        case theme(name: String)
     }
 
     let id: String
@@ -494,17 +623,27 @@ private struct PaletteAction: Identifiable {
     let title: String
     /// Hugeicons glyph, or nil when `agent` supplies a brand icon instead.
     let icon: HugeIcon?
+    /// An SF Symbol name, used in place of `icon` when a system glyph reads better
+    /// than any Hugeicon (e.g. `paintpalette` for Change Theme…, matching the
+    /// Appearance settings). Takes precedence over `icon` when set.
+    var symbol: String?
     var agent: AgentPreset?
     let shortcut: String?
+    /// Set when the command switches the palette into another mode in place (e.g.
+    /// Change Theme…) rather than running and dismissing; `perform` is then unused.
+    var switchesMode: PaletteMode?
     let perform: @MainActor (TermioStore) -> Void
 
-    init(id: String, title: String, icon: HugeIcon?, agent: AgentPreset? = nil,
-         shortcut: String?, perform: @escaping @MainActor (TermioStore) -> Void) {
+    init(id: String, title: String, icon: HugeIcon?, symbol: String? = nil,
+         agent: AgentPreset? = nil, shortcut: String?, switchesMode: PaletteMode? = nil,
+         perform: @escaping @MainActor (TermioStore) -> Void) {
         self.id = id
         self.title = title
         self.icon = icon
+        self.symbol = symbol
         self.agent = agent
         self.shortcut = shortcut
+        self.switchesMode = switchesMode
         self.perform = perform
     }
 }
@@ -568,10 +707,26 @@ private struct PaletteRow: View {
         case .action(let action):
             if let agent = action.agent {
                 AgentIconView(agent: agent, size: 14)
+            } else if let symbol = action.symbol {
+                symbolIcon(symbol)
             } else {
                 hugeIcon(action.icon ?? .terminal)
             }
+        case .theme(let name):
+            // The theme's own colors are its icon — Warp-style, so the list reads
+            // as swatches. The default row (no definition) shows the palette glyph.
+            if let definition = ThemeLibrary.theme(named: name) {
+                ThemeSwatch(definition: definition, compact: true)
+            } else {
+                symbolIcon("paintpalette")
+            }
         }
+    }
+
+    private func symbolIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 13))
+            .foregroundStyle(isHighlighted ? Color.white : Color.secondary)
     }
 
     private func hugeIcon(_ icon: HugeIcon) -> some View {

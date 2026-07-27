@@ -17,6 +17,19 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.22.0",
+    date: "2026-07-27",
+    title: "Switch themes without leaving the terminal",
+    changes: {
+      new: [
+        "Change Theme: open the command palette (⌘⇧P), pick Change Theme…, and browse — each theme previews live on your open terminals as you arrow through, Enter keeps it, Esc snaps back. It edits the slot for your current appearance and shows a color swatch per theme.",
+      ],
+      fixed: [
+        "The theme pickers list the full bundled catalog again (hundreds of themes), not just the popular shortlist.",
+      ],
+    },
+  },
+  {
     version: "0.20.0",
     date: "2026-07-26",
     title: "Your agents can tap you on the shoulder",
