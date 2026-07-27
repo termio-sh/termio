@@ -28,17 +28,24 @@ struct IssuesView: View {
     private var chrome: ChromeTheme? { settings.chromeTheme(for: colorScheme) }
 
     var body: some View {
-        Group {
-            if let item = model.openItem {
-                IssueDetailView(item: item, model: model, settings: settings) {
-                    model.openItem = nil
-                    selection = nil
-                }
-            } else {
-                listPane
+        // List only — the detail opens in the center over the terminal (like the file
+        // editor and diff), driven by `store.openIssueDetail`, not pushed in here.
+        listPane
+            .task(id: repoRoot) {
+                store.issuesModel = model
+                await model.start()
             }
-        }
-        .task(id: repoRoot) { await model.start() }
+            // Selection IS the open gesture; route it to the center overlay. Follow the
+            // overlay back: when it closes, release the selection so the same row reopens.
+            .onChange(of: selection) { _, selected in
+                guard let selected,
+                      let item = model.items.first(where: { $0.number == selected })
+                else { return }
+                store.openIssueDetail = item
+            }
+            .onChange(of: store.openIssueDetail) { _, item in
+                if item == nil { selection = nil }
+            }
     }
 
     // MARK: List pane
@@ -202,7 +209,7 @@ struct IssuesView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             // Native `List` selection as the click handler, like the changes list —
-            // a selected row pushes in its detail.
+            // a selected row opens its detail in the center (see `body`'s onChange).
             List(model.items, selection: $selection) { item in
                 IssueRow(
                     item: item,
@@ -214,11 +221,6 @@ struct IssuesView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .environment(\.defaultMinListRowHeight, 1)
-            .onChange(of: selection) { _, selected in
-                if let selected, let item = model.items.first(where: { $0.number == selected }) {
-                    model.openItem = item
-                }
-            }
         }
     }
 
@@ -230,10 +232,12 @@ struct IssuesView: View {
 
 // MARK: - Row
 
-/// One list row: state dot, monospace identifier, title (the flexible element).
-/// The trailing metadata — label chips and the updated age — appears on hover
-/// (the GitChangeRow pattern): bare color dots at rest carried no meaning, so
-/// the resting row is clean and the hover answers "what is this, how fresh".
+/// One list row: state icon, monospace identifier, title (the flexible element).
+/// The icon is shape-distinct per state (GitHub's octicon convention), so the
+/// resting row reads without hover and without leaning on hue alone. The trailing
+/// metadata — label chips and the updated age — still appears on hover (the
+/// GitChangeRow pattern), so the resting row stays clean and the hover answers
+/// "what labels, how fresh".
 private struct IssueRow: View {
     let item: IssueSummary
     let font: Font
@@ -244,10 +248,13 @@ private struct IssueRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(item.state.tint(for: item.kind))
-                .frame(width: 7, height: 7)
-                .help(item.state.label)
+            OcticonView(
+                icon: item.state.octicon(for: item.kind),
+                size: 13,
+                color: item.state.tint(for: item.kind)
+            )
+            .frame(width: 14)
+            .help(item.state.label)
             // Never wraps or compresses — without this, a narrow pane stacks the
             // identifier one character per line and the row balloons.
             Text(item.identifier)
@@ -301,27 +308,25 @@ private struct IssueRow: View {
     }
 }
 
-// MARK: - Detail (pushed in)
+// MARK: - Detail (center overlay)
 
-/// The pushed-in detail: a native header (back, identifier, checkout for PRs,
-/// open-in-browser) over the content. An issue shows the conversation (body +
-/// comments through `MarkdownHTML` in a themed web view); a pull request adds
-/// the Conversation | Files switch — files diff natively in the `GitDiffView`
-/// overlay against the fetched PR refs, JetBrains-style, no checkout needed.
-private struct IssueDetailView: View {
+/// The item detail, shown over the terminal in the center (by `TerminalPane`,
+/// driven by `store.openIssueDetail`) — the editor/diff pattern, not the narrow
+/// inspector. A native header (back, identifier, checkout for PRs, open-in-browser)
+/// over the content: an issue shows the conversation (body + comments through
+/// `MarkdownHTML` in a themed web view); a pull request adds the Conversation |
+/// Files switch — files diff natively in the `GitDiffView` overlay (which stacks
+/// on top of this one) against the fetched PR refs, JetBrains-style, no checkout needed.
+struct IssueDetailView: View {
     let item: IssueSummary
     @ObservedObject var model: IssuesPanelModel
     @ObservedObject var settings: AppSettings
     let onBack: () -> Void
 
-    @EnvironmentObject var store: TermioStore
     @Environment(\.colorScheme) private var colorScheme
 
     private enum Tab: Hashable { case conversation, files }
     @State private var tab: Tab = .conversation
-    /// The Files list's selected row, by path — selection IS the open gesture,
-    /// like the Changes list.
-    @State private var fileSelection: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -334,14 +339,6 @@ private struct IssueDetailView: View {
         }
         .task(id: item.number) { await model.loadDetail(for: item) }
         .onExitCommand(perform: onBack)
-        // Follow the overlay both ways, like the Changes list: walking with ← / →
-        // chases the selection; closing releases it so the same row reopens.
-        .onChange(of: store.openDiff) { _, request in
-            if let request, request.range != nil, fileSelection != request.change.path {
-                fileSelection = request.change.path
-            }
-            if request == nil { fileSelection = nil }
-        }
         .alert(
             "Couldn’t Check Out",
             isPresented: Binding(
@@ -362,9 +359,12 @@ private struct IssueDetailView: View {
     private var header: some View {
         HStack(spacing: 6) {
             TreeHeaderButton(huge: .chevronLeft, help: "Back", action: onBack)
-            Circle()
-                .fill(item.state.tint(for: item.kind))
-                .frame(width: 7, height: 7)
+            OcticonView(
+                icon: item.state.octicon(for: item.kind),
+                size: 14,
+                color: item.state.tint(for: item.kind)
+            )
+            .frame(width: 15)
             Text(item.identifier)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
@@ -439,108 +439,25 @@ private struct IssueDetailView: View {
 
     @ViewBuilder
     private var filesBody: some View {
-        if model.prFiles.isEmpty {
+        if !model.prFiles.isEmpty {
+            // GitHub Desktop's "Files changed": file list on the left, the selected file's
+            // diff on the right, rendered from the API's inline patches (no fetch, no git).
+            PRFilesSplitView(
+                files: model.prFiles, patches: model.prFilePatches,
+                repoRoot: model.repoRoot, settings: settings, onClose: onBack
+            )
+        } else if model.detail == nil, model.detailError == nil {
+            // The file list arrives with the detail; show a spinner until it lands.
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
             ContentUnavailableView(
                 "No Files", huge: .fileDoc,
                 description: Text("This pull request changes no files.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            List(model.prFiles, selection: $fileSelection) { change in
-                PRFileRow(
-                    change: change,
-                    font: settings.interfaceFont,
-                    chrome: settings.chromeTheme(for: colorScheme),
-                    isSelected: fileSelection == change.path
-                )
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, 1)
-            // Diffs need the fetched refs; a brief overlay spinner covers the fetch
-            // kicked off when the tab first appears.
-            .overlay {
-                if model.isFetchingDiffRefs {
-                    ProgressView().controlSize(.small)
-                }
-            }
-            .task { await model.prepareDiffRefs() }
-            .onChange(of: fileSelection) { _, selected in
-                guard let selected,
-                      let change = model.prFiles.first(where: { $0.path == selected })
-                else { return }
-                openDiff(change)
-            }
-            .onKeyPress(.leftArrow) { walkOverlay(-1) }
-            .onKeyPress(.rightArrow) { walkOverlay(+1) }
         }
-    }
-
-    private func openDiff(_ change: GitChange) {
-        guard let range = model.prDiffRange else { return }
-        store.openDiff = GitDiffRequest(
-            repoRoot: model.repoRoot, change: change, range: range, siblings: model.prFiles)
-    }
-
-    private func walkOverlay(_ delta: Int) -> KeyPress.Result {
-        guard let next = store.openDiff?.neighbor(delta) else { return .ignored }
-        store.openDiff = next
-        return .handled
-    }
-}
-
-/// A PR file row: the Changes list's visual language (status letter, name,
-/// dimmed directory, `+A −D`) without the working-tree affordances (no drag,
-/// no discard — the files aren't local).
-private struct PRFileRow: View {
-    let change: GitChange
-    let font: Font
-    let chrome: ChromeTheme?
-    let isSelected: Bool
-
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(change.status.letter)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(change.status.tint)
-                .frame(width: 14)
-            Text(change.name)
-                .font(font)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .layoutPriority(1)
-            if !change.directory.isEmpty {
-                Text(change.directory)
-                    .font(font)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer(minLength: 6)
-            HStack(spacing: 5) {
-                if change.additions > 0 { Text("+\(change.additions)").foregroundStyle(.green) }
-                if change.deletions > 0 { Text("−\(change.deletions)").foregroundStyle(.red) }
-            }
-            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-            .opacity(0.85)
-            .fixedSize()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .background(OutlineSelectionStyleStripper())
-        .listRowInsets(EdgeInsets())
-        .listRowSeparator(.hidden)
-        .listRowBackground(
-            SidebarRowHighlight(isSelected: isSelected, isHovering: isHovering, chrome: chrome)
-                .animation(.easeInOut(duration: 0.12), value: isSelected)
-                .animation(.easeInOut(duration: 0.12), value: isHovering)
-        )
-        .onHover { isHovering = $0 }
-        .help(change.originalPath.map { "\($0) → \(change.path)" } ?? change.path)
     }
 }
 

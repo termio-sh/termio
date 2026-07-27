@@ -642,20 +642,6 @@ enum GitService {
         return value.isEmpty ? nil : value
     }
 
-    /// Fetches a pull request's head (`refs/pull/N/head` — GitHub serves every PR
-    /// there, fork or not) into `origin/pr/N`, plus the PR's base branch, so the
-    /// Files tab can show three-dot merge-base diffs without any checkout. Returns
-    /// the `base...head` range string to diff with, or `nil` when the fetch failed.
-    static func fetchPullRequestRef(number: Int, baseRef: String, in repoRoot: String) async -> String? {
-        await offMain {
-            guard run(["fetch", "--no-tags", "origin", baseRef,
-                       "+refs/pull/\(number)/head:refs/remotes/origin/pr/\(number)"],
-                      in: repoRoot) != nil
-            else { return nil }
-            return "origin/\(baseRef)...origin/pr/\(number)"
-        }
-    }
-
     /// Checks the PR's branch out: a same-repo PR switches to its real head branch
     /// (tracking `origin`); a fork PR materializes the pull ref as local `pr/N`.
     /// Returns an error description, or `nil` on success.

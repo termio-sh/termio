@@ -115,6 +115,23 @@ struct TerminalPane: View {
             }
         }
         .animation(.easeOut(duration: 0.12), value: store.openFileURL != nil)
+        // Clicking a row in the inspector's Issues pane covers the terminal with that item's
+        // detail — the conversation (and, for a PR, its Files), opened in the center like the
+        // editor and diff rather than cramped in the narrow inspector. Ordered BEFORE the diff
+        // overlay below so a PR's file diff stacks on top: closing the diff returns here, not to
+        // the terminal. Escape or the back button clears it.
+        .overlay {
+            if let item = store.openIssueDetail, let model = store.issuesModel {
+                IssueDetailView(item: item, model: model, settings: settings) {
+                    store.openIssueDetail = nil
+                    requestSelectedTerminalFocus(reason: .overlayClosed)
+                }
+                .background(paneBackground)
+                .id(item.number)
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: store.openIssueDetail != nil)
         // Clicking a row in the inspector's Changes pane covers the terminal with that file's
         // unified diff (the surface keeps running underneath), the git counterpart of the editor
         // overlay above. Escape or the close button clears it.
@@ -183,14 +200,21 @@ struct TerminalPane: View {
             store.openFileURL = nil
             store.openDiff = nil
             store.openTrace = nil
+            store.openIssueDetail = nil
             requestSelectedTerminalFocus(reason: .selectionChanged)
         }
         // The toolbar's close button posts this; tear the overlay down the same way the overlay's
         // own Esc / close does (clear the store, return focus to the selected session's terminal).
         .onReceive(NotificationCenter.default.publisher(for: .termioCloseContentOverlay)) { _ in
-            store.openFileURL = nil
-            store.openDiff = nil
-            store.openTrace = nil
+            // Tear down top-down: a stacked PR file diff closes first, revealing the detail;
+            // a second press then closes the detail (matching the overlay's own Esc handling).
+            if store.openDiff != nil {
+                store.openDiff = nil
+            } else {
+                store.openFileURL = nil
+                store.openTrace = nil
+                store.openIssueDetail = nil
+            }
             requestSelectedTerminalFocus(reason: .overlayClosed)
         }
         // Dev-only: perform the real AppKit failure while the main window stays key.

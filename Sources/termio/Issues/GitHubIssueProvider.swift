@@ -103,21 +103,25 @@ struct GitHubIssueProvider: IssueProvider {
             URL(string: "https://api.github.com/repos/\(container.id)/pulls/\(number)")!)
         return PullRequestGitInfo(
             headRef: raw.head.ref,
-            baseRef: raw.base.ref,
             // A deleted fork leaves `head.repo` null — only the pull ref remains.
             crossRepository: raw.head.repo?.fullName != raw.base.repo?.fullName
         )
     }
 
-    /// The PR's changed files as `GitChange` rows (the git pane's own model), so
-    /// the Files tab and the diff overlay's sibling walk reuse everything.
-    func pullRequestFiles(_ number: Int, in container: IssueContainer) async throws -> [GitChange] {
+    /// The PR's changed files as `GitChange` rows (the git pane's own model) *with the
+    /// diff inline*: the `/pulls/{n}/files` response already carries each file's unified
+    /// `patch`, so the Files tab renders straight from this one call — no `git fetch` of
+    /// the PR refs, no per-file `git diff`, and it works for cross-fork PRs with nothing
+    /// checked out locally. GitHub omits `patch` for binaries and diffs too large to
+    /// inline; those arrive as `nil` and the UI shows a note instead.
+    func pullRequestFiles(_ number: Int, in container: IssueContainer) async throws -> [PullRequestFile] {
         struct RawFile: Decodable {
             let filename: String
             let status: String
             let additions: Int
             let deletions: Int
             let previousFilename: String?
+            let patch: String?
         }
         let raw: [RawFile] = try await get(
             URL(string: "https://api.github.com/repos/\(container.id)/pulls/\(number)/files?per_page=100")!)
@@ -134,7 +138,9 @@ struct GitHubIssueProvider: IssueProvider {
             change.additions = file.additions
             change.deletions = file.deletions
             change.originalPath = file.previousFilename
-            return change
+            // No `patch` on a binary file; GitHub also drops it past its inline-size cap.
+            change.isBinary = file.patch == nil && file.additions == 0 && file.deletions == 0
+            return PullRequestFile(change: change, patch: file.patch)
         }
     }
 

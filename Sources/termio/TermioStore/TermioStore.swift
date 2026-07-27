@@ -113,7 +113,7 @@ final class TermioStore: ObservableObject {
     /// Opening a file dismisses any open diff — the two overlays are mutually exclusive.
     @Published var openFileURL: URL? {
         didSet {
-            if openFileURL != nil { openDiff = nil; openTrace = nil }
+            if openFileURL != nil { openDiff = nil; openTrace = nil; openIssueDetail = nil }
             // Closing always returns to the editable default; a read-only open re-asserts the flag
             // immediately before setting the URL (see `openTerminalLink`). The jump line clears too,
             // so a later plain open of the same file doesn't scroll to a stale hit.
@@ -158,8 +158,26 @@ final class TermioStore: ObservableObject {
     /// "View Trace" sets it, and `TerminalPane` covers itself with `TraceView` while
     /// it is non-nil. Mutually exclusive with the other two.
     @Published var openTrace: TraceRequest? {
-        didSet { if openTrace != nil { openFileURL = nil; openDiff = nil } }
+        didSet { if openTrace != nil { openFileURL = nil; openDiff = nil; openIssueDetail = nil } }
     }
+
+    /// The GitHub issue / pull request whose detail is shown over the terminal, or `nil`
+    /// when none is. The fourth content overlay: clicking a row in the inspector's Issues
+    /// pane sets it, and `TerminalPane` covers itself with the detail — the conversation /
+    /// PR files opened in the center like the editor and diff, not cramped in the narrow
+    /// inspector. Unlike the others it deliberately COEXISTS with `openDiff`: a PR's file
+    /// diff stacks on top of the detail (`TerminalPane` orders the diff overlay above this
+    /// one), so closing the diff returns to the PR rather than the terminal.
+    @Published var openIssueDetail: IssueSummary? {
+        didSet { if openIssueDetail != nil { openFileURL = nil; openDiff = nil; openTrace = nil } }
+    }
+
+    /// The Issues pane's model, held here (in addition to the inspector view that owns it)
+    /// so an open PR/issue detail in the center keeps its data — conversation, PR files,
+    /// checkout — even when the inspector switches to another tab or collapses and its view
+    /// is torn down. `IssuesView` points this at its model on appear; `TerminalPane`'s
+    /// detail overlay reads it.
+    @Published var issuesModel: IssuesPanelModel?
 
     /// Which pane the trailing inspector shows — the file tree or git changes. Set by the toolbar's
     /// segmented switch and read by `FileBrowserView`. (The inspector's open/closed state is owned by

@@ -122,6 +122,10 @@ typealias HugeIcon = TermioShared.HugeIcon
 typealias HugeIconView = TermioShared.HugeIconView
 typealias HugeIconShape = TermioShared.HugeIconShape
 
+/// GitHub's Octicons for issue/PR state, shared with iOS from `TermioShared`.
+typealias StateOcticon = TermioShared.StateOcticon
+typealias OcticonView = TermioShared.OcticonView
+
 /// A vendor brand mark, stored as its official SVG path so it renders crisp at any
 /// size without shipping binary image assets. Rendered in the vendor's brand color
 /// by `BrandLogoShape`; see `BrandLogo.tint`. Pi and OpenCode are not here — their

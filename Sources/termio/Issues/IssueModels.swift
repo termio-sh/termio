@@ -44,6 +44,19 @@ enum IssueItemState: Hashable, Sendable {
         }
     }
 
+    /// The state glyph: GitHub's own Octicon for this lifecycle state, so a row
+    /// shows the exact mark users read on github.com. Shape carries the state on
+    /// its own — open issue and closed PR are a red/green pair that colorblind
+    /// users can't separate by hue, but the shapes stay distinct.
+    func octicon(for kind: IssueKind) -> StateOcticon {
+        switch self {
+        case .open: return kind == .pullRequest ? .pullOpen : .issueOpened
+        case .closed: return kind == .pullRequest ? .pullClosed : .issueClosed
+        case .merged: return .pullMerged
+        case .draft: return .pullDraft
+        }
+    }
+
     var label: String {
         switch self {
         case .open: return "Open"
@@ -126,13 +139,20 @@ struct IssueDetail: Sendable {
     let comments: [IssueComment]
 }
 
-/// The branch facts the Files tab and Checkout need from a pull request —
-/// which refs to fetch and diff, and whether the head lives in a fork (a fork's
-/// branch is only reachable through the `refs/pull/N/head` ref).
+/// The branch facts Checkout needs from a pull request — which head ref to fetch,
+/// and whether it lives in a fork (a fork's branch is only reachable through the
+/// `refs/pull/N/head` ref).
 struct PullRequestGitInfo: Sendable {
     let headRef: String
-    let baseRef: String
     let crossRepository: Bool
+}
+
+/// One PR file with its unified-diff `patch` straight from the GitHub API — the Files
+/// tab renders from this without a local checkout or extra fetch. `patch` is `nil` when
+/// GitHub omits it (a binary file, or a diff too large to inline).
+struct PullRequestFile: Sendable {
+    let change: GitChange
+    let patch: String?
 }
 
 // MARK: - Provider protocol

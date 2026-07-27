@@ -135,18 +135,29 @@ final class IssuesPanelModel: ObservableObject {
 
     func loadDetail(for item: IssueSummary) async {
         guard let provider, let container else { return }
+        // The model's own record of which item is open, independent of what drives the
+        // UI — `checkout` keys off it.
+        openItem = item
         detail = nil
         detailError = nil
         prFiles = []
+        prFilePatches = [:]
         prInfo = nil
-        prDiffRange = nil
         checkoutError = nil
         do {
             if item.kind == .pullRequest {
                 async let loadedDetail = provider.detail(item.number, in: container)
                 async let info = provider.pullRequestGitInfo(item.number, in: container)
                 async let files = provider.pullRequestFiles(item.number, in: container)
-                (detail, prInfo, prFiles) = try await (loadedDetail, info, files)
+                let loadedFiles = try await files
+                (detail, prInfo) = try await (loadedDetail, info)
+                prFiles = loadedFiles.map(\.change)
+                // The diff arrives inline with the file list — key each file's patch by
+                // path so the Files tab renders with no further network or git work.
+                prFilePatches = Dictionary(
+                    uniqueKeysWithValues: loadedFiles.compactMap { file in
+                        file.patch.map { (file.change.path, $0) }
+                    })
             } else {
                 detail = try await provider.detail(item.number, in: container)
             }
@@ -159,25 +170,12 @@ final class IssuesPanelModel: ObservableObject {
 
     /// The PR's changed files (empty for issues) and branch facts.
     @Published private(set) var prFiles: [GitChange] = []
+    /// Each file's inline unified-diff patch from the API, keyed by path — what the Files
+    /// tab renders. Absent keys are files GitHub gave no patch for (binary / too large).
+    @Published private(set) var prFilePatches: [String: String] = [:]
     @Published private(set) var prInfo: PullRequestGitInfo?
-    /// The `base...head` range diffs run over, set once the refs are fetched —
-    /// the Files tab shows a spinner until this lands.
-    @Published private(set) var prDiffRange: String?
-    @Published private(set) var isFetchingDiffRefs = false
     @Published private(set) var isCheckingOut = false
     @Published var checkoutError: String?
-
-    /// Fetches the PR's refs once per opened detail, so file rows diff locally
-    /// (JetBrains' trick: read the code without checking anything out).
-    func prepareDiffRefs() async {
-        guard prDiffRange == nil, !isFetchingDiffRefs,
-              let item = openItem, let info = prInfo
-        else { return }
-        isFetchingDiffRefs = true
-        prDiffRange = await GitService.fetchPullRequestRef(
-            number: item.number, baseRef: info.baseRef, in: repoRoot)
-        isFetchingDiffRefs = false
-    }
 
     func checkout() async {
         guard let item = openItem, let info = prInfo, !isCheckingOut else { return }
