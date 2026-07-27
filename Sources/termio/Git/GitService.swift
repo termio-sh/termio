@@ -589,10 +589,49 @@ enum GitService {
             guard let remote = run(["remote", "get-url", "origin"], in: dir)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
                 let (host, path) = parseRemote(remote),
-                host == "github.com" || host == "www.github.com"
+                isGitHubHost(host)
             else { return nil }
             return path
         }
+    }
+
+    /// Whether `host` is github.com — directly, or through an SSH `~/.ssh/config`
+    /// alias (`Host github-work` → `HostName github.com`), the standard trick for
+    /// juggling two GitHub accounts with different keys. We ask ssh itself to
+    /// expand the alias (`ssh -G`) rather than parse the config by hand, so
+    /// Include / Match directives all resolve correctly; this mirrors how `gh`
+    /// (go-gh's SSH translator) handles the same case. Results are cached — the
+    /// ssh config rarely changes within a run.
+    private static func isGitHubHost(_ host: String) -> Bool {
+        let lower = host.lowercased()
+        if lower == "github.com" || lower == "www.github.com" { return true }
+        return resolveSSHHostName(lower) == "github.com"
+    }
+
+    private nonisolated(unsafe) static var sshHostNameCache: [String: String] = [:]
+    private static let sshHostNameLock = NSLock()
+
+    /// The real hostname `ssh` resolves `host` to (after alias / Include / Match
+    /// expansion), or `nil` when ssh can't be run or reports nothing. An empty
+    /// string is cached for "no answer" so a missing ssh isn't retried per repo.
+    private static func resolveSSHHostName(_ host: String) -> String? {
+        sshHostNameLock.lock()
+        if let cached = sshHostNameCache[host] {
+            sshHostNameLock.unlock()
+            return cached.isEmpty ? nil : cached
+        }
+        sshHostNameLock.unlock()
+        // `ssh -G <host>` prints the fully-resolved effective config; its
+        // `hostname <value>` line is the destination the alias points at.
+        let resolved = output(of: "/usr/bin/ssh", ["-G", host])?
+            .split(separator: "\n")
+            .first { $0.lowercased().hasPrefix("hostname ") }
+            .map { String($0.dropFirst("hostname ".count)).trimmingCharacters(in: .whitespaces) }
+        let value = resolved?.lowercased() ?? ""
+        sshHostNameLock.lock()
+        sshHostNameCache[host] = value
+        sshHostNameLock.unlock()
+        return value.isEmpty ? nil : value
     }
 
     /// Fetches a pull request's head (`refs/pull/N/head` — GitHub serves every PR
@@ -699,6 +738,23 @@ enum GitService {
         let data = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         if !ignoreStatus, process.terminationStatus != 0 { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// Runs an arbitrary executable and returns stdout on a clean exit — the same
+    /// drain-before-wait discipline as `run`, for the non-git tools (ssh) the
+    /// service shells out to. Inherits the environment so ssh finds `~/.ssh/config`.
+    private static func output(of executable: String, _ args: [String]) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = args
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        if process.terminationStatus != 0 { return nil }
         return String(data: data, encoding: .utf8)
     }
 }
