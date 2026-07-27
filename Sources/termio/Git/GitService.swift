@@ -666,33 +666,6 @@ enum GitService {
         return value.isEmpty ? nil : value
     }
 
-    /// Checks the PR's branch out: a same-repo PR switches to its real head branch
-    /// (tracking `origin`); a fork PR materializes the pull ref as local `pr/N`.
-    /// Returns an error description, or `nil` on success.
-    static func checkoutPullRequest(
-        number: Int, headRef: String, crossRepository: Bool, in repoRoot: String
-    ) async -> String? {
-        await offMain {
-            if !crossRepository {
-                guard run(["fetch", "--no-tags", "origin", headRef], in: repoRoot) != nil else {
-                    return "Couldn’t fetch \(headRef) from origin."
-                }
-                // `switch` DWIMs a local tracking branch from origin/<headRef>.
-                guard run(["switch", headRef], in: repoRoot) != nil else {
-                    return "Couldn’t switch to \(headRef) — the working tree may have conflicting changes."
-                }
-                return nil
-            }
-            guard run(["fetch", "--no-tags", "origin",
-                       "+refs/pull/\(number)/head:refs/heads/pr/\(number)"], in: repoRoot) != nil
-            else { return "Couldn’t fetch the pull request from origin." }
-            guard run(["switch", "pr/\(number)"], in: repoRoot) != nil else {
-                return "Couldn’t switch to pr/\(number) — the working tree may have conflicting changes."
-            }
-            return nil
-        }
-    }
-
     /// A git remote split into its web-addressable host + repo path, plus the
     /// `[user@]host` to hand `ssh -G` when git reaches it over SSH.
     private struct ParsedRemote {

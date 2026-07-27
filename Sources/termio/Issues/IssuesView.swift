@@ -217,6 +217,19 @@ struct IssuesView: View {
                     chrome: chrome,
                     isSelected: selection == item.number
                 )
+                // Drag a row out as its GitHub URL — the terminal pane catches the
+                // drop and inserts the full link at the prompt (see
+                // `TerminalPane.dropToken`), so you can hand an agent "look at #123"
+                // without leaving the keyboard-mouse flow. The custom preview names
+                // the item so the lift reads as "this issue", not a bare link chip —
+                // and doubles as the affordance that the row is draggable at all.
+                .draggableIssueLink(item)
+                // Right-click menu via an AppKit `NSMenu`, NOT SwiftUI's
+                // `.contextMenu` — the latter rings the targeted row with an
+                // un-styleable accent border (the file tree learned the same, see
+                // `FileTreeList.RowContextMenu`). A secondary-click recognizer on the
+                // row's own view pops the menu, so nothing emphasizes the row.
+                .background(IssueRowContextMenu(url: item.url))
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -308,11 +321,135 @@ private struct IssueRow: View {
     }
 }
 
+private extension View {
+    /// Makes a row draggable as its GitHub URL, with a labelled lift preview.
+    /// A no-op when the item has no URL (nothing meaningful to carry). Applied at
+    /// the `List` row rather than inside `IssueRow` so the drag composes with the
+    /// list's native `selection:` binding — a SwiftUI tap gesture on the row would
+    /// swallow the drag, the native selection does not.
+    @ViewBuilder
+    func draggableIssueLink(_ item: IssueSummary) -> some View {
+        if let url = item.url {
+            draggable(url) {
+                HStack(spacing: 6) {
+                    OcticonView(
+                        icon: item.state.octicon(for: item.kind),
+                        size: 12,
+                        color: item.state.tint(for: item.kind)
+                    )
+                    Text(item.identifier)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Text(item.title)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+            }
+        } else {
+            self
+        }
+    }
+}
+
+/// The per-row right-click menu, via AppKit `NSMenu` rather than SwiftUI's
+/// `.contextMenu` — the latter rings the targeted row with an un-styleable accent
+/// border. A secondary-click recognizer on the row's own view pops the menu up, so
+/// nothing emphasizes the row. Both items act on the item's GitHub URL, so the whole
+/// menu is suppressed when there is none (mirrors `FileTreeList.RowContextMenu`).
+private struct IssueRowContextMenu: NSViewRepresentable {
+    let url: URL?
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.owner = view
+        context.coordinator.url = url
+        context.coordinator.attach()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.url = url
+        context.coordinator.attach()
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        weak var owner: NSView?
+        var url: URL?
+        private weak var hostView: NSView?
+        private var recognizer: NSClickGestureRecognizer?
+
+        func attach() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let owner = self.owner else { return }
+                guard let host = Self.rowView(above: owner) else { return }
+                if hostView === host, recognizer != nil { return }
+                detach()
+                let recognizer = NSClickGestureRecognizer(target: self, action: #selector(self.showMenu(_:)))
+                recognizer.buttonMask = 0x2 // secondary (right) mouse button
+                host.addGestureRecognizer(recognizer)
+                self.recognizer = recognizer
+                self.hostView = host
+            }
+        }
+
+        func detach() {
+            if let recognizer, let hostView { hostView.removeGestureRecognizer(recognizer) }
+            recognizer = nil
+            hostView = nil
+        }
+
+        @objc private func showMenu(_ recognizer: NSClickGestureRecognizer) {
+            guard let hostView, url != nil else { return }
+            let menu = NSMenu()
+            menu.addItem(menuItem("Copy Link", #selector(copyLink)))
+            menu.addItem(menuItem("Open in Browser", #selector(openInBrowser)))
+            menu.popUp(positioning: nil, at: recognizer.location(in: hostView), in: hostView)
+        }
+
+        private func menuItem(_ title: String, _ action: Selector) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            return item
+        }
+
+        @objc private func copyLink() {
+            guard let url else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(url.absoluteString, forType: .string)
+        }
+
+        @objc private func openInBrowser() {
+            guard let url else { return }
+            NSWorkspace.shared.open(url)
+        }
+
+        private static func rowView(above view: NSView) -> NSView? {
+            var ancestor = view.superview
+            while let current = ancestor {
+                if current is NSTableRowView { return current }
+                ancestor = current.superview
+            }
+            return nil
+        }
+    }
+}
+
 // MARK: - Detail (center overlay)
 
 /// The item detail, shown over the terminal in the center (by `TerminalPane`,
 /// driven by `store.openIssueDetail`) — the editor/diff pattern, not the narrow
-/// inspector. A native header (back, identifier, checkout for PRs, open-in-browser)
+/// inspector. A native header (identifier, open-in-browser)
 /// over the content: an issue shows the conversation (body + comments through
 /// `MarkdownHTML` in a themed web view); a pull request adds the Conversation |
 /// Files switch — files diff natively in the `GitDiffView` overlay (which stacks
@@ -339,26 +476,15 @@ struct IssueDetailView: View {
         }
         .task(id: item.number) { await model.loadDetail(for: item) }
         .onExitCommand(perform: onBack)
-        .alert(
-            "Couldn’t Check Out",
-            isPresented: Binding(
-                get: { model.checkoutError != nil },
-                set: { if !$0 { model.checkoutError = nil } }
-            )
-        ) {
-            Button("OK") { model.checkoutError = nil }
-        } message: {
-            Text(model.checkoutError ?? "")
-        }
     }
 
-    /// Back on the left; the item identity in the middle; actions on the right —
-    /// all buttons are `TreeHeaderButton`s (the explorer header's quiet hover
-    /// style), so they share the 22pt hit target and hover fill of every other
-    /// pane header instead of bare 11pt glyphs.
+    /// The item identity on the left; actions on the right — all buttons are
+    /// `TreeHeaderButton`s (the explorer header's quiet hover style), so they
+    /// share the 22pt hit target and hover fill of every other pane header
+    /// instead of bare 11pt glyphs. Dismissal is the toolbar's overlay-close
+    /// button (and Esc), matching the editor/diff overlays — no in-header back.
     private var header: some View {
         HStack(spacing: 6) {
-            TreeHeaderButton(huge: .chevronLeft, help: "Back", action: onBack)
             OcticonView(
                 icon: item.state.octicon(for: item.kind),
                 size: 14,
@@ -371,20 +497,6 @@ struct IssueDetailView: View {
                 .lineLimit(1)
                 .fixedSize()
             Spacer(minLength: 6)
-            if item.kind == .pullRequest, model.prInfo != nil {
-                if model.isCheckingOut {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(width: 22, height: 22)
-                } else {
-                    TreeHeaderButton(
-                        huge: .gitPullRequest,
-                        help: "Check Out \(model.prInfo?.headRef ?? "Branch")"
-                    ) {
-                        Task { await model.checkout() }
-                    }
-                }
-            }
             if let url = item.url {
                 TreeHeaderButton(huge: .squareArrowUpRight, help: "Open on GitHub") {
                     NSWorkspace.shared.open(url)
@@ -490,30 +602,18 @@ private struct CapsuleSwitch<Value: Hashable>: View {
         .animation(.snappy(duration: 0.28), value: selection)
     }
 
-    @ViewBuilder
+    // Flat track + pill on every OS: macOS 26's `.glassEffect` casts an ambient
+    // drop shadow beneath the switch that reads as a stray shadow against the
+    // detail's pale body, so both the pill and its track use plain capsule fills
+    // with no shadow.
     private var selectionPill: some View {
-        if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.interactive(), in: .capsule)
-                .matchedGeometryEffect(id: selection, in: pillNamespace, isSource: false)
-        } else {
-            Capsule(style: .continuous)
-                .fill(Color(nsColor: .controlColor))
-                .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
-                .matchedGeometryEffect(id: selection, in: pillNamespace, isSource: false)
-        }
+        Capsule(style: .continuous)
+            .fill(Color(nsColor: .controlColor))
+            .matchedGeometryEffect(id: selection, in: pillNamespace, isSource: false)
     }
 
-    @ViewBuilder
     private var trackBackground: some View {
-        if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
-        } else {
-            Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
-        }
+        Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
     }
 }
 
@@ -541,7 +641,7 @@ private enum IssueDetailHTML {
             </section>
             """
         }.joined()
-        return """
+        let page = """
         <!doctype html><html><head><meta charset="utf-8">
         <style>\(css(theme))</style></head><body>
         <header>
@@ -553,6 +653,19 @@ private enum IssueDetailHTML {
         \(comments)
         </body></html>
         """
+        return routeImages(page)
+    }
+
+    /// Point every `<img>`/`<source>` at the token-authenticating loader so a private
+    /// repo's attachments resolve — the raw `<img src>` GitHub embeds targets
+    /// `github.com/user-attachments/…`, which 404s anonymously and only returns bytes
+    /// with the connect token attached (see `GitHubAssetSchemeHandler`). Only `src`/
+    /// `srcset` are rewritten, so `href` links still open in the browser as before.
+    private static func routeImages(_ html: String) -> String {
+        let scheme = GitHubAssetSchemeHandler.scheme
+        return html
+            .replacingOccurrences(of: "src=\"https://", with: "src=\"\(scheme)://")
+            .replacingOccurrences(of: "srcset=\"https://", with: "srcset=\"\(scheme)://")
     }
 
     private static func avatar(_ url: URL?) -> String {
@@ -622,7 +735,12 @@ private struct IssueWebView: NSViewRepresentable {
     let background: NSColor
 
     func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView()
+        let config = WKWebViewConfiguration()
+        // Attachments in a private repo need the connect token; route their <img> loads
+        // through the handler so it can attach the bearer WebKit can't add itself.
+        config.setURLSchemeHandler(context.coordinator.assetHandler,
+                                   forURLScheme: GitHubAssetSchemeHandler.scheme)
+        let view = WKWebView(frame: .zero, configuration: config)
         view.setValue(false, forKey: "drawsBackground")
         view.navigationDelegate = context.coordinator
         view.loadHTMLString(html, baseURL: nil)
@@ -640,6 +758,7 @@ private struct IssueWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String
+        let assetHandler = GitHubAssetSchemeHandler()
         init(lastHTML: String) { self.lastHTML = lastHTML }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -652,6 +771,72 @@ private struct IssueWebView: NSViewRepresentable {
                 decisionHandler(.allow)
             }
         }
+    }
+}
+
+/// Loads the detail page's images with the connect token so a *private* repo's
+/// attachments resolve. GitHub embeds them as `github.com/user-attachments/…`,
+/// which 404s anonymously and only returns the bytes with a bearer attached — but
+/// WebKit can't add an `Authorization` header to sub-resource loads. `IssueDetailHTML`
+/// rewrites image URLs to this custom scheme; the handler restores `https`, adds the
+/// bearer for GitHub hosts, and streams the result back. (URLSession drops the header
+/// on the cross-origin redirect to the signed CDN URL, matching `curl -L`'s default,
+/// so the presigned download isn't rejected.)
+final class GitHubAssetSchemeHandler: NSObject, WKURLSchemeHandler {
+    static let scheme = "x-termio-ghasset"
+
+    private var live = Set<ObjectIdentifier>()
+    private let lock = NSLock()
+
+    func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
+        let id = ObjectIdentifier(task)
+        lock.lock(); live.insert(id); lock.unlock()
+
+        // Only feed a task that hasn't been stopped — calling back into a stopped
+        // `WKURLSchemeTask` traps. `stop` removes the id, so `settle` no-ops after it.
+        func settle(_ body: (any WKURLSchemeTask) -> Void) {
+            lock.lock(); let ok = live.remove(id) != nil; lock.unlock()
+            if ok { body(task) }
+        }
+
+        guard let raw = task.request.url?.absoluteString,
+              let url = URL(string: raw.replacingOccurrences(
+                  of: "\(Self.scheme)://", with: "https://")) else {
+            settle { $0.didFailWithError(URLError(.badURL)) }
+            return
+        }
+
+        var request = URLRequest(url: url)
+        if let host = url.host,
+           host == "github.com" || host.hasSuffix(".githubusercontent.com"),
+           let token = GitHubIssueAuth.storedToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let error {
+                    settle { $0.didFailWithError(error) }
+                } else if let data, let response {
+                    settle {
+                        // Frame the payload under the request's own custom-scheme URL so
+                        // WebKit doesn't reject a response that arrived over https.
+                        let framed = URLResponse(
+                            url: $0.request.url ?? url, mimeType: response.mimeType,
+                            expectedContentLength: data.count, textEncodingName: nil)
+                        $0.didReceive(framed)
+                        $0.didReceive(data)
+                        $0.didFinish()
+                    }
+                } else {
+                    settle { $0.didFailWithError(URLError(.badServerResponse)) }
+                }
+            }
+        }.resume()
+    }
+
+    func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {
+        lock.lock(); live.remove(ObjectIdentifier(task)); lock.unlock()
     }
 }
 

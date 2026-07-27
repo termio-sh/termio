@@ -135,15 +135,13 @@ final class IssuesPanelModel: ObservableObject {
 
     func loadDetail(for item: IssueSummary) async {
         guard let provider, let container else { return }
-        // The model's own record of which item is open, independent of what drives the
-        // UI — `checkout` keys off it.
+        // The model's own record of which item is open, independent of what drives the UI.
         openItem = item
         detail = nil
         detailError = nil
         prFiles = []
         prFilePatches = [:]
         prInfo = nil
-        checkoutError = nil
         do {
             if item.kind == .pullRequest {
                 async let loadedDetail = provider.detail(item.number, in: container)
@@ -174,15 +172,4 @@ final class IssuesPanelModel: ObservableObject {
     /// tab renders. Absent keys are files GitHub gave no patch for (binary / too large).
     @Published private(set) var prFilePatches: [String: String] = [:]
     @Published private(set) var prInfo: PullRequestGitInfo?
-    @Published private(set) var isCheckingOut = false
-    @Published var checkoutError: String?
-
-    func checkout() async {
-        guard let item = openItem, let info = prInfo, !isCheckingOut else { return }
-        isCheckingOut = true
-        checkoutError = await GitService.checkoutPullRequest(
-            number: item.number, headRef: info.headRef,
-            crossRepository: info.crossRepository, in: repoRoot)
-        isCheckingOut = false
-    }
 }

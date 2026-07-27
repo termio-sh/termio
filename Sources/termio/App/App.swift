@@ -212,15 +212,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 MainActor.assumeIsolated { self?.updateWindowTitle() }
             }
 
-        // Surface the overlay-close button in the toolbar while a file editor, diff, or preview
-        // covers the terminal. `objectWillChange` fires before the value lands, so read the settled
-        // state on the next runloop tick (the title observer's pattern).
+        // Surface the overlay-close button in the toolbar while a file editor, diff, preview,
+        // trace, or issue detail covers the terminal. `objectWillChange` fires before the value
+        // lands, so read the settled state on the next runloop tick (the title observer's pattern).
         overlayObserver = store.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.setCloseOverlayVisible(self.store.openFileURL != nil || self.store.openDiff != nil || self.store.openTrace != nil)
+                    self.setCloseOverlayVisible(self.store.openFileURL != nil || self.store.openDiff != nil || self.store.openTrace != nil || self.store.openIssueDetail != nil)
                 }
             }
 
