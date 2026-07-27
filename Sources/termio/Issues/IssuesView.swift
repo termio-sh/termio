@@ -603,8 +603,10 @@ private struct CapsuleSwitch<Value: Hashable>: View {
 // MARK: - Detail HTML
 
 /// Assembles the self-contained detail page: title + meta header, the body,
-/// then each comment as a panel — all markdown through `MarkdownHTML` (escaped;
-/// tracker content is untrusted), colored from the live `TraceTheme`.
+/// then each comment as a panel — all markdown through `MarkdownHTML` in
+/// `documentMode`, so raw HTML (bot comments, `<picture>`/`<img>`/tables) renders
+/// through the GitHub-mirroring `HTMLSanitizer` whitelist the way GitHub itself
+/// does, colored from the live `TraceTheme`.
 private enum IssueDetailHTML {
     static func page(_ detail: IssueDetail, theme: TraceTheme) -> String {
         let s = detail.summary
@@ -613,12 +615,12 @@ private enum IssueDetailHTML {
         }.joined()
         let body = detail.bodyMarkdown.isEmpty
             ? "<p class=\"empty\">No description provided.</p>"
-            : MarkdownHTML.html(detail.bodyMarkdown)
+            : MarkdownHTML.html(detail.bodyMarkdown, documentMode: true)
         let comments = detail.comments.map { comment in
             """
             <section class="comment">
             <div class="who">\(avatar(comment.avatarURL))<b>\(escape(comment.author))</b> · \(relative(comment.createdAt))</div>
-            \(MarkdownHTML.html(comment.bodyMarkdown))
+            \(MarkdownHTML.html(comment.bodyMarkdown, documentMode: true))
             </section>
             """
         }.joined()
