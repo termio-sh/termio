@@ -16,6 +16,8 @@ struct MarkdownReaderView: View {
     let fileURL: URL
     @ObservedObject var settings: AppSettings
     let colorScheme: ColorScheme
+    /// Reports the page's scroll offset (0 at top) so the editor's header can slide up with it.
+    var onScroll: ((CGFloat) -> Void)? = nil
 
     var body: some View {
         let theme = TraceTheme.resolveReader(settings: settings, colorScheme: colorScheme)
@@ -23,7 +25,8 @@ struct MarkdownReaderView: View {
         MarkdownReaderWebView(
             html: MarkdownReaderRenderer.document(source, theme: theme, fontFamily: settings.fontFamily),
             baseURL: fileURL.deletingLastPathComponent(),
-            background: settings.terminalBackgroundColor
+            background: settings.terminalBackgroundColor,
+            onScroll: onScroll
         )
     }
 }
@@ -36,6 +39,10 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
     let html: String
     let baseURL: URL
     let background: NSColor
+    var onScroll: ((CGFloat) -> Void)? = nil
+
+    /// The message channel the injected scroll listener posts through.
+    private static let scrollHandler = "termioScroll"
 
     /// `loadHTMLString` pages get no filesystem access in the WebContent process, so a
     /// `file://` image would silently 404 (same reason the reader fonts are embedded as
@@ -54,11 +61,25 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(LocalFileSchemeHandler(), forURLScheme: Self.fileScheme)
-        let view = WKWebView(frame: .zero, configuration: config)
+        // Post the page's scroll offset back so the editor's header slides with it. A passive
+        // listener keeps scrolling smooth; the script survives reloads (the controller keeps it),
+        // so flipping theme / editing then previewing re-arms it automatically.
+        config.userContentController.add(context.coordinator, name: Self.scrollHandler)
+        let js = "window.addEventListener('scroll',function(){window.webkit.messageHandlers."
+            + "\(Self.scrollHandler).postMessage(window.scrollY)},{passive:true});"
+        config.userContentController.addUserScript(
+            WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        let view = ContextMenuWebView(frame: .zero, configuration: config)
         view.setValue(false, forKey: "drawsBackground")
         view.navigationDelegate = context.coordinator
         view.loadHTMLString(html, baseURL: schemeBaseURL)
         return view
+    }
+
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        // The content controller retains its message handler for good; drop it so the coordinator
+        // (and the closed editor) can deallocate.
+        nsView.configuration.userContentController.removeScriptMessageHandler(forName: scrollHandler)
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
@@ -73,13 +94,21 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
         }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(lastHTML: html) }
+    func makeCoordinator() -> Coordinator { Coordinator(lastHTML: html, onScroll: onScroll) }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var lastHTML: String
         var savedScrollY: CGFloat = 0
         var restoreScroll = false
-        init(lastHTML: String) { self.lastHTML = lastHTML }
+        let onScroll: ((CGFloat) -> Void)?
+        init(lastHTML: String, onScroll: ((CGFloat) -> Void)?) {
+            self.lastHTML = lastHTML
+            self.onScroll = onScroll
+        }
+
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            onScroll?(max(0, (message.body as? CGFloat) ?? 0))
+        }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard restoreScroll else { return }
@@ -107,6 +136,22 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
                 decisionHandler(.allow)
             }
         }
+    }
+}
+
+/// A `WKWebView` that appends a "Close" to its right-click menu, so the Markdown preview closes
+/// terminal-style like the source editor — the overlay has no chrome button.
+private final class ContextMenuWebView: WKWebView {
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        let close = NSMenuItem(title: "Close", action: #selector(closeEditorOverlay), keyEquivalent: "")
+        close.target = self
+        menu.addItem(close)
+    }
+
+    @objc private func closeEditorOverlay() {
+        NotificationCenter.default.post(name: .termioCloseContentOverlay, object: nil)
     }
 }
 

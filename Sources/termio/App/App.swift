@@ -220,7 +220,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .sink { [weak self] in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.setCloseOverlayVisible(self.store.openFileURL != nil || self.store.openDiff != nil || self.store.openTrace != nil || self.store.openIssueDetail != nil)
+                    // The text editor drops the toolbar X — it closes via its own right-click
+                    // menu (and Esc), terminal-style. Every other overlay (the Quick Look
+                    // preview, diff, trace, issue detail) keeps the shared button.
+                    let isTextEditor = self.store.openFileURL.map { !FileActivation.isPreviewable($0) } ?? false
+                    self.setCloseOverlayVisible(
+                        (self.store.openFileURL != nil && !isTextEditor)
+                            || self.store.openDiff != nil
+                            || self.store.openTrace != nil
+                            || self.store.openIssueDetail != nil)
                 }
             }
 
@@ -413,7 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // sidebar. It starts collapsed — the tree is summoned via the toolbar toggle.
         let inspector = FileBrowserHostingController(store: store, settings: settings)
         let inspectorItem = NSSplitViewItem(viewController: inspector)
-        inspectorItem.minimumThickness = 220
+        inspectorItem.minimumThickness = 260
         inspectorItem.maximumThickness = 420
         inspectorItem.canCollapse = true
         inspectorItem.isCollapsed = true
