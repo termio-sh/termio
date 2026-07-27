@@ -175,6 +175,12 @@ push-to-talk voice input — is on its way to the App Store.
 **[Download termio for macOS](https://downloads.termio.sh/termio.dmg)** — free,
 no account. Requires macOS 14+.
 
+Or install with [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask termio-sh/tap/termio
+```
+
 ## Build from source
 
 ```sh

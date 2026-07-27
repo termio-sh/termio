@@ -20,6 +20,17 @@ Termio runs on Apple Silicon Macs. Installation is a normal drag-to-Applications
 3. Launch it from Applications. Because the app is notarized by Apple, it opens
    without a Gatekeeper warning.
 
+## Install with Homebrew
+
+Prefer the command line? Termio is a [Homebrew](https://brew.sh) cask:
+
+```sh
+brew install --cask termio-sh/tap/termio
+```
+
+This installs the same notarized build. Termio still updates itself through
+Sparkle, so `brew upgrade` leaves it alone unless you pass `--greedy`.
+
 ## Staying up to date
 
 Termio updates itself through Sparkle. It periodically checks the download
