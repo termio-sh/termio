@@ -222,6 +222,36 @@ jobs:
             --title "${APP_NAME} v${VERSION} — $DOWNLOAD_BASE_URL/v${VERSION}/${APP_NAME}.dmg" \
             --generate-notes
 
+      # Point the Homebrew tap (termio-sh/homebrew-tap) at this release so
+      # `brew install --cask termio-sh/tap/termio` serves it. Auth is a write
+      # deploy key on the tap repo. No-ops (with a notice) until the secret is set.
+      - name: Bump Homebrew cask
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          if [ -z "$TAP_DEPLOY_KEY" ]; then
+            echo "::notice::TAP_DEPLOY_KEY not set — skipping Homebrew cask bump."
+            exit 0
+          fi
+          VERSION="${{ steps.meta.outputs.version }}"
+          SHA256=$(shasum -a 256 "$DMG_PATH" | cut -d' ' -f1)
+
+          KEY_FILE="$RUNNER_TEMP/tap_deploy_key"
+          echo "$TAP_DEPLOY_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          export GIT_SSH_COMMAND="ssh -i $KEY_FILE -o StrictHostKeyChecking=accept-new"
+
+          git clone --depth 1 git@github.com:termio-sh/homebrew-tap.git "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          sed -i '' \
+            -e "s/^  version .*/  version \"${VERSION}\"/" \
+            -e "s/^  sha256 .*/  sha256 \"${SHA256}\"/" \
+            Casks/termio.rb
+          git -c user.name="termio-release" -c user.email="release@termio.sh" \
+            commit -am "termio ${VERSION}"
+          git push
+          echo "Bumped cask to ${VERSION} (${SHA256})"
+
       - name: Cleanup keychain
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true

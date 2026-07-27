@@ -35,10 +35,14 @@ runner, which:
 7. Purges the stable DMG + appcast from Cloudflare's edge (if the purge token is
    set — otherwise skips with a notice).
 8. Records a GitHub Release for the tag + auto-generated changelog.
+9. Bumps the Homebrew cask in `termio-sh/homebrew-tap` (version + sha256 in
+   `Casks/termio.rb`), pushed with the `TAP_DEPLOY_KEY` secret — a write deploy
+   key on the tap repo. Skips with a notice if the secret is unset.
 
 Result: `https://downloads.termio.sh/termio.dmg` serves the notarized build (the
-website Download button), and existing installs auto-update via Sparkle from
-`https://downloads.termio.sh/appcast.xml` (the app's `SUFeedURL`).
+website Download button), existing installs auto-update via Sparkle from
+`https://downloads.termio.sh/appcast.xml` (the app's `SUFeedURL`), and
+`brew install --cask termio-sh/tap/termio` serves the new version.
 
 ## Fixed facts (this project)
 
@@ -65,7 +69,7 @@ password, the R2 secret access key) live only in GitHub Secrets and your vault.
 
 ## GitHub secrets inventory
 
-The workflow reads these ten secrets. **None is a GitHub token** — Actions
+The workflow reads these eleven secrets. **None is a GitHub token** — Actions
 injects `GITHUB_TOKEN` automatically. Check state with
 `gh secret list --repo jiweiyuan/termio`.
 
@@ -82,10 +86,13 @@ injects `GITHUB_TOKEN` automatically. Check state with
 | `R2_ENDPOINT` | `https://<accountid>.r2.cloudflarestorage.com` | ✅ |
 | `CLOUDFLARE_ZONE_ID` | termio.sh zone ID (for cache purge) | ⚪ |
 | `CLOUDFLARE_API_TOKEN` | Zone→Cache Purge token | ⚪ |
+| `TAP_DEPLOY_KEY` | write deploy key for `termio-sh/homebrew-tap` (cask bump) | ⚪ |
 
 ⚪ = optional. Without the two Cloudflare cache secrets the release still
-succeeds; the purge step just skips. The stable copies are uploaded with
-`Cache-Control: no-cache`, so they mostly aren't edge-cached anyway.
+succeeds; the purge step just skips. Without `TAP_DEPLOY_KEY` the Homebrew cask
+bump skips too (the tap still serves the previous version). The stable copies
+are uploaded with `Cache-Control: no-cache`, so they mostly aren't edge-cached
+anyway.
 
 ### Gotcha: setting secret values from the shell
 
