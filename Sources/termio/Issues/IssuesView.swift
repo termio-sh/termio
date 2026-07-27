@@ -62,14 +62,24 @@ struct IssuesView: View {
     /// deeper than leading so the funnel's right edge lines up under the
     /// toolbar's collapse button instead of hugging the pane edge.
     private var topBar: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 2) {
             if model.capabilities?.pullRequests == true { kindSwitch }
             Spacer(minLength: 0)
+            refreshButton
             filterMenu
         }
         .padding(.leading, 8)
         .padding(.trailing, 12)
         .frame(height: GitChangesView.topBarHeight)
+    }
+
+    /// Manual reload of the current query — the GitHub Desktop refresh affordance.
+    /// The list is otherwise fetch-on-interaction, so this is the "prove it's
+    /// current" escape hatch when something changed on GitHub out of band.
+    private var refreshButton: some View {
+        TreeHeaderButton(codicon: .refresh, help: "Refresh") {
+            Task { await model.loadList() }
+        }
     }
 
     private var kindSwitch: some View {
@@ -81,19 +91,34 @@ struct IssuesView: View {
 
     private var filterMenu: some View {
         Menu {
-            Toggle("Open Only", isOn: Binding(
-                get: { model.query.openOnly },
-                set: { model.query.openOnly = $0 }
-            ))
-            Toggle("Assigned to Me", isOn: Binding(
-                get: { model.query.assignedToMe },
-                set: { model.query.assignedToMe = $0 }
-            ))
-            // Label filter, GitHub's own semantics (multi-select = AND). The
-            // repo's full label set, checkmarked from the current query.
+            // Each axis is its own submenu so the top level reads as the list of
+            // things you can filter by, not a flat pile of toggles. State and
+            // assignee are single-select (inline Picker = radio); labels stay
+            // multi-select with GitHub's AND semantics.
+            Menu("State") {
+                Picker("State", selection: Binding(
+                    get: { model.query.openOnly },
+                    set: { model.query.openOnly = $0 }
+                )) {
+                    Text("Open").tag(true)
+                    Text("All").tag(false)
+                }
+                .pickerStyle(.inline)
+            }
+            Menu("Assignee") {
+                Picker("Assignee", selection: Binding(
+                    get: { model.query.assignedToMe },
+                    set: { model.query.assignedToMe = $0 }
+                )) {
+                    Text("Anyone").tag(false)
+                    Text("Assigned to Me").tag(true)
+                }
+                .pickerStyle(.inline)
+            }
+            // The repo's full label set, checkmarked from the current query —
+            // only when the repo actually has labels to offer.
             if !model.availableLabels.isEmpty {
-                Divider()
-                Section("Labels") {
+                Menu("Labels") {
                     ForEach(model.availableLabels, id: \.name) { label in
                         Toggle(label.name, isOn: Binding(
                             get: { model.query.labels.contains(label.name) },
@@ -114,16 +139,23 @@ struct IssuesView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .background {
-            // The funnel takes the accent color while any label filter narrows
-            // the list, so a filtered view can't be mistaken for the full one.
+            // The funnel takes the accent color while any filter narrows the list
+            // (non-default state, an assignee, or a label), so a filtered view
+            // can't be mistaken for the full one.
             HugeIconView(
                 icon: .filter, size: 13,
-                color: model.query.labels.isEmpty ? .secondary : .accentColor,
+                color: isFiltered ? .accentColor : .secondary,
                 lineWidthOverride: 1.5
             )
             .allowsHitTesting(false)
         }
         .help("Filter")
+    }
+
+    /// Any axis narrowing the list away from its default (all open items, anyone,
+    /// no labels) — drives the funnel's accent tint.
+    private var isFiltered: Bool {
+        !model.query.openOnly || model.query.assignedToMe || !model.query.labels.isEmpty
     }
 
     // MARK: Content per phase
