@@ -496,6 +496,13 @@ struct IssueDetailView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .fixedSize()
+            // The title fills the bar so the open item reads from the header alone,
+            // not only from the body's H1 — truncating at the tail when the pane is
+            // narrow (the row's own treatment).
+            Text(item.title)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 6)
             if let url = item.url {
                 TreeHeaderButton(huge: .squareArrowUpRight, help: "Open on GitHub") {
