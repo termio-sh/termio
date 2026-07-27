@@ -100,6 +100,11 @@ enum ContentSearch {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        // See `GitEnvironment`: keep `git grep` from touching the index; the BSD
+        // `grep` fallback ignores it.
+        if executable.hasSuffix("/git") {
+            process.environment = GitEnvironment.optionalLocksDisabled
+        }
         let stdout = Pipe()
         process.standardOutput = stdout
         // Never attach a pipe that isn't drained: BSD grep can emit 64KB+ of

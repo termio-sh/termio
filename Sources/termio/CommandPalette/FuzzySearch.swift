@@ -45,6 +45,7 @@ enum FuzzySearch {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["-C", root.path, "ls-files", "--cached", "--others", "--exclude-standard"]
+        process.environment = GitEnvironment.optionalLocksDisabled
         let stdout = Pipe()
         process.standardOutput = stdout
         process.standardError = Pipe()

@@ -1,6 +1,30 @@
 import Darwin
 import Foundation
 
+/// The environment for **every** app-side `git` subprocess. `GIT_OPTIONAL_LOCKS=0`
+/// stops read-only git — notably `git status` — from taking the index lock and
+/// rewriting `.git/index` to refresh its stat/untracked cache. That write fires an
+/// FSEvent under `.git`, which the git pane's watcher treats as a change and
+/// re-reads: a `status → index-write → status` loop that never settles while the
+/// working tree keeps changing (a live dev server, a busy agent) and pegged a
+/// long-running app at ~20% CPU, starving the main actor until `sessions list`
+/// timed out.
+///
+/// It is applied at *every* git spawn site (GitService, BranchModel,
+/// WorktreeService, CommandPalette, CompanionServer), not just the pane's, so no
+/// path can reintroduce the loop — the same reason VS Code's git extension sets it
+/// globally rather than per-command. Safe for writes too: `--no-optional-locks`
+/// only skips *optional* locks, never the ones a real mutation needs. The inherited
+/// environment is preserved (git still finds config/credentials), and it is scoped
+/// to the app's own subprocesses — terminal sessions are never touched.
+enum GitEnvironment {
+    static let optionalLocksDisabled: [String: String] = {
+        var env = ProcessInfo.processInfo.environment
+        env["GIT_OPTIONAL_LOCKS"] = "0"
+        return env
+    }()
+}
+
 // MARK: - Git
 
 /// Thin wrapper over the `git` CLI for the changes list and diff overlay. Every call
@@ -748,6 +772,11 @@ enum GitService {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
+        // See `GitEnvironment`: keeps `git status` from rewriting `.git/index` and
+        // re-triggering the pane watcher. `ssh` (the other caller) ignores it.
+        if executable.hasSuffix("/git") {
+            process.environment = GitEnvironment.optionalLocksDisabled
+        }
         let out = Pipe()
         process.standardOutput = out
         process.standardError = FileHandle.nullDevice

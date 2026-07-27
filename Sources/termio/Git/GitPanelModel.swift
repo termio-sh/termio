@@ -29,6 +29,13 @@ final class GitPanelModel: ObservableObject {
     private var refreshDebounce: Task<Void, Never>?
     /// Monotonic ticket for `load()` — only the newest pass may publish.
     private var loadGeneration = 0
+    /// One `git status` in flight at a time: `load()` sets `loading` while it runs,
+    /// and any call that lands mid-pass (the FSEvents debounce *or* a direct
+    /// `model.load()` from the view) sets `loadReentered` to request a single
+    /// replay instead of spawning an overlapping, expensive status — the way VS
+    /// Code serializes its own status.
+    private var loading = false
+    private var loadReentered = false
 
     /// Whether the pane is actually on screen, read live at refresh time. A collapsed
     /// inspector keeps this model alive (the hosting view stays in the hierarchy), and
@@ -80,16 +87,42 @@ final class GitPanelModel: ObservableObject {
 
     /// Reloads the working-tree change list. The first successful pass also arms the
     /// file-system watch, so from then on the pane refreshes itself.
+    ///
+    /// Serialized: only one `git status` runs at a time. Every refresh path funnels
+    /// through here — the watcher and the view's direct `model.load()` calls alike —
+    /// so a call that arrives mid-pass flags a replay rather than spawning an
+    /// overlapping status. (Runs on the main actor, so the flags need no lock.)
+    ///
+    /// Immediate replays are capped at one. The first pass is suppressed if a reentry
+    /// superseded it (its snapshot predates whatever change triggered the reentry —
+    /// a discard, ignore, checkout); the single replay always publishes best-effort.
+    /// If events *still* arrive through that replay — a continuously churning tree —
+    /// we publish anyway and hand off to a debounced refresh instead of looping here,
+    /// so the pane can never livelock (spinning `git status`, `isLoading` stuck on).
     func load() async {
-        // Loads overlap (explicit reload racing the FSEvents debounce); the generation
-        // guard keeps a slow older pass from publishing a stale snapshot over a newer one.
-        loadGeneration += 1
-        let generation = loadGeneration
-        let loaded = await GitService.changes(in: repoRoot)
-        guard generation == loadGeneration else { return }
-        changes = loaded
-        isLoading = false
-        if watcher == nil { await armWatcher() }
+        if loading {
+            loadReentered = true
+            loadGeneration += 1   // supersede the in-flight pass's stale snapshot
+            return
+        }
+        loading = true
+        defer { loading = false }
+        for attempt in 0...1 {
+            loadReentered = false
+            loadGeneration += 1
+            let generation = loadGeneration
+            let loaded = await GitService.changes(in: repoRoot)
+            if generation == loadGeneration || attempt == 1 {
+                changes = loaded
+                isLoading = false
+            }
+            if watcher == nil { await armWatcher() }
+            if !loadReentered { break }
+        }
+        if loadReentered {
+            loadReentered = false
+            scheduleRefresh(includeHistory: false)   // still churning: catch up off-stack
+        }
     }
 
     /// Loads the commit history on demand (first time the History tab opens); re-run
@@ -143,9 +176,10 @@ final class GitPanelModel: ObservableObject {
     }
 
     /// Coalesces a burst of events (FSEvents latency already batches most) into one
-    /// reload a beat later. `git status` itself may refresh the index once, which
-    /// echoes back as a git-dir event — the second pass reads clean and the chain ends.
-    /// While the pane is hidden the reload is parked instead (see `flushDeferredRefresh`).
+    /// reload a beat later. `git status` no longer echoes back as a git-dir event —
+    /// `GIT_OPTIONAL_LOCKS=0` keeps it from writing the index — so the chain ends
+    /// after one pass. While the pane is hidden the reload is parked instead (see
+    /// `flushDeferredRefresh`).
     private func scheduleRefresh(includeHistory: Bool) {
         if let isPaneVisible, !isPaneVisible() {
             deferredRefreshIncludesHistory = (deferredRefreshIncludesHistory ?? false) || includeHistory

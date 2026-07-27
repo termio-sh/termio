@@ -442,6 +442,7 @@ final class CompanionServer {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]
+        process.environment = GitEnvironment.optionalLocksDisabled
         process.currentDirectoryURL = URL(fileURLWithPath: root)
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -634,6 +635,7 @@ final class CompanionServer {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["status", "--porcelain", "--no-renames", "-z", "--untracked-files=all"]
+        process.environment = GitEnvironment.optionalLocksDisabled
         process.currentDirectoryURL = URL(fileURLWithPath: root)
         let pipe = Pipe()
         process.standardOutput = pipe

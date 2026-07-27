@@ -259,6 +259,7 @@ final class BranchModel: ObservableObject {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["-C", folder] + arguments
+        process.environment = GitEnvironment.optionalLocksDisabled
         let output = Pipe()
         process.standardOutput = output
         process.standardError = Pipe()
