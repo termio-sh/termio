@@ -45,14 +45,14 @@ website Download button), and existing installs auto-update via Sparkle from
 | Thing | Value |
 | --- | --- |
 | Repo | `jiweiyuan/termio` (private) |
-| Apple Team ID | `5Y27G7B6D8` (Jiwei Yuan) |
-| Developer ID Application | `Jiwei Yuan (5Y27G7B6D8)` — SHA-1 `7E3F98DC984CE82B7F58A71AC4548F6C766F2657` |
-| ASC API key (Team key "termio") | Key ID `YC4MR9DW4Q`, Issuer ID `5242c966-78e9-46ac-96f4-c90f9117c419`, role **Developer** |
-| ASC `.p8` backup | `~/.appstoreconnect/private_keys/AuthKey_YC4MR9DW4Q.p8` (also `~/credentials/`) |
+| Apple Team ID | `<TEAM_ID>` (<YOUR_NAME>) |
+| Developer ID Application | `<YOUR_NAME> (<TEAM_ID>)` — SHA-1 `<CERT_SHA1>` |
+| ASC API key (Team key "termio") | Key ID `<ASC_KEY_ID>`, Issuer ID `<ASC_ISSUER_ID>`, role **Developer** |
+| ASC `.p8` backup | `~/.appstoreconnect/private_keys/AuthKey_<ASC_KEY_ID>.p8` (also `~/credentials/`) |
 | Sparkle public key | `SUPublicEDKey = zm3UpFrDf8tFcctK2vkEhrms6oFTp50AUb824lP9BAw=` (shared with oakreader) |
-| Cloudflare account ID | `a22b80fa365fb7cf04d194272379b669` |
+| Cloudflare account ID | `<CF_ACCOUNT_ID>` |
 | R2 bucket | `termio-downloads` (custom domain `downloads.termio.sh`) |
-| R2 S3 endpoint | `https://a22b80fa365fb7cf04d194272379b669.r2.cloudflarestorage.com` |
+| R2 S3 endpoint | `https://<CF_ACCOUNT_ID>.r2.cloudflarestorage.com` |
 
 These are identifiers, not secrets — the real secrets (the `.p8` bytes, the cert
 password, the R2 secret access key) live only in GitHub Secrets and your vault.
@@ -74,7 +74,7 @@ injects `GITHUB_TOKEN` automatically. Check state with
 | `DEVELOPER_ID_CERT_P12` | base64 of the Developer ID `.p12` (cert + key) | ✅ |
 | `DEVELOPER_ID_CERT_PASSWORD` | that `.p12`'s password | ✅ |
 | `ASC_API_KEY` | base64 of the App Store Connect `.p8` | ✅ |
-| `ASC_KEY_ID` | 10-char key ID (`YC4MR9DW4Q`) | ✅ |
+| `ASC_KEY_ID` | 10-char key ID (`<ASC_KEY_ID>`) | ✅ |
 | `ASC_ISSUER_ID` | account issuer UUID | ✅ |
 | `SPARKLE_ED_KEY` | Sparkle EdDSA private key (shared w/ oakreader) | ✅ |
 | `R2_ACCESS_KEY_ID` | R2 S3 access key ID | ✅ |
@@ -159,7 +159,7 @@ notarization). Download the `.p8` **once** (`AuthKey_<KEYID>.p8`). The **Issuer
 ID** is shown above the key list — one per account, shared across all keys.
 
 ```sh
-KEYID=YC4MR9DW4Q                                  # filename = AuthKey_<KEYID>.p8
+KEYID=<ASC_KEY_ID>                                  # filename = AuthKey_<KEYID>.p8
 base64 -i ~/Downloads/AuthKey_$KEYID.p8 | gh secret set ASC_API_KEY --repo jiweiyuan/termio
 printf '%s' "$KEYID"                              | gh secret set ASC_KEY_ID    --repo jiweiyuan/termio
 gh secret set ASC_ISSUER_ID --repo jiweiyuan/termio   # prompts; paste the issuer UUID

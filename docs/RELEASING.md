@@ -51,7 +51,7 @@ and records a GitHub Release for the changelog.
 ## One-time setup: GitHub secrets
 
 Set these with the `gh` CLI from the repo root (`gh auth login` first). Team ID
-is `5Y27G7B6D8` (Jiwei Yuan).
+is `<TEAM_ID>` (your Apple Developer team).
 
 ### Cloudflare R2 (artifact hosting)
 
