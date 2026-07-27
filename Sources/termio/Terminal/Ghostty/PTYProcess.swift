@@ -926,8 +926,9 @@ final class PTYProcess: @unchecked Sendable {
             let ps = Process()
             ps.executableURL = URL(fileURLWithPath: "/bin/ps")
             // -E appends each process's environment to the command column
-            // (own-user processes only, which is exactly the scope wanted).
-            ps.arguments = ["-axEww", "-o", "pid=,ppid=,command="]
+            // (own-user processes only, which is exactly the scope wanted);
+            // `tty` gates out daemons — see the guard below.
+            ps.arguments = ["-axEww", "-o", "pid=,ppid=,tty=,command="]
             let out = Pipe()
             ps.standardOutput = out
             do { try ps.run() } catch {
@@ -941,9 +942,16 @@ final class PTYProcess: @unchecked Sendable {
                 guard line.contains("TERMIO_SESSION="),
                       line.contains("TERM_PROGRAM=termio") else { continue }
                 let fields = line.split(separator: " ", omittingEmptySubsequences: true)
-                guard fields.count >= 2,
+                // fields: pid, ppid, tty, command… — `ppid == 1` alone can't
+                // tell a stranded agent from a tool that daemonized off the
+                // pane (a tmux/screen server, or termio itself): both
+                // re-parent to launchd carrying the stamps. The tell is the
+                // tty — a stray still holds its dead PTY (`ttysNNN`), which is
+                // why it leaks; a daemon shed it (`??`).
+                guard fields.count >= 3,
                       let pid = pid_t(fields[0]), let ppid = pid_t(fields[1]),
-                      ppid == 1, pid != getpid()
+                      ppid == 1, pid != getpid(),
+                      fields[2] != "??"
                 else { continue }
                 Log.pty.info("reaping stray session process pid=\(pid, privacy: .public)")
                 // The group first (the leader's tree), then the pid itself —
