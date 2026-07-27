@@ -43,6 +43,13 @@ enum GitService {
         await offMain { loadDiffText(change, repoRoot) }
     }
 
+    /// Parses ready-made unified-diff text (GitHub's inline PR `patch`) into rows off the
+    /// main thread — the same parser the local `git diff` path uses, so a PR file diffed
+    /// from the API renders identically without a subprocess or a checkout.
+    static func parseDiffText(_ text: String) async -> [DiffRow] {
+        await offMain { parseDiff(text) }
+    }
+
     /// Discards a whole selection in one confirmed action — the multi-select's
     /// "Discard N Files…". Sequential and best-effort per file, like the single form.
     static func discard(_ changes: [GitChange], in repoRoot: String) async {
@@ -588,48 +595,70 @@ enum GitService {
         await offMain {
             guard let remote = run(["remote", "get-url", "origin"], in: dir)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
-                let (host, path) = parseRemote(remote),
-                isGitHubHost(host)
+                let (host, path) = parseRemote(remote)
+            else { return nil }
+            // A literal github.com host binds directly, whatever the transport.
+            if isGitHubHostName(host) { return path }
+            // Otherwise it may be an SSH `~/.ssh/config` alias (`Host github-work`
+            // → `HostName github.com`, the standard trick for juggling accounts).
+            // Only expand for remotes git actually reaches over SSH: running
+            // `ssh -G` on an HTTPS host is pointless and could fire a `Match exec`
+            // or falsely bind an unrelated repo to public GitHub. Feed ssh the
+            // exact `[user@]host`, original case, so `Host` patterns and
+            // `Match user` / `%r` rules resolve as git's own ssh would.
+            guard let target = sshTarget(remote),
+                  let resolved = resolveSSHHostName(target),
+                  isGitHubHostName(resolved)
             else { return nil }
             return path
         }
     }
 
-    /// Whether `host` is github.com — directly, or through an SSH `~/.ssh/config`
-    /// alias (`Host github-work` → `HostName github.com`), the standard trick for
-    /// juggling two GitHub accounts with different keys. We ask ssh itself to
-    /// expand the alias (`ssh -G`) rather than parse the config by hand, so
-    /// Include / Match directives all resolve correctly; this mirrors how `gh`
-    /// (go-gh's SSH translator) handles the same case. Results are cached — the
-    /// ssh config rarely changes within a run.
-    private static func isGitHubHost(_ host: String) -> Bool {
+    private static func isGitHubHostName(_ host: String) -> Bool {
         let lower = host.lowercased()
-        if lower == "github.com" || lower == "www.github.com" { return true }
-        return resolveSSHHostName(lower) == "github.com"
+        return lower == "github.com" || lower == "www.github.com"
+    }
+
+    /// The `[user@]host` to hand `ssh -G`, or `nil` when the remote isn't an SSH
+    /// URL (HTTPS / git:// never touch ssh). Case and userinfo are preserved.
+    private static func sshTarget(_ remote: String) -> String? {
+        if !remote.contains("://") {
+            // scp-style `user@host:path` — the only no-scheme form git treats as SSH.
+            guard remote.contains("@"), let colon = remote.firstIndex(of: ":") else { return nil }
+            let target = String(remote[..<colon])
+            return target.isEmpty ? nil : target
+        }
+        guard remote.hasPrefix("ssh://"), let url = URL(string: remote),
+              let host = url.host, !host.isEmpty else { return nil }
+        if let user = url.user, !user.isEmpty { return "\(user)@\(host)" }
+        return host
     }
 
     private nonisolated(unsafe) static var sshHostNameCache: [String: String] = [:]
     private static let sshHostNameLock = NSLock()
 
-    /// The real hostname `ssh` resolves `host` to (after alias / Include / Match
-    /// expansion), or `nil` when ssh can't be run or reports nothing. An empty
-    /// string is cached for "no answer" so a missing ssh isn't retried per repo.
-    private static func resolveSSHHostName(_ host: String) -> String? {
+    /// The real hostname `ssh` resolves `target` (`[user@]host`) to, after alias /
+    /// Include / Match expansion — mirrors how `gh` (go-gh's SSH translator)
+    /// resolves the same case. `nil` when ssh can't be run or reports nothing; an
+    /// empty string is cached for "no answer" so a missing ssh isn't retried per
+    /// repo. The cache key keeps the target's case (OpenSSH matching is
+    /// case-sensitive), so `github-work` and `GitHub-Work` stay distinct.
+    private static func resolveSSHHostName(_ target: String) -> String? {
         sshHostNameLock.lock()
-        if let cached = sshHostNameCache[host] {
+        if let cached = sshHostNameCache[target] {
             sshHostNameLock.unlock()
             return cached.isEmpty ? nil : cached
         }
         sshHostNameLock.unlock()
-        // `ssh -G <host>` prints the fully-resolved effective config; its
+        // `ssh -G <target>` prints the fully-resolved effective config; its
         // `hostname <value>` line is the destination the alias points at.
-        let resolved = output(of: "/usr/bin/ssh", ["-G", host])?
+        let resolved = output(of: "/usr/bin/ssh", ["-G", target])?
             .split(separator: "\n")
             .first { $0.lowercased().hasPrefix("hostname ") }
             .map { String($0.dropFirst("hostname ".count)).trimmingCharacters(in: .whitespaces) }
-        let value = resolved?.lowercased() ?? ""
+        let value = resolved ?? ""
         sshHostNameLock.lock()
-        sshHostNameCache[host] = value
+        sshHostNameCache[target] = value
         sshHostNameLock.unlock()
         return value.isEmpty ? nil : value
     }
