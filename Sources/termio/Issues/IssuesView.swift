@@ -19,6 +19,7 @@ struct IssuesView: View {
 
     @StateObject private var model: IssuesPanelModel
     @State private var selection: Int?
+    @State private var filterHovering = false
 
     init(repoRoot: String) {
         self.repoRoot = repoRoot
@@ -79,8 +80,8 @@ struct IssuesView: View {
     /// The list is otherwise fetch-on-interaction, so this is the "prove it's
     /// current" escape hatch when something changed on GitHub out of band.
     private var refreshButton: some View {
-        // VS Code codicon refresh, matching the File Explorer header's four codicon actions so the
-        // two pane toolbars read as one family.
+        // VS Code codicon refresh — the two-arrow ring reads more refined than the Hugeicons
+        // single-arrow one, and matches the File Explorer header's four codicon actions.
         TreeHeaderButton(codicon: .refresh, help: "Refresh") {
             Task { await model.loadList() }
         }
@@ -133,8 +134,8 @@ struct IssuesView: View {
             }
         } label: {
             // macOS flattens a Menu label to Text/Image and drops shape-drawn
-            // views — so the label is only a clear hit-area, and the funnel is
-            // painted behind it (see .background below).
+            // views — so the label is only a clear hit-area, and the chip + funnel
+            // are painted behind it (see .background below).
             Color.clear
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
@@ -143,18 +144,27 @@ struct IssuesView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .background {
-            // The funnel takes the accent color while any filter narrows the list
-            // (non-default state, an assignee, or a label), so a filtered view
-            // can't be mistaken for the full one.
-            // A thinner stroke than the switches use (1.5 read heavier than the filled codicons
-            // beside it) so the funnel sits at the codicons' optical weight.
-            HugeIconView(
-                icon: .filter, size: 13,
-                color: isFiltered ? .accentColor : .secondary,
-                lineWidthOverride: 1
-            )
+            // The shared `TreeHeaderChip` fill (drawn here, not in the label, because the
+            // Menu drops shape-drawn label views) so the funnel hovers exactly like the
+            // refresh codicon beside it. On top of the chip:
+            // the funnel takes the accent color while any filter narrows the list (non-default
+            // state, an assignee, or a label), so a filtered view can't be mistaken for the full
+            // one — and only otherwise follows the secondary→primary hover of every header glyph.
+            // 1.0pt: the shared inspector-header Hugeicon weight, so the funnel matches the
+            // detail's window controls and the ↗ exactly and sits at the codicon refresh's weight.
+            ZStack {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(filterHovering ? 0.08 : 0))
+                    .frame(width: 22, height: 22)
+                HugeIconView(
+                    icon: .filter, size: 13,
+                    color: isFiltered ? .accentColor : (filterHovering ? .primary : .secondary),
+                    lineWidthOverride: 1.0
+                )
+            }
             .allowsHitTesting(false)
         }
+        .onHover { filterHovering = $0 }
         .help("Filter")
     }
 

@@ -81,9 +81,10 @@ struct InspectorDetailChromeButtons: View {
     }
 }
 
-/// One content-area control: a fully-round Hugeicons button whose hover state is a Liquid Glass
-/// disc (real `glassEffect` on macOS 26, a translucent material disc below it). Quiet `.secondary`
-/// ink at rest, brightening to primary under the cursor — the inspector's detail window controls.
+/// One content-area control, wearing the shared `TreeHeaderChip` so the detail's window controls
+/// read as one family with the refresh / filter / ↗ buttons in the same header — a 22×22 Hugeicons
+/// glyph, quiet `.secondary` at rest and brightening to primary over a faint rounded fill on hover.
+/// `size` varies per glyph so each sits at the same optical weight (the diagonal-heavy ✕ shrinks).
 private struct DetailChromeButton: View {
     let icon: HugeIcon
     var size: CGFloat = 14
@@ -95,32 +96,11 @@ private struct DetailChromeButton: View {
         Button(action: action) {
             HugeIconView(icon: icon, size: size,
                          color: hovering ? .primary : .secondary,
-                         lineWidthOverride: 1.5)
-                .frame(width: 24, height: 24)
-                .modifier(GlassDisc(active: hovering))
-                .contentShape(Circle())
+                         lineWidthOverride: 1.0)
+                .modifier(TreeHeaderChip(hovering: $hovering))
         }
         .buttonStyle(.plain)
-        .onHover { hovering = $0 }
         .help(help)
-    }
-}
-
-/// A circular Liquid Glass background, shown only while `active`. Falls back to a translucent
-/// material disc below macOS 26, which lacks the real `glassEffect`.
-private struct GlassDisc: ViewModifier {
-    let active: Bool
-
-    func body(content: Content) -> some View {
-        if active {
-            if #available(macOS 26.0, *) {
-                content.glassEffect(.regular.interactive(), in: Circle())
-            } else {
-                content.background(Circle().fill(.ultraThinMaterial))
-            }
-        } else {
-            content
-        }
     }
 }
 
