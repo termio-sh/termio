@@ -45,6 +45,16 @@ struct FileEditorView: View {
     @State private var cursor: EditorCursor?
     /// The pending debounced write, cancelled and rescheduled on each keystroke.
     @State private var saveTask: Task<Void, Never>?
+    @State private var findBarVisible = false
+    @State private var findQuery = ""
+    @State private var findOptions = FindOptions()
+    @State private var findFocusedIndex = 0
+    @State private var findMatchCount = 0
+    /// The query at the last Return press. A second Return on the same query advances to the
+    /// next match (VS Code / Safari convention).
+    @State private var findLastSubmittedQuery = ""
+    /// Bumped on every ⌘F so the find bar re-focuses even when already on screen.
+    @State private var findFocusTrigger = 0
 
     /// Past this size the file renders as plain text: highlight.js parses off-main, but
     /// *applying* its result is thousands of main-thread `setAttributes` calls plus a
@@ -158,9 +168,32 @@ struct FileEditorView: View {
                             currentLineColor: currentLineColor,
                             isEditable: !readOnly,
                             jumpToLine: jumpLine,
+                            findQuery: findBarVisible ? findQuery : "",
+                            findOptions: findOptions,
+                            findFocusedIndex: findFocusedIndex,
+                            onMatchesChanged: { count in
+                                findMatchCount = count
+                                if count > 0, findFocusedIndex >= count { findFocusedIndex = 0 }
+                            },
                             onSave: saveNow
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .overlay(alignment: .top) {
+                            if findBarVisible {
+                                FileFindBar(
+                                    query: $findQuery,
+                                    options: $findOptions,
+                                    currentMatch: findMatchCount == 0 ? 0 : findFocusedIndex + 1,
+                                    totalMatches: findMatchCount,
+                                    onSubmit: submitFind,
+                                    onNext: { advanceFind(by: 1) },
+                                    onPrevious: { advanceFind(by: -1) },
+                                    onClose: closeFindBar,
+                                    focusTrigger: findFocusTrigger
+                                )
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                            }
+                        }
                     }
                     Divider()
                     statusBar
@@ -171,6 +204,9 @@ struct FileEditorView: View {
         // titlebar — no outer `.frame`, which was reserving an empty band above the header.
         .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
         .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .termioShowFindBar)) { _ in
+            openFindBar()
+        }
         // Auto-save: debounce a write after each edit; Escape closes (flushing first). A read-only
         // peek never writes, so neither the debounce nor the exit flush is armed.
         .onChange(of: text) {
@@ -357,6 +393,42 @@ struct FileEditorView: View {
         saveTask?.cancel()
         writeIfNeeded()
         onClose()
+    }
+
+    /// ⌘F: show the find bar. Skipped in Markdown Preview mode — there's no NSTextView to
+    /// search underneath.
+    private func openFindBar() {
+        guard mode == .edit else { return }
+        withAnimation(.easeOut(duration: 0.12)) { findBarVisible = true }
+        // NSTextView keeps first responder otherwise, and SwiftUI's @FocusState can't wrestle
+        // it away — drop it explicitly so the find field can claim the keyboard.
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        findFocusTrigger &+= 1
+    }
+
+    private func closeFindBar() {
+        withAnimation(.easeOut(duration: 0.12)) { findBarVisible = false }
+        findQuery = ""
+        findLastSubmittedQuery = ""
+        findMatchCount = 0
+        findFocusedIndex = 0
+        findOptions = FindOptions()
+    }
+
+    /// Return: fresh query → jump to match 1; same query → next match.
+    private func submitFind() {
+        guard !findQuery.isEmpty else { return }
+        if findQuery == findLastSubmittedQuery, findMatchCount > 0 {
+            advanceFind(by: 1)
+        } else {
+            findLastSubmittedQuery = findQuery
+            findFocusedIndex = 0
+        }
+    }
+
+    private func advanceFind(by offset: Int) {
+        guard findMatchCount > 0 else { return }
+        findFocusedIndex = ((findFocusedIndex + offset) % findMatchCount + findMatchCount) % findMatchCount
     }
 
     /// Reads the file once per opened identity (`.id(url)` on the overlay), off the main

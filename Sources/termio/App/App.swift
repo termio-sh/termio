@@ -828,6 +828,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NotificationCenter.default.post(name: .termioCloseContentOverlay, object: nil)
     }
 
+    /// ⌘F: broadcast so any on-screen file editor opens its find bar.
+    @objc func showEditorFindBar(_ sender: Any?) {
+        NotificationCenter.default.post(name: .termioShowFindBar, object: nil)
+    }
+
     /// Inserts or removes the overlay-close button as a file editor / diff / preview opens and
     /// closes, so it is shown only while there is an overlay to close. It rides the terminal
     /// column's trailing edge: anchored just before the inspector switch's tracking separator when
@@ -1587,6 +1592,13 @@ private func buildMainMenu() -> NSMenu {
     editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
     editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
     editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+    editMenu.addItem(.separator())
+    // ⌘F opens the current file's in-editor find bar. Broadcast via notification so the
+    // shortcut works regardless of first-responder — the terminal receives no find behaviour.
+    let findItem = NSMenuItem(title: "Find…",
+                              action: #selector(AppDelegate.showEditorFindBar(_:)),
+                              keyEquivalent: "f")
+    editMenu.addItem(findItem)
     editItem.submenu = editMenu
 
     let viewItem = NSMenuItem()

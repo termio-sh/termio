@@ -24,6 +24,13 @@ struct HighlightedTextView: NSViewRepresentable {
     /// A 1-based line to scroll to and flash (a content-search hit). Applied once on creation and
     /// again whenever the value changes — clicking a different hit in the same file re-scrolls.
     var jumpToLine: Int? = nil
+    /// Search query for the in-editor find bar. Empty string clears highlights.
+    var findQuery: String = ""
+    var findOptions: FindOptions = FindOptions()
+    /// 0-based match to focus; ignored on empty query or empty result.
+    var findFocusedIndex: Int = 0
+    /// Fires with the total match count after any recompute (new query, options, or edit).
+    var onMatchesChanged: ((Int) -> Void)? = nil
     /// Invoked when the user presses ⌘S — flushes the buffer to disk immediately.
     let onSave: () -> Void
 
@@ -57,7 +64,6 @@ struct HighlightedTextView: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isContinuousSpellCheckingEnabled = false
         textView.isGrammarCheckingEnabled = false
-        textView.usesFindBar = true
         textView.textContainerInset = NSSize(width: 6, height: 10)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -154,6 +160,9 @@ struct HighlightedTextView: NSViewRepresentable {
             coordinator.appliedJumpLine = jumpToLine
             if let jumpToLine { Self.reveal(line: jumpToLine, in: textView) }
         }
+
+        coordinator.onMatchesChanged = onMatchesChanged
+        coordinator.updateFind(query: findQuery, options: findOptions, focusedIndex: findFocusedIndex, in: textView)
     }
 
     private func apply(to textView: NSTextView) {
@@ -191,8 +200,13 @@ struct HighlightedTextView: NSViewRepresentable {
         /// The last jump target acted on, so `updateNSView` only re-scrolls on a genuine new hit.
         var appliedJumpLine: Int?
         weak var ruler: LineNumberRulerView?
+        var onMatchesChanged: ((Int) -> Void)?
         private let text: Binding<String>
         private let cursor: Binding<EditorCursor?>
+        private var appliedFindQuery: String = ""
+        private var appliedFindOptions: FindOptions = FindOptions()
+        private var appliedFocusedIndex: Int = -1
+        private var findMatches: [NSRange] = []
 
         init(text: Binding<String>, cursor: Binding<EditorCursor?>) {
             self.text = text
@@ -223,6 +237,11 @@ struct HighlightedTextView: NSViewRepresentable {
             guard let textView = notification.object as? NSTextView else { return }
             text.wrappedValue = textView.string
             ruler?.needsDisplay = true
+            if !appliedFindQuery.isEmpty {
+                recomputeMatches(query: appliedFindQuery, options: appliedFindOptions, in: textView)
+                paintMatches(in: textView, focused: min(appliedFocusedIndex, findMatches.count - 1))
+                notifyMatchCount()
+            }
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
@@ -233,6 +252,95 @@ struct HighlightedTextView: NSViewRepresentable {
             guard location <= full.length else { return }
             let (line, column) = TextPositions.lineColumn(utf16Offset: location, in: full)
             cursor.wrappedValue = EditorCursor(line: line, column: column)
+        }
+
+        /// Recompute + repaint after a new query, option change, or focus move. Same query
+        /// with a new focused index only re-scrolls.
+        func updateFind(query: String, options: FindOptions, focusedIndex: Int, in textView: NSTextView) {
+            if query != appliedFindQuery || options != appliedFindOptions {
+                appliedFindQuery = query
+                appliedFindOptions = options
+                recomputeMatches(query: query, options: options, in: textView)
+                notifyMatchCount()
+                appliedFocusedIndex = -1
+            }
+            paintMatches(in: textView, focused: focusedIndex)
+            appliedFocusedIndex = focusedIndex
+        }
+
+        /// SwiftUI forbids mutating parent state inside `updateNSView`, so defer the callback
+        /// to the next runloop.
+        private func notifyMatchCount() {
+            let count = findMatches.count
+            let callback = onMatchesChanged
+            DispatchQueue.main.async { callback?(count) }
+        }
+
+        private func recomputeMatches(query: String, options: FindOptions, in textView: NSTextView) {
+            findMatches.removeAll()
+            guard !query.isEmpty else { return }
+            let full = textView.string as NSString
+            let total = full.length
+            guard total > 0 else { return }
+
+            if options.regex {
+                var regexOptions: NSRegularExpression.Options = []
+                if !options.caseSensitive { regexOptions.insert(.caseInsensitive) }
+                guard let regex = try? NSRegularExpression(pattern: query, options: regexOptions) else { return }
+                let matches = regex.matches(in: textView.string, range: NSRange(location: 0, length: total))
+                for match in matches where match.range.length > 0 {
+                    if options.wholeWord, !Self.isWordBoundary(match.range, in: full) { continue }
+                    findMatches.append(match.range)
+                }
+                return
+            }
+
+            var searchOptions: NSString.CompareOptions = []
+            if !options.caseSensitive { searchOptions.insert(.caseInsensitive) }
+            var searchStart = 0
+            while searchStart < total {
+                let searchRange = NSRange(location: searchStart, length: total - searchStart)
+                let hit = full.range(of: query, options: searchOptions, range: searchRange)
+                if hit.location == NSNotFound { break }
+                if !options.wholeWord || Self.isWordBoundary(hit, in: full) {
+                    findMatches.append(hit)
+                }
+                // `hit.length` can be zero for a pathological pattern; step by 1 to guarantee
+                // termination.
+                searchStart = hit.location + max(hit.length, 1)
+            }
+        }
+
+        private static func isWordBoundary(_ range: NSRange, in string: NSString) -> Bool {
+            let letters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_"))
+            if range.location > 0 {
+                let prev = string.character(at: range.location - 1)
+                if let scalar = Unicode.Scalar(prev), letters.contains(scalar) { return false }
+            }
+            let end = range.location + range.length
+            if end < string.length {
+                let next = string.character(at: end)
+                if let scalar = Unicode.Scalar(next), letters.contains(scalar) { return false }
+            }
+            return true
+        }
+
+        private func paintMatches(in textView: NSTextView, focused: Int) {
+            guard let layoutManager = textView.layoutManager else { return }
+            let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
+            layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
+
+            let matchColor = NSColor.systemYellow.withAlphaComponent(0.35)
+            let focusedColor = NSColor.systemYellow.withAlphaComponent(0.7)
+            for (index, range) in findMatches.enumerated() {
+                let color = (index == focused) ? focusedColor : matchColor
+                layoutManager.addTemporaryAttribute(.backgroundColor, value: color, forCharacterRange: range)
+            }
+            if findMatches.indices.contains(focused) {
+                let range = findMatches[focused]
+                textView.scrollRangeToVisible(range)
+                textView.showFindIndicator(for: range)
+            }
         }
     }
 }
