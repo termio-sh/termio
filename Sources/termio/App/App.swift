@@ -286,12 +286,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             startSSHSession: { [weak store] host in
                 store?.companionStartSSHSession(host: host)
             },
-            openProject: { [weak store] path in
-                store?.companionOpenProject(path: path)
-            },
-            recentProjects: { [weak store] in
-                store?.companionRecentProjects() ?? []
-            },
             traceProvider: { [weak store] sessionID in
                 store?.companionTrace(for: sessionID)
             }

@@ -90,11 +90,6 @@ final class CompanionServer {
     /// Opens an `ssh <host>` terminal for the phone's Terminals ＋ → SSH
     /// (`.startSSH`); returns the `.started` echo, or nil on failure.
     private let startSSHSession: (String) -> (sessionID: String, agentID: String)?
-    /// Reopens a recent project by path for the phone's Projects ＋
-    /// (`.openProject`). Fire-and-forget: the roster poll announces the result.
-    private let openProject: (String) -> Void
-    /// The Mac's recent projects for the phone's Projects ＋ (`.recentProjects`).
-    private let recentProjects: () -> [WireRecentProject]
     /// Resolves a session's transcript path and display title for a `trace`
     /// request, or nil when the session has no readable transcript yet.
     private let traceProvider: (String) -> (path: String, title: String)?
@@ -123,8 +118,6 @@ final class CompanionServer {
         stopSession: @escaping (String) -> Bool,
         startScratchTerminal: @escaping () -> (sessionID: String, agentID: String)?,
         startSSHSession: @escaping (String) -> (sessionID: String, agentID: String)?,
-        openProject: @escaping (String) -> Void,
-        recentProjects: @escaping () -> [WireRecentProject],
         traceProvider: @escaping (String) -> (path: String, title: String)?
     ) {
         self.port = port
@@ -134,8 +127,6 @@ final class CompanionServer {
         self.stopSession = stopSession
         self.startScratchTerminal = startScratchTerminal
         self.startSSHSession = startSSHSession
-        self.openProject = openProject
-        self.recentProjects = recentProjects
         self.traceProvider = traceProvider
     }
 
@@ -352,12 +343,6 @@ final class CompanionServer {
             } else {
                 sendControl(.error(message: "could not open an SSH session"), to: connection)
             }
-        case .openProject(let path):
-            // Reopen a recent project; the roster poll carries the new row back —
-            // no direct reply, mirroring how a desktop Open-folder just appears.
-            openProject(path)
-        case .recentProjects:
-            sendControl(.recentProjectList(projects: recentProjects()), to: connection)
         case .stop(let sessionID):
             // Close on the Mac; the roster push drops the row on every phone.
             if !stopSession(sessionID) {
@@ -386,7 +371,7 @@ final class CompanionServer {
         case .sshConfigHosts:
             sendControl(.sshConfigList(hosts: Self.parseSSHConfigHosts()), to: connection)
         case .auth, .exit, .error, .started, .fileList, .file, .written, .uploaded,
-             .searchResults, .traceHTML, .sshConfigList, .recentProjectList:
+             .searchResults, .traceHTML, .sshConfigList:
             break
         }
     }
@@ -1040,24 +1025,6 @@ extension TermioStore {
         addSSHSession(host: host)
         guard let sessionID = selectedSessionID?.uuidString else { return nil }
         return (sessionID, AgentPreset.terminal.wireName)
-    }
-
-    /// Reopen `path` as a project for the phone's Projects-tab ＋ (`.openProject`)
-    /// — the same `addProject` the desktop's Open-folder picker feeds. The phone
-    /// only ever sends a path the Mac already handed it via `.recentProjectList`,
-    /// so there's nothing to browse or validate here beyond `addProject`'s own
-    /// dedupe. No reply: the roster poll carries the new project to every phone.
-    func companionOpenProject(path: String) {
-        let path = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !path.isEmpty else { return }
-        addProject(at: URL(fileURLWithPath: path))
-    }
-
-    /// The Mac's recent-projects list for the phone's Projects-tab ＋
-    /// (`.recentProjects`) — the last folders opened in termio, most-recent
-    /// first, flattened to name + path.
-    func companionRecentProjects() -> [WireRecentProject] {
-        settings.recentProjects.map { WireRecentProject(name: $0.name, path: $0.path) }
     }
 
     /// Close a session for a phone `stop` request — the same `closeSession`
