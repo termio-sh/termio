@@ -2,11 +2,12 @@ import AppKit
 import SwiftUI
 
 /// The editor that covers the terminal pane: a soft-wrapped, monospaced `NSTextView` whose text is
-/// syntax-highlighted by Highlightr (highlight.js), with a slim header (file name + close) and a VS
-/// Code-style footer (language · caret · encoding). The file is read once on open and **auto-saved**
-/// — a short idle after the last keystroke flushes it to disk, and closing flushes any pending
-/// write — so there is no Save button (⌘S still forces an immediate flush for muscle memory).
-/// Escape (or the close button) dismisses back to the terminal.
+/// syntax-highlighted by Highlightr (highlight.js), with a slim fixed header (the file name, pinned
+/// like the inspector panes' headers) over the scrolling content. The
+/// file is read once on open and **auto-saved** — a short idle after the last keystroke flushes it to
+/// disk, and closing flushes any pending write — so there is no Save button (⌘S still forces an
+/// immediate flush for muscle memory). It closes three ways: the toolbar close button, a right-click
+/// "Close" (terminal-style), or Escape — all dismiss back to the terminal.
 /// Non-text files that can't be decoded as UTF-8 show a short notice rather than a wall of mojibake.
 struct FileEditorView: View {
     let url: URL
@@ -142,61 +143,12 @@ struct FileEditorView: View {
                 // within a frame or two, so a spinner would only flash.
                 Color.clear
             } else {
+                // A fixed header over the content (no divider, no footer), matching the inspector
+                // panes' pinned headers (File Explorer's "TERMIO", Issues, Git) — the file name
+                // stays put while you scroll rather than sliding away and leaving you place-blind.
                 VStack(spacing: 0) {
                     header
-                    Divider()
-                    if isMarkdown && mode == .preview {
-                        // Render the *live* buffer, so flipping over from Edit shows unsaved
-                        // keystrokes without a round-trip through disk.
-                        MarkdownReaderView(
-                            source: text,
-                            fileURL: url,
-                            settings: settings,
-                            colorScheme: colorScheme
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        HighlightedTextView(
-                            text: $text,
-                            cursor: $cursor,
-                            language: highlightDisabled ? nil : language,
-                            theme: colorScheme == .dark ? "xcode-dark" : "xcode",
-                            font: editorFont,
-                            backgroundColor: settings.terminalBackgroundColor,
-                            caretColor: caretColor,
-                            lineNumberColor: lineNumberColor,
-                            currentLineColor: currentLineColor,
-                            isEditable: !readOnly,
-                            jumpToLine: jumpLine,
-                            findQuery: findBarVisible ? findQuery : "",
-                            findOptions: findOptions,
-                            findFocusedIndex: findFocusedIndex,
-                            onMatchesChanged: { count in
-                                findMatchCount = count
-                                if count > 0, findFocusedIndex >= count { findFocusedIndex = 0 }
-                            },
-                            onSave: saveNow
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .overlay(alignment: .topTrailing) {
-                            if findBarVisible {
-                                FileFindBar(
-                                    query: $findQuery,
-                                    options: $findOptions,
-                                    currentMatch: findMatchCount == 0 ? 0 : findFocusedIndex + 1,
-                                    totalMatches: findMatchCount,
-                                    onSubmit: submitFind,
-                                    onNext: { advanceFind(by: 1) },
-                                    onPrevious: { advanceFind(by: -1) },
-                                    onClose: closeFindBar,
-                                    focusTrigger: findFocusTrigger
-                                )
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
-                            }
-                        }
-                    }
-                    Divider()
-                    statusBar
+                    editorContent
                 }
             }
         }
@@ -216,6 +168,62 @@ struct FileEditorView: View {
         // A safety flush if the overlay goes away without the close button (file switch, app quit).
         .onDisappear {
             if !readOnly { saveTask?.cancel(); writeIfNeeded() }
+        }
+    }
+
+    /// The scrolling body — the Markdown reader in Preview, else the Highlightr source editor. It
+    /// scrolls below the fixed header; the source editor also carries the right-click "Close".
+    @ViewBuilder private var editorContent: some View {
+        if isMarkdown && mode == .preview {
+            // Render the *live* buffer, so flipping over from Edit shows unsaved keystrokes
+            // without a round-trip through disk.
+            MarkdownReaderView(
+                source: text,
+                fileURL: url,
+                settings: settings,
+                colorScheme: colorScheme
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            HighlightedTextView(
+                text: $text,
+                cursor: $cursor,
+                language: highlightDisabled ? nil : language,
+                theme: colorScheme == .dark ? "xcode-dark" : "xcode",
+                font: editorFont,
+                backgroundColor: settings.terminalBackgroundColor,
+                caretColor: caretColor,
+                lineNumberColor: lineNumberColor,
+                currentLineColor: currentLineColor,
+                isEditable: !readOnly,
+                jumpToLine: jumpLine,
+                findQuery: findBarVisible ? findQuery : "",
+                findOptions: findOptions,
+                findFocusedIndex: findFocusedIndex,
+                onMatchesChanged: { count in
+                    findMatchCount = count
+                    if count > 0, findFocusedIndex >= count { findFocusedIndex = 0 }
+                },
+                showsCloseMenuItem: true,
+                onSave: saveNow
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .topTrailing) {
+                if findBarVisible {
+                    FileFindBar(
+                        query: $findQuery,
+                        options: $findOptions,
+                        currentMatch: findMatchCount == 0 ? 0 : findFocusedIndex + 1,
+                        totalMatches: findMatchCount,
+                        onSubmit: submitFind,
+                        onNext: { advanceFind(by: 1) },
+                        onPrevious: { advanceFind(by: -1) },
+                        onClose: closeFindBar,
+                        focusTrigger: findFocusTrigger
+                    )
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
         }
     }
 
@@ -254,17 +262,18 @@ struct FileEditorView: View {
                     .foregroundStyle(.orange)
                     .lineLimit(1)
             }
-            // The close control lives in the toolbar (a bordered, Liquid Glass button on the
-            // terminal column's trailing edge); this trailing spacer keeps the label left-aligned.
             Spacer()
             // Markdown reads as a document by default; the toggle keeps the source one click away.
             if isMarkdown {
                 modeToggle
             }
         }
-        .padding(.horizontal, 12)
-        // One explicit height for EVERY file type: the mode pill is taller than the text
-        // row, so without the clamp a markdown header outgrew plain files' (44 vs ~31).
+        // Leading edge matches the Markdown reader's body padding (20) so the file name lines up
+        // with the document text beneath it.
+        .padding(.leading, 20)
+        .padding(.trailing, 12)
+        // One explicit height for every file type: the mode pill is taller than the text row, so
+        // without the clamp a markdown header outgrows plain files'.
         .frame(height: Self.headerHeight)
         .background(Color(nsColor: settings.terminalBackgroundColor))
         .animation(.easeOut(duration: 0.15), value: isDirty)
@@ -306,67 +315,17 @@ struct FileEditorView: View {
             .help(help)
     }
 
-    @ViewBuilder private var modePill: some View {
-        if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.interactive(), in: .capsule)
-                .matchedGeometryEffect(id: mode, in: modePillNamespace, isSource: false)
-        } else {
-            Capsule(style: .continuous)
-                .fill(Color(nsColor: .controlColor))
-                .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
-                .matchedGeometryEffect(id: mode, in: modePillNamespace, isSource: false)
-        }
+    // The selected pill: a flat fill, no glass and no drop shadow — the raised/glass pill cast a
+    // shadow that read as heavy chrome over the document. The fill alone (brighter than the track)
+    // is enough to show which segment is active.
+    private var modePill: some View {
+        Capsule(style: .continuous)
+            .fill(Color.primary.opacity(0.14))
+            .matchedGeometryEffect(id: mode, in: modePillNamespace, isSource: false)
     }
 
-    @ViewBuilder private var modeTrack: some View {
-        if #available(macOS 26.0, *) {
-            // Faint whitened glass so the brighter selected pill reads as raised above it.
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
-        } else {
-            Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
-        }
-    }
-
-    /// A slim VS Code-style footer: language on the left, cursor position and file facts on the
-    /// right. The caret tracks as you move around the file.
-    private var statusBar: some View {
-        HStack(spacing: 0) {
-            Text(languageName)
-            if readOnly {
-                // Mark the peek so the absent caret/typing doesn't read as the editor being broken.
-                statusItem("Read-Only")
-            }
-            Spacer()
-            if isMarkdown && mode == .preview {
-                // No caret in the rendered view — name the mode so the missing Ln/Col reads right.
-                statusItem("Preview")
-            } else if let cursor {
-                statusItem("Ln \(cursor.line), Col \(cursor.column)")
-            }
-            statusItem("UTF-8")
-        }
-        .font(.system(size: 11))
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(Color(nsColor: settings.terminalBackgroundColor))
-    }
-
-    private func statusItem(_ text: String) -> some View {
-        Text(text).padding(.leading, 14)
-    }
-
-    /// A human-readable name for the detected language ("Plain Text" when auto/unknown,
-    /// with the reason named when a large file skipped highlighting).
-    private var languageName: String {
-        guard !highlightDisabled else { return "Plain Text — large file" }
-        guard let language else { return "Plain Text" }
-        return language.prefix(1).uppercased() + language.dropFirst()
+    private var modeTrack: some View {
+        Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
     }
 
     /// An explicit save (⌘S): cancels the pending debounce and flushes the buffer to disk right

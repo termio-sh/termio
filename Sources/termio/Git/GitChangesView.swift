@@ -156,30 +156,17 @@ struct GitChangesView: View {
             .onTapGesture { mode = value }
     }
 
-    @ViewBuilder
+    // Flat track + pill on every OS, matching the Issues pane's switch (`CapsuleSwitch`): macOS 26's
+    // `.glassEffect` cast an ambient drop shadow that read as stray chrome and made this switch look
+    // different from the GitHub pane's, so both now use plain capsule fills with no shadow.
     private var selectionPill: some View {
-        if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.interactive(), in: .capsule)
-                .matchedGeometryEffect(id: mode, in: pillNamespace, isSource: false)
-        } else {
-            Capsule(style: .continuous)
-                .fill(Color(nsColor: .controlColor))
-                .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
-                .matchedGeometryEffect(id: mode, in: pillNamespace, isSource: false)
-        }
+        Capsule(style: .continuous)
+            .fill(Color(nsColor: .controlColor))
+            .matchedGeometryEffect(id: mode, in: pillNamespace, isSource: false)
     }
 
-    @ViewBuilder
     private var trackBackground: some View {
-        if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
-        } else {
-            Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
-        }
+        Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
     }
 
     /// Status strip under the content: what the visible list adds up to. There is no

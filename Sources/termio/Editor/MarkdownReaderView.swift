@@ -54,10 +54,16 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(LocalFileSchemeHandler(), forURLScheme: Self.fileScheme)
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = ContextMenuWebView(frame: .zero, configuration: config)
         view.setValue(false, forKey: "drawsBackground")
         view.navigationDelegate = context.coordinator
         view.loadHTMLString(html, baseURL: schemeBaseURL)
+        // Take first responder off the terminal surface beneath the overlay so ⌘C copies the
+        // reader's selection (the Edit menu's Copy routes to whoever holds focus).
+        DispatchQueue.main.async { [weak view] in
+            guard let view, let window = view.window else { return }
+            window.makeFirstResponder(view)
+        }
         return view
     }
 
@@ -107,6 +113,25 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
                 decisionHandler(.allow)
             }
         }
+    }
+}
+
+/// A `WKWebView` that appends a "Close" to its right-click menu, so the Markdown preview closes
+/// terminal-style like the source editor — the overlay has no chrome button.
+private final class ContextMenuWebView: WKWebView {
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        // Strip the reader's menu down to Copy — a read-only document doesn't need Reload / Look Up
+        // / Translate / Share / Services — then add a prominent Close so it's not buried.
+        menu.items = menu.items.filter { $0.identifier?.rawValue == "WKMenuItemIdentifierCopy" }
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        let close = NSMenuItem(title: "Close", action: #selector(closeEditorOverlay), keyEquivalent: "")
+        close.target = self
+        menu.addItem(close)
+    }
+
+    @objc private func closeEditorOverlay() {
+        NotificationCenter.default.post(name: .termioCloseContentOverlay, object: nil)
     }
 }
 

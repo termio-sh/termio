@@ -66,6 +66,8 @@ struct IssuesView: View {
             if model.capabilities?.pullRequests == true { kindSwitch }
             Spacer(minLength: 0)
             refreshButton
+                // Breathing room so refresh and filter don't read as one two-icon cluster.
+                .padding(.trailing, 8)
             filterMenu
         }
         .padding(.leading, 8)
@@ -77,6 +79,8 @@ struct IssuesView: View {
     /// The list is otherwise fetch-on-interaction, so this is the "prove it's
     /// current" escape hatch when something changed on GitHub out of band.
     private var refreshButton: some View {
+        // VS Code codicon refresh, matching the File Explorer header's four codicon actions so the
+        // two pane toolbars read as one family.
         TreeHeaderButton(codicon: .refresh, help: "Refresh") {
             Task { await model.loadList() }
         }
@@ -142,10 +146,12 @@ struct IssuesView: View {
             // The funnel takes the accent color while any filter narrows the list
             // (non-default state, an assignee, or a label), so a filtered view
             // can't be mistaken for the full one.
+            // A thinner stroke than the switches use (1.5 read heavier than the filled codicons
+            // beside it) so the funnel sits at the codicons' optical weight.
             HugeIconView(
                 icon: .filter, size: 13,
                 color: isFiltered ? .accentColor : .secondary,
-                lineWidthOverride: 1.5
+                lineWidthOverride: 1
             )
             .allowsHitTesting(false)
         }

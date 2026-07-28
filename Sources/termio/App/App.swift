@@ -220,7 +220,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .sink { [weak self] in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.setCloseOverlayVisible(self.store.openFileURL != nil || self.store.openDiff != nil || self.store.openTrace != nil || self.store.openIssueDetail != nil)
+                    // Every overlay covering the terminal — file editor, Quick Look preview, diff,
+                    // trace, issue detail — carries the toolbar close button. (The editor also
+                    // closes via its right-click "Close" and Esc; the button is the discoverable one.)
+                    self.setCloseOverlayVisible(
+                        self.store.openFileURL != nil
+                            || self.store.openDiff != nil
+                            || self.store.openTrace != nil
+                            || self.store.openIssueDetail != nil)
                 }
             }
 
@@ -413,7 +420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // sidebar. It starts collapsed — the tree is summoned via the toolbar toggle.
         let inspector = FileBrowserHostingController(store: store, settings: settings)
         let inspectorItem = NSSplitViewItem(viewController: inspector)
-        inspectorItem.minimumThickness = 220
+        inspectorItem.minimumThickness = 260
         inspectorItem.maximumThickness = 420
         inspectorItem.canCollapse = true
         inspectorItem.isCollapsed = true
@@ -1589,6 +1596,7 @@ private func buildMainMenu() -> NSMenu {
     let editItem = NSMenuItem()
     mainMenu.addItem(editItem)
     let editMenu = NSMenu(title: "Edit")
+    editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
     editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
     editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
     editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")

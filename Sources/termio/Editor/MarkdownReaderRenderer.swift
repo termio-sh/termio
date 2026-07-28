@@ -181,11 +181,12 @@ enum MarkdownReaderRenderer {
     html, body { max-width: 100%; overflow-x: hidden; }
     ::selection { background: color-mix(in srgb, var(--accent) 20%, transparent); }
     body.reader {
-      /* A ceiling, not a column: narrow panes still fill edge-to-edge; on a wide pane the
-         text stops at ~76ch and centers instead of running to 120+ characters a line.
-         (+88px keeps the 44px side padding from eating into the 76ch of actual text —
-         border-box puts padding inside max-width.) */
-      max-width: calc(76ch + 88px); margin: 0 auto; padding: 52px 44px 180px;
+      /* Left-aligned, not centered, so the prose lines up under the editor's file-name header
+         (which sits at the same 20px leading edge) rather than drifting to the middle of a wide
+         pane. A measure ceiling still caps the line length; +40px keeps the 20px side padding from
+         eating into the 76ch of actual text (border-box puts padding inside max-width). The top is
+         kept small — the scroll-away header already occupies the first strip. */
+      max-width: calc(76ch + 40px); margin: 0; padding: 36px 20px 160px;
       background: var(--bg); color: var(--fg);
       font: 17px/1.6 var(--font-prose);
       /* NOT antialiased — grayscale smoothing thins the strokes and reads "轻飘飘"; the
