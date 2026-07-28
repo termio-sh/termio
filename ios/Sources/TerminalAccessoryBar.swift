@@ -468,17 +468,19 @@ final class TerminalAccessoryBar: UIInputView {
         // Collapse back into the (+) key, mirroring the entrance.
         let card = attachMenuCard
         let size = card?.bounds.size ?? .zero
-        // Collapse-into-the-(+)-key wants ease-IN here, not ease-out: ease-in
-        // keeps the card solid while it shrinks and only vanishes at the small
-        // end, so no faint large "ghost" trails behind it (ease-out drops the
-        // alpha while the card is still large — see the dismiss-easing note).
+        // Decouple the shrink from the fade rather than easing both IN (which delayed the whole
+        // exit): the card collapses toward the (+) key on ease-OUT so the response is immediate,
+        // while its alpha rides ease-IN — staying opaque until the small end so no faint large
+        // "ghost" lingers. Under Reduce Motion it's a plain fade, no scale-into-the-corner.
         let reduce = UIAccessibility.isReduceMotionEnabled
-        UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseIn) {
-            card?.alpha = 0
-            if !reduce {
+        if !reduce {
+            UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseOut) {
                 card?.transform = CGAffineTransform(scaleX: 0.4, y: 0.4)
                     .translatedBy(x: -size.width * 0.5, y: size.height * 0.5)
             }
+        }
+        UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseIn) {
+            card?.alpha = 0
         } completion: { _ in
             scrim.removeFromSuperview()
         }
