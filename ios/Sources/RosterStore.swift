@@ -138,17 +138,6 @@ final class RosterStore {
         client?.send(.start(projectID: projectID, agent: agent.id))
     }
 
-    /// The Chats tab's one-tap ＋: start a chat with no agent named, so the
-    /// Mac resolves its default (pinned → last used → first enabled — the
-    /// exact ⌘N policy, which also keeps updating "last used"). The phone
-    /// deliberately owns none of that policy; the per-agent menu behind
-    /// long-press stays the escape hatch for picking a specific one.
-    func startDefaultChat() {
-        guard let project = chatsProject, let projectID = project.rosterID else { return }
-        pendingStart = (project, nil)
-        client?.send(.start(projectID: projectID, agent: nil))
-    }
-
     /// The Terminals tab's ＋: open a plain login shell at `~` in the loose
     /// `.terminals` funnel. The wire agent token `"terminal"` maps to the Mac's
     /// The Terminals tab's ＋ → "New Terminal": a plain login shell in the Mac's

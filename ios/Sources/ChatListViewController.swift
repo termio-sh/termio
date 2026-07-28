@@ -76,20 +76,15 @@ final class ChatListViewController: UIViewController {
     }
 
     /// ＋ floats bottom-right, opposite the home tab pill — the compose corner.
-    /// A TAP is one New Chat, no questions asked: the Mac resolves the agent
-    /// through its ⌘N default policy (`startDefaultChat`), so composing costs
-    /// zero choices. The per-agent menu survives on LONG-PRESS as the
-    /// pick-a-specific-agent escape hatch — `menu` stays set, it's just no
-    /// longer the primary action. Deferred so it always reflects the roster's
-    /// current agent list (and the button hides while unpaired).
+    /// A TAP presents the agent picker directly: choosing which agent to start
+    /// IS the primary action, not a default hidden behind a long-press. Deferred
+    /// so it always reflects the roster's current enabled agents (and the button
+    /// hides while unpaired).
     private func configureNewChatButton() {
         newChatButton.applyGlassIcon(.add, boxSize: 26)
         newChatButton.tintColor = .label
         newChatButton.accessibilityLabel = "New Chat"
-        newChatButton.addAction(
-            UIAction { [weak self] _ in self?.store.startDefaultChat() },
-            for: .touchUpInside
-        )
+        newChatButton.showsMenuAsPrimaryAction = true
         newChatButton.menu = UIMenu(children: [
             UIDeferredMenuElement.uncached { [weak self] completion in
                 guard let self, let chatsProject = store.chatsProject else {
