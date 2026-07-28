@@ -961,8 +961,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// Mounts (or removes) the full-window host that shows the active inspector detail blown up to
-    /// cover the whole content area (sidebar and terminal included) — an in-window maximize, *not*
-    /// native macOS fullscreen: the window stays put in its Space, the menu bar stays visible.
+    /// cover the content area (the terminal + inspector region, *not* the project sidebar) — an
+    /// in-window maximize, *not* native macOS fullscreen: the window stays put in its Space, the
+    /// menu bar stays visible. The sidebar stays reachable, and toggling it slides the maximized
+    /// detail with it (see the leading constraint below).
     /// `InspectorDetailContent` is the same view the inspector docks; while it is up the inspector
     /// hides its own copy (see `InspectorRoot`), so the detail renders once. The toolbar stays above
     /// it, so its maximize button restores and Esc still closes.
@@ -977,8 +979,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             ))
             host.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(host, positioned: .above, relativeTo: nil)
+            // Pin the leading edge to the *content* area (the terminal/inspector region), not the
+            // whole window — so the maximized detail sits beside the project sidebar rather than
+            // swallowing it. Item 1 is the terminal (0 is the sidebar, 2 the inspector); its leading
+            // tracks the split, so toggling the sidebar slides the maximized detail with it (it
+            // extends left when the sidebar collapses).
+            let items = splitViewController?.splitViewItems ?? []
+            let contentLeading = items.count > 1
+                ? items[1].viewController.view.leadingAnchor
+                : container.leadingAnchor
             NSLayoutConstraint.activate([
-                host.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                host.leadingAnchor.constraint(equalTo: contentLeading),
                 host.trailingAnchor.constraint(equalTo: container.trailingAnchor),
                 host.topAnchor.constraint(equalTo: container.topAnchor),
                 host.bottomAnchor.constraint(equalTo: container.bottomAnchor),
