@@ -231,13 +231,22 @@ struct IssuesView: View {
             ProgressView()
                 .controlSize(.small)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = model.errorMessage {
-            ContentUnavailableView(
-                "Couldn’t Load",
-                huge: .github,
-                description: Text(error)
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if model.errorMessage != nil {
+            // A non-401 failure (typically a 403: valid token, no rights to *this*
+            // repo) leaves the pane bound but unreadable. Offer a way out instead of
+            // wedging — reconnect to switch account, or grant termio org access.
+            // `zeroState` paints `model.errorMessage` in red beneath the actions.
+            zeroState(
+                title: "Couldn’t Load",
+                message: "Reconnect to sign in with a different account, or grant termio access to the organization that owns this repository."
+            ) {
+                Button("Reconnect") { Task { await model.reconnect() } }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                Button("Grant Org Access…") { model.openConnectionSettings() }
+                    .buttonStyle(.link)
+                    .controlSize(.small)
+            }
         } else if model.items.isEmpty {
             ContentUnavailableView(
                 model.query.kind == .issue ? "No Issues" : "No Pull Requests",

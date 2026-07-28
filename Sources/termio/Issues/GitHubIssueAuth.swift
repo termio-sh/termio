@@ -17,6 +17,13 @@ enum GitHubIssueAuth {
             ?? "Ov23lipSynmaEBOQR1cM"
     }
 
+    /// The user's connections page for this OAuth app — where org access is
+    /// granted. A 403 on a private repo is usually an org that hasn't authorized
+    /// termio, and reconnecting alone won't fix it; the grant happens here.
+    static var settingsURL: URL {
+        URL(string: "https://github.com/settings/connections/applications/\(clientID)")!
+    }
+
     // MARK: Keychain
 
     private static let service = "sh.termio.app.issues"

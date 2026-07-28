@@ -87,6 +87,23 @@ final class IssuesPanelModel: ObservableObject {
         phase = .disconnected
     }
 
+    /// Recover from a non-401 failure (typically a 403: the token is valid but has
+    /// no rights to *this* repo). A 401 self-heals via `disconnect()` in `loadList`,
+    /// but a 403 leaves the pane bound-yet-empty with no way out — so drop the token
+    /// and re-run the device flow, letting the user approve under a different account
+    /// (or after granting termio org access, see `openConnectionSettings`).
+    func reconnect() async {
+        disconnect()
+        await connect()
+    }
+
+    /// Opens the OAuth app's connections page, where the user grants termio access
+    /// to the org that owns a private repo — the fix a bare reconnect can't make,
+    /// since GitHub re-issues the same token without re-prompting for org grants.
+    func openConnectionSettings() {
+        NSWorkspace.shared.open(GitHubIssueAuth.settingsURL)
+    }
+
     // MARK: Loading
 
     private func resolveContainer() async {
