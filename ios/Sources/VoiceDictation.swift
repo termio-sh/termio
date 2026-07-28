@@ -88,16 +88,24 @@ final class VoiceDictation: NSObject {
         }
     }
 
-    private var recorder: AVAudioRecorder?
+    private var engine: AVAudioEngine?
+    private var audioFile: AVAudioFile?
     private var fileURL: URL?
+    /// Frames the tap has written ÷ sample rate = the clip length, for the
+    /// too-short-jab guard. Written on the audio thread, read after teardown.
+    private var recordedFrames: AVAudioFramePosition = 0
+    private var inputSampleRate: Double = 48_000
+    /// Latest input level, 0…1, for the waveform. Written on the tap's audio
+    /// thread, read on the main thread — a benign race for a meter (aligned
+    /// 32-bit access), so no render-thread lock.
+    private var meterLevel: Float = 0
 
-    var isRecording: Bool { recorder?.isRecording ?? false }
+    var isRecording: Bool { engine?.isRunning ?? false }
 
     // MARK: - Recording
 
     /// Requests mic access if needed, then begins recording. `completion` fires
-    /// on the main queue once recording is actually underway (or with the
-    /// reason it couldn't start).
+    /// on the main queue once recording is underway (or with why it couldn't).
     func start(completion: @escaping (Result<Void, Failure>) -> Void) {
         guard Self.hasAPIKey(for: MobileSettings.shared.transcriptionProvider) else {
             completion(.failure(.missingKey))
@@ -113,62 +121,94 @@ final class VoiceDictation: NSObject {
                 try beginRecording()
                 completion(.success(()))
             } catch {
+                teardownEngine()
                 completion(.failure(.recordingFailed))
             }
         }
     }
 
+    /// Taps the mic through AVAudioEngine and writes straight to an AAC file.
+    /// Unlike AVAudioRecorder, stopping the engine flushes every frame the tap
+    /// has delivered, so the tail is never clipped and no drain delay is needed
+    /// — Apple's recommended path for recording.
     private func beginRecording() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
         try session.setActive(true)
 
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0 else { throw Failure.recordingFailed }
+
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("termio-dictation-\(UUID().uuidString).m4a")
-        // AAC in an m4a container: one of OpenAI's accepted formats, and small.
-        // 24 kHz mono is plenty for speech and keeps uploads tiny.
+        // AAC in an m4a container (both providers accept it), written at the
+        // mic's own rate/channels so the tap buffers need no format conversion.
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 24_000,
-            AVNumberOfChannelsKey: 1,
+            AVSampleRateKey: format.sampleRate,
+            AVNumberOfChannelsKey: format.channelCount,
             AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
         ]
-        let recorder = try AVAudioRecorder(url: url, settings: settings)
-        recorder.isMeteringEnabled = true
-        guard recorder.record() else { throw Failure.recordingFailed }
-        self.recorder = recorder
+        let file = try AVAudioFile(forWriting: url, settings: settings)
+
+        recordedFrames = 0
+        inputSampleRate = format.sampleRate
+        meterLevel = 0
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            guard let self else { return }
+            try? file.write(from: buffer)
+            recordedFrames += AVAudioFramePosition(buffer.frameLength)
+            meterLevel = Self.level(of: buffer)
+        }
+
+        engine.prepare()
+        try engine.start()
+        self.engine = engine
+        self.audioFile = file
         self.fileURL = url
+    }
+
+    /// RMS of a buffer mapped to 0…1 over the useful speech band. The band is
+    /// deliberately narrow — quiet room ≈ -55 dB, normal speech ≈ -30 dB, loud
+    /// ≈ -12 dB — so normal talking fills the bar instead of sitting near the
+    /// floor (0 dB is clipping, which speech never reaches).
+    private static func level(of buffer: AVAudioPCMBuffer) -> Float {
+        guard let data = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return 0 }
+        let count = Int(buffer.frameLength)
+        var sum: Float = 0
+        for i in 0..<count { let s = data[i]; sum += s * s }
+        let decibels = 20 * log10(max(sqrt(sum / Float(count)), 1e-7))
+        let floor: Float = -55
+        let ceiling: Float = -12
+        return min(1, max(0, (decibels - floor) / (ceiling - floor)))
     }
 
     /// The current input level, 0…1, for the pill's waveform. Call while
     /// recording; returns 0 otherwise.
     func currentLevel() -> Float {
-        guard let recorder, recorder.isRecording else { return 0 }
-        recorder.updateMeters()
-        let decibels = recorder.averagePower(forChannel: 0)
-        // averagePower is roughly -160…0 dB; map the useful speech band to 0…1.
-        let floor: Float = -50
-        guard decibels > floor else { return 0 }
-        return min(1, (decibels - floor) / -floor)
+        isRecording ? meterLevel : 0
     }
 
     /// Discards the in-flight recording without transcribing (the cancel ✕).
     func cancel() {
-        recorder?.stop()
+        teardownEngine()
         cleanUp()
     }
 
     /// Stops recording and transcribes the clip. `completion` fires on the main
-    /// queue with the transcript or the reason it failed.
+    /// queue with the transcript or the reason it failed. Stopping the engine
+    /// flushes the tap cleanly, so the whole clip is on disk — no drain wait.
     func stopAndTranscribe(completion: @escaping (Result<String, Failure>) -> Void) {
-        guard let recorder, let fileURL else {
+        guard let fileURL, engine != nil else {
             completion(.failure(.recordingFailed))
             return
         }
-        let duration = recorder.currentTime
-        recorder.stop()
-        self.recorder = nil
+        // Teardown first so the tap has stopped and recordedFrames is final.
+        teardownEngine()
         deactivateSession()
+        let duration = Double(recordedFrames) / inputSampleRate
 
         // A stab at the button (or a bump) isn't a dictation; drop it quietly.
         guard duration >= 0.4 else {
@@ -176,7 +216,6 @@ final class VoiceDictation: NSObject {
             completion(.failure(.empty))
             return
         }
-
         let provider = MobileSettings.shared.transcriptionProvider
         guard let key = Self.apiKey(for: provider), !key.isEmpty else {
             cleanUp()
@@ -189,9 +228,18 @@ final class VoiceDictation: NSObject {
         }
     }
 
+    /// Stops the engine and closes the file, flushing every delivered frame.
+    private func teardownEngine() {
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop()
+        engine = nil
+        audioFile = nil   // closing the AVAudioFile flushes its remaining frames
+    }
+
     private func cleanUp() {
         if let fileURL { try? FileManager.default.removeItem(at: fileURL) }
-        recorder = nil
+        engine = nil
+        audioFile = nil
         fileURL = nil
         deactivateSession()
     }
@@ -377,9 +425,9 @@ private extension Data {
 
 /// The recording surface that takes over the terminal keyboard's accessory bar
 /// when the user picks Voice from the (+) menu — Apple Messages' audio-message
-/// aesthetic: a rounded capsule with a cancel (✕) on the left, a pulsing red
-/// record dot, an elapsed timer and a live waveform in the middle, and the
-/// signature red circular stop button (a white rounded square) on the right.
+/// aesthetic: a rounded capsule with a cancel (✕) on the left, an elapsed timer
+/// and a live waveform in the middle, and the signature red circular stop button
+/// (a white rounded square) on the right.
 /// Tap Voice to start, tap stop to finish — no hold. After stop it swaps to a
 /// "Transcribing…" spinner, then a brief red error line on failure.
 final class VoiceRecordingBar: UIView {
@@ -395,14 +443,13 @@ final class VoiceRecordingBar: UIView {
     private let cancelButton = UIButton(type: .system)
     private let stopButton = UIButton(type: .system)
     private let stopGlyph = UIView()
-    private let dot = UIView()
     private let timeLabel = UILabel()
     private let statusLabel = UILabel()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let waveform = WaveformView()
 
     /// Controls shown while recording; hidden once we're transcribing or errored.
-    private var recordingControls: [UIView] { [cancelButton, dot, timeLabel, waveform, stopButton] }
+    private var recordingControls: [UIView] { [cancelButton, timeLabel, waveform, stopButton] }
 
     private var startDate: Date?
     private var timer: Timer?
@@ -443,9 +490,6 @@ final class VoiceRecordingBar: UIView {
         stopGlyph.translatesAutoresizingMaskIntoConstraints = false
         stopButton.addSubview(stopGlyph)
 
-        dot.backgroundColor = .systemRed
-        dot.layer.cornerRadius = 4
-
         timeLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .medium)
         timeLabel.textColor = .label
         timeLabel.text = "0:00"
@@ -457,7 +501,7 @@ final class VoiceRecordingBar: UIView {
 
         spinner.hidesWhenStopped = true
 
-        for v in [cancelButton, dot, timeLabel, waveform, stopButton, statusLabel, spinner] {
+        for v in [cancelButton, timeLabel, waveform, stopButton, statusLabel, spinner] {
             v.translatesAutoresizingMaskIntoConstraints = false
             capsule.addSubview(v)
         }
@@ -481,12 +525,7 @@ final class VoiceRecordingBar: UIView {
             stopGlyph.widthAnchor.constraint(equalToConstant: 15),
             stopGlyph.heightAnchor.constraint(equalToConstant: 15),
 
-            dot.leadingAnchor.constraint(equalTo: cancelButton.trailingAnchor, constant: 10),
-            dot.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
-            dot.widthAnchor.constraint(equalToConstant: 8),
-            dot.heightAnchor.constraint(equalToConstant: 8),
-
-            timeLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
+            timeLabel.leadingAnchor.constraint(equalTo: cancelButton.trailingAnchor, constant: 14),
             timeLabel.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
 
             waveform.leadingAnchor.constraint(equalTo: timeLabel.trailingAnchor, constant: 12),
@@ -524,7 +563,6 @@ final class VoiceRecordingBar: UIView {
         waveform.reset()
 
         startDate = Date()
-        pulseDot()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self, let startDate else { return }
@@ -568,8 +606,6 @@ final class VoiceRecordingBar: UIView {
         hasDismissed = true
         stopTimer()
         spinner.stopAnimating()
-        dot.layer.removeAllAnimations()
-        dot.alpha = 1
         onDismissed?()
     }
 
@@ -577,18 +613,6 @@ final class VoiceRecordingBar: UIView {
         timer?.invalidate()
         timer = nil
         startDate = nil
-    }
-
-    private func pulseDot() {
-        dot.layer.removeAllAnimations()
-        dot.alpha = 1
-        // Reduced motion: hold the dot steady rather than breathing it.
-        guard !UIAccessibility.isReduceMotionEnabled else { return }
-        UIView.animate(
-            withDuration: 0.6, delay: 0, options: [.repeat, .autoreverse, .allowUserInteraction]
-        ) {
-            self.dot.alpha = 0.3
-        }
     }
 }
 
