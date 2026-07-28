@@ -429,6 +429,11 @@ final class TerminalViewController: UIViewController {
             case .files: self?.presentDocumentPicker()
             }
         }
+        // The transcript types straight into the prompt — no newline, so a
+        // dictation never sends a half-formed prompt on its own.
+        keyBar.onVoiceTranscript = { [weak self] text in
+            self?.terminalView.send(Data(text.utf8))
+        }
         terminalView.setStickyModifierChangeHandler { [weak self] in
             guard let self else { return }
             keyBar.setStickyVisual(.ctrl, Self.stickyVisual(terminalView.stickyActivation(for: .ctrl)))

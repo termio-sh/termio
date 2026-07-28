@@ -138,6 +138,9 @@ final class TerminalAccessoryBar: UIInputView {
     var onAttach: ((TerminalAttachSource) -> Void)?
     /// A viewport jump key was tapped — the owner scrolls the terminal view.
     var onScrollEdge: ((TerminalScrollEdge) -> Void)?
+    /// Voice dictation finished — the transcript to type into the terminal.
+    /// Never carries a newline: dictation fills the prompt, it never sends it.
+    var onVoiceTranscript: ((String) -> Void)?
 
     static let barHeight: CGFloat = 82
     private static let keyHeight: CGFloat = 32
@@ -146,6 +149,11 @@ final class TerminalAccessoryBar: UIInputView {
     private let haptic = UIImpactFeedbackGenerator(style: .light)
     private var stickyButtons: [TerminalStickyKey: UIButton] = [:]
     private let attachButton = UIButton(type: .system)
+
+    /// Voice dictation: the recorder/transcriber and the Messages-style
+    /// recording capsule that takes over the bar while it's active.
+    private let voice = VoiceDictation()
+    private let voiceBar = VoiceRecordingBar()
 
     init() {
         super.init(frame: CGRect(x: 0, y: 0, width: 320, height: Self.barHeight),
@@ -187,6 +195,53 @@ final class TerminalAccessoryBar: UIInputView {
             plane.topAnchor.constraint(equalTo: topAnchor, constant: 6),
             plane.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
         ])
+
+        // The voice capsule overlays the key grid, filling the same band. It's
+        // hidden until Voice is picked from the (+) menu, then covers the keys.
+        voiceBar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(voiceBar)
+        NSLayoutConstraint.activate([
+            voiceBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            voiceBar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            voiceBar.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            voiceBar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+        ])
+        voiceBar.onCancel = { [weak self] in
+            self?.voice.cancel()
+            self?.voiceBar.dismiss()
+        }
+        voiceBar.onStop = { [weak self] in
+            guard let self else { return }
+            haptic.impactOccurred()
+            voiceBar.showTranscribing()
+            voice.stopAndTranscribe { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success(let text):
+                    voiceBar.dismiss()
+                    onVoiceTranscript?(text)
+                case .failure(let failure):
+                    voiceBar.showError(failure.hudMessage)
+                }
+            }
+        }
+    }
+
+    /// Picked Voice from the (+) menu: show the capsule and start recording.
+    /// A start failure (no key, mic denied) surfaces in the capsule itself.
+    private func startVoiceRecording() {
+        haptic.impactOccurred()
+        voiceBar.isHidden = false
+        bringSubviewToFront(voiceBar)
+        voice.start { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                voiceBar.beginRecording(levelProvider: { [weak self] in self?.voice.currentLevel() ?? 0 })
+            case .failure(let failure):
+                voiceBar.showError(failure.hudMessage)
+            }
+        }
     }
 
     @available(*, unavailable)
@@ -273,9 +328,10 @@ final class TerminalAccessoryBar: UIInputView {
         glass.layer.cornerCurve = .continuous
 
         let rows = UIStackView(arrangedSubviews: [
-            makeAttachRow(title: "Camera", symbol: "camera", source: .camera),
-            makeAttachRow(title: "Photos", symbol: "photo.on.rectangle", source: .photos),
-            makeAttachRow(title: "Files", symbol: "folder", source: .files),
+            makeMenuRow(title: "Camera", symbol: "camera") { [weak self] in self?.onAttach?(.camera) },
+            makeMenuRow(title: "Photos", symbol: "photo.on.rectangle") { [weak self] in self?.onAttach?(.photos) },
+            makeMenuRow(title: "Files", symbol: "folder") { [weak self] in self?.onAttach?(.files) },
+            makeMenuRow(title: "Voice", symbol: "waveform") { [weak self] in self?.startVoiceRecording() },
         ])
         rows.axis = .vertical
         rows.translatesAutoresizingMaskIntoConstraints = false
@@ -283,7 +339,7 @@ final class TerminalAccessoryBar: UIInputView {
 
         // Bottom-left corner of the card sits just above the (+) key.
         let anchor = attachButton.convert(attachButton.bounds, to: window)
-        let size = CGSize(width: 250, height: 3 * 46 + 12)
+        let size = CGSize(width: 250, height: 4 * 46 + 12)
         let card = UIView(frame: CGRect(
             x: max(8, anchor.minX),
             y: anchor.minY - size.height - 8,
@@ -329,8 +385,8 @@ final class TerminalAccessoryBar: UIInputView {
     /// One native-menu row: 17pt title leading, SF symbol trailing — the
     /// layout a real UIMenu row uses (icons ride the right edge on iOS).
     /// No separators: iMessage/WhatsApp source menus are clean rows.
-    private func makeAttachRow(
-        title: String, symbol: String, source: TerminalAttachSource
+    private func makeMenuRow(
+        title: String, symbol: String, handler: @escaping () -> Void
     ) -> UIView {
         var config = UIButton.Configuration.plain()
         config.title = title
@@ -352,7 +408,7 @@ final class TerminalAccessoryBar: UIInputView {
         button.heightAnchor.constraint(equalToConstant: 46).isActive = true
         button.addAction(UIAction { [weak self] _ in
             self?.dismissAttachMenu()
-            self?.onAttach?(source)
+            handler()
         }, for: .touchUpInside)
         return button
     }

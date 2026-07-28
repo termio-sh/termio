@@ -374,17 +374,31 @@ private extension Data {
     }
 }
 
-/// The recording overlay shown over the composer's pill while the mic button is
-/// held: a pulsing red dot, an elapsed timer, a live waveform, and a hint that
-/// swaps to a cancel warning when the finger slides up into the cancel zone —
-/// Doubao's hold-to-talk affordances, pared to what a one-line composer can
-/// carry. It also renders a brief "transcribing…" and error state.
-final class VoiceRecordingHUD: UIView {
+/// The recording surface that takes over the terminal keyboard's accessory bar
+/// when the user picks Voice from the (+) menu — Apple Messages' audio-message
+/// aesthetic: a rounded capsule with a cancel (✕) on the left, a pulsing red
+/// record dot, an elapsed timer and a live waveform in the middle, and the
+/// signature red circular stop button (a white rounded square) on the right.
+/// Tap Voice to start, tap stop to finish — no hold. After stop it swaps to a
+/// "Transcribing…" spinner, then a brief red error line on failure.
+final class VoiceRecordingBar: UIView {
+    /// The cancel (✕) was tapped — discard the clip, don't transcribe.
+    var onCancel: (() -> Void)?
+    /// The stop button was tapped — finish recording and transcribe.
+    var onStop: (() -> Void)?
+
+    private let capsule = UIView()
+    private let cancelButton = UIButton(type: .system)
+    private let stopButton = UIButton(type: .system)
+    private let stopGlyph = UIView()
     private let dot = UIView()
     private let timeLabel = UILabel()
-    private let hintLabel = UILabel()
+    private let statusLabel = UILabel()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let waveform = WaveformView()
+
+    /// Controls shown while recording; hidden once we're transcribing or errored.
+    private var recordingControls: [UIView] { [cancelButton, dot, timeLabel, waveform, stopButton] }
 
     private var startDate: Date?
     private var timer: Timer?
@@ -392,7 +406,34 @@ final class VoiceRecordingHUD: UIView {
     init() {
         super.init(frame: .zero)
         isHidden = true
-        layer.cornerCurve = .continuous
+
+        capsule.backgroundColor = .secondarySystemBackground
+        capsule.layer.cornerCurve = .continuous
+        capsule.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(capsule)
+
+        // Cancel (✕): Messages' discard affordance, a plain grey circle.
+        var cancelConfig = UIButton.Configuration.plain()
+        cancelConfig.image = UIImage(
+            systemName: "xmark",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        )
+        cancelConfig.baseForegroundColor = .secondaryLabel
+        cancelButton.configuration = cancelConfig
+        cancelButton.backgroundColor = .tertiarySystemFill
+        cancelButton.accessibilityLabel = "Cancel recording"
+        cancelButton.addAction(UIAction { [weak self] _ in self?.onCancel?() }, for: .touchUpInside)
+
+        // Stop: the red circle with a white rounded square — Messages' stop.
+        stopButton.backgroundColor = .systemRed
+        stopButton.accessibilityLabel = "Stop and transcribe"
+        stopButton.addAction(UIAction { [weak self] _ in self?.onStop?() }, for: .touchUpInside)
+        stopGlyph.backgroundColor = .white
+        stopGlyph.layer.cornerRadius = 3.5
+        stopGlyph.layer.cornerCurve = .continuous
+        stopGlyph.isUserInteractionEnabled = false
+        stopGlyph.translatesAutoresizingMaskIntoConstraints = false
+        stopButton.addSubview(stopGlyph)
 
         dot.backgroundColor = .systemRed
         dot.layer.cornerRadius = 4
@@ -401,32 +442,56 @@ final class VoiceRecordingHUD: UIView {
         timeLabel.textColor = .label
         timeLabel.text = "0:00"
 
-        hintLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        hintLabel.textColor = .secondaryLabel
-        hintLabel.text = "Slide up to cancel"
+        statusLabel.font = .systemFont(ofSize: 15, weight: .medium)
+        statusLabel.textColor = .secondaryLabel
+        statusLabel.textAlignment = .center
+        statusLabel.isHidden = true
 
         spinner.hidesWhenStopped = true
 
-        for subview in [dot, timeLabel, waveform, hintLabel, spinner] {
-            subview.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(subview)
+        for v in [cancelButton, dot, timeLabel, waveform, stopButton, statusLabel, spinner] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            capsule.addSubview(v)
         }
         NSLayoutConstraint.activate([
-            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            capsule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            capsule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            capsule.centerYAnchor.constraint(equalTo: centerYAnchor),
+            capsule.heightAnchor.constraint(equalToConstant: 52),
+
+            cancelButton.leadingAnchor.constraint(equalTo: capsule.leadingAnchor, constant: 6),
+            cancelButton.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
+            cancelButton.widthAnchor.constraint(equalToConstant: 40),
+            cancelButton.heightAnchor.constraint(equalToConstant: 40),
+
+            stopButton.trailingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: -6),
+            stopButton.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
+            stopButton.widthAnchor.constraint(equalToConstant: 40),
+            stopButton.heightAnchor.constraint(equalToConstant: 40),
+            stopGlyph.centerXAnchor.constraint(equalTo: stopButton.centerXAnchor),
+            stopGlyph.centerYAnchor.constraint(equalTo: stopButton.centerYAnchor),
+            stopGlyph.widthAnchor.constraint(equalToConstant: 15),
+            stopGlyph.heightAnchor.constraint(equalToConstant: 15),
+
+            dot.leadingAnchor.constraint(equalTo: cancelButton.trailingAnchor, constant: 10),
+            dot.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
             dot.widthAnchor.constraint(equalToConstant: 8),
             dot.heightAnchor.constraint(equalToConstant: 8),
+
             timeLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
-            timeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            waveform.leadingAnchor.constraint(equalTo: timeLabel.trailingAnchor, constant: 10),
-            waveform.centerYAnchor.constraint(equalTo: centerYAnchor),
-            waveform.heightAnchor.constraint(equalToConstant: 22),
-            waveform.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
-            hintLabel.leadingAnchor.constraint(greaterThanOrEqualTo: waveform.trailingAnchor, constant: 10),
-            hintLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            hintLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
+            timeLabel.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
+
+            waveform.leadingAnchor.constraint(equalTo: timeLabel.trailingAnchor, constant: 12),
+            waveform.trailingAnchor.constraint(equalTo: stopButton.leadingAnchor, constant: -12),
+            waveform.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
+            waveform.heightAnchor.constraint(equalToConstant: 24),
+
+            statusLabel.leadingAnchor.constraint(equalTo: capsule.leadingAnchor, constant: 44),
+            statusLabel.trailingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: -16),
+            statusLabel.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
+
+            spinner.trailingAnchor.constraint(equalTo: statusLabel.leadingAnchor, constant: -8),
+            spinner.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
         ])
     }
 
@@ -435,19 +500,18 @@ final class VoiceRecordingHUD: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        layer.cornerRadius = min(bounds.height, bounds.width) / 2
+        capsule.layer.cornerRadius = capsule.bounds.height / 2
+        cancelButton.layer.cornerRadius = cancelButton.bounds.height / 2
+        stopButton.layer.cornerRadius = stopButton.bounds.height / 2
     }
 
     /// Shows the recording state and starts the timer. `levelProvider` is polled
-    /// for the live waveform so the HUD never reaches into the recorder itself.
+    /// for the live waveform so the bar never reaches into the recorder itself.
     func beginRecording(levelProvider: @escaping () -> Float) {
         isHidden = false
         spinner.stopAnimating()
-        waveform.isHidden = false
-        setCancelZone(false)
-        backgroundColor = Self.material
-        dot.isHidden = false
-        timeLabel.isHidden = false
+        statusLabel.isHidden = true
+        recordingControls.forEach { $0.isHidden = false }
         waveform.reset()
 
         startDate = Date()
@@ -461,35 +525,25 @@ final class VoiceRecordingHUD: UIView {
         }
     }
 
-    /// Toggles the cancel-zone warning (finger slid up past the threshold).
-    func setCancelZone(_ active: Bool) {
-        hintLabel.text = active ? "Release to cancel" : "Slide up to cancel"
-        hintLabel.textColor = active ? .systemRed : .secondaryLabel
-        dot.backgroundColor = active ? .systemGray : .systemRed
-    }
-
-    /// Swaps to the "transcribing…" state after release.
+    /// Swaps to the "Transcribing…" state after stop.
     func showTranscribing() {
         stopTimer()
-        dot.isHidden = true
-        timeLabel.isHidden = true
-        waveform.isHidden = true
-        hintLabel.text = "Transcribing…"
-        hintLabel.textColor = .secondaryLabel
+        recordingControls.forEach { $0.isHidden = true }
+        statusLabel.text = "Transcribing…"
+        statusLabel.textColor = .secondaryLabel
+        statusLabel.isHidden = false
         spinner.startAnimating()
     }
 
-    /// Flashes an error line, then hides the HUD.
+    /// Flashes a red error line, then hides the bar.
     func showError(_ message: String) {
         stopTimer()
         isHidden = false
         spinner.stopAnimating()
-        dot.isHidden = true
-        timeLabel.isHidden = true
-        waveform.isHidden = true
-        backgroundColor = Self.material
-        hintLabel.text = message
-        hintLabel.textColor = .systemRed
+        recordingControls.forEach { $0.isHidden = true }
+        statusLabel.text = message
+        statusLabel.textColor = .systemRed
+        statusLabel.isHidden = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in
             self?.dismiss()
         }
@@ -498,6 +552,8 @@ final class VoiceRecordingHUD: UIView {
     func dismiss() {
         stopTimer()
         spinner.stopAnimating()
+        dot.layer.removeAllAnimations()
+        dot.alpha = 1
         isHidden = true
     }
 
@@ -508,22 +564,23 @@ final class VoiceRecordingHUD: UIView {
     }
 
     private func pulseDot() {
+        dot.layer.removeAllAnimations()
+        dot.alpha = 1
         UIView.animate(
             withDuration: 0.6, delay: 0, options: [.repeat, .autoreverse, .allowUserInteraction]
         ) {
             self.dot.alpha = 0.3
         }
     }
-
-    private static var material: UIColor { .secondarySystemBackground }
 }
 
 /// A row of bars whose heights trail a rolling buffer of input levels — the
 /// "I'm listening" waveform. Cheap: a handful of layers nudged each tick.
 private final class WaveformView: UIView {
-    private let barCount = 13
+    // Enough bars to fill the full-width capsule; they spread to fit whatever
+    // width Auto Layout hands us (no fixed width — the bar stretches).
+    private let barCount = 26
     private let barWidth: CGFloat = 3
-    private let spacing: CGFloat = 4
     private var bars: [CALayer] = []
     private var levels: [Float]
 
@@ -538,9 +595,6 @@ private final class WaveformView: UIView {
             bars.append(bar)
         }
         translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(
-            equalToConstant: CGFloat(barCount) * barWidth + CGFloat(barCount - 1) * spacing
-        ).isActive = true
     }
 
     @available(*, unavailable)
@@ -569,6 +623,10 @@ private final class WaveformView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         let midY = bounds.midY
+        // Spread the bars evenly across the available width.
+        let spacing = bars.count > 1
+            ? max(0, (bounds.width - CGFloat(bars.count) * barWidth) / CGFloat(bars.count - 1))
+            : 0
         for (index, bar) in bars.enumerated() {
             let height = max(barWidth, CGFloat(levels[index]) * bounds.height)
             let x = CGFloat(index) * (barWidth + spacing)
