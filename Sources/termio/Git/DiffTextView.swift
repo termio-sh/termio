@@ -84,6 +84,11 @@ struct DiffTextPane: NSViewRepresentable {
         context.coordinator.observeFrame(of: textView)
         scrollView.contentView.postsBoundsChangedNotifications = true
         context.coordinator.observeScroll(of: scrollView)
+        // ⌘F now lives on a global Edit-menu item (see App.swift), whose key equivalent
+        // pre-empts the text view before AppKit's find-bar machinery ever sees the event.
+        // Honor the same broadcast the file editor listens for and drive the system find bar
+        // by hand, so ⌘F still opens find in the diff overlay.
+        context.coordinator.observeFindBar(for: textView)
 
         apply(to: textView, layoutManager: layoutManager, ruler: ruler,
               coordinator: context.coordinator)
@@ -97,6 +102,10 @@ struct DiffTextPane: NSViewRepresentable {
             }
         }
         return scrollView
+    }
+
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        coordinator.teardown()
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
@@ -163,6 +172,30 @@ struct DiffTextPane: NSViewRepresentable {
         var appliedDocument: DiffDocument?
         var appliedStyled: Int?
         weak var ruler: DiffGutterRulerView?
+        private var findObserver: NSObjectProtocol?
+
+        /// Opens the system find bar on the ⌘F broadcast — the menu item swallows the key
+        /// equivalent, so the text view never gets a chance to open it itself.
+        func observeFindBar(for textView: DiffTextView) {
+            findObserver = NotificationCenter.default.addObserver(
+                forName: .termioShowFindBar, object: nil, queue: .main
+            ) { [weak textView] _ in
+                MainActor.assumeIsolated {
+                    guard let textView, textView.window != nil else { return }
+                    let action = NSMenuItem()
+                    action.tag = NSTextFinder.Action.showFindInterface.rawValue
+                    textView.performTextFinderAction(action)
+                }
+            }
+        }
+
+        /// The find-bar observer is registered with `object: nil`, so unlike the frame/scroll
+        /// observers (scoped to their view) it must be torn down explicitly or it leaks and
+        /// keeps firing for stale diff panes.
+        func teardown() {
+            if let findObserver { NotificationCenter.default.removeObserver(findObserver) }
+            findObserver = nil
+        }
 
         func observeFrame(of textView: NSTextView) {
             NotificationCenter.default.addObserver(

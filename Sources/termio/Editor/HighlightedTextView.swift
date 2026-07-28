@@ -239,7 +239,10 @@ struct HighlightedTextView: NSViewRepresentable {
             ruler?.needsDisplay = true
             if !appliedFindQuery.isEmpty {
                 recomputeMatches(query: appliedFindQuery, options: appliedFindOptions, in: textView)
-                paintMatches(in: textView, focused: min(appliedFocusedIndex, findMatches.count - 1))
+                // An edit reshuffles the matches, so repaint the highlights — but the user is
+                // typing in the document, not navigating, so don't steal the scroll or re-pulse
+                // the find indicator.
+                paintMatches(in: textView, focused: min(appliedFocusedIndex, findMatches.count - 1), reveal: false)
                 notifyMatchCount()
             }
         }
@@ -257,14 +260,19 @@ struct HighlightedTextView: NSViewRepresentable {
         /// Recompute + repaint after a new query, option change, or focus move. Same query
         /// with a new focused index only re-scrolls.
         func updateFind(query: String, options: FindOptions, focusedIndex: Int, in textView: NSTextView) {
-            if query != appliedFindQuery || options != appliedFindOptions {
+            let queryChanged = query != appliedFindQuery || options != appliedFindOptions
+            if queryChanged {
                 appliedFindQuery = query
                 appliedFindOptions = options
                 recomputeMatches(query: query, options: options, in: textView)
                 notifyMatchCount()
                 appliedFocusedIndex = -1
             }
-            paintMatches(in: textView, focused: focusedIndex)
+            // Every unrelated SwiftUI re-render (caret moves, footer refresh) flows through
+            // `updateNSView` → here. Bail unless the query, options, or focused match actually
+            // moved, so we don't churn the temporary attributes or re-fire the find pulse.
+            guard queryChanged || focusedIndex != appliedFocusedIndex else { return }
+            paintMatches(in: textView, focused: focusedIndex, reveal: true)
             appliedFocusedIndex = focusedIndex
         }
 
@@ -325,7 +333,10 @@ struct HighlightedTextView: NSViewRepresentable {
             return true
         }
 
-        private func paintMatches(in textView: NSTextView, focused: Int) {
+        /// `reveal` scrolls the focused match into view and pulses the find indicator — set only
+        /// when the focus genuinely moved (a new query or a next/prev step), never on a passive
+        /// repaint after an in-document edit.
+        private func paintMatches(in textView: NSTextView, focused: Int, reveal: Bool) {
             guard let layoutManager = textView.layoutManager else { return }
             let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
             layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
@@ -336,7 +347,7 @@ struct HighlightedTextView: NSViewRepresentable {
                 let color = (index == focused) ? focusedColor : matchColor
                 layoutManager.addTemporaryAttribute(.backgroundColor, value: color, forCharacterRange: range)
             }
-            if findMatches.indices.contains(focused) {
+            if reveal, findMatches.indices.contains(focused) {
                 let range = findMatches[focused]
                 textView.scrollRangeToVisible(range)
                 textView.showFindIndicator(for: range)
