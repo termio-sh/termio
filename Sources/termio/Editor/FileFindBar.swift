@@ -18,18 +18,20 @@ struct FileFindBar: View {
     var body: some View {
         HStack(spacing: 8) {
             searchFieldGroup
+            // A vibrant hairline splits the query+modifiers from the count/nav cluster —
+            // structure without a second material, so the bar stays one sheet of glass.
+            Divider().frame(height: 16).opacity(0.6)
             countLabel
             iconButton("chevron.up", disabled: totalMatches == 0, tooltip: "Previous Match", action: onPrevious)
             iconButton("chevron.down", disabled: totalMatches == 0, tooltip: "Next Match", action: onNext)
             iconButton("xmark", disabled: false, tooltip: "Close (Esc)", action: onClose)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-        )
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 6)
+        // One Liquid Glass capsule — the same recipe as `FileSearchView`/`InspectorTabsToolbar`,
+        // with a flat-material fallback below macOS 26. A single sheet, never glass-on-glass.
+        .findBarGlass()
         .fixedSize()
         .padding(.trailing, 12)
         .padding(.top, 6)
@@ -68,14 +70,6 @@ struct FileFindBar: View {
                 options.regex.toggle()
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.6),
-                    in: RoundedRectangle(cornerRadius: 4))
-        .overlay(
-            RoundedRectangle(cornerRadius: 4)
-                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-        )
     }
 
     private enum ToggleLabel {
@@ -127,6 +121,21 @@ struct FileFindBar: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+        }
+    }
+}
+
+private extension View {
+    /// The floating find bar's Liquid Glass shell: a single `.regular` glass capsule on
+    /// macOS 26 (matching `FileSearchView`'s field and the inspector toolbar's track), and a
+    /// plain material capsule with a hairline on macOS 14/15 where the effect doesn't exist.
+    @ViewBuilder
+    func findBarGlass() -> some View {
+        if #available(macOS 26.0, *) {
+            glassEffect(.regular, in: .capsule)
+        } else {
+            background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
         }
     }
 }
