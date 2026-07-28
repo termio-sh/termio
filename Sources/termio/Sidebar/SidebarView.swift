@@ -1011,32 +1011,39 @@ private struct SessionRow: View {
                     .truncationMode(.middle)
                     .layoutPriority(-1)
             }
+            // Nothing trails the title in the flow: the resting status dot and the
+            // hover close button both live in the trailing overlay below (zero
+            // layout width), so the title always spans the full row and truncates
+            // only at the true trailing edge. The spacer just left-aligns the title.
             Spacer(minLength: 4)
-            // At rest a status dot trails the title only when the session needs the
-            // user (working is shown by the leading spinner instead), so the title
-            // keeps nearly the whole row width. The hover actions live in the overlay
-            // below and reserve no flow width of their own.
-            StatusDot(status: store.status(for: session.id))
-                .frame(width: 16)
-                .opacity(isHovering ? 0 : 1)
-                .help(store.statusDescription(for: session.id))
         }
-        // VSCode-style trailing actions: hovering paints them over the trailing edge
-        // (where the status dot was), reserving no resting width. Creating a worktree
-        // is a folder-level action now (the project header's "New worktree" button),
-        // so a session row carries only its close button.
+        // VSCode-style trailing edge, shared and reserving zero flow width: at rest
+        // the "your turn" status dot (done=green / needsAttention=orange) floats over
+        // the title's tail; on hover it yields to the close button. Because neither
+        // sits in the row's HStack, the title always spans the full width and only
+        // the two are painted on top of its trailing end. Creating a worktree is a
+        // folder-level action now (the project header's "New worktree" button), so a
+        // session row's trailing cluster carries only the close button.
         .overlay(alignment: .trailing) {
-            // Just the close button now — reordering is a drag of the whole row (no
-            // separate handle), so the trailing hover cluster carries only the close.
-            SessionRowActionButton(
-                systemImage: "xmark.circle.fill",
-                help: "Close session",
-                chrome: chrome
-            ) {
-                store.closeSession(session.id)
+            ZStack(alignment: .trailing) {
+                // StatusDot self-hides for idle/working, so at rest this shows a dot
+                // only for the two resting "your turn" states; on hover it fades out.
+                StatusDot(status: store.status(for: session.id))
+                    .frame(width: 16)
+                    .opacity(isHovering ? 0 : 1)
+                    .help(store.statusDescription(for: session.id))
+                // Reordering is a drag of the whole row (no separate handle), so the
+                // trailing hover cluster carries only the close.
+                SessionRowActionButton(
+                    systemImage: "xmark.circle.fill",
+                    help: "Close session",
+                    chrome: chrome
+                ) {
+                    store.closeSession(session.id)
+                }
+                .opacity(isHovering ? 1 : 0)
+                .allowsHitTesting(isHovering)
             }
-            .opacity(isHovering ? 1 : 0)
-            .allowsHitTesting(isHovering)
         }
         .padding(.vertical, settings.interfaceRowPadding)
         // Indent the session content under its project header (or its worktree
