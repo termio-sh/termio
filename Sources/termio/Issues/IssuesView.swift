@@ -522,6 +522,10 @@ struct IssueDetailView: View {
             case .files: filesBody
             }
         }
+        // Match the diff/editor detail overlays: paint the whole view (header and
+        // tab bar included) with the terminal background so the header doesn't fall
+        // through to the host's `windowBackgroundColor` and seam against the body.
+        .background(Color(nsColor: settings.terminalBackgroundColor))
         .task(id: item.number) { await model.loadDetail(for: item) }
         .onExitCommand(perform: onBack)
     }
