@@ -91,12 +91,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // Keeps the native window title (path) and subtitle (git branch) in step with the
     // selected session — NetNewsWire's approach, no custom title-bar views.
     private var titleObserver: AnyCancellable?
-    // Shows/hides the toolbar's overlay-close button as a file editor / diff / preview opens and
-    // closes (see `setCloseOverlayVisible`).
+    // Reveals the inspector and manages the maximize host as a detail opens/closes (see the
+    // `store.objectWillChange` sink in `applicationDidFinishLaunching`).
     private var overlayObserver: AnyCancellable?
-    // Whether the close button is currently in the toolbar, so the observer only mutates the
-    // toolbar on an actual open↔closed transition rather than on every store change.
-    private var closeOverlayShown = false
+    // Previous detail-presented state, so the observer fires reveal only on the open transition
+    // rather than on every store change.
+    private var detailWasPresented = false
+    // The full-window host that shows the active inspector detail blown up to cover everything
+    // while `store.inspectorMaximized`; nil when the detail is docked in the inspector.
+    private var maximizedDetailHost: NSHostingView<AnyView>?
     // The floating panel shared by ⌘⇧O Open Quickly and ⌘⇧P Command Palette.
     // Presented as a child window (Xcode Open-Quickly style) because the
     // terminal surfaces are NSViews that draw above any SwiftUI overlay in the
@@ -166,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         applyWindowTransparency()
         applyChromeAppearance()
+        updateInspectorMaxThickness()
         installToolbar()
         // Empty the sidebar's toolbar region (sort + new-terminal) whenever the navigator collapses
         // and restore it when it reopens — the sidebar's own buttons ride with the sidebar, the way
@@ -212,22 +216,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 MainActor.assumeIsolated { self?.updateWindowTitle() }
             }
 
-        // Surface the overlay-close button in the toolbar while a file editor, diff, preview,
-        // trace, or issue detail covers the terminal. `objectWillChange` fires before the value
-        // lands, so read the settled state on the next runloop tick (the title observer's pattern).
+        // A detail (file editor, diff, trace, PR/issue) opens in the right inspector, beside the
+        // terminal. Its own window controls (hide list / maximize / close) live *in* the detail's
+        // header now (see `InspectorDetailChromeButtons`), not the toolbar — so this observer only
+        // reveals the inspector on open and mounts/tears down the full-window maximize host.
+        // `objectWillChange` fires before the value lands, so read the settled state next runloop.
         overlayObserver = store.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    // Every overlay covering the terminal — file editor, Quick Look preview, diff,
-                    // trace, issue detail — carries the toolbar close button. (The editor also
-                    // closes via its right-click "Close" and Esc; the button is the discoverable one.)
-                    self.setCloseOverlayVisible(
-                        self.store.openFileURL != nil
-                            || self.store.openDiff != nil
-                            || self.store.openTrace != nil
-                            || self.store.openIssueDetail != nil)
+                    let presented = self.store.isDetailPresented
+                    let opened = presented && !self.detailWasPresented
+                    self.detailWasPresented = presented
+                    // Opening a detail reveals the inspector and gives it a comfortable reading width
+                    // the first time — only on the open transition, so a later store change can't yank
+                    // an inspector the user has since resized.
+                    if opened { self.revealInspectorForDetail() }
+                    // Blow the detail up into a full-window host when maximized; tear it down otherwise.
+                    self.setDetailMaximized(self.store.inspectorMaximized && presented)
+                    // Revealing the inspector moves divider 1, which can leave the tracking separator
+                    // inert (the centered-tabs / missing-divider glitch). Re-bind it once layout settles.
+                    if opened {
+                        DispatchQueue.main.async { [weak self] in self?.reassertInspectorSeparator() }
+                    }
                 }
             }
 
@@ -421,6 +433,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let inspector = FileBrowserHostingController(store: store, settings: settings)
         let inspectorItem = NSSplitViewItem(viewController: inspector)
         inspectorItem.minimumThickness = 260
+        // Max width tracks the window: the inspector can grow to the golden ratio of the
+        // content width (`updateInspectorMaxThickness`), never below the 420pt floor. A fixed
+        // cap felt cramped on wide windows when reading a diff or a wide file in the inspector.
         inspectorItem.maximumThickness = 420
         inspectorItem.canCollapse = true
         inspectorItem.isCollapsed = true
@@ -559,6 +574,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowDidExitFullScreen(_ notification: Notification) {
         applyChromeAppearance()
         applyWindowTransparency()
+        updateInspectorMaxThickness()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        updateInspectorMaxThickness()
+    }
+
+    /// Lets the right inspector grow with the window: its max width is the golden ratio (0.618)
+    /// of the current content width, floored at 420pt so it never shrinks below the old fixed cap
+    /// on narrow windows. A static `maximumThickness` capped the inspector at 420pt regardless of
+    /// window size, which felt small when the inspector held a diff or a wide file on a large display.
+    private func updateInspectorMaxThickness() {
+        guard let item = filesInspectorItem, let window else { return }
+        let contentWidth = window.contentLayoutRect.width
+        item.maximumThickness = max(420, (contentWidth * 0.618).rounded(.down))
     }
 
     /// Applies the user's appearance mode. `.system` leaves every surface tracking
@@ -780,6 +810,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Removes and re-inserts the inspector's tracking separator so it re-binds to divider 1 against
+    /// the *current, settled* geometry. `NSTrackingSeparatorToolbarItem` is flaky under termio's
+    /// translucent, `titlebarAppearsTransparent` titlebar — mutating the toolbar or moving the divider
+    /// (as opening a detail does) can leave it inert, so it stops splitting the toolbar into
+    /// terminal/inspector regions and the tab switcher drifts to center with no divider line. A fresh
+    /// item built when geometry is stable re-binds cleanly — the same cure as a manual inspector
+    /// toggle, which is why toggling fixed the glitch. Deferred by the caller to a settled runloop.
+    private func reassertInspectorSeparator() {
+        guard let toolbar = window?.toolbar else { return }
+        func index(of id: NSToolbarItem.Identifier) -> Int? {
+            toolbar.items.firstIndex { $0.itemIdentifier == id }
+        }
+        // Only meaningful while the switch is present (inspector open); nothing to align otherwise.
+        guard index(of: .inspectorTabs) != nil else { return }
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        defer { NSAnimationContext.endGrouping() }
+        if let sep = index(of: .inspectorTrackingSeparator) { toolbar.removeItem(at: sep) }
+        // Re-find the tabs (index shifted after the removal) and slot the separator just before them.
+        if let tabs = index(of: .inspectorTabs) {
+            toolbar.insertItem(withItemIdentifier: .inspectorTrackingSeparator, at: tabs)
+        }
+    }
+
     /// Matches the sidebar's toolbar region to the navigator's *actual* collapse state — called once
     /// at launch after the split view has restored from autosave, the navigator twin of
     /// `syncInspectorSwitch` (so a restored-collapsed sidebar shows no sort/new buttons, a
@@ -826,46 +880,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// The toolbar's overlay-close button — dismisses whichever content overlay (file editor, diff,
-    /// or preview) covers the terminal. Routed through a notification so `TerminalPane` runs the
-    /// same teardown (clear the store, return focus to the terminal) the overlays' own Esc / close
-    /// buttons use, keeping the two close paths identical. Reached via the responder chain (the
-    /// toolbar item targets `nil`), like the other app actions.
-    @objc func closeContentOverlay(_ sender: Any?) {
-        NotificationCenter.default.post(name: .termioCloseContentOverlay, object: nil)
-    }
-
     /// ⌘F: broadcast so any on-screen file editor opens its find bar.
     @objc func showEditorFindBar(_ sender: Any?) {
         NotificationCenter.default.post(name: .termioShowFindBar, object: nil)
     }
 
-    /// Inserts or removes the overlay-close button as a file editor / diff / preview opens and
-    /// closes, so it is shown only while there is an overlay to close. It rides the terminal
-    /// column's trailing edge: anchored just before the inspector switch's tracking separator when
-    /// the inspector is open (hugging the terminal|inspector divider, directly above the overlay's
-    /// own close edge), else before the inspector toggle at the window's trailing edge. The flexible
-    /// space already ahead of the toggle pushes the button right against that anchor. The button is
-    /// built bordered, so it inherits the same Liquid Glass treatment and size as the navigator and
-    /// inspector toggles for free.
-    private func setCloseOverlayVisible(_ visible: Bool) {
-        guard let toolbar = window?.toolbar, visible != closeOverlayShown else { return }
-        closeOverlayShown = visible
-        func index(of id: NSToolbarItem.Identifier) -> Int? {
-            toolbar.items.firstIndex { $0.itemIdentifier == id }
+    /// Reveals the inspector for a freshly opened detail: un-collapses it if hidden, and grows it
+    /// (never shrinks) toward a comfortable width the first time — enough for the list ‖ detail two
+    /// column layout (see `InspectorRoot`), so a 240pt list still leaves the detail room to read.
+    /// The target stays under the golden-ratio cap (`updateInspectorMaxThickness`).
+    private func revealInspectorForDetail() {
+        guard let item = filesInspectorItem, let split = splitViewController?.splitView, let window else { return }
+        // Un-collapse *synchronously* (not via `animator()`) so the split geometry — and the divider
+        // the tracking separator binds to — is settled before the toolbar switch is (re)inserted.
+        if item.isCollapsed {
+            item.isCollapsed = false
+            setInspectorSwitchVisible(true)
         }
-        // Mutate with animation off, matching the inspector switch: the button simply presents for
-        // the overlay's fade rather than running NSToolbar's own pop on an independent clock.
-        NSAnimationContext.beginGrouping()
-        NSAnimationContext.current.duration = 0
-        defer { NSAnimationContext.endGrouping() }
-        if visible {
-            guard index(of: .closeOverlay) == nil,
-                  let anchor = index(of: .inspectorTrackingSeparator) ?? index(of: .toggleInspector)
-            else { return }
-            toolbar.insertItem(withItemIdentifier: .closeOverlay, at: anchor)
-        } else if let i = index(of: .closeOverlay) {
-            toolbar.removeItem(at: i)
+        let contentWidth = window.contentLayoutRect.width
+        let comfortable = min(max(680, contentWidth * 0.5), item.maximumThickness)
+        // Grow to a comfortable width by briefly raising the inspector's *minimum* thickness and
+        // forcing a layout, then restoring it — NOT by `setPosition(ofDividerAt:)`. That divider is
+        // tracked by `.inspectorTrackingSeparator`; moving it directly desyncs the separator, which
+        // then stops splitting the toolbar into terminal/inspector regions and lets the tab switcher
+        // drift to center with no divider line (the glitch that a manual inspector toggle re-binds).
+        if item.viewController.view.frame.width < comfortable - 1 {
+            let savedMinimum = item.minimumThickness
+            item.minimumThickness = comfortable
+            split.layoutSubtreeIfNeeded()
+            item.minimumThickness = savedMinimum
+        }
+    }
+
+    /// Mounts (or removes) the full-window host that shows the active inspector detail blown up to
+    /// cover the whole content area. `InspectorDetailContent` is the same view the inspector docks;
+    /// while it is up the inspector hides its own copy (see `InspectorRoot`), so the detail renders
+    /// once. The toolbar stays above it, so its maximize button restores and Esc still closes.
+    private func setDetailMaximized(_ on: Bool) {
+        guard let container = splitViewController?.view else { return }
+        if on {
+            guard maximizedDetailHost == nil else { return }
+            let host = NSHostingView(rootView: AnyView(
+                InspectorDetailContent()
+                    .environmentObject(store)
+                    .environmentObject(settings)
+            ))
+            host.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(host, positioned: .above, relativeTo: nil)
+            NSLayoutConstraint.activate([
+                host.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                host.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                host.topAnchor.constraint(equalTo: container.topAnchor),
+                host.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            maximizedDetailHost = host
+        } else {
+            maximizedDetailHost?.removeFromSuperview()
+            maximizedDetailHost = nil
         }
     }
 
@@ -1319,7 +1390,7 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        defaultIdentifiers + [.sortProjects, .newTerminal, .inspectorTrackingSeparator, .inspectorTabs, .closeOverlay]
+        defaultIdentifiers + [.sortProjects, .newTerminal, .inspectorTrackingSeparator, .inspectorTabs]
     }
 
     func toolbar(
@@ -1411,17 +1482,6 @@ private final class MainToolbarDelegate: NSObject, NSToolbarDelegate, NSMenuDele
             item.isBordered = true
             item.action = #selector(AppDelegate.toggleFilesInspector(_:))
             return item
-        case .closeOverlay:
-            // Native bordered button (free Liquid Glass on macOS 26, same size as the toggles),
-            // shown only while a file editor / diff / preview covers the terminal — inserted and
-            // removed by `setCloseOverlayVisible`, so it is never in the default set.
-            let item = NSToolbarItem(itemIdentifier: .closeOverlay)
-            item.label = "Close"
-            item.toolTip = "Close (Esc)"
-            item.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
-            item.isBordered = true
-            item.action = #selector(AppDelegate.closeContentOverlay(_:))
-            return item
         case .branchPicker:
             let item = NSToolbarItem(itemIdentifier: .branchPicker)
             let hosting = NSHostingView(rootView: BranchPickerToolbarView()
@@ -1458,7 +1518,6 @@ private extension NSToolbarItem.Identifier {
     static let toggleInspector = NSToolbarItem.Identifier("TermioToggleInspector")
     static let inspectorTrackingSeparator = NSToolbarItem.Identifier("TermioInspectorTrackingSeparator")
     static let branchPicker = NSToolbarItem.Identifier("TermioBranchPicker")
-    static let closeOverlay = NSToolbarItem.Identifier("TermioCloseOverlay")
 }
 
 /// The custom title item: the selected session's folder name over its live git branch, drawn as

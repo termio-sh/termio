@@ -312,8 +312,7 @@ struct FileBrowserView: View {
             newFile: { createFile(in: $0) },
             newFolder: { createFolder(in: $0) },
             rename: { rename($0) },
-            delete: { delete($0) },
-            openToSide: { store.openFileInSidePane($0) }
+            delete: { delete($0) }
         )
     }
 

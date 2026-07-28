@@ -225,6 +225,8 @@ public enum HugeIcon: Hashable, Sendable {
     case inbox
     case github
     case voice
+    case close
+    case collapse
 
     /// Side length of the source SVG's square viewBox (Hugeicons uses 24).
     public var viewBox: CGFloat { 24 }
@@ -420,6 +422,14 @@ public enum HugeIcon: Hashable, Sendable {
             // A microphone in the Hugeicons stroke style (mic body + cradle arc,
             // stem, and base) — the Voice settings tab.
             return "M9 6C9 4.34315 10.3431 3 12 3C13.6569 3 15 4.34315 15 6V11C15 12.6569 13.6569 14 12 14C10.3431 14 9 12.6569 9 11V6Z M18 11C18 14.3137 15.3137 17 12 17C8.68629 17 6 14.3137 6 11 M12 17V21 M8.5 21H15.5"
+        case .close:
+            // Hugeicons "cancel-01": a centered X (5–19 span, matching the set's optical size) —
+            // the inspector detail's close control.
+            return "M19.0005 4.99988L5.00049 18.9999M5.00049 4.99988L19.0005 18.9999"
+        case .collapse:
+            // The inward mirror of `.expand`, on the same 3.5–20.5 reach so the two read as a pair:
+            // two corner arrows drawn toward the centre — restores a maximized detail to the inspector.
+            return "M20.5 3.5L14.5 9.5 M14.5 9.5L18.5 9.5 M14.5 9.5L14.5 5.5 M3.5 20.5L9.5 14.5 M9.5 14.5L5.5 14.5 M9.5 14.5L9.5 18.5"
         }
     }
 }

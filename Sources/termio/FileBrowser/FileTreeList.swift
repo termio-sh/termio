@@ -244,9 +244,6 @@ private struct RowContextMenu: NSViewRepresentable {
                 menu.addItem(menuItem("New File", #selector(newFile)))
                 menu.addItem(menuItem("New Folder", #selector(newFolder)))
                 menu.addItem(.separator())
-            } else {
-                menu.addItem(menuItem("Open in Right Panel", #selector(openToSide)))
-                menu.addItem(.separator())
             }
             menu.addItem(menuItem("Reveal in Finder", #selector(revealInFinder)))
             menu.addItem(.separator())
@@ -268,8 +265,6 @@ private struct RowContextMenu: NSViewRepresentable {
         @objc private func newFolder() { actions?.newFolder(target) }
         @objc private func rename() { actions?.rename(target) }
         @objc private func deleteItem() { actions?.delete(target) }
-        @objc private func openToSide() { actions?.openToSide(target) }
-
         @objc private func revealInFinder() {
             NSWorkspace.shared.activateFileViewerSelecting([target])
         }

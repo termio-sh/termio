@@ -161,8 +161,9 @@ struct GitDiffView: View {
             }
             .font(.system(size: 11, weight: .medium, design: .monospaced))
             .fixedSize()
-            // Close lives in the toolbar (a bordered button hugging the terminal|inspector
-            // divider) — see `setCloseOverlayVisible` in App.swift.
+            // The content-area window controls (hide list / maximize / close) ride the header's
+            // trailing edge, after the diff's own stats.
+            InspectorDetailChromeButtons()
         }
         .padding(.horizontal, 12)
         // Fixed height + inset hairline shared with the git pane's mode switch, so this

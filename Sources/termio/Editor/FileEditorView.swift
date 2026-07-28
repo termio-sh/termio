@@ -267,6 +267,9 @@ struct FileEditorView: View {
             if isMarkdown {
                 modeToggle
             }
+            // The content-area window controls (hide list / maximize / close) ride the header's
+            // trailing edge, after the file's own controls.
+            InspectorDetailChromeButtons()
         }
         // Leading edge matches the Markdown reader's body padding (20) so the file name lines up
         // with the document text beneath it.

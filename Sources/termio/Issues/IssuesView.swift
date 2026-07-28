@@ -547,6 +547,9 @@ struct IssueDetailView: View {
                     NSWorkspace.shared.open(url)
                 }
             }
+            // The content-area window controls (hide list / maximize / close) ride the header's
+            // trailing edge, after the open-on-GitHub button.
+            InspectorDetailChromeButtons()
         }
         .padding(.horizontal, 8)
         .frame(height: GitChangesView.topBarHeight)

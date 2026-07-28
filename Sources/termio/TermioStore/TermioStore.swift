@@ -120,25 +120,14 @@ final class TermioStore: ObservableObject {
             else {
                 openFileReadOnly = false
                 openFileLine = nil
-                previewSplitRatio = 0.5
-                openFileInSidePanel = false
             }
+            refreshDetailPresentation()
         }
     }
 
     /// The 1-based line the editor should reveal when it opens `openFileURL` — set by a
     /// content-search hit (see `FileSearchView`); `nil` for a plain open (top of file).
     @Published var openFileLine: Int?
-
-    /// Fraction of the terminal pane's width given to the file preview column when a file is
-    /// open (`openFileURL != nil`). The terminal group keeps the remaining width. Transient —
-    /// resets to 0.5 on every open so a very narrow / very wide preview doesn't stick around.
-    @Published var previewSplitRatio: CGFloat = 0.5
-
-    /// Whether `openFileURL` should open beside the terminal (right split pane) instead of
-    /// covering it. Set by the sidebar's "Open to the Side" action; a plain open leaves this
-    /// false so the historical overlay behaviour is unchanged. Cleared with `openFileURL`.
-    @Published var openFileInSidePanel: Bool = false
 
     /// Whether the open file should be shown read-only (no editing, no auto-save). Set when the file
     /// was opened by cmd-clicking a link in the terminal — a peek at the source, not an invitation to
@@ -150,7 +139,7 @@ final class TermioStore: ObservableObject {
     /// pane covers itself with `GitDiffView` while it is non-nil. Opening a diff dismisses any open
     /// file editor.
     @Published var openDiff: GitDiffRequest? {
-        didSet { if openDiff != nil { openFileURL = nil; openTrace = nil } }
+        didSet { if openDiff != nil { openFileURL = nil; openTrace = nil }; refreshDetailPresentation() }
     }
 
     /// The agent trace currently shown over the terminal, or `nil` when none is. The
@@ -158,18 +147,44 @@ final class TermioStore: ObservableObject {
     /// "View Trace" sets it, and `TerminalPane` covers itself with `TraceView` while
     /// it is non-nil. Mutually exclusive with the other two.
     @Published var openTrace: TraceRequest? {
-        didSet { if openTrace != nil { openFileURL = nil; openDiff = nil; openIssueDetail = nil } }
+        didSet { if openTrace != nil { openFileURL = nil; openDiff = nil; openIssueDetail = nil }; refreshDetailPresentation() }
     }
 
-    /// The GitHub issue / pull request whose detail is shown over the terminal, or `nil`
-    /// when none is. The fourth content overlay: clicking a row in the inspector's Issues
-    /// pane sets it, and `TerminalPane` covers itself with the detail — the conversation /
-    /// PR files opened in the center like the editor and diff, not cramped in the narrow
-    /// inspector. Unlike the others it deliberately COEXISTS with `openDiff`: a PR's file
-    /// diff stacks on top of the detail (`TerminalPane` orders the diff overlay above this
-    /// one), so closing the diff returns to the PR rather than the terminal.
+    /// The GitHub issue / pull request whose detail is shown, or `nil` when none is. The
+    /// fourth inspector detail: clicking a row in the Issues pane sets it, and the inspector
+    /// shows the conversation / PR files in place of its list (see `InspectorDetailHost`).
+    /// Unlike the others it deliberately COEXISTS with `openDiff`: a PR's file diff stacks on
+    /// top of the detail, so closing the diff returns to the PR rather than the list.
     @Published var openIssueDetail: IssueSummary? {
-        didSet { if openIssueDetail != nil { openFileURL = nil; openDiff = nil; openTrace = nil } }
+        didSet { if openIssueDetail != nil { openFileURL = nil; openDiff = nil; openTrace = nil }; refreshDetailPresentation() }
+    }
+
+    /// True while any inspector detail (file, diff, trace, PR/issue) is open. Drives the app
+    /// delegate: it un-collapses the inspector and gives it a comfortable reading width on the
+    /// first detail, and tears down the full-window maximize host when the last one closes.
+    /// `private(set)` — only the detail setters above flip it, via `refreshDetailPresentation`.
+    @Published private(set) var isDetailPresented = false
+
+    /// Whether the active inspector detail is blown up to fill the whole window. The inspector
+    /// hosts the detail beside the terminal by default; the detail's maximize button flips this
+    /// to cover everything (see the app delegate's full-window host), and it resets to `false`
+    /// automatically whenever the last detail closes.
+    @Published var inspectorMaximized = false
+
+    /// Whether the list column is collapsed so the detail fills the whole inspector (terminal still
+    /// visible), one step short of `inspectorMaximized`. Flipped by the detail chrome's list toggle;
+    /// resets to `false` when the last detail closes, so the list is back for the next browse.
+    @Published var inspectorListCollapsed = false
+
+    /// Recomputes `isDetailPresented` from the four detail properties and drops the maximize
+    /// state once nothing is left to show. Called from each detail setter's `didSet`.
+    private func refreshDetailPresentation() {
+        let presented = openFileURL != nil || openDiff != nil || openTrace != nil || openIssueDetail != nil
+        if isDetailPresented != presented { isDetailPresented = presented }
+        if !presented {
+            if inspectorMaximized { inspectorMaximized = false }
+            if inspectorListCollapsed { inspectorListCollapsed = false }
+        }
     }
 
     /// The Issues pane's model, held here (in addition to the inspector view that owns it)
@@ -182,7 +197,17 @@ final class TermioStore: ObservableObject {
     /// Which pane the trailing inspector shows — the file tree or git changes. Set by the toolbar's
     /// segmented switch and read by `FileBrowserView`. (The inspector's open/closed state is owned by
     /// the app delegate's `NSSplitViewItem`, not mirrored here, so the two cannot desync.)
-    @Published var inspectorTab: InspectorTab = .files
+    /// Switching tabs closes any open detail: a detail belongs to the item you picked in *this* tab,
+    /// so the new tab starts on a clean list rather than showing the old tab's file/issue/diff.
+    @Published var inspectorTab: InspectorTab = .files {
+        didSet {
+            guard inspectorTab != oldValue else { return }
+            openFileURL = nil
+            openDiff = nil
+            openTrace = nil
+            openIssueDetail = nil
+        }
+    }
 
     /// The repo's dirty-file count, surfaced from the Changes pane so callers can reflect "has
     /// changes" without the inspector being open.
@@ -269,6 +294,10 @@ final class TermioStore: ObservableObject {
         guard runtime.status != status else { return false }
         let previous = runtime.status
         runtime.status = status
+        // A blocked session's dot survives a click (see `markSeen`); any genuine
+        // transition off `.needsAttention` — the agent proceeded, or the condition
+        // otherwise cleared — retires the "still blocking" flag that kept it lit.
+        if status != .needsAttention { blockingAttention.remove(id) }
         // Stall detection (§4.7) keys off continuous time spent `.working`, so the
         // window opens on the genuine transition in — this method is the single
         // status choke point — and closes on the way out: a session that stopped
@@ -481,6 +510,15 @@ final class TermioStore: ObservableObject {
     /// transitions — a spinner frame change re-classifies as the same `working`
     /// and is dropped here.
     var lastTitleActivity: [Session.ID: AgentStatusRules.Activity] = [:]
+    /// Sessions whose `.needsAttention` dot came from a genuine, *observable*
+    /// blocking condition — a hook / screen / title "attention" signal, all of which
+    /// have a matching "resolved" transition (the agent proceeds → working/idle/done).
+    /// `markSeen` keeps such a dot lit through a click, because looking at a
+    /// permission prompt isn't answering it; only the real resolving transition
+    /// clears it (dropped here in `setStatus` on any move off `.needsAttention`). A
+    /// one-shot bell/notification attention — which has no "resolved" event to wait
+    /// for — is deliberately *not* recorded here, so it still dismisses on view.
+    var blockingAttention: Set<Session.ID> = []
     var staleWorkingSweep: Timer?
     /// How long a `.working` session may go with *no screen change and no working
     /// hook* before the sweep flips it back to idle. A working agent's TUI repaints
@@ -861,9 +899,20 @@ final class TermioStore: ObservableObject {
     func markSeen(_ id: Session.ID) {
         // Engaging with the session makes any delivered banner stale too.
         TaskNotificationCenter.shared.withdraw(for: id)
-        let current = status(for: id)
-        if current == .done || current == .needsAttention {
+        switch status(for: id) {
+        case .done:
+            // A finished cue is dismissed by engaging with the row — seeing "ready
+            // for you" is enough.
             setStatus(.idle, for: id)
+        case .needsAttention where !blockingAttention.contains(id):
+            // A blocked cue is NOT dismissed by looking: reading a permission prompt
+            // isn't answering it, so a dot from a real blocking condition stays lit
+            // until the agent actually proceeds (the resolving transition clears it).
+            // Only a one-shot bell/notification attention — untracked, with no
+            // "resolved" event to wait for — is dismissed on view, as it always was.
+            setStatus(.idle, for: id)
+        default:
+            break
         }
     }
 
@@ -979,17 +1028,6 @@ final class TermioStore: ObservableObject {
     func openFileInEditor(_ url: URL, at line: Int? = nil) {
         openFileReadOnly = false
         openFileLine = line
-        openFileInSidePanel = false
-        openFileURL = url
-    }
-
-    /// The side-panel counterpart of `openFileInEditor`: opens `url` in the right split pane
-    /// beside the terminal instead of covering it, so the terminal stays visible and interactive.
-    /// Wired to the file-row context menu's "Open to the Side" action.
-    func openFileInSidePane(_ url: URL, at line: Int? = nil) {
-        openFileReadOnly = false
-        openFileLine = line
-        openFileInSidePanel = true
         openFileURL = url
     }
 

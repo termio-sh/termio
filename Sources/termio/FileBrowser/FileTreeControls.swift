@@ -82,8 +82,4 @@ struct FileTreeActions {
     let newFolder: (_ directory: URL) -> Void
     let rename: (URL) -> Void
     let delete: (URL) -> Void
-    /// Opens the file in the right split panel beside the terminal instead of covering it —
-    /// wired to the row's "Open in Right Panel" context-menu item. Only shown for non-directory
-    /// rows since directories have nothing to preview.
-    let openToSide: (URL) -> Void
 }

@@ -15,16 +15,21 @@ final class FileBrowserHostingController: NSHostingController<AnyView>, @MainAct
         let state = FileBrowserState()
         self.state = state
         super.init(rootView: AnyView(
-            FileBrowserView(
-                onQuickLook: { FileBrowserHostingController.toggleQuickLook() },
-                // A single click opens the file over the terminal (driven by `store.openFileURL`):
-                // a previewable file (image, PDF, HTML) in the read-only preview, everything else
-                // in the editor. The terminal pane picks which based on the file kind. (Spacebar
-                // still pops Quick Look for a quick peek without leaving the tree.)
-                onActivate: { url in
-                    store.openFileInEditor(url)
-                }
-            )
+            // The inspector shows its list (tree / search / changes / issues) with any open detail
+            // — editor, diff, PR/issue, trace — layered on top of it (see `InspectorRoot`), so a
+            // click opens the file *here*, beside the terminal, rather than covering the terminal.
+            InspectorRoot(list: AnyView(
+                FileBrowserView(
+                    onQuickLook: { FileBrowserHostingController.toggleQuickLook() },
+                    // A single click opens the file in the inspector (driven by `store.openFileURL`):
+                    // a previewable file (image, PDF, HTML) in the read-only preview, everything else
+                    // in the editor. `InspectorDetailContent` picks which based on the file kind.
+                    // (Spacebar still pops Quick Look for a quick peek without leaving the tree.)
+                    onActivate: { url in
+                        store.openFileInEditor(url)
+                    }
+                )
+            ))
             .environmentObject(store)
             .environmentObject(settings)
             .environmentObject(state)

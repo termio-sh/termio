@@ -108,6 +108,12 @@ struct TraceView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Match the editor/diff overlays: opaque terminal background bleeding under the titlebar.
         .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
+        // The trace has no header row, so the content-area controls float in the top-trailing corner.
+        .overlay(alignment: .topTrailing) {
+            InspectorDetailChromeButtons()
+                .padding(.top, 4)
+                .padding(.trailing, 8)
+        }
         .onExitCommand(perform: onClose)
         .task(id: request) { await build() }
         // Re-render if the user flips light/dark while the trace is open.
