@@ -56,6 +56,11 @@ struct MockProject: Identifiable {
     var kind: String?
     let sessions: [MockSession]
 
+    /// A stand-in for the Mac's loose-terminals container before it has opened
+    /// one, so a phone-seeded first terminal can open attached right away; the
+    /// next roster push swaps in the real container.
+    static let terminalsPlaceholder = MockProject(name: "Terminals", path: "", sessions: [])
+
     /// Projects keep their order; within a project, attention floats up.
     static let samples: [MockProject] = {
         var order: [String] = []

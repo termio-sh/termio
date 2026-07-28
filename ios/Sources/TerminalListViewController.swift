@@ -78,18 +78,26 @@ final class TerminalListViewController: UIViewController {
     }
 
     /// ＋ floats bottom-right, opposite the home tab pill — the compose corner.
-    /// A TAP is one new terminal: a plain login shell at `~`, which the Mac
-    /// gathers into the loose `.terminals` funnel. There is no agent to choose,
-    /// so — unlike the Chats ＋ — no long-press menu. Hidden until the Mac has a
-    /// terminals container to land in (mirrors the Chats ＋), and while unpaired.
+    /// A TAP presents the menu the issue asks for: New Terminal (a plain login
+    /// shell the Mac gathers into the loose `.terminals` funnel) and New SSH (an
+    /// `ssh <host>` terminal). New SSH is a read-only pick from the Mac's
+    /// `~/.ssh/config` aliases — the phone never types a host — so it's deferred
+    /// to always reflect the Mac's current config. Shown whenever paired: New
+    /// Terminal is project-less now, so it can seed the first terminal too.
     private func configureNewTerminalButton() {
         newTerminalButton.applyGlassIcon(.add, boxSize: 26)
         newTerminalButton.tintColor = .label
         newTerminalButton.accessibilityLabel = "New Terminal"
-        newTerminalButton.addAction(
-            UIAction { [weak self] _ in self?.store.startDefaultTerminal() },
-            for: .touchUpInside
-        )
+        newTerminalButton.showsMenuAsPrimaryAction = true
+        newTerminalButton.menu = UIMenu(children: [
+            UIAction(
+                title: "New Terminal",
+                image: UIImage(systemName: "terminal")
+            ) { [weak self] _ in self?.store.startNewTerminal() },
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                completion([self?.sshMenu() ?? UIMenu()])
+            },
+        ])
         newTerminalButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(newTerminalButton)
         NSLayoutConstraint.activate([
@@ -100,6 +108,27 @@ final class TerminalListViewController: UIViewController {
             newTerminalButton.widthAnchor.constraint(equalToConstant: 64),
             newTerminalButton.heightAnchor.constraint(equalToConstant: 64),
         ])
+    }
+
+    /// The "New SSH" submenu: one entry per `~/.ssh/config` host the Mac knows.
+    /// Read-only by design — the phone chooses a known alias, it never authors a
+    /// host. An empty config shows a disabled hint pointing back to the Mac, so
+    /// the item never dead-ends on a tap.
+    private func sshMenu() -> UIMenu {
+        let icon = UIImage(systemName: "network")
+        let hosts = store.sshHosts
+        guard !hosts.isEmpty else {
+            let hint = UIAction(title: "Add hosts in ~/.ssh/config on your Mac") { _ in }
+            hint.attributes = .disabled
+            return UIMenu(title: "New SSH", image: icon, children: [hint])
+        }
+        let items = hosts.map { host in
+            UIAction(
+                title: host.alias,
+                subtitle: host.user.isEmpty ? host.hostName : "\(host.user)@\(host.hostName)"
+            ) { [weak self] _ in self?.store.startSSH(host: host.alias) }
+        }
+        return UIMenu(title: "New SSH", image: icon, children: items)
     }
 
     // MARK: - Table
@@ -130,7 +159,9 @@ final class TerminalListViewController: UIViewController {
 
     private func refilter() {
         terminals = store.terminalSessions
-        newTerminalButton.isHidden = store.terminalsProject?.rosterID == nil
+        // Shown whenever paired: New Terminal is project-less, so it no longer
+        // needs an existing terminals container to land in (it seeds the first).
+        newTerminalButton.isHidden = store.companionURL == nil
         tableView.reloadData()
         updateEmptyState()
     }
@@ -150,13 +181,13 @@ final class TerminalListViewController: UIViewController {
     }
 
     /// Link-state nuance lives on the Projects tab (the pairing home); this
-    /// zero state only answers "no terminals yet". When the ＋ is visible it is
-    /// the next step; when it's hidden (no container yet) the message points at
-    /// the Mac, since the phone can't seed the first one over the wire.
+    /// zero state only answers "no terminals yet". Whenever paired the ＋ can
+    /// seed the first terminal, so it's the next step; only while unpaired (＋
+    /// hidden) does the message fall back to pointing at the Mac.
     private func updateEmptyState() {
         emptyState.isHidden = !terminals.isEmpty
         guard !emptyState.isHidden else { return }
-        let canStart = store.terminalsProject?.rosterID != nil
+        let canStart = store.companionURL != nil
         emptyState.configure(
             icon: .terminal,
             title: "No terminals yet",

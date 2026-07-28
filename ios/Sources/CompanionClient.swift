@@ -45,6 +45,10 @@ final class CompanionClient: NSObject {
     var onSearchResults: ((String, [String], Bool) -> Void)?
     /// The server rejected a request (e.g. a failed `start`).
     var onError: ((String) -> Void)?
+    /// The Mac's parsed `~/.ssh/config` host blocks, answering a
+    /// `.sshConfigHosts` request — the read-only menu the Terminals ＋ → New SSH
+    /// picks from (the phone never authors a host, only chooses a known alias).
+    var onSSHConfig: (([WireSSHHost]) -> Void)?
 
     /// Controls sent before the socket is open wait here — auth must ride
     /// the wire first on every connect, so a `.upload` fired right after
@@ -194,6 +198,7 @@ final class CompanionClient: NSObject {
                         case .searchResults(let query, let paths, let truncated):
                             onSearchResults?(query, paths, truncated)
                         case .error(let reason): onError?(reason)
+                        case .sshConfigList(let hosts): onSSHConfig?(hosts)
                         default: break
                         }
                     }

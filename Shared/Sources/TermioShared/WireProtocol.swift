@@ -35,6 +35,23 @@ public enum CompanionControl: Codable, Sendable, Equatable {
     /// it for an agent-less start until the next roster push. nil from an
     /// older Mac; the client falls back to the agent it asked for.
     case started(sessionID: String, agent: String?)
+    /// The Terminals tab's ＋ → "New Terminal": open a plain login shell in the
+    /// Mac's loose `.terminals` funnel, the shell twin of the agent-less
+    /// `.start`. It carries no project because the funnel is found-or-created by
+    /// kind on the Mac (like ⌘T), so — unlike `.start` — the phone can seed the
+    /// very first terminal too. Answered with `.started` (agent `"terminal"`).
+    case startTerminal
+    /// The Terminals tab's ＋ → "New SSH": open a loose terminal that runs
+    /// `ssh <host>` instead of a local shell. `host` is a `~/.ssh/config` alias
+    /// (see `.sshConfigHosts`) or a bare `user@host`. Like `.startTerminal` it
+    /// gathers in the `.terminals` funnel and needs no project. Answered with
+    /// `.started`.
+    case startSSH(host: String)
+    /// The Projects tab's ＋: reopen a folder from the Mac's recent-projects
+    /// list (see `.recentProjects`) as a project. The phone is sandboxed and
+    /// can't browse the Mac's disk, so it can only reopen a path the Mac already
+    /// knows. No reply — the next roster push carries the new project row.
+    case openProject(path: String)
     /// The client asks the Mac to close a session (the phone's swipe-to-remove).
     /// No success reply — the next roster push drops the row everywhere.
     case stop(sessionID: String)
@@ -96,6 +113,15 @@ public enum CompanionControl: Codable, Sendable, Equatable {
     /// Mac → phone: the parsed `~/.ssh/config` host blocks.
     case sshConfigList(hosts: [WireSSHHost])
 
+    /// Phone → Mac: list the Mac's recent projects (the last folders opened in
+    /// termio). The phone can't browse the Mac's disk, so this is how the
+    /// Projects tab's ＋ offers something to reopen. Answered with
+    /// `.recentProjectList`.
+    case recentProjects
+
+    /// Mac → phone: the Mac's recent-project entries, most-recent first.
+    case recentProjectList(projects: [WireRecentProject])
+
     case error(message: String)
 
     public func encoded() -> String {
@@ -115,6 +141,12 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             var fields: [String: Any] = ["t": "started", "session": sessionID]
             if let agent { fields["agent"] = agent }
             return Self.json(fields)
+        case .startTerminal:
+            return #"{"t":"startTerminal"}"#
+        case .startSSH(let host):
+            return Self.json(["t": "startSSH", "host": host])
+        case .openProject(let path):
+            return Self.json(["t": "openProject", "path": path])
         case .stop(let sessionID):
             return #"{"t":"stop","session":"\#(sessionID)"}"#
         case .resize(let cols, let rows):
@@ -172,6 +204,13 @@ public enum CompanionControl: Codable, Sendable, Equatable {
                     ["alias": $0.alias, "hostName": $0.hostName, "user": $0.user, "port": $0.port]
                 },
             ])
+        case .recentProjects:
+            return #"{"t":"recentProjects"}"#
+        case .recentProjectList(let projects):
+            return Self.json([
+                "t": "recentProjectList",
+                "projects": projects.map { ["name": $0.name, "path": $0.path] },
+            ])
         case .error(let message):
             let escaped = message
                 .replacingOccurrences(of: "\\", with: "\\\\")
@@ -200,6 +239,14 @@ public enum CompanionControl: Codable, Sendable, Equatable {
         case "started":
             guard let sessionID = obj["session"] as? String else { return nil }
             return .started(sessionID: sessionID, agent: obj["agent"] as? String)
+        case "startTerminal":
+            return .startTerminal
+        case "startSSH":
+            guard let host = obj["host"] as? String else { return nil }
+            return .startSSH(host: host)
+        case "openProject":
+            guard let path = obj["path"] as? String else { return nil }
+            return .openProject(path: path)
         case "stop":
             guard let sessionID = obj["session"] as? String else { return nil }
             return .stop(sessionID: sessionID)
@@ -296,6 +343,16 @@ public enum CompanionControl: Codable, Sendable, Equatable {
                 )
             }
             return .sshConfigList(hosts: hosts)
+        case "recentProjects":
+            return .recentProjects
+        case "recentProjectList":
+            let raw = obj["projects"] as? [[String: Any]] ?? []
+            let projects = raw.compactMap { entry -> WireRecentProject? in
+                guard let name = entry["name"] as? String,
+                      let path = entry["path"] as? String else { return nil }
+                return WireRecentProject(name: name, path: path)
+            }
+            return .recentProjectList(projects: projects)
         case "error":
             guard let message = obj["message"] as? String else { return nil }
             return .error(message: message)
@@ -340,6 +397,20 @@ public struct WireSSHHost: Codable, Sendable, Equatable {
         self.hostName = hostName
         self.user = user
         self.port = port
+    }
+}
+
+/// One entry from the Mac's recent-projects list, flattened for the phone's
+/// "reopen a project" menu: the folder name the row shows, and the absolute Mac
+/// path `.openProject` reopens. The phone never touches the path itself — it
+/// only echoes it back, the same contract as an SSH alias.
+public struct WireRecentProject: Codable, Sendable, Equatable {
+    public let name: String
+    public let path: String
+
+    public init(name: String, path: String) {
+        self.name = name
+        self.path = path
     }
 }
 
