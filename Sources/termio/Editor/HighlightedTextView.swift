@@ -24,14 +24,8 @@ struct HighlightedTextView: NSViewRepresentable {
     /// A 1-based line to scroll to and flash (a content-search hit). Applied once on creation and
     /// again whenever the value changes — clicking a different hit in the same file re-scrolls.
     var jumpToLine: Int? = nil
-    /// A top content inset that reserves room for the editor's scroll-away header — the first line
-    /// lands below it, and the header (an overlay above this view) covers the reserved strip.
-    var topInset: CGFloat = 0
-    /// Reports how far the buffer has scrolled from the top (0 at rest), so the header can slide up
-    /// with the content. Already offset by `topInset`, clamped at 0.
-    var onScroll: ((CGFloat) -> Void)? = nil
-    /// Appends a "Close" item to the right-click menu — the editor closes terminal-style, with no
-    /// chrome button. Left off wherever the text view isn't the closable editor overlay.
+    /// Appends a "Close" item to the right-click menu — the editor closes terminal-style, alongside
+    /// the toolbar button. Left off wherever the text view isn't the closable editor overlay.
     var showsCloseMenuItem: Bool = false
     /// Invoked when the user presses ⌘S — flushes the buffer to disk immediately.
     let onSave: () -> Void
@@ -87,15 +81,6 @@ struct HighlightedTextView: NSViewRepresentable {
         scrollView.contentView.drawsBackground = true
         scrollView.contentView.backgroundColor = backgroundColor
 
-        // Reserve the header's height at the top so the first line clears the scroll-away header
-        // overlaying this view; the header covers this empty strip until you scroll it up.
-        if topInset > 0 {
-            scrollView.automaticallyAdjustsContentInsets = false
-            scrollView.contentInsets = NSEdgeInsets(top: topInset, left: 0, bottom: 0, right: 0)
-        }
-        context.coordinator.topInset = topInset
-        context.coordinator.onScroll = onScroll
-
         // Xcode-style line-number gutter down the leading edge.
         let ruler = LineNumberRulerView(
             scrollView: scrollView, editorFont: font,
@@ -116,6 +101,15 @@ struct HighlightedTextView: NSViewRepresentable {
         scrollView.contentView.postsBoundsChangedNotifications = true
         context.coordinator.observeScroll(of: scrollView)
 
+        // Claim first responder once the editor is in a window, so the Edit menu's Cut/Copy/Paste
+        // (and typing) act on this buffer instead of the terminal surface that held focus beneath
+        // the overlay. The terminal focus driver won't fight back — its `canFocus` bails while a
+        // file is open (see `requestTerminalFocus`).
+        DispatchQueue.main.async { [weak textView] in
+            guard let textView, let window = textView.window else { return }
+            window.makeFirstResponder(textView)
+        }
+
         // Reveal the requested line once the view has a real frame — at make time it hasn't been
         // laid out, so scrolling now would land nowhere.
         if let jumpToLine {
@@ -134,8 +128,6 @@ struct HighlightedTextView: NSViewRepresentable {
         // Refresh the save closure each update so ⌘S always flushes the latest buffer (the closure
         // captures the view's current state, which SwiftUI re-creates on every change).
         textView.onSave = onSave
-        // The scroll callback captures fresh SwiftUI state each render, so re-point it too.
-        context.coordinator.onScroll = onScroll
         if textView.isEditable != isEditable { textView.isEditable = isEditable }
         let coordinator = context.coordinator
         let storage = coordinator.textStorage
@@ -211,9 +203,6 @@ struct HighlightedTextView: NSViewRepresentable {
         var appliedLanguage: String?
         /// The last jump target acted on, so `updateNSView` only re-scrolls on a genuine new hit.
         var appliedJumpLine: Int?
-        /// Header-tracking state: how far the top is inset, and where to report the scroll offset.
-        var topInset: CGFloat = 0
-        var onScroll: ((CGFloat) -> Void)?
         weak var ruler: LineNumberRulerView?
         private let text: Binding<String>
         private let cursor: Binding<EditorCursor?>
@@ -238,15 +227,8 @@ struct HighlightedTextView: NSViewRepresentable {
         func observeScroll(of scrollView: NSScrollView) {
             NotificationCenter.default.addObserver(
                 forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main
-            ) { [weak self, weak scrollView] _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.ruler?.needsDisplay = true
-                    guard let clip = scrollView?.contentView else { return }
-                    // Bounds origin runs from `-topInset` (rested) upward; re-zero it so the header
-                    // slides 1:1 with the content and never overshoots past the top.
-                    self.onScroll?(max(0, clip.bounds.origin.y + self.topInset))
-                }
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.ruler?.needsDisplay = true }
             }
         }
 
@@ -297,12 +279,22 @@ private final class SavingTextView: NSTextView {
         return super.performKeyEquivalent(with: event)
     }
 
-    /// Keep the native editing menu (Copy/Paste/Look Up…) and append a "Close" so the editor can be
-    /// dismissed by right-click, the way a terminal session is — it no longer has a chrome button.
+    /// A deliberately minimal right-click menu — just the edit basics and a prominent Close —
+    /// instead of AppKit's full text menu (Look Up, Translate, Font, Substitutions, Speech,
+    /// Layout Orientation, Services…), which buried Close under a wall of items an editor covering
+    /// the terminal has no use for. `cut`/`copy`/`paste` route through the responder chain, so they
+    /// auto-enable off the selection and clipboard exactly like the native items did.
     override func menu(for event: NSEvent) -> NSMenu? {
-        let menu = super.menu(for: event) ?? NSMenu()
-        guard showsCloseMenuItem else { return menu }
-        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        guard showsCloseMenuItem else { return super.menu(for: event) }
+        let menu = NSMenu()
+        if isEditable {
+            menu.addItem(withTitle: "Cut", action: #selector(cut(_:)), keyEquivalent: "")
+        }
+        menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+        if isEditable {
+            menu.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+        }
+        menu.addItem(.separator())
         let close = NSMenuItem(title: "Close", action: #selector(closeEditorOverlay), keyEquivalent: "")
         close.target = self
         menu.addItem(close)

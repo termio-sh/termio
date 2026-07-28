@@ -2,12 +2,12 @@ import AppKit
 import SwiftUI
 
 /// The editor that covers the terminal pane: a soft-wrapped, monospaced `NSTextView` whose text is
-/// syntax-highlighted by Highlightr (highlight.js), with a slim scroll-away header (the file name,
-/// which slides up with the content) and a VS Code-style footer (language · caret · encoding). The
+/// syntax-highlighted by Highlightr (highlight.js), with a slim fixed header (the file name, pinned
+/// like the inspector panes' headers) over the scrolling content. The
 /// file is read once on open and **auto-saved** — a short idle after the last keystroke flushes it to
 /// disk, and closing flushes any pending write — so there is no Save button (⌘S still forces an
-/// immediate flush for muscle memory). It carries no chrome close button: Escape or the right-click
-/// "Close" dismisses it back to the terminal, the way a terminal session closes.
+/// immediate flush for muscle memory). It closes three ways: the toolbar close button, a right-click
+/// "Close" (terminal-style), or Escape — all dismiss back to the terminal.
 /// Non-text files that can't be decoded as UTF-8 show a short notice rather than a wall of mojibake.
 struct FileEditorView: View {
     let url: URL
@@ -35,9 +35,6 @@ struct FileEditorView: View {
     @State private var text = ""
     /// The text last written to disk, so auto-save only writes on a genuine change.
     @State private var savedText = ""
-    /// How far the content has scrolled from the top (0 at rest) — drives the header sliding up
-    /// with it, so the header reads as the first thing in the document rather than fixed chrome.
-    @State private var headerScroll: CGFloat = 0
     /// False until the async load lands — the editor mounts only then, so the
     /// highlighter and the jump-to-line both see the real document, never the
     /// empty placeholder.
@@ -136,23 +133,13 @@ struct FileEditorView: View {
                 // within a frame or two, so a spinner would only flash.
                 Color.clear
             } else {
-                // One surface, no chrome bars: the content reserves the header's height at its top,
-                // the header overlays that strip and slides up 1:1 as you scroll (no divider, no
-                // fixed bar), and there's no footer — the editor reads like the terminal it covers.
-                ZStack(alignment: .top) {
-                    editorContent
+                // A fixed header over the content (no divider, no footer), matching the inspector
+                // panes' pinned headers (File Explorer's "TERMIO", Issues, Git) — the file name
+                // stays put while you scroll rather than sliding away and leaving you place-blind.
+                VStack(spacing: 0) {
                     header
-                        .offset(y: -min(max(headerScroll, 0), Self.headerHeight))
-                    // The Edit/Preview toggle can't live inside the scrolling web/text view, so it
-                    // stays pinned at the top-right while the header slides away under it.
-                    if isMarkdown {
-                        modeToggle
-                            .padding(.top, 4)
-                            .padding(.trailing, 10)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    }
+                    editorContent
                 }
-                .clipped()
             }
         }
         // Match the diff overlay (`GitDiffView`): a plain VStack whose background bleeds under the
@@ -164,9 +151,6 @@ struct FileEditorView: View {
         .onChange(of: text) {
             if !readOnly { scheduleSave() }
         }
-        // Flipping Edit/Preview swaps in a fresh scroll view parked at the top, so the header must
-        // return with it — otherwise it stays stuck off-screen from the previous view's scroll.
-        .onChange(of: mode) { headerScroll = 0 }
         .onExitCommand { close() }
         // A safety flush if the overlay goes away without the close button (file switch, app quit).
         .onDisappear {
@@ -174,9 +158,8 @@ struct FileEditorView: View {
         }
     }
 
-    /// The scrolling body — the Markdown reader in Preview, else the Highlightr source editor. Both
-    /// report their scroll offset so the header can track it; the source editor also reserves the
-    /// header's height at its top and carries the right-click "Close".
+    /// The scrolling body — the Markdown reader in Preview, else the Highlightr source editor. It
+    /// scrolls below the fixed header; the source editor also carries the right-click "Close".
     @ViewBuilder private var editorContent: some View {
         if isMarkdown && mode == .preview {
             // Render the *live* buffer, so flipping over from Edit shows unsaved keystrokes
@@ -185,8 +168,7 @@ struct FileEditorView: View {
                 source: text,
                 fileURL: url,
                 settings: settings,
-                colorScheme: colorScheme,
-                onScroll: { headerScroll = $0 }
+                colorScheme: colorScheme
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -202,8 +184,6 @@ struct FileEditorView: View {
                 currentLineColor: currentLineColor,
                 isEditable: !readOnly,
                 jumpToLine: jumpLine,
-                topInset: Self.headerHeight,
-                onScroll: { headerScroll = $0 },
                 showsCloseMenuItem: true,
                 onSave: saveNow
             )
@@ -246,17 +226,18 @@ struct FileEditorView: View {
                     .foregroundStyle(.orange)
                     .lineLimit(1)
             }
-            // The editor closes by right-click (like a terminal session), so there's no close
-            // control here; this trailing spacer just keeps the label left-aligned and lets the
-            // background fill the full width. The Edit/Preview toggle is pinned separately above.
             Spacer()
+            // Markdown reads as a document by default; the toggle keeps the source one click away.
+            if isMarkdown {
+                modeToggle
+            }
         }
         // Leading edge matches the Markdown reader's body padding (20) so the file name lines up
-        // with the document text beneath it; trailing stays tight since the toggle floats separately.
+        // with the document text beneath it.
         .padding(.leading, 20)
         .padding(.trailing, 12)
-        // One explicit height for every file type — the header reserves exactly this much at the
-        // top of the content (`topInset`) and slides away over the same distance.
+        // One explicit height for every file type: the mode pill is taller than the text row, so
+        // without the clamp a markdown header outgrows plain files'.
         .frame(height: Self.headerHeight)
         .background(Color(nsColor: settings.terminalBackgroundColor))
         .animation(.easeOut(duration: 0.15), value: isDirty)

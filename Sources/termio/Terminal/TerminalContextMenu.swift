@@ -44,9 +44,12 @@ final class TerminalContextMenu: NSObject {
               let window = event.window,
               window.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName,
               let contentView = window.contentView,
-              // A file editor / diff / trace overlay covers the terminal; its
-              // right-clicks (text-view menus) are its own.
-              store.openFileURL == nil, store.openDiff == nil, store.openTrace == nil
+              // An overlay that COVERS the terminal owns its right-clicks (its text-view menus are
+              // its own). But a file opened *to the side* leaves the terminal fully visible in its
+              // own column, so the terminal's menu must still work there — only bail for a file
+              // editor when it's the full-pane overlay, not the side panel.
+              (store.openFileURL == nil || store.openFileInSidePanel),
+              store.openDiff == nil, store.openTrace == nil
         else { return false }
 
         // Resolve the pane by geometry rather than `hitTest`: every activated
