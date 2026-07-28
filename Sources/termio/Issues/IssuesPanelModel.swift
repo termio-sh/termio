@@ -25,6 +25,13 @@ final class IssuesPanelModel: ObservableObject {
     @Published private(set) var items: [IssueSummary] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+
+    /// How the user can recover from a failed load, so the error state offers the *right* action.
+    /// `reauthorize` (the reconnect / grant-org path) is reserved for a genuine access 403 — a
+    /// valid token with no rights to this repo. Everything else (rate limits, 404, 5xx, network,
+    /// decode) is `retry`, since reconnecting can't fix it. `nil` when there's no error.
+    enum Recovery { case reauthorize, retry }
+    @Published private(set) var recovery: Recovery?
     /// The pushed-in detail (list → detail, like git pane file → diff).
     @Published var openItem: IssueSummary?
     @Published private(set) var detail: IssueDetail?
@@ -63,6 +70,7 @@ final class IssuesPanelModel: ObservableObject {
     /// polls until approved, then loads the pane.
     func connect() async {
         errorMessage = nil
+        recovery = nil
         do {
             let code = try await GitHubIssueAuth.requestDeviceCode()
             phase = .connecting(userCode: code.userCode)
@@ -85,6 +93,8 @@ final class IssuesPanelModel: ObservableObject {
         openItem = nil
         detail = nil
         phase = .disconnected
+        errorMessage = nil
+        recovery = nil
     }
 
     /// Recover from a non-401 failure (typically a 403: the token is valid but has
@@ -137,14 +147,23 @@ final class IssuesPanelModel: ObservableObject {
         if availableLabels.isEmpty { Task { await loadLabels() } }
         isLoading = true
         errorMessage = nil
+        recovery = nil
         do {
             items = try await provider.issues(in: container, query: query)
         } catch {
             // A revoked token must degrade to the connect zero state, not wedge.
             if case GitHubIssueProvider.APIError.status(401) = error {
                 disconnect()
-            } else {
+            } else if case GitHubIssueProvider.APIError.status(403) = error {
+                // A genuine 403 (rate-limit 403s are classified as `.rateLimited` upstream) means
+                // the token is valid but has no rights to *this* repo — usually an org that hasn't
+                // authorized termio. This is the one case reconnect / grant-org access can fix.
                 errorMessage = error.localizedDescription
+                recovery = .reauthorize
+            } else {
+                // Rate limits, 404, 5xx, decode, network: reconnecting won't help — offer a retry.
+                errorMessage = error.localizedDescription
+                recovery = .retry
             }
         }
         isLoading = false

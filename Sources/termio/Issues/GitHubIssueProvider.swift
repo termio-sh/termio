@@ -16,6 +16,10 @@ struct GitHubIssueProvider: IssueProvider {
 
     enum APIError: LocalizedError {
         case status(Int)
+        /// A 403/429 that is GitHub throttling, not an access denial — kept distinct from
+        /// `.status(403)` so the pane offers "wait and retry" rather than the reconnect/grant-org
+        /// recovery, which can't fix a rate limit.
+        case rateLimited
         case decoding
 
         var errorDescription: String? {
@@ -24,6 +28,7 @@ struct GitHubIssueProvider: IssueProvider {
             case .status(403): return "GitHub denied the request — the token may lack access to this repository."
             case .status(404): return "GitHub can’t find this repository with the connected account."
             case .status(let code): return "GitHub replied with HTTP \(code)."
+            case .rateLimited: return "GitHub’s rate limit is exhausted. Wait a moment and try again."
             case .decoding: return "GitHub returned an unexpected reply."
             }
         }
@@ -163,6 +168,17 @@ struct GitHubIssueProvider: IssueProvider {
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            // GitHub signals throttling with a 403 or 429 carrying an exhausted primary-limit
+            // header (`x-ratelimit-remaining: 0`) or a secondary-limit `retry-after`. Classify
+            // those as `.rateLimited` so a 403 that is really "no access to this repo" stays the
+            // only case that offers the reconnect/grant-org recovery.
+            if http.statusCode == 403 || http.statusCode == 429 {
+                let remaining = http.value(forHTTPHeaderField: "x-ratelimit-remaining")
+                let retryAfter = http.value(forHTTPHeaderField: "retry-after")
+                if remaining == "0" || retryAfter != nil {
+                    throw APIError.rateLimited
+                }
+            }
             throw APIError.status(http.statusCode)
         }
         let decoder = JSONDecoder()

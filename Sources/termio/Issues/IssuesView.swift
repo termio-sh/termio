@@ -232,20 +232,34 @@ struct IssuesView: View {
                 .controlSize(.small)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.errorMessage != nil {
-            // A non-401 failure (typically a 403: valid token, no rights to *this*
-            // repo) leaves the pane bound but unreadable. Offer a way out instead of
-            // wedging — reconnect to switch account, or grant termio org access.
-            // `zeroState` paints `model.errorMessage` in red beneath the actions.
-            zeroState(
-                title: "Couldn’t Load",
-                message: "Reconnect to sign in with a different account, or grant termio access to the organization that owns this repository."
-            ) {
-                Button("Reconnect") { Task { await model.reconnect() } }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
-                Button("Grant Org Access…") { model.openConnectionSettings() }
-                    .buttonStyle(.link)
-                    .controlSize(.small)
+            // The recovery the model classified drives which actions we offer — reconnecting can
+            // only fix an access 403, not a rate limit / 404 / 5xx / network error. `zeroState`
+            // paints `model.errorMessage` in red beneath the actions.
+            switch model.recovery {
+            case .reauthorize:
+                // A valid token with no rights to *this* repo (403) — usually an org that hasn't
+                // authorized termio. Switch account, or grant org access.
+                zeroState(
+                    title: "Couldn’t Load",
+                    message: "Reconnect to sign in with a different account, or grant termio access to the organization that owns this repository."
+                ) {
+                    Button("Reconnect") { Task { await model.reconnect() } }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                    Button("Grant Org Access…") { model.openConnectionSettings() }
+                        .buttonStyle(.link)
+                        .controlSize(.small)
+                }
+            case .retry, .none:
+                // Rate limit, 404, 5xx, network, decode — reconnecting won't help; just retry.
+                zeroState(
+                    title: "Couldn’t Load",
+                    message: "Something went wrong loading this repository. Try again in a moment."
+                ) {
+                    Button("Try Again") { Task { await model.loadList() } }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                }
             }
         } else if model.items.isEmpty {
             ContentUnavailableView(
