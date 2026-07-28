@@ -30,7 +30,8 @@ struct FileFindBar: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
         )
-        .padding(.horizontal, 8)
+        .fixedSize()
+        .padding(.trailing, 12)
         .padding(.top, 6)
         .onExitCommand(perform: onClose)
         .onAppear { requestFocus() }

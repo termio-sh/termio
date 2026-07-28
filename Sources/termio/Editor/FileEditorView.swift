@@ -178,7 +178,7 @@ struct FileEditorView: View {
                             onSave: saveNow
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .overlay(alignment: .top) {
+                        .overlay(alignment: .topTrailing) {
                             if findBarVisible {
                                 FileFindBar(
                                     query: $findQuery,
@@ -191,7 +191,7 @@ struct FileEditorView: View {
                                     onClose: closeFindBar,
                                     focusTrigger: findFocusTrigger
                                 )
-                                .transition(.move(edge: .top).combined(with: .opacity))
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
                             }
                         }
                     }
