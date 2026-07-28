@@ -229,21 +229,19 @@ final class TerminalAccessoryBar: UIInputView {
                 }
             }
         }
-        // Every exit path (success, cancel, auto-dismissed error) restores the
-        // control-key rows.
+        // Every exit path (success, cancel, auto-dismissed error) cross-fades
+        // the control-key rows back in as the pill leaves.
         voiceBar.onDismissed = { [weak self] in
-            self?.keyPlane?.isHidden = false
+            self?.hideVoiceBar()
         }
     }
 
-    /// Picked Voice from the (+) menu: hide the two control-key rows, show the
-    /// pill in their place, and start recording. A start failure (no key, mic
-    /// denied) surfaces in the pill itself. The QWERTY keyboard is untouched.
+    /// Picked Voice from the (+) menu: swap the two control-key rows for the
+    /// pill and start recording. A start failure (no key, mic denied) surfaces
+    /// in the pill itself. The QWERTY keyboard is untouched.
     private func startVoiceRecording() {
         haptic.impactOccurred()
-        keyPlane?.isHidden = true
-        voiceBar.isHidden = false
-        bringSubviewToFront(voiceBar)
+        showVoiceBar()
         voice.start { [weak self] result in
             guard let self else { return }
             switch result {
@@ -252,6 +250,48 @@ final class TerminalAccessoryBar: UIInputView {
             case .failure(let failure):
                 voiceBar.showError(failure.hudMessage)
             }
+        }
+    }
+
+    /// Materialize the pill: it scales up from 0.96 + fades in while the key
+    /// rows fade out under it — critically damped, no overshoot (the pill
+    /// didn't come from a flick), under 300ms, ease-out for an entrance. Under
+    /// Reduce Motion it's a plain opacity cross-fade, no transform.
+    private func showVoiceBar() {
+        let reduce = UIAccessibility.isReduceMotionEnabled
+        bringSubviewToFront(voiceBar)
+        voiceBar.isHidden = false
+        voiceBar.alpha = 0
+        voiceBar.transform = reduce ? .identity : CGAffineTransform(scaleX: 0.96, y: 0.96)
+        UIView.animate(
+            withDuration: reduce ? 0.2 : 0.28, delay: 0,
+            usingSpringWithDamping: 1, initialSpringVelocity: 0,
+            options: [.curveEaseOut, .allowUserInteraction]
+        ) {
+            self.voiceBar.alpha = 1
+            self.voiceBar.transform = .identity
+            self.keyPlane?.alpha = 0
+        } completion: { _ in
+            self.keyPlane?.isHidden = true
+        }
+    }
+
+    /// Reverse of `showVoiceBar` — the pill fades/scales out along the same path
+    /// as the key rows fade back in, so the swap reads as one motion.
+    private func hideVoiceBar() {
+        let reduce = UIAccessibility.isReduceMotionEnabled
+        keyPlane?.alpha = 0
+        keyPlane?.isHidden = false
+        UIView.animate(
+            withDuration: reduce ? 0.2 : 0.24, delay: 0,
+            options: [.curveEaseOut, .allowUserInteraction]
+        ) {
+            self.voiceBar.alpha = 0
+            self.voiceBar.transform = reduce ? .identity : CGAffineTransform(scaleX: 0.96, y: 0.96)
+            self.keyPlane?.alpha = 1
+        } completion: { _ in
+            self.voiceBar.isHidden = true
+            self.voiceBar.transform = .identity
         }
     }
 

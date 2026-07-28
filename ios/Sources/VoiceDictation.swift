@@ -560,6 +560,9 @@ final class VoiceRecordingBar: UIView {
         }
     }
 
+    /// Marks the cycle done and hands off to the owner, which animates the pill
+    /// out (so the exit stays in sync with the key rows fading back in) — the
+    /// bar's own visibility is left to `onDismissed`.
     func dismiss() {
         guard !hasDismissed else { return }
         hasDismissed = true
@@ -567,7 +570,6 @@ final class VoiceRecordingBar: UIView {
         spinner.stopAnimating()
         dot.layer.removeAllAnimations()
         dot.alpha = 1
-        isHidden = true
         onDismissed?()
     }
 
@@ -580,6 +582,8 @@ final class VoiceRecordingBar: UIView {
     private func pulseDot() {
         dot.layer.removeAllAnimations()
         dot.alpha = 1
+        // Reduced motion: hold the dot steady rather than breathing it.
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
         UIView.animate(
             withDuration: 0.6, delay: 0, options: [.repeat, .autoreverse, .allowUserInteraction]
         ) {
