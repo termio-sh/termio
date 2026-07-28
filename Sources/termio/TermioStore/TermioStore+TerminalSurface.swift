@@ -252,6 +252,13 @@ extension TermioStore {
             let agentID = session.agent.id
             let isAgentSession = session.agent != .terminal && !session.isSSH
             let statusTrace = ProcessInfo.processInfo.environment["TERMIO_STATUS_TRACE"] != nil
+            // Whether to read this agent's ConEmu `OSC 9;4` progress out of the raw
+            // stream as a busy/idle signal (Grok emits it natively). Scanned on every
+            // chunk *before* the 1 s status throttle below — an agent's turn boundary
+            // is an edge, not something to sample once a second — but only for agents
+            // that opt in, so a plain shell's download progress bar can't move a dot.
+            let emitsProgress = session.agent.emitsProgressStatus
+            var progressScanner = OSCProgressScanner()
             var lastPoke = Date.distantPast
             var lastScreenSignature: Int?
             // Bytes seen since the last poke, so the throttled tick can report the
@@ -260,6 +267,14 @@ extension TermioStore {
             var pendingBytes = 0
             pty.addSink { [weak self, weak inMemory, weak pty] data in
                 pendingBytes += data.count
+                if emitsProgress, let progress = progressScanner.scan(data) {
+                    if statusTrace {
+                        AgentStatusRules.trace(
+                            agent: "\(agentID).progress", session: session.id,
+                            activity: progress, matched: "OSC 9;4")
+                    }
+                    DispatchQueue.main.async { self?.applyProgressActivity(progress, for: session.id) }
+                }
                 let now = Date()
                 guard now.timeIntervalSince(lastPoke) >= 1 else { return }
                 lastPoke = now

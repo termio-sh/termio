@@ -510,6 +510,11 @@ final class TermioStore: ObservableObject {
     /// transitions — a spinner frame change re-classifies as the same `working`
     /// and is dropped here.
     var lastTitleActivity: [Session.ID: AgentStatusRules.Activity] = [:]
+    /// The last busy/idle state an agent's `OSC 9;4` progress reports resolved to
+    /// (see `applyProgressActivity` / `OSCProgressScanner`). The scanner already
+    /// collapses keepalives, but a session torn down and rebuilt gets a fresh scanner,
+    /// so the store dedupes here too — and the transition guard mirrors the title path.
+    var lastProgressActivity: [Session.ID: AgentStatusRules.Activity] = [:]
     /// Sessions whose `.needsAttention` dot came from a genuine, *observable*
     /// blocking condition — a hook / screen / title "attention" signal, all of which
     /// have a matching "resolved" transition (the agent proceeds → working/idle/done).

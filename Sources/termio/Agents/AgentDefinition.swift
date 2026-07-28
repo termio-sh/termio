@@ -61,6 +61,14 @@ struct AgentDefinition: Identifiable {
     /// script, no socket), so it corrects a missed or late hook the instant the
     /// title flips. See `TermioStore.applyTitleActivity` for the arbitration.
     let titleRules: AgentStatusRules?
+    /// Whether this agent reports its busy/idle state as ConEmu-style `OSC 9;4`
+    /// progress in the PTY byte stream (Grok natively; Claude Code once
+    /// `terminalProgressBarEnabled` is set). When true, termio scans the raw stream
+    /// for it and drives status the same way the title does — a correction channel
+    /// that coexists with hooks, never a competing authority. See `OSCProgressScanner`
+    /// and `TermioStore.applyProgressActivity`. Off for agents (and the plain shell)
+    /// that don't, so an unrelated tool's progress bar can't move an agent's dot.
+    let emitsProgressStatus: Bool
     /// A manifest's declarative hook integration: the destination owned by the agent,
     /// a closed installer/dialect, and its event→state mapping.
     /// When present it is installed by `AgentStatusHooks` and becomes the session's
@@ -76,6 +84,7 @@ struct AgentDefinition: Identifiable {
         resumeSpec: ResumeSpec, icon: AgentIcon,
         iconRef: TermioShared.IconRef, tint: Color, tintHex: String?, installURL: URL?, wireName: String,
         statusRules: AgentStatusRules? = nil, titleRules: AgentStatusRules? = nil,
+        emitsProgressStatus: Bool = false,
         hookSpec: AgentHookSpec? = nil
     ) {
         self.id = id
@@ -92,6 +101,7 @@ struct AgentDefinition: Identifiable {
         self.wireName = wireName
         self.statusRules = statusRules
         self.titleRules = titleRules
+        self.emitsProgressStatus = emitsProgressStatus
         self.hookSpec = hookSpec
     }
 
@@ -854,6 +864,10 @@ struct AgentManifest: Decodable {
     /// correction channel, not a competing authority), so it is not gated the way
     /// `status` is.
     var titleStatus: StatusSpec?
+    /// Opt-in to reading this agent's ConEmu-style `OSC 9;4` progress out of the PTY
+    /// byte stream as a busy/idle signal (`OSCProgressScanner`). Off by default so a
+    /// plain shell's `wget`/`npm` progress bar can never move an agent's status dot.
+    var progressStatus: Bool?
     var hooks: HookSpec?
 
     struct IconSpec: Decodable {
@@ -1208,7 +1222,8 @@ struct AgentManifest: Decodable {
             resumeSpec: resumeSpec, icon: resolvedIcon, iconRef: resolvedIconRef,
             tint: resolvedTint, tintHex: resolvedTintHex,
             installURL: (install ?? installURL).flatMap(URL.init(string:)), wireName: wire ?? id,
-            statusRules: statusRules, titleRules: titleRules, hookSpec: hookSpec)
+            statusRules: statusRules, titleRules: titleRules,
+            emitsProgressStatus: progressStatus ?? false, hookSpec: hookSpec)
     }
 
     private static func bundledAsset(named name: String, in bundle: Bundle) -> URL? {

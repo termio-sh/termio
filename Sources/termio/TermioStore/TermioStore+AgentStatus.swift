@@ -208,6 +208,7 @@ extension TermioStore {
         lastUserInputAt[id] = nil
         promotionStreak[id] = nil
         lastTitleActivity[id] = nil
+        lastProgressActivity[id] = nil
         lastScreenActivity[id] = nil
         stallProbes[id] = nil
         blockingAttention.remove(id)
@@ -368,6 +369,38 @@ extension TermioStore {
         }
     }
 
+    /// Drives status from the agent's ConEmu-style `OSC 9;4` progress reports —
+    /// the in-band busy/idle signal Grok ships natively (`9;4;1;-1` while a turn
+    /// runs, `9;4;0;` when it ends). Like the title, this is a *correction* channel
+    /// layered over hooks on the one channel that cannot break (the PTY byte stream),
+    /// so its arbitration is deliberately identical to `applyTitleActivity` and just
+    /// as subordinate: a progress-working never overrides `needsAttention` (a blocked
+    /// agent can keep its busy bar lit — the herdr "blocker outranks a stale busy
+    /// progress" rule), and a progress-idle only ends a turn that is genuinely
+    /// working, so a lone or stale `9;4;0` can't clear a hook- or title-set state.
+    /// The `OSCProgressScanner` only reaches busy/idle, never attention, so the
+    /// attention arm is unreachable here but kept exhaustive for the shared enum.
+    func applyProgressActivity(_ activity: AgentStatusRules.Activity, for id: Session.ID) {
+        guard lastProgressActivity[id] != activity else { return }
+        let previous = lastProgressActivity[id]
+        lastProgressActivity[id] = activity
+        switch activity {
+        case .working:
+            guard status(for: id) != .needsAttention else { return }
+            guard let session = session(id), effectiveAgent(for: session) != .terminal
+            else { return }
+            setStatus(.working, for: id)
+            lastWorkingAt[id] = Date()
+        case .attention:
+            clearWorking(id)
+            flagBlockingAttention(for: id)
+        case .idle:
+            guard previous == .working, status(for: id) == .working else { return }
+            clearWorking(id)
+            setStatus(isViewing(id) ? .idle : .done, for: id)
+        }
+    }
+
     /// Reclassifies a shell-backed session to whatever agent runs in its foreground —
     /// for real, not as a runtime overlay: a hand-started `claude` makes the session
     /// *become* a Claude Code session (persisted, so a reopened app relaunches it as
@@ -423,6 +456,7 @@ extension TermioStore {
         projects[location.project].sessions[location.session] = session
         setLiveTitle(nil, for: id)
         lastTitleActivity[id] = nil
+        lastProgressActivity[id] = nil
         clearWorking(id)
         let current = status(for: id)
         if current == .working || current == .done { setStatus(.idle, for: id) }

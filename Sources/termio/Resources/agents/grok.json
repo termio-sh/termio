@@ -17,6 +17,7 @@
   "titleStatus": {
     "attention": ["Action Required"]
   },
+  "progressStatus": true,
   "hooks": {
     "type": "json",
     "file": "~/.grok/hooks/termio.json",
