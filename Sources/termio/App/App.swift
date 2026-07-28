@@ -103,6 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // The full-window host that shows the active inspector detail blown up to cover everything
     // while `store.inspectorMaximized`; nil when the detail is docked in the inspector.
     private var maximizedDetailHost: NSHostingView<AnyView>?
+    // Whether *we* drove the window into native fullscreen when the detail was maximized, so restore
+    // exits only the fullscreen we entered — never one the user opened with the green button first.
+    private var maximizeDidEnterFullScreen = false
     // Coalesces the per-frame `windowDidResize` stream into a single settle so the inspector's
     // max thickness (and the tracking-separator re-bind it forces) is recomputed once the drag
     // stops, not on every intermediate frame.
@@ -974,9 +977,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 host.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             ])
             maximizedDetailHost = host
+            // Take the maximize all the way into native macOS fullscreen (own Space, hidden menu bar)
+            // for a truly immersive read — but only if the window isn't already fullscreen, so a
+            // green-button fullscreen the user set up themselves is left for them to exit.
+            if let window, !window.styleMask.contains(.fullScreen) {
+                window.toggleFullScreen(nil)
+                maximizeDidEnterFullScreen = true
+            }
         } else {
             maximizedDetailHost?.removeFromSuperview()
             maximizedDetailHost = nil
+            // Leave fullscreen only when this maximize is what entered it.
+            if maximizeDidEnterFullScreen {
+                if let window, window.styleMask.contains(.fullScreen) {
+                    window.toggleFullScreen(nil)
+                }
+                maximizeDidEnterFullScreen = false
+            }
         }
     }
 

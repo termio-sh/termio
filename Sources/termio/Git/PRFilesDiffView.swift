@@ -19,14 +19,41 @@ struct PRFilesSplitView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var selection: String?
+    /// Narrow mode only: whether we've drilled from the file list into a file's diff.
+    @State private var narrowShowingDiff = false
 
     /// The list rail's width — the changed-files column, a touch wider than the sidebar
     /// since PR paths run deep.
     private static let listWidth: CGFloat = 260
+    /// Below this the file list and the diff can't both breathe, so the view collapses to a single
+    /// navigable column (list → tap → diff → back) — the same single-column, master→detail idiom the
+    /// issue/PR detail (and the whole inspector) already uses. Above it, side-by-side has room.
+    private static let sideBySideMinWidth: CGFloat = 620
 
     var body: some View {
+        GeometryReader { geo in
+            Group {
+                if geo.size.width >= Self.sideBySideMinWidth {
+                    sideBySide
+                } else {
+                    narrow
+                }
+            }
+            .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
+        }
+        .onExitCommand(perform: onClose)
+        // Select the first file on open (and if the set changes under us). Assigned directly — not
+        // through the list's selection binding — so this initial pick isn't treated as a drill-in and
+        // narrow mode still opens on the list.
+        .onAppear { if selection == nil { selection = files.first?.path } }
+    }
+
+    // MARK: Layouts
+
+    /// Wide: GitHub Desktop's side-by-side — the file list rail beside the selected file's diff.
+    private var sideBySide: some View {
         HStack(spacing: 0) {
-            fileList
+            fileList(onSelect: { _ in })
                 .frame(width: Self.listWidth)
                 .background(Color(nsColor: settings.terminalBackgroundColor).opacity(0.4))
             Rectangle()
@@ -35,16 +62,61 @@ struct PRFilesSplitView: View {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
-        .onExitCommand(perform: onClose)
-        // Select the first file on open (and if the set changes under us).
-        .onAppear { if selection == nil { selection = files.first?.path } }
+    }
+
+    /// Narrow: one column at a time — the file list, or (after a tap) the selected file's diff behind
+    /// a "‹ Files" back bar. The arrow-key walk inside the diff still steps files without popping out.
+    @ViewBuilder
+    private var narrow: some View {
+        if narrowShowingDiff, selection != nil {
+            VStack(spacing: 0) {
+                narrowBackBar
+                detail.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else {
+            fileList(onSelect: { _ in narrowShowingDiff = true })
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// The narrow-mode back control, sized like the pane's other header bars.
+    private var narrowBackBar: some View {
+        HStack(spacing: 4) {
+            Button { narrowShowingDiff = false } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                    Text("Files").font(.system(size: 12, weight: .medium))
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Text("\(files.count) file\(files.count == 1 ? "" : "s")")
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: GitChangesView.topBarHeight)
+        .background(Color(nsColor: settings.terminalBackgroundColor))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+        }
     }
 
     // MARK: List rail
 
-    private var fileList: some View {
-        List(files, selection: $selection) { change in
+    private func fileList(onSelect: @escaping (String) -> Void) -> some View {
+        // A custom binding so a user's row tap (which flows through `set`) can drive narrow-mode
+        // navigation, while the programmatic initial pick and the arrow `walk` assign `selection`
+        // directly and don't — and without a row tap gesture, which would break List selection.
+        let selectionBinding = Binding<String?>(
+            get: { selection },
+            set: { newValue in
+                selection = newValue
+                if let newValue { onSelect(newValue) }
+            }
+        )
+        return List(files, selection: selectionBinding) { change in
             PRFileRow(
                 change: change,
                 font: settings.interfaceFont,
