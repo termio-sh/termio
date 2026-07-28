@@ -252,12 +252,14 @@ extension TermioStore {
             let agentID = session.agent.id
             let isAgentSession = session.agent != .terminal && !session.isSSH
             let statusTrace = ProcessInfo.processInfo.environment["TERMIO_STATUS_TRACE"] != nil
-            // Whether to read this agent's ConEmu `OSC 9;4` progress out of the raw
-            // stream as a busy/idle signal (Grok emits it natively). Scanned on every
-            // chunk *before* the 1 s status throttle below — an agent's turn boundary
-            // is an edge, not something to sample once a second — but only for agents
-            // that opt in, so a plain shell's download progress bar can't move a dot.
-            let emitsProgress = session.agent.emitsProgressStatus
+            // Reads this session's ConEmu `OSC 9;4` progress out of the raw stream as
+            // a busy/idle signal (Grok emits it natively). Scanned on every chunk
+            // *before* the 1 s status throttle below — an agent's turn boundary is an
+            // edge, not something to sample once a second. The scan runs for every
+            // session (a plain terminal can be promoted to a hand-started Grok, whose
+            // sink was built while the row was still a shell); whether a transition is
+            // *acted on* is gated in `applyProgressActivity` by the session's live
+            // agent, so an unrelated shell's `wget`/`npm` progress bar can't move a dot.
             var progressScanner = OSCProgressScanner()
             var lastPoke = Date.distantPast
             var lastScreenSignature: Int?
@@ -267,7 +269,7 @@ extension TermioStore {
             var pendingBytes = 0
             pty.addSink { [weak self, weak inMemory, weak pty] data in
                 pendingBytes += data.count
-                if emitsProgress, let progress = progressScanner.scan(data) {
+                for progress in progressScanner.scan(data) {
                     if statusTrace {
                         AgentStatusRules.trace(
                             agent: "\(agentID).progress", session: session.id,

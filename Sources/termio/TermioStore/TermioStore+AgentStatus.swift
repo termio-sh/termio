@@ -381,14 +381,24 @@ extension TermioStore {
     /// The `OSCProgressScanner` only reaches busy/idle, never attention, so the
     /// attention arm is unreachable here but kept exhaustive for the shared enum.
     func applyProgressActivity(_ activity: AgentStatusRules.Activity, for id: Session.ID) {
+        // Gate on the session's *live* agent, not a value captured when the sink was
+        // built: a plain terminal promoted to a hand-started Grok now opts in, while a
+        // shell that stays a shell (its `wget` bar) stays out. Re-reading the session
+        // here also drops any event that outlived the pane it came from — a session
+        // torn down or relaunched before this main-actor block ran no longer resolves,
+        // or resolves to an agent that doesn't emit progress, so it can't repopulate a
+        // cleared entry or move a replacement process's dot.
+        guard let session = session(id), effectiveAgent(for: session).emitsProgressStatus else { return }
         guard lastProgressActivity[id] != activity else { return }
         let previous = lastProgressActivity[id]
         lastProgressActivity[id] = activity
         switch activity {
         case .working:
+            // `needsAttention` stays senior — a blocked agent can keep its busy bar
+            // lit (herdr's "a blocker outranks a stale busy progress" rule). The live
+            // agent is already known to emit progress (top gate), so it is never the
+            // plain shell.
             guard status(for: id) != .needsAttention else { return }
-            guard let session = session(id), effectiveAgent(for: session) != .terminal
-            else { return }
             setStatus(.working, for: id)
             lastWorkingAt[id] = Date()
         case .attention:

@@ -2,14 +2,16 @@ import XCTest
 @testable import termio
 
 /// Pins the `OSC 9;4` progress parser (issue #23): the ConEmu busy/idle states map
-/// correctly, the busy/idle transition fires only on a real flip, the two OSC
-/// terminators (BEL and ST) both close a sequence, sequences split across read
-/// chunks reassemble, and neighbouring OSC forms (title, notification, palette) are
-/// ignored so nothing but a genuine progress report can move an agent's dot.
+/// correctly, the busy/idle transition fires only on a real flip, *every* flip in a
+/// chunk is reported in order, the two OSC terminators (BEL and ST) both close a
+/// sequence, sequences split across read chunks reassemble, and neighbouring OSC
+/// forms (title, notification, palette) plus malformed/overlong payloads are all
+/// rejected so nothing but a genuine progress report can move an agent's dot.
 final class OSCProgressScannerTests: XCTestCase {
+    /// Feeds each chunk and flattens every transition, in order.
     private func scan(_ chunks: [String]) -> [AgentStatusRules.Activity] {
         var scanner = OSCProgressScanner()
-        return chunks.compactMap { scanner.scan(Data($0.utf8)) }
+        return chunks.flatMap { scanner.scan(Data($0.utf8)) }
     }
 
     func testBusyThenIdle() {
@@ -40,6 +42,14 @@ final class OSCProgressScannerTests: XCTestCase {
             [.working])
     }
 
+    /// A single PTY read can carry a whole fast turn — both edges must survive, in
+    /// order, or the arbitration (keyed on the previous *delivered* state) drops both.
+    func testBothTransitionsInOneChunkAreReported() {
+        XCTAssertEqual(
+            scan(["\u{1B}]9;4;1;-1\u{07}some output\u{1B}]9;4;0;\u{07}"]),
+            [.working, .idle])
+    }
+
     func testSequenceSplitAcrossChunks() {
         // The terminator lands in a later read than the introducer.
         XCTAssertEqual(scan(["\u{1B}]9;4", ";1;", "-1\u{07}"]), [.working])
@@ -54,6 +64,21 @@ final class OSCProgressScannerTests: XCTestCase {
         XCTAssertEqual(scan(["\u{1B}]4;0;rgb:11/22/33\u{07}"]), [])
     }
 
+    /// A notification whose body merely *starts* `4;<state>;` must not be mistaken for
+    /// progress: the trailing field isn't numeric, and extra `;`-fields overrun the
+    /// `9;4;state;progress` grammar.
+    func testProgressLikeNotificationBodyIsRejected() {
+        XCTAssertEqual(scan(["\u{1B}]9;4;1;this is a notification\u{07}"]), [])
+        XCTAssertEqual(scan(["\u{1B}]9;4;1;-1;extra;fields\u{07}"]), [])
+    }
+
+    /// An overlong payload can't be a progress report, so it is rejected outright
+    /// rather than classified from its truncated prefix.
+    func testOverlongPayloadIsRejected() {
+        let long = "9;4;1;" + String(repeating: "9", count: 64)
+        XCTAssertEqual(scan(["\u{1B}]" + long + "\u{07}"]), [])
+    }
+
     func testProgressAmidstOtherOutput() {
         // A busy report embedded in a burst of ordinary bytes still lands.
         XCTAssertEqual(
@@ -64,7 +89,9 @@ final class OSCProgressScannerTests: XCTestCase {
     func testClassifyDirect() {
         XCTAssertEqual(OSCProgressScanner.classify(Array("9;4;0;".utf8)), .idle)
         XCTAssertEqual(OSCProgressScanner.classify(Array("9;4;1;-1".utf8)), .working)
+        XCTAssertEqual(OSCProgressScanner.classify(Array("9;4;3".utf8)), .working)
         XCTAssertNil(OSCProgressScanner.classify(Array("9;4".utf8)))
+        XCTAssertNil(OSCProgressScanner.classify(Array("9;4;1;text".utf8)))
         XCTAssertNil(OSCProgressScanner.classify(Array("9;9;cwd".utf8)))
     }
 }
