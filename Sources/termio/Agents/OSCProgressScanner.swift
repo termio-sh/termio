@@ -1,40 +1,26 @@
 import Foundation
 
-/// Parses ConEmu-style `OSC 9;4` progress reports out of a terminal byte stream
-/// and maps them to an agent activity — an in-band busy/idle signal on the same
-/// unbreakable channel as the OSC title, but more precise: an agent that reports
-/// progress says "I am working" without termio having to recognise a spinner glyph.
+/// Parses ConEmu-style `OSC 9;4` progress out of a terminal byte stream as an agent
+/// busy/idle signal — the same unbreakable channel as the OSC title, but more precise
+/// (the agent says "I'm working" without termio having to recognise a spinner glyph).
+/// libghostty forwards the sequence but surfaces only titles (OSC 0/2) and cwd (OSC 7).
 ///
-/// The sequence is the ConEmu / Windows Terminal progress protocol that libghostty
-/// forwards but does not surface: `ESC ] 9 ; 4 ; <state> ; <progress> (BEL | ST)`,
-/// where
-/// - state `0` = clear → **idle**,
-/// - state `1` (normal) and `3` (indeterminate) → **working**,
-/// - state `2` (error) and `4` (paused) → ignored (neither a clean busy nor idle
-///   transition; leaving the last signal in place beats guessing).
+/// The protocol is `ESC ] 9 ; 4 ; <state> ; <progress> (BEL | ST)`: state `0` = clear
+/// → idle, `1`/`3` (normal/indeterminate) → working, `2`/`4` (error/paused) ignored.
+/// Grok emits `9;4;1;-1` while a turn runs and `9;4;0;` when it ends.
 ///
-/// Grok emits `9;4;1;-1` natively while a turn runs and `9;4;0;` when it finishes;
-/// Claude Code emits the same shape once `terminalProgressBarEnabled` is set. This is
-/// fed every raw read chunk from the PTY (sequences split across reads are tolerated)
-/// and returns each completed report in byte order — including *both* edges when a
-/// single read carries a whole `busy … idle` turn, which the arbitration (keyed on
-/// the previous *delivered* state) would otherwise silently drop.
+/// Fed every raw read chunk (sequences split across reads are tolerated), it returns
+/// each completed report in byte order — both edges when one read carries a whole
+/// `busy … idle` turn. It keeps NO cross-chunk state: duplicates collapse within a
+/// chunk, but dedup across reads is the store's job (`lastProgressActivity`, under the
+/// live-agent gate), exactly like the title channel. That is deliberate — a scanner
+/// that privately deduped a pre-promotion `working` (which the gate rejects) would then
+/// swallow the keepalives a row just promoted to Grok needs.
 ///
-/// The scanner keeps **no** cross-chunk state of its own: consecutive identical
-/// reports within one chunk collapse, but it never remembers the last activity across
-/// reads. Dedup is the store's job (`lastProgressActivity`, applied under the
-/// live-agent gate) — exactly like the title channel, whose every spinner frame
-/// re-fires and is collapsed in `applyTitleActivity`. Keeping the memory there and
-/// not here is what lets a session promoted to Grok mid-stream pick the signal up: a
-/// scanner that had privately deduped a pre-promotion `working` (rejected by the
-/// gate) would then swallow the keepalives the promoted row needs.
-///
-/// It reads only OSC 9 *progress* (`9;4;<state>;<progress>`); the neighbouring OSC 9
-/// notification (`9;<text>`), OSC 9;9 cwd, and OSC 4 palette forms all fall through —
-/// the grammar is validated end to end (numeric state, a progress field in the
-/// documented `0…100` range plus Grok's `-1`, no trailing fields) and an overrun
-/// payload is rejected, so a notification whose body merely starts `4;…` can't be
-/// mistaken for progress.
+/// Only `9;4` progress is read; OSC 9 notifications (`9;<text>`), OSC 9;9 cwd and OSC 4
+/// palette fall through — the grammar is validated whole (numeric state; busy carries a
+/// `0…100` percentage, Grok's `-1`, or empty) and overruns rejected, so a notification
+/// body starting `4;…` can't be misread as progress.
 struct OSCProgressScanner {
     private enum State { case ground, esc, osc, oscEsc }
     private var state: State = .ground
@@ -114,9 +100,11 @@ struct OSCProgressScanner {
               payload[2] == UInt8(ascii: "4") else { return nil }
         let parts = String(decoding: payload, as: UTF8.self)
             .split(separator: ";", omittingEmptySubsequences: false)
-        // `9 ; 4 ; <state>` with an optional trailing `<progress>` — nothing more.
+        // `9 ; 4 ; <state>` with an optional trailing `<progress>` — nothing more. The
+        // byte prefix already pinned `parts[0] == "9"`, but `4` may have been a longer
+        // run (`9;41;…`), so the second field is re-checked exactly.
         guard parts.count == 3 || parts.count == 4,
-              parts[0] == "9", parts[1] == "4",
+              parts[1] == "4",
               let stateDigit = Int(parts[2]) else { return nil }
         switch stateDigit {
         case 0:

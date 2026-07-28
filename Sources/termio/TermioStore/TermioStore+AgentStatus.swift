@@ -394,10 +394,6 @@ extension TermioStore {
         lastProgressActivity[id] = activity
         switch activity {
         case .working:
-            // `needsAttention` stays senior — a blocked agent can keep its busy bar
-            // lit (herdr's "a blocker outranks a stale busy progress" rule). The live
-            // agent is already known to emit progress (top gate), so it is never the
-            // plain shell.
             guard status(for: id) != .needsAttention else { return }
             setStatus(.working, for: id)
             lastWorkingAt[id] = Date()
