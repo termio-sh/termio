@@ -33,6 +33,14 @@ extension TermioStore {
         }
     }
 
+    /// Whether any session is an agent (declared or detected via `effectiveAgent`). Gates
+    /// the "status is off" reminder — a shell-only workspace has nothing to report.
+    var isRunningAnyAgent: Bool {
+        projects.contains { project in
+            project.sessions.contains { effectiveAgent(for: $0) != .terminal }
+        }
+    }
+
     /// Re-aligns the installed hooks when, and only when, the hooks setting itself
     /// changed. Called from the shared settings observer, which fires for every
     /// preference, so the guard keeps unrelated changes from rewriting the file.

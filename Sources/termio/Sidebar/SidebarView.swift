@@ -159,6 +159,13 @@ struct SidebarView: View {
         let hasTerminals = terminals.contains { !$0.sessions.isEmpty }
         let hasChats = chats.contains { !$0.sessions.isEmpty }
         return List {
+            // Nudge when agents are running but the status hooks are off — without them
+            // the sidebar spinner stays dark. One tap enables (and reinstalls) them.
+            if !settings.agentHooksEnabled && store.isRunningAnyAgent {
+                AgentHooksOffBanner { settings.agentHooksEnabled = true }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
             // The top "Pinned" working set, under its own section header: pinned projects
             // as full blocks, then pinned worktrees as mini-blocks (header + their
             // sessions), then pinned sessions as shortcut rows — each nested entry tagged
@@ -1228,4 +1235,35 @@ extension Color {
     static let sidebarWorkingInk = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .white : .black
     })
+}
+
+/// Sidebar nudge shown when agents run with the status hooks disabled. Low-alarm by
+/// design — a neutral card, not an accent banner. "Enable" turns the hooks back on.
+private struct AgentHooksOffBanner: View {
+    let enable: () -> Void
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Live agent status is off")
+                    .font(.callout.weight(.medium))
+                Text("Agents won't show as working.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Button("Enable", action: enable)
+                .buttonStyle(.borderless)
+                .font(.callout.weight(.medium))
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+        .padding(.vertical, 4)
+    }
 }

@@ -205,6 +205,16 @@ enum AgentStatusHooks {
     /// or the legacy `marker`, so upgrades cleanly replace old hooks with new ones.
     static let cliMarker = "agent report"
 
+    /// Fingerprints of third-party status hooks that full-replace the shared `hooks`
+    /// block (Claude's `settings.json`, Codex's `hooks.json`) instead of merging, wiping
+    /// termio's entries. We strip these on install so a destructive writer can't out-merge
+    /// us. Each substring is specific to one tool's command, so a user's own hook is never
+    /// matched — extend only with equally specific fingerprints.
+    static let conflictingHookMarkers = [
+        "SUPERSET_HOME_DIR",
+        "SUPERSET_AGENT_ID",
+    ]
+
     /// Re-applies every agent's integration (or removes them all) to match `enabled`.
     static func sync(enabled: Bool) {
         // Every hook references the channel-stable CLI copy, so make sure it carries
@@ -287,7 +297,29 @@ enum AgentStatusHooks {
         } else {
             command += " 2>/dev/null || true"
         }
+        // Stamp the build version as a trailing shell comment (ignored at runtime): the
+        // command string changes each release, so the idempotent `write()` re-installs the
+        // hook on the first launch after an upgrade, and `installedVersion` can read it back.
+        command += " \(hookVersionComment)"
         return command
+    }
+
+    /// Marker + version stamped into every installed hook (`# termio-hooks v0.21.0`);
+    /// the marker is the anchor `installedVersion` scans for.
+    static let hookVersionMarker = "# termio-hooks v"
+    static var appVersion: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0"
+    }
+    static var hookVersionComment: String { "\(hookVersionMarker)\(appVersion)" }
+
+    /// The termio-hooks version stamped in a host hooks file, or `nil` if none is present —
+    /// so a caller can tell current from stale from not-installed.
+    static func installedVersion(inFileAt url: URL) -> String? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8),
+              let range = text.range(of: hookVersionMarker) else { return nil }
+        let tail = text[range.upperBound...]
+        let version = tail.prefix { !$0.isWhitespace && $0 != "\"" && $0 != "\\" }
+        return version.isEmpty ? nil : String(version)
     }
 
     /// Absolute path to this channel's stable `termio`/`termio-dev` CLI copy under
@@ -412,6 +444,9 @@ private struct JSONHookFile: AgentStatusInstaller {
         // ones we're about to re-add — so an event we no longer manage (e.g. a
         // mapping we dropped between versions) doesn't leave an orphan behind.
         stripTermioEntries(from: &hooks)
+        // Then drop known conflicting third-party hooks that full-replace the block, so
+        // the next destructive writer can't win again — this makes our install authoritative.
+        stripConflictingEntries(from: &hooks)
         for event in events {
             var groups = hooks[event.name] as? [[String: Any]] ?? []
             let command = AgentStatusHooks.reportCommand(
@@ -481,6 +516,27 @@ private struct JSONHookFile: AgentStatusInstaller {
                 hooks[key] = groups
             }
         }
+    }
+
+    private func stripConflictingEntries(from hooks: inout [String: Any]) {
+        for key in Array(hooks.keys) {
+            guard var groups = hooks[key] as? [[String: Any]] else { continue }
+            groups.removeAll { isConflictingGroup($0) }
+            if groups.isEmpty {
+                hooks.removeValue(forKey: key)
+            } else {
+                hooks[key] = groups
+            }
+        }
+    }
+
+    private func isConflictingGroup(_ group: [String: Any]) -> Bool {
+        func isTheirs(_ command: String) -> Bool {
+            AgentStatusHooks.conflictingHookMarkers.contains { command.contains($0) }
+        }
+        if let command = group["command"] as? String { return isTheirs(command) }
+        guard let hooks = group["hooks"] as? [[String: Any]] else { return false }
+        return hooks.contains { ($0["command"] as? String).map(isTheirs) == true }
     }
 
     private func isTermioGroup(_ group: [String: Any]) -> Bool {

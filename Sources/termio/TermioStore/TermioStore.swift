@@ -602,7 +602,15 @@ final class TermioStore: ObservableObject {
             self?.scheduleWorktreeReconcile(for: folder)
         }
         appActiveObserver = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
-            .sink { [weak self] _ in self?.scheduleWorktreeReconcile() }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.scheduleWorktreeReconcile()
+                // Re-assert agent hooks on refocus: a third-party tool can overwrite the
+                // shared hooks file while termio is backgrounded, wiping ours. Re-installing
+                // restores them (and drops the conflicting entries); skipped when the file
+                // is already byte-identical.
+                if self.settings.agentHooksEnabled { AgentStatusHooks.sync(enabled: true) }
+            }
         reconcileWorktrees()
 
         startHookMonitoring()
