@@ -56,15 +56,16 @@ enum TranscriptionProvider: String, CaseIterable {
     }
 }
 
-/// Hold-to-talk voice dictation: record the mic while the user holds the
-/// terminal keyboard's mic key, then transcribe the clip with the provider the
-/// user picked in Settings ▸ Voice and hand the text back to drop into the
-/// terminal (never auto-sent — a dictation can't fire a half-formed prompt).
+/// Voice dictation: record the mic while the recording pill is up (started
+/// from the terminal keyboard's (+) menu), then transcribe the clip with the
+/// provider the user picked in Settings ▸ Voice and hand the text back to drop
+/// into the terminal (never auto-sent — a dictation can't fire a half-formed
+/// prompt).
 ///
-/// The clip is short (a held key, seconds to a minute) and the text is wanted
-/// only after release, so this records-then-POSTs rather than opening a
-/// realtime socket — see `docs/rfcs/push-to-talk-voice-dictation.md` for why
-/// that model wins here.
+/// The clip is short (seconds to a minute) and the text is wanted only once the
+/// user taps stop, so this records-then-POSTs rather than opening a realtime
+/// socket — see `docs/rfcs/push-to-talk-voice-dictation.md` for why that model
+/// wins here.
 final class VoiceDictation: NSObject {
     enum Failure: Error {
         case missingKey
@@ -74,7 +75,7 @@ final class VoiceDictation: NSObject {
         case network(String)
         case api(status: Int, message: String)
 
-        /// A short line fit for the recording HUD's error state.
+        /// A short line fit for the recording pill's error state.
         var hudMessage: String {
             switch self {
             case .missingKey: "Add an API key in Settings ▸ Voice"
@@ -139,7 +140,7 @@ final class VoiceDictation: NSObject {
         self.fileURL = url
     }
 
-    /// The current input level, 0…1, for the HUD's waveform. Call while
+    /// The current input level, 0…1, for the pill's waveform. Call while
     /// recording; returns 0 otherwise.
     func currentLevel() -> Float {
         guard let recorder, recorder.isRecording else { return 0 }
@@ -151,7 +152,7 @@ final class VoiceDictation: NSObject {
         return min(1, (decibels - floor) / -floor)
     }
 
-    /// Discards the in-flight recording without transcribing (slide-to-cancel).
+    /// Discards the in-flight recording without transcribing (the cancel ✕).
     func cancel() {
         recorder?.stop()
         cleanUp()
@@ -405,6 +406,10 @@ final class VoiceRecordingBar: UIView {
 
     private var startDate: Date?
     private var timer: Timer?
+    /// Guards `onDismissed` to one fire per cycle — `showError` schedules a
+    /// delayed `dismiss()`, so a cycle must not restore the key rows twice.
+    /// Reset whenever the pill re-enters an active state.
+    private var hasDismissed = false
 
     init() {
         super.init(frame: .zero)
@@ -511,6 +516,7 @@ final class VoiceRecordingBar: UIView {
     /// Shows the recording state and starts the timer. `levelProvider` is polled
     /// for the live waveform so the bar never reaches into the recorder itself.
     func beginRecording(levelProvider: @escaping () -> Float) {
+        hasDismissed = false
         isHidden = false
         spinner.stopAnimating()
         statusLabel.isHidden = true
@@ -538,8 +544,10 @@ final class VoiceRecordingBar: UIView {
         spinner.startAnimating()
     }
 
-    /// Flashes a red error line, then hides the bar.
+    /// Flashes a red error line, then hides the bar. Can be reached without a
+    /// preceding `beginRecording` (a start failure), so it re-arms the guard.
     func showError(_ message: String) {
+        hasDismissed = false
         stopTimer()
         isHidden = false
         spinner.stopAnimating()
@@ -553,6 +561,8 @@ final class VoiceRecordingBar: UIView {
     }
 
     func dismiss() {
+        guard !hasDismissed else { return }
+        hasDismissed = true
         stopTimer()
         spinner.stopAnimating()
         dot.layer.removeAllAnimations()
