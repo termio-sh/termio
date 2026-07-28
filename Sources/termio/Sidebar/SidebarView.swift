@@ -994,6 +994,12 @@ private struct SessionRow: View {
                 }
             }
             .frame(width: 16)
+            // The resting "your turn" status now rides the leading mark itself — a green ring when
+            // the agent just finished, orange when it's blocked on you — so all of a row's status
+            // (spinner = working, ring = your turn, nothing = idle) reads from one place on the left
+            // instead of being split with a trailing dot. An overlay, so the ring never shifts the
+            // row's layout, and it sits *around* the brand glyph so the vendor color stays intact.
+            .overlay { StatusRing(status: store.status(for: session.id)) }
             .help(store.statusDescription(for: session.id))
             Text(store.displayTitle(for: session))
                 .font(settings.interfaceFont)
@@ -1017,23 +1023,13 @@ private struct SessionRow: View {
             // only at the true trailing edge. The spacer just left-aligns the title.
             Spacer(minLength: 4)
         }
-        // VSCode-style trailing edge, shared and reserving zero flow width: at rest
-        // the "your turn" status dot (done=green / needsAttention=orange) floats over
-        // the title's tail; on hover it yields to the close button. Because neither
-        // sits in the row's HStack, the title always spans the full width and only
-        // the two are painted on top of its trailing end. Creating a worktree is a
-        // folder-level action now (the project header's "New worktree" button), so a
-        // session row's trailing cluster carries only the close button.
+        // VSCode-style trailing edge, reserving zero flow width: the close button appears here on
+        // hover only. Status no longer trails the title — it moved to the leading mark's ring (above)
+        // — so at rest the trailing edge is empty and the title spans the full row. Reordering is a
+        // drag of the whole row (no separate handle), and creating a worktree is a folder-level
+        // action (the project header's "New worktree" button), so the cluster carries only the close.
         .overlay(alignment: .trailing) {
             ZStack(alignment: .trailing) {
-                // StatusDot self-hides for idle/working, so at rest this shows a dot
-                // only for the two resting "your turn" states; on hover it fades out.
-                StatusDot(status: store.status(for: session.id))
-                    .frame(width: 16)
-                    .opacity(isHovering ? 0 : 1)
-                    .help(store.statusDescription(for: session.id))
-                // Reordering is a drag of the whole row (no separate handle), so the
-                // trailing hover cluster carries only the close.
                 SessionRowActionButton(
                     systemImage: "xmark.circle.fill",
                     help: "Close session",
@@ -1212,16 +1208,18 @@ struct SidebarRowHighlight: View {
 
 /// A small coloured dot mirroring the menu-bar pulse: hidden when idle, amber
 /// when the session wants attention, blue while working.
-private struct StatusDot: View {
+/// The resting "your turn" status, drawn as a ring *around* the leading brand mark: green when the
+/// agent just finished, orange when it's blocked on you. Working is the leading spinner and idle is
+/// nothing, so only those two states light the ring. Sized well past the 16pt icon column so it
+/// reads as a clear halo at a glance — the sidebar's most-scanned signal — while staying an overlay
+/// that never shifts the row.
+private struct StatusRing: View {
     let status: SessionStatus
 
     var body: some View {
         Circle()
-            .fill(color)
-            .frame(width: 7, height: 7)
-            // Working is shown by the leading spinner and idle shows nothing, so
-            // only the two resting "your turn" states trail the title as a dot:
-            // green when the agent just finished, orange when it's blocked on you.
+            .stroke(color, lineWidth: 2)
+            .frame(width: 21, height: 21)
             .opacity(status == .done || status == .needsAttention ? 1 : 0)
     }
 
