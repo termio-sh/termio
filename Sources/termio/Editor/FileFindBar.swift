@@ -88,11 +88,12 @@ struct FileFindBar: View {
                 }
             }
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(active ? Color.accentColor : .secondary)
+            // Active reads as a neutral grey chip + full-strength label, not an accent-blue fill.
+            .foregroundStyle(active ? Color.primary : .secondary)
             .frame(width: 20, height: 18)
             .background(
-                active ? Color.accentColor.opacity(0.18) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 3)
+                active ? Color.primary.opacity(0.12) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 4)
             )
         }
         .buttonStyle(.borderless)
