@@ -166,9 +166,10 @@ extension TermioStore {
             // The agent is blocked waiting on the user (a permission prompt or a
             // free-text answer). Mirror the bell path: only flag a session the user
             // isn't actually watching — with termio backgrounded, even the selected
-            // session needs the cue (it's what fires the desktop notification).
+            // session needs the cue (it's what fires the desktop notification). This
+            // is an observable blocking condition, so its dot survives a click.
             clearWorking(id)
-            if !isViewing(id) { setStatus(.needsAttention, for: id) }
+            flagBlockingAttention(for: id)
         case "idle":
             clearWorking(id)
             setStatus(.idle, for: id)
@@ -209,6 +210,21 @@ extension TermioStore {
         lastTitleActivity[id] = nil
         lastScreenActivity[id] = nil
         stallProbes[id] = nil
+        blockingAttention.remove(id)
+    }
+
+    /// Light the "blocked on you" dot from a genuine, observable blocking condition
+    /// (a hook / screen / title "attention" signal). Unlike a one-shot bell, these
+    /// have a matching "resolved" transition, so the dot is recorded as blocking
+    /// (`blockingAttention`) and survives a click in `markSeen` — looking at a
+    /// permission prompt isn't answering it. Only flags a session the user isn't
+    /// already watching, mirroring the raw `!isViewing` guard it replaces; the flag
+    /// is still set even when the status write is a no-op, so a bell-set dot already
+    /// showing gets *upgraded* to blocking when the real signal arrives.
+    func flagBlockingAttention(for id: Session.ID) {
+        guard !isViewing(id) else { return }
+        blockingAttention.insert(id)
+        setStatus(.needsAttention, for: id)
     }
 
     /// Marks the moment of live user input into a session's terminal. Keystroke
@@ -309,7 +325,7 @@ extension TermioStore {
             setStatus(.working, for: id)
         case .attention:
             clearWorking(id)
-            if !isViewing(id) { setStatus(.needsAttention, for: id) }
+            flagBlockingAttention(for: id)
         case .idle:
             clearWorking(id)
             if previous == .working || previous == .attention {
@@ -344,7 +360,7 @@ extension TermioStore {
             lastWorkingAt[id] = Date()
         case .attention:
             clearWorking(id)
-            if !isViewing(id) { setStatus(.needsAttention, for: id) }
+            flagBlockingAttention(for: id)
         case .idle:
             guard previous == .working, status(for: id) == .working else { return }
             clearWorking(id)
