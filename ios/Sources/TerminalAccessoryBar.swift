@@ -328,10 +328,10 @@ final class TerminalAccessoryBar: UIInputView {
         glass.layer.cornerCurve = .continuous
 
         let rows = UIStackView(arrangedSubviews: [
-            makeMenuRow(title: "Camera", symbol: "camera") { [weak self] in self?.onAttach?(.camera) },
-            makeMenuRow(title: "Photos", symbol: "photo.on.rectangle") { [weak self] in self?.onAttach?(.photos) },
-            makeMenuRow(title: "Files", symbol: "folder") { [weak self] in self?.onAttach?(.files) },
-            makeMenuRow(title: "Voice", symbol: "waveform") { [weak self] in self?.startVoiceRecording() },
+            makeMenuRow(title: "Camera", symbol: "camera.fill", tint: .systemGray) { [weak self] in self?.onAttach?(.camera) },
+            makeMenuRow(title: "Photos", symbol: "photo.fill", tint: .systemBlue) { [weak self] in self?.onAttach?(.photos) },
+            makeMenuRow(title: "Voice", symbol: "mic.fill", tint: .systemRed) { [weak self] in self?.startVoiceRecording() },
+            makeMenuRow(title: "Files", symbol: "folder.fill", tint: .systemIndigo) { [weak self] in self?.onAttach?(.files) },
         ])
         rows.axis = .vertical
         rows.translatesAutoresizingMaskIntoConstraints = false
@@ -382,34 +382,56 @@ final class TerminalAccessoryBar: UIInputView {
         attachMenuScrim = nil
     }
 
-    /// One native-menu row: 17pt title leading, SF symbol trailing — the
-    /// layout a real UIMenu row uses (icons ride the right edge on iOS).
-    /// No separators: iMessage/WhatsApp source menus are clean rows.
+    /// One source row in the newest-Messages style: a filled SF symbol in a
+    /// tinted rounded chip on the leading edge, then the label — the iMessage
+    /// (+) app-row look, cleaner than the plain UIMenu icon-on-the-right shape.
     private func makeMenuRow(
-        title: String, symbol: String, handler: @escaping () -> Void
+        title: String, symbol: String, tint: UIColor, handler: @escaping () -> Void
     ) -> UIView {
-        var config = UIButton.Configuration.plain()
-        config.title = title
-        config.image = UIImage(
-            systemName: symbol,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular)
-        )
-        config.imagePlacement = .trailing
-        config.baseForegroundColor = .label
-        config.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 18, bottom: 0, trailing: 18)
-        config.titleTextAttributesTransformer = .init { attributes in
-            var attributes = attributes
-            attributes.font = .systemFont(ofSize: 17)
-            return attributes
-        }
-        let button = UIButton(configuration: config)
-        // .fill spreads title and trailing image to opposite edges.
-        button.contentHorizontalAlignment = .fill
+        let button = UIButton(type: .system)
         button.heightAnchor.constraint(equalToConstant: 46).isActive = true
         button.addAction(UIAction { [weak self] _ in
             self?.dismissAttachMenu()
             handler()
         }, for: .touchUpInside)
+
+        let chip = UIView()
+        chip.backgroundColor = tint
+        chip.layer.cornerRadius = 7
+        chip.layer.cornerCurve = .continuous
+        chip.isUserInteractionEnabled = false
+        chip.translatesAutoresizingMaskIntoConstraints = false
+
+        let icon = UIImageView(image: UIImage(
+            systemName: symbol,
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        ))
+        icon.tintColor = .white
+        icon.contentMode = .center
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        chip.addSubview(icon)
+
+        let label = UILabel()
+        label.text = title
+        label.font = .systemFont(ofSize: 17)
+        label.textColor = .label
+        label.isUserInteractionEnabled = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        button.addSubview(chip)
+        button.addSubview(label)
+        button.accessibilityLabel = title
+        NSLayoutConstraint.activate([
+            chip.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 16),
+            chip.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            chip.widthAnchor.constraint(equalToConstant: 30),
+            chip.heightAnchor.constraint(equalToConstant: 30),
+            icon.centerXAnchor.constraint(equalTo: chip.centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: chip.trailingAnchor, constant: 12),
+            label.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: button.trailingAnchor, constant: -16),
+        ])
         return button
     }
 
