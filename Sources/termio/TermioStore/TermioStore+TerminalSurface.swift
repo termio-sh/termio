@@ -275,7 +275,16 @@ extension TermioStore {
                             agent: "\(agentID).progress", session: session.id,
                             activity: progress, matched: "OSC 9;4")
                     }
-                    DispatchQueue.main.async { self?.applyProgressActivity(progress, for: session.id) }
+                    // Tie the event to the PTY that produced it. Unlike the title
+                    // channel — whose Combine subscription is torn down with the view
+                    // state on relaunch — this sink is only session-id-keyed, so a
+                    // same-agent relaunch could otherwise let a dead PTY's queued
+                    // `working` mark the replacement process. Applying only while this
+                    // PTY is still the session's live one drops that stale event.
+                    DispatchQueue.main.async { [weak pty] in
+                        guard let self, let pty, self.ptyProcesses[session.id] === pty else { return }
+                        self.applyProgressActivity(progress, for: session.id)
+                    }
                 }
                 let now = Date()
                 guard now.timeIntervalSince(lastPoke) >= 1 else { return }

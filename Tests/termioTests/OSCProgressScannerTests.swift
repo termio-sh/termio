@@ -36,10 +36,22 @@ final class OSCProgressScannerTests: XCTestCase {
         XCTAssertEqual(scan(["\u{1B}]9;4;3;\u{1B}\\"]), [.working])
     }
 
-    func testRepeatedBusyKeepalivesCollapseToOneTransition() {
+    func testKeepalivesInOneChunkCollapse() {
+        // Consecutive duplicates within a single read collapse to one report.
+        XCTAssertEqual(
+            scan(["\u{1B}]9;4;1;-1\u{07}\u{1B}]9;4;1;-1\u{07}\u{1B}]9;4;1;-1\u{07}"]),
+            [.working])
+    }
+
+    /// The scanner keeps no memory across reads: each chunk's keepalive is reported,
+    /// and the *store* dedupes under the live-agent gate (`lastProgressActivity`).
+    /// This is what lets a session promoted to Grok mid-stream pick the signal up
+    /// after its first `working` was gate-rejected — a scanner that privately deduped
+    /// would swallow the keepalives the promoted row needs.
+    func testKeepalivesAcrossChunksAreEachReported() {
         XCTAssertEqual(
             scan(["\u{1B}]9;4;1;-1\u{07}", "\u{1B}]9;4;1;-1\u{07}", "\u{1B}]9;4;1;-1\u{07}"]),
-            [.working])
+            [.working, .working, .working])
     }
 
     /// A single PTY read can carry a whole fast turn — both edges must survive, in
@@ -72,6 +84,17 @@ final class OSCProgressScannerTests: XCTestCase {
         XCTAssertEqual(scan(["\u{1B}]9;4;1;-1;extra;fields\u{07}"]), [])
     }
 
+    /// The busy states carry a progress field in the documented `0…100` range (plus
+    /// Grok's `-1`). An out-of-range value, or no field at all, is not a progress
+    /// report — which also narrows the OSC 9 notification collision.
+    func testBusyStateValidatesProgressRange() {
+        XCTAssertEqual(scan(["\u{1B}]9;4;1;100\u{07}"]), [.working]) // upper bound ok
+        XCTAssertEqual(scan(["\u{1B}]9;4;1;0\u{07}"]), [.working])   // lower bound ok
+        XCTAssertEqual(scan(["\u{1B}]9;4;1;101\u{07}"]), [])         // out of range
+        XCTAssertEqual(scan(["\u{1B}]9;4;1;-2\u{07}"]), [])          // only -1 allowed
+        XCTAssertEqual(scan(["\u{1B}]9;4;1\u{07}"]), [])             // busy needs a field
+    }
+
     /// An overlong payload can't be a progress report, so it is rejected outright
     /// rather than classified from its truncated prefix.
     func testOverlongPayloadIsRejected() {
@@ -88,8 +111,10 @@ final class OSCProgressScannerTests: XCTestCase {
 
     func testClassifyDirect() {
         XCTAssertEqual(OSCProgressScanner.classify(Array("9;4;0;".utf8)), .idle)
+        XCTAssertEqual(OSCProgressScanner.classify(Array("9;4;0".utf8)), .idle) // clear needs no field
         XCTAssertEqual(OSCProgressScanner.classify(Array("9;4;1;-1".utf8)), .working)
-        XCTAssertEqual(OSCProgressScanner.classify(Array("9;4;3".utf8)), .working)
+        XCTAssertEqual(OSCProgressScanner.classify(Array("9;4;3;".utf8)), .working) // indeterminate, empty
+        XCTAssertNil(OSCProgressScanner.classify(Array("9;4;3".utf8))) // busy needs a progress field
         XCTAssertNil(OSCProgressScanner.classify(Array("9;4".utf8)))
         XCTAssertNil(OSCProgressScanner.classify(Array("9;4;1;text".utf8)))
         XCTAssertNil(OSCProgressScanner.classify(Array("9;9;cwd".utf8)))
