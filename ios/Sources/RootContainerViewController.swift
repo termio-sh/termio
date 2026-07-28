@@ -173,6 +173,11 @@ final class RootContainerViewController: UIViewController {
         }
         if let terminal = screen as? TerminalViewController {
             terminal.onRequestBack = { [weak self] in self?.goHome() }
+            terminal.onBackBegan = { [weak self] in self?.beginInteractiveBack() }
+            terminal.onBackChanged = { [weak self] tx in self?.updateInteractiveBack(translationX: tx) }
+            terminal.onBackEnded = { [weak self] vx, commit in
+                self?.finishInteractiveBack(velocityX: vx, commit: commit)
+            }
             terminal.onClose = { [weak self, weak screen] in
                 guard let screen else { return }
                 self?.close(screen)
@@ -227,12 +232,69 @@ final class RootContainerViewController: UIViewController {
         }
         if animated {
             UIView.animate(withDuration: 0.3, delay: 0,
-                           options: .curveEaseIn,
+                           options: .curveEaseOut,
                            animations: { screen.view.frame = offscreen },
                            completion: { _ in finish() })
         } else {
             screen.view.frame = offscreen
             finish()
+        }
+    }
+
+    // MARK: - Interactive back (finger-tracked right-swipe)
+
+    /// The screen currently being dragged back to the list. Held so update/finish
+    /// keep driving the same view even if `activeScreen` is cleared on commit.
+    private var interactiveBackScreen: UIViewController?
+
+    private func beginInteractiveBack() {
+        interactiveBackScreen = activeScreen
+    }
+
+    /// Follow the finger: slide the active screen right by `translationX`
+    /// (already clamped to >= 0 by the caller), revealing the list underneath.
+    private func updateInteractiveBack(translationX: CGFloat) {
+        guard let screen = interactiveBackScreen else { return }
+        screen.view.frame = view.bounds.offsetBy(dx: translationX, dy: 0)
+    }
+
+    /// Release: either complete the pop (carrying the fling velocity, then the
+    /// SAME park-or-evict teardown as `goHome`) or spring back to full screen.
+    private func finishInteractiveBack(velocityX: CGFloat, commit: Bool) {
+        guard let screen = interactiveBackScreen else { return }
+        interactiveBackScreen = nil
+        let width = view.bounds.width
+        let currentX = screen.view.frame.origin.x
+
+        if commit {
+            // Teardown deferred from goHome to here (only once the drag commits).
+            if activeScreen === screen { activeScreen = nil }
+            store.currentSessionKey = nil
+            refreshHomeLists()
+            let parked = recentTerminals.contains { $0.value === screen }
+            let offscreen = view.bounds.offsetBy(dx: width, dy: 0)
+            let remaining = max(1, width - currentX)
+            let v = min(max(velocityX / remaining, 0), 30)
+            UIView.animate(withDuration: 0.3, delay: 0,
+                           usingSpringWithDamping: 0.9, initialSpringVelocity: v,
+                           options: .curveEaseOut,
+                           animations: { screen.view.frame = offscreen },
+                           completion: { _ in
+                if parked {
+                    screen.view.isHidden = true // stays in the window: surface alive
+                } else {
+                    self.evict(screen)
+                }
+            })
+        } else {
+            // Cancel: settle back to x = 0. A leftward flick (negative vx) is
+            // toward the target, so negate; away-from-target starts from rest.
+            let remaining = max(1, currentX)
+            let v = min(max(-velocityX / remaining, 0), 30)
+            UIView.animate(withDuration: 0.3, delay: 0,
+                           usingSpringWithDamping: 0.9, initialSpringVelocity: v,
+                           options: .curveEaseOut,
+                           animations: { screen.view.frame = self.view.bounds })
         }
     }
 

@@ -446,13 +446,15 @@ final class TerminalAccessoryBar: UIInputView {
 
         // UIMenu's entrance: grow from the bottom-left corner (the (+) key)
         // with a soft spring — the translate keeps that corner pinned while
-        // the card scales up out of it.
+        // the card scales up out of it. Under Reduce Motion it's a plain fade,
+        // no scale-from-corner (matches showVoiceBar's pattern).
+        let reduce = UIAccessibility.isReduceMotionEnabled
         let collapsed = CGAffineTransform(scaleX: 0.4, y: 0.4)
             .translatedBy(x: -size.width * 0.5, y: size.height * 0.5)
         card.alpha = 0
-        card.transform = collapsed
-        UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.78,
-                       initialSpringVelocity: 0) {
+        card.transform = reduce ? .identity : collapsed
+        UIView.animate(withDuration: reduce ? 0.2 : 0.4, delay: 0,
+                       usingSpringWithDamping: 0.78, initialSpringVelocity: 0) {
             card.alpha = 1
             card.transform = .identity
         }
@@ -466,10 +468,17 @@ final class TerminalAccessoryBar: UIInputView {
         // Collapse back into the (+) key, mirroring the entrance.
         let card = attachMenuCard
         let size = card?.bounds.size ?? .zero
+        // Collapse-into-the-(+)-key wants ease-IN here, not ease-out: ease-in
+        // keeps the card solid while it shrinks and only vanishes at the small
+        // end, so no faint large "ghost" trails behind it (ease-out drops the
+        // alpha while the card is still large — see the dismiss-easing note).
+        let reduce = UIAccessibility.isReduceMotionEnabled
         UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseIn) {
             card?.alpha = 0
-            card?.transform = CGAffineTransform(scaleX: 0.4, y: 0.4)
-                .translatedBy(x: -size.width * 0.5, y: size.height * 0.5)
+            if !reduce {
+                card?.transform = CGAffineTransform(scaleX: 0.4, y: 0.4)
+                    .translatedBy(x: -size.width * 0.5, y: size.height * 0.5)
+            }
         } completion: { _ in
             scrim.removeFromSuperview()
         }

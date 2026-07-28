@@ -189,7 +189,8 @@ final class HomeTabPill: UIView {
         // 48pt Lottie and replays it once on every select. Same idea, hand-
         // keyed in Core Animation per icon — in-place character moves with
         // overshoot, never a size pop.
-        if animated, changed, buttons.indices.contains(index) {
+        if animated, changed, !UIAccessibility.isReduceMotionEnabled,
+           buttons.indices.contains(index) {
             playSelectionAnimation(on: buttons[index], icon: icons[index])
         }
         layoutIfNeeded()
