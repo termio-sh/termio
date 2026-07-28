@@ -97,9 +97,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // Previous detail-presented state, so the observer fires reveal only on the open transition
     // rather than on every store change.
     private var detailWasPresented = false
+    // Previous maximize state, so the observer re-binds the tracking separator on the restore
+    // transition (tearing down the full-window host relayouts the inspector) and not every tick.
+    private var detailWasMaximized = false
     // The full-window host that shows the active inspector detail blown up to cover everything
     // while `store.inspectorMaximized`; nil when the detail is docked in the inspector.
     private var maximizedDetailHost: NSHostingView<AnyView>?
+    // Coalesces the per-frame `windowDidResize` stream into a single settle so the inspector's
+    // max thickness (and the tracking-separator re-bind it forces) is recomputed once the drag
+    // stops, not on every intermediate frame.
+    private var inspectorResizeSettle: DispatchWorkItem?
     // The floating panel shared by ⌘⇧O Open Quickly and ⌘⇧P Command Palette.
     // Presented as a child window (Xcode Open-Quickly style) because the
     // terminal surfaces are NSViews that draw above any SwiftUI overlay in the
@@ -229,15 +236,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     let presented = self.store.isDetailPresented
                     let opened = presented && !self.detailWasPresented
                     self.detailWasPresented = presented
+                    let maximized = self.store.inspectorMaximized && presented
+                    let restored = self.detailWasMaximized && !maximized
+                    self.detailWasMaximized = maximized
                     // Opening a detail reveals the inspector and gives it a comfortable reading width
                     // the first time — only on the open transition, so a later store change can't yank
                     // an inspector the user has since resized.
                     if opened { self.revealInspectorForDetail() }
                     // Blow the detail up into a full-window host when maximized; tear it down otherwise.
-                    self.setDetailMaximized(self.store.inspectorMaximized && presented)
-                    // Revealing the inspector moves divider 1, which can leave the tracking separator
-                    // inert (the centered-tabs / missing-divider glitch). Re-bind it once layout settles.
-                    if opened {
+                    self.setDetailMaximized(maximized)
+                    // Revealing the inspector (open) or tearing down the maximize host (restore) both
+                    // relayout around divider 1, which can leave the tracking separator inert (the
+                    // centered-tabs / missing-divider glitch). Re-bind once layout settles.
+                    if opened || restored {
                         DispatchQueue.main.async { [weak self] in self?.reassertInspectorSeparator() }
                     }
                 }
@@ -578,7 +589,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowDidResize(_ notification: Notification) {
-        updateInspectorMaxThickness()
+        // `windowDidResize` fires every frame of a live drag. Re-setting `maximumThickness` (and the
+        // separator re-bind it triggers) on each frame both wastes layout and repeatedly disturbs the
+        // tracking separator mid-drag. Coalesce to a single update once the drag settles.
+        inspectorResizeSettle?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.updateInspectorMaxThickness() }
+        }
+        inspectorResizeSettle = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     /// Lets the right inspector grow with the window: its max width is the golden ratio (0.618)
@@ -588,7 +607,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func updateInspectorMaxThickness() {
         guard let item = filesInspectorItem, let window else { return }
         let contentWidth = window.contentLayoutRect.width
-        item.maximumThickness = max(420, (contentWidth * 0.618).rounded(.down))
+        let newMax = max(420, (contentWidth * 0.618).rounded(.down))
+        guard item.maximumThickness != newMax else { return }
+        item.maximumThickness = newMax
+        // Changing the max can pull divider 1 in (when the inspector was pinned at the old cap),
+        // which leaves `.inspectorTrackingSeparator` inert — so the tab switch drifts to center. Only
+        // an issue while the inspector is open; the reassert no-ops otherwise. Deferred so it runs
+        // against the settled geometry.
+        DispatchQueue.main.async { [weak self] in self?.reassertInspectorSeparator() }
     }
 
     /// Applies the user's appearance mode. `.system` leaves every surface tracking
@@ -760,6 +786,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let willOpen = item.isCollapsed
         item.animator().isCollapsed = !willOpen
         setInspectorSwitchVisible(willOpen)
+        // On expand the switch + separator are inserted while the divider is still mid-slide, so the
+        // separator binds against unsettled geometry and can land inert (tabs drift to center). Re-bind
+        // once the collapse animation finishes. Nothing to align on collapse (the switch is gone).
+        if willOpen {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.reassertInspectorSeparator()
+            }
+        }
     }
 
     /// Matches the toolbar's pane switch to the inspector's *actual* collapse state — called once at
