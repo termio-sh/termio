@@ -1188,6 +1188,7 @@ private final class DisplayTerminalView: UITerminalView {
     /// newline from auto-submitting. A char with a sticky ctrl/alt armed also
     /// stays on the wrapper path, which applies the modifier.
     override func insertText(_ text: String) {
+        deleteRepeat.reset()
         if text == "\n" {
             send(Data([0x0D]))
             return
@@ -1198,6 +1199,115 @@ private final class DisplayTerminalView: UITerminalView {
             return
         }
         super.insertText(text)
+    }
+
+    // MARK: - Software-keyboard delete auto-repeat (phantom document)
+
+    /// Owns the phantom-document state and hold-acceleration policy that make
+    /// the on-screen keyboard's delete key auto-repeat over the terminal. The
+    /// `UITextInput` overrides below are the thin UIKit glue that feed it; the
+    /// reasoning lives in `SoftwareKeyboardDeleteRepeat`.
+    private var deleteRepeat = SoftwareKeyboardDeleteRepeat()
+
+    /// True while an IME (e.g. pinyin) is composing. In that state we defer to
+    /// the wrapper's real geometry so composition, cursor, and candidate
+    /// replacement keep working — the phantom document is only for plain typing.
+    private var isComposingIME: Bool { super.markedTextRange != nil }
+
+    override func deleteBackward() {
+        // IME composition and armed sticky modifiers own the keystroke — never
+        // accelerate those; one delete, real geometry, streak cleared.
+        guard !isComposingIME, !stickyModifierArmed else {
+            deleteRepeat.reset()
+            super.deleteBackward()
+            return
+        }
+        // Re-use the wrapper's own delete encoding (correct per backend,
+        // marked-text-safe) rather than hand-rolling the byte.
+        let count = deleteRepeat.backspaceCount(now: CACurrentMediaTime())
+        for _ in 0..<count { super.deleteBackward() }
+    }
+
+    override var beginningOfDocument: UITextPosition {
+        isComposingIME ? super.beginningOfDocument : PhantomTextPosition(0)
+    }
+
+    override var endOfDocument: UITextPosition {
+        isComposingIME
+            ? super.endOfDocument
+            : PhantomTextPosition(SoftwareKeyboardDeleteRepeat.documentLength)
+    }
+
+    override var selectedTextRange: UITextRange? {
+        get {
+            guard !isComposingIME else { return super.selectedTextRange }
+            let caret = PhantomTextPosition(deleteRepeat.caret)
+            return PhantomTextRange(start: caret, end: caret)
+        }
+        set {
+            guard !isComposingIME else { super.selectedTextRange = newValue; return }
+            if let caret = (newValue?.start as? PhantomTextPosition)?.index {
+                deleteRepeat.moveCaret(to: caret)
+            }
+        }
+    }
+
+    override func textRange(
+        from fromPosition: UITextPosition, to toPosition: UITextPosition
+    ) -> UITextRange? {
+        guard !isComposingIME,
+              let from = fromPosition as? PhantomTextPosition,
+              let to = toPosition as? PhantomTextPosition
+        else { return super.textRange(from: fromPosition, to: toPosition) }
+        return PhantomTextRange(start: from, end: to)
+    }
+
+    override func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
+        guard !isComposingIME, let pos = position as? PhantomTextPosition else {
+            return super.position(from: position, offset: offset)
+        }
+        let index = pos.index + offset
+        guard index >= 0, index <= SoftwareKeyboardDeleteRepeat.documentLength else { return nil }
+        return PhantomTextPosition(index)
+    }
+
+    override func position(
+        from position: UITextPosition, in direction: UITextLayoutDirection, offset: Int
+    ) -> UITextPosition? {
+        guard !isComposingIME, position is PhantomTextPosition else {
+            return super.position(from: position, in: direction, offset: offset)
+        }
+        return self.position(from: position, offset: offset)
+    }
+
+    override func compare(
+        _ position: UITextPosition, to other: UITextPosition
+    ) -> ComparisonResult {
+        guard !isComposingIME,
+              let lhs = position as? PhantomTextPosition,
+              let rhs = other as? PhantomTextPosition
+        else { return super.compare(position, to: other) }
+        if lhs.index < rhs.index { return .orderedAscending }
+        if lhs.index > rhs.index { return .orderedDescending }
+        return .orderedSame
+    }
+
+    override func offset(from: UITextPosition, to toPosition: UITextPosition) -> Int {
+        guard !isComposingIME,
+              let f = from as? PhantomTextPosition,
+              let t = toPosition as? PhantomTextPosition
+        else { return super.offset(from: from, to: toPosition) }
+        return t.index - f.index
+    }
+
+    override func text(in range: UITextRange) -> String? {
+        guard !isComposingIME, let range = range as? PhantomTextRange else {
+            return super.text(in: range)
+        }
+        // Any non-empty string keeps the keyboard convinced there is content
+        // to delete; the bytes never leave this class.
+        let length = max(0, range.length)
+        return String(repeating: " ", count: min(length, 64))
     }
 
     /// Whether any sticky modifier (key bar's ctrl/alt/cmd chips) is armed or
