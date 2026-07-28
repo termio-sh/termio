@@ -925,30 +925,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NotificationCenter.default.post(name: .termioShowFindBar, object: nil)
     }
 
-    /// Reveals the inspector for a freshly opened detail: un-collapses it if hidden, and grows it
-    /// (never shrinks) toward a comfortable width the first time — enough for the list ‖ detail two
-    /// column layout (see `InspectorRoot`), so a 240pt list still leaves the detail room to read.
-    /// The target stays under the golden-ratio cap (`updateInspectorMaxThickness`).
+    /// Reveals the inspector for a freshly opened detail: un-collapses it if hidden, and otherwise
+    /// leaves its width alone. It comes back at whatever the split last had (the user's own width,
+    /// restored from the autosave), and the responsive `InspectorRoot` — two-column when there's
+    /// room, detail-only when narrow, draggable seam either way — takes it from there.
+    ///
+    /// It used to *grow* the inspector to ~half the window on every open. That shrank the terminal
+    /// unbidden and, because the growth was a mid-layout `minimumThickness` bump, left the terminal a
+    /// blank strip where the surface hadn't reflowed. Respect the user's width; let layout be
+    /// responsive instead of forcing it.
     private func revealInspectorForDetail() {
-        guard let item = filesInspectorItem, let split = splitViewController?.splitView, let window else { return }
+        guard let item = filesInspectorItem else { return }
         // Un-collapse *synchronously* (not via `animator()`) so the split geometry — and the divider
         // the tracking separator binds to — is settled before the toolbar switch is (re)inserted.
         if item.isCollapsed {
             item.isCollapsed = false
             setInspectorSwitchVisible(true)
-        }
-        let contentWidth = window.contentLayoutRect.width
-        let comfortable = min(max(680, contentWidth * 0.5), item.maximumThickness)
-        // Grow to a comfortable width by briefly raising the inspector's *minimum* thickness and
-        // forcing a layout, then restoring it — NOT by `setPosition(ofDividerAt:)`. That divider is
-        // tracked by `.inspectorTrackingSeparator`; moving it directly desyncs the separator, which
-        // then stops splitting the toolbar into terminal/inspector regions and lets the tab switcher
-        // drift to center with no divider line (the glitch that a manual inspector toggle re-binds).
-        if item.viewController.view.frame.width < comfortable - 1 {
-            let savedMinimum = item.minimumThickness
-            item.minimumThickness = comfortable
-            split.layoutSubtreeIfNeeded()
-            item.minimumThickness = savedMinimum
         }
     }
 
