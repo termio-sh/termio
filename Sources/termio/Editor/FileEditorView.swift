@@ -358,7 +358,7 @@ struct FileEditorView: View {
     /// search underneath.
     private func openFindBar() {
         guard mode == .edit else { return }
-        withAnimation(.easeOut(duration: 0.12)) { findBarVisible = true }
+        withAnimation(.spring(response: 0.3, dampingFraction: 1)) { findBarVisible = true }
         // NSTextView keeps first responder otherwise, and SwiftUI's @FocusState can't wrestle
         // it away — drop it explicitly so the find field can claim the keyboard.
         NSApp.keyWindow?.makeFirstResponder(nil)
@@ -366,7 +366,7 @@ struct FileEditorView: View {
     }
 
     private func closeFindBar() {
-        withAnimation(.easeOut(duration: 0.12)) { findBarVisible = false }
+        withAnimation(.spring(response: 0.3, dampingFraction: 1)) { findBarVisible = false }
         findQuery = ""
         findLastSubmittedQuery = ""
         findMatchCount = 0

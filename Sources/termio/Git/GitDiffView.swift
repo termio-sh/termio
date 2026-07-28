@@ -8,8 +8,8 @@ import SwiftUI
 /// TextKit view holding the whole diff (`DiffTextPane`): code keeps its syntax colors
 /// (the editor's Highlightr pipeline) with the add/delete tint painted as a full-width
 /// wash underneath, raw `@@` plumbing never appears — unchanged runs collapse into
-/// expandable "n lines" bands — selection runs continuously across lines, and ⌘F is
-/// the system find bar. Escape or the close button dismisses it.
+/// expandable "n lines" bands — selection runs continuously across lines, and ⌘F opens the
+/// same `FileFindBar` the code editor uses. Escape or the close button dismisses it.
 struct GitDiffView: View {
     let request: GitDiffRequest
     @ObservedObject var settings: AppSettings
@@ -33,6 +33,19 @@ struct GitDiffView: View {
     /// Ids (first hidden row) of the collapsed bands the user has expanded.
     @State private var expanded: Set<Int> = []
 
+    // Find bar — the same `FileFindBar` the code editor uses, over the diff's read-only text.
+    @State private var findBarVisible = false
+    @State private var findQuery = ""
+    @State private var findOptions = FindOptions()
+    @State private var findFocusedIndex = 0
+    @State private var findMatchCount = 0
+    /// The query at the last Return press; a second Return on the same query advances.
+    @State private var findLastSubmittedQuery = ""
+    /// Bumped on every ⌘F so the field re-focuses even when the bar is already open.
+    @State private var findFocusTrigger = 0
+    /// Bumped when the bar closes so the text view reclaims first responder.
+    @State private var findReclaim = 0
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -47,6 +60,46 @@ struct GitDiffView: View {
         .onKeyPress(.rightArrow) { walk(+1) ? .handled : .ignored }
         .onExitCommand(perform: onClose)
         .task(id: request) { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .termioShowFindBar)) { _ in
+            openFindBar()
+        }
+    }
+
+    // MARK: Find
+
+    /// ⌘F: reveal the find bar (only over a loaded diff — nothing to search otherwise).
+    private func openFindBar() {
+        guard document != nil else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 1)) { findBarVisible = true }
+        // The text view holds first responder; drop it so the find field can take the keyboard.
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        findFocusTrigger &+= 1
+    }
+
+    private func closeFindBar() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 1)) { findBarVisible = false }
+        findQuery = ""
+        findLastSubmittedQuery = ""
+        findMatchCount = 0
+        findFocusedIndex = 0
+        findOptions = FindOptions()
+        findReclaim &+= 1
+    }
+
+    /// Return: fresh query → match 1; same query → next match.
+    private func submitFind() {
+        guard !findQuery.isEmpty else { return }
+        if findQuery == findLastSubmittedQuery, findMatchCount > 0 {
+            advanceFind(by: 1)
+        } else {
+            findLastSubmittedQuery = findQuery
+            findFocusedIndex = 0
+        }
+    }
+
+    private func advanceFind(by offset: Int) {
+        guard findMatchCount > 0 else { return }
+        findFocusedIndex = ((findFocusedIndex + offset) % findMatchCount + findMatchCount) % findMatchCount
     }
 
     // MARK: Walking
@@ -148,8 +201,32 @@ struct GitDiffView: View {
                         codeFont: settings.resolvedTerminalFont())
                 },
                 onWalk: { walk($0) },
-                onClose: onClose
+                onClose: onClose,
+                findQuery: findBarVisible ? findQuery : "",
+                findOptions: findOptions,
+                findFocusedIndex: findFocusedIndex,
+                onMatchesChanged: { count in
+                    findMatchCount = count
+                    if count > 0, findFocusedIndex >= count { findFocusedIndex = 0 }
+                },
+                reclaimFocus: findReclaim
             )
+            .overlay(alignment: .topTrailing) {
+                if findBarVisible {
+                    FileFindBar(
+                        query: $findQuery,
+                        options: $findOptions,
+                        currentMatch: findMatchCount == 0 ? 0 : findFocusedIndex + 1,
+                        totalMatches: findMatchCount,
+                        onSubmit: submitFind,
+                        onNext: { advanceFind(by: 1) },
+                        onPrevious: { advanceFind(by: -1) },
+                        onClose: closeFindBar,
+                        focusTrigger: findFocusTrigger
+                    )
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
         } else {
             ContentUnavailableView(
                 "No Diff",

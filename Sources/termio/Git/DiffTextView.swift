@@ -7,8 +7,9 @@ import SwiftUI
 /// editor) holding the whole `DiffDocument`. Line semantics are painted, not stacked —
 /// `DiffWashLayoutManager` fills the add/delete washes and band fills behind the text,
 /// the gutter ruler draws line numbers and the `+`/`−` signs *outside* the selectable
-/// text — so selection runs continuously across lines, copies pure code, and ⌘F is
-/// the system find bar.
+/// text — so selection runs continuously across lines, copies pure code, and ⌘F opens the
+/// same `FileFindBar` the code editor uses (driven by the shared `TextFindEngine`), not
+/// AppKit's un-styleable system find bar.
 struct DiffTextPane: NSViewRepresentable {
     let document: DiffDocument
     /// Syntax-colored lines by row id (the `DiffHighlighter` pass), applied in place
@@ -24,6 +25,16 @@ struct DiffTextPane: NSViewRepresentable {
     /// ← / → sibling walk; returns false at either end so the press dies quietly.
     let onWalk: (Int) -> Bool
     let onClose: () -> Void
+    /// Find state driven by the overlay's `FileFindBar` — empty query paints nothing.
+    var findQuery: String = ""
+    var findOptions: FindOptions = FindOptions()
+    /// 0-based match to focus; ignored on empty query or empty result.
+    var findFocusedIndex: Int = 0
+    /// Fires with the total match count after any recompute.
+    var onMatchesChanged: ((Int) -> Void)? = nil
+    /// Bumped when the find bar closes, so the text view reclaims first responder and its
+    /// ← / → walk and Esc work again.
+    var reclaimFocus: Int = 0
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -46,8 +57,6 @@ struct DiffTextPane: NSViewRepresentable {
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = false
-        textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = true
         textView.textContainerInset = NSSize(width: 0, height: 8)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -84,16 +93,11 @@ struct DiffTextPane: NSViewRepresentable {
         context.coordinator.observeFrame(of: textView)
         scrollView.contentView.postsBoundsChangedNotifications = true
         context.coordinator.observeScroll(of: scrollView)
-        // ⌘F now lives on a global Edit-menu item (see App.swift), whose key equivalent
-        // pre-empts the text view before AppKit's find-bar machinery ever sees the event.
-        // Honor the same broadcast the file editor listens for and drive the system find bar
-        // by hand, so ⌘F still opens find in the diff overlay.
-        context.coordinator.observeFindBar(for: textView)
 
         apply(to: textView, layoutManager: layoutManager, ruler: ruler,
               coordinator: context.coordinator)
 
-        // Keys (← → walk, Esc, ⌘F) should work the moment the overlay lands, without
+        // Keys (← → walk, Esc) should work the moment the overlay lands, without
         // a click first. Deferred one turn — at make time the view has no window yet.
         DispatchQueue.main.async { [weak textView] in
             guard let textView, let window = textView.window else { return }
@@ -102,10 +106,6 @@ struct DiffTextPane: NSViewRepresentable {
             }
         }
         return scrollView
-    }
-
-    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
-        coordinator.teardown()
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
@@ -118,8 +118,15 @@ struct DiffTextPane: NSViewRepresentable {
         scrollView.backgroundColor = backgroundColor
         scrollView.contentView.backgroundColor = backgroundColor
         textView.backgroundColor = backgroundColor
+        let documentChanged = context.coordinator.appliedDocument !== document
         apply(to: textView, layoutManager: layoutManager, ruler: ruler,
               coordinator: context.coordinator)
+        if documentChanged { context.coordinator.invalidateFind() }
+
+        context.coordinator.onMatchesChanged = onMatchesChanged
+        context.coordinator.updateFind(query: findQuery, options: findOptions,
+                                       focusedIndex: findFocusedIndex, in: textView)
+        context.coordinator.reclaimFocusIfNeeded(reclaimFocus, in: textView)
     }
 
     /// Swaps the document in when it changed (initial load, band expand) and lays the
@@ -172,29 +179,52 @@ struct DiffTextPane: NSViewRepresentable {
         var appliedDocument: DiffDocument?
         var appliedStyled: Int?
         weak var ruler: DiffGutterRulerView?
-        private var findObserver: NSObjectProtocol?
+        var onMatchesChanged: ((Int) -> Void)?
+        /// The same incremental-find engine the code editor uses — highlights and semantics
+        /// stay identical across the two ⌘F surfaces.
+        private let find = TextFindEngine()
+        private var appliedFindQuery: String = ""
+        private var appliedFindOptions: FindOptions = FindOptions()
+        private var appliedFocusedIndex: Int = -1
+        private var appliedReclaim: Int = 0
 
-        /// Opens the system find bar on the ⌘F broadcast — the menu item swallows the key
-        /// equivalent, so the text view never gets a chance to open it itself.
-        func observeFindBar(for textView: DiffTextView) {
-            findObserver = NotificationCenter.default.addObserver(
-                forName: .termioShowFindBar, object: nil, queue: .main
-            ) { [weak textView] _ in
-                MainActor.assumeIsolated {
-                    guard let textView, textView.window != nil else { return }
-                    let action = NSMenuItem()
-                    action.tag = NSTextFinder.Action.showFindInterface.rawValue
-                    textView.performTextFinderAction(action)
-                }
+        /// Recompute + repaint after a new query, option change, or focus move (the diff is
+        /// read-only, so there's no edit path to keep matches in sync with — unlike the editor).
+        func updateFind(query: String, options: FindOptions, focusedIndex: Int, in textView: NSTextView) {
+            let queryChanged = query != appliedFindQuery || options != appliedFindOptions
+            if queryChanged {
+                appliedFindQuery = query
+                appliedFindOptions = options
+                find.recompute(query: query, options: options, in: textView)
+                notifyMatchCount()
+                appliedFocusedIndex = -1
             }
+            // Unrelated re-renders (a sibling walk, a theme change) flow through here too — only
+            // repaint when the query, options, or focused match actually moved.
+            guard queryChanged || focusedIndex != appliedFocusedIndex else { return }
+            find.paint(focused: focusedIndex, reveal: true, in: textView)
+            appliedFocusedIndex = focusedIndex
         }
 
-        /// The find-bar observer is registered with `object: nil`, so unlike the frame/scroll
-        /// observers (scoped to their view) it must be torn down explicitly or it leaks and
-        /// keeps firing for stale diff panes.
-        func teardown() {
-            if let findObserver { NotificationCenter.default.removeObserver(findObserver) }
-            findObserver = nil
+        /// A band-expand rebuilds the document, wiping the highlights and shifting offsets, so
+        /// force the next `updateFind` to recompute against the fresh text.
+        func invalidateFind() {
+            appliedFindQuery = ""
+            appliedFindOptions = FindOptions()
+            appliedFocusedIndex = -1
+        }
+
+        /// Closing the find bar hands the keyboard back to the text view so ← / → and Esc work.
+        func reclaimFocusIfNeeded(_ token: Int, in textView: NSTextView) {
+            guard token != appliedReclaim else { return }
+            appliedReclaim = token
+            textView.window?.makeFirstResponder(textView)
+        }
+
+        private func notifyMatchCount() {
+            let count = find.matches.count
+            let callback = onMatchesChanged
+            DispatchQueue.main.async { callback?(count) }
         }
 
         func observeFrame(of textView: NSTextView) {
