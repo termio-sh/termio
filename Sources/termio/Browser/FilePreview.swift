@@ -46,12 +46,14 @@ struct FilePreviewView: View {
                 .font(.system(size: 12.5, weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            // Close moved to the toolbar (a bordered, Liquid Glass button on the terminal
-            // column's trailing edge); this trailing spacer keeps the file name left-aligned.
-            Spacer()
+            Spacer(minLength: 8)
+            // The content-area window controls (hide list / maximize / close) ride the header's
+            // trailing edge, matching the editor and every other inspector detail — so a previewed
+            // image/PDF/page has the same visible exit as a diff, not just Escape.
+            InspectorDetailChromeButtons()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .frame(height: GitChangesView.topBarHeight)
         .background(Color(nsColor: settings.terminalBackgroundColor))
     }
 
