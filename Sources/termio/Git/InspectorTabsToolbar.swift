@@ -129,34 +129,19 @@ struct InspectorTabsToolbar: View {
         .animation(.snappy(duration: 0.28), value: store.inspectorTab)
     }
 
-    // MARK: Materials — Liquid Glass on macOS 26, flat fills below
+    // MARK: Materials — flat capsule fills, no Liquid Glass
 
-    @ViewBuilder
+    // A flat fill, no `.glassEffect` and no drop shadow: the glass pill cast an ambient shadow that
+    // read as stray chrome floating in the toolbar. The brighter fill alone (over the fainter track)
+    // marks the active pane. Built the same way as the file editor's mode toggle, so the two match.
     private var selectionPill: some View {
-        if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.interactive(), in: .capsule)
-                // Non-source: takes the frame + position of the currently selected segment.
-                .matchedGeometryEffect(id: store.inspectorTab, in: pillNamespace, isSource: false)
-        } else {
-            Capsule(style: .continuous)
-                .fill(Color(nsColor: .controlColor))
-                .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
-                .matchedGeometryEffect(id: store.inspectorTab, in: pillNamespace, isSource: false)
-        }
+        Capsule(style: .continuous)
+            .fill(Color.primary.opacity(0.14))
+            // Non-source: takes the frame + position of the currently selected segment.
+            .matchedGeometryEffect(id: store.inspectorTab, in: pillNamespace, isSource: false)
     }
 
-    @ViewBuilder
     private var trackBackground: some View {
-        if #available(macOS 26.0, *) {
-            // A faint, slightly-whitened glass so the track stays lighter than the system collapse
-            // button and lets the brighter selected pill read as raised above it.
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
-        } else {
-            Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
-        }
+        Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
     }
 }

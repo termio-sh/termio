@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// The right inspector's content: its list (file tree / search / changes / issues) beside any open
 /// detail — a file editor or preview, a git diff, a PR/issue, or an agent trace. Every one of these
@@ -15,10 +16,20 @@ struct InspectorRoot: View {
 
     /// The leading list column's width once the detail sits beside it — a comfortable browse strip
     /// (Mail's message-list / VS Code's explorer proportions), not so wide it starves the detail.
-    private static let listColumnWidth: CGFloat = 240
+    /// Persisted, so the drag-to-resize width survives relaunch, and shared across inspector panes.
+    @AppStorage("inspectorListColumnWidth") private var listColumnWidth: Double = 240
+
+    /// The default browse width a double-click on the divider snaps back to.
+    private static let defaultListWidth: CGFloat = 240
+    /// Drag bounds for the list column: wide enough to read a path, never so wide the detail starves.
+    private static let minListWidth: CGFloat = 180
+    private static let maxListWidth: CGFloat = 460
     /// Below this the list ‖ detail split leaves the detail too narrow, so the detail takes the whole
     /// panel and the list hides until the inspector is widened (or a tab switch brings it back).
     private static let twoColumnMinWidth: CGFloat = 600
+    /// The named space the resize drag reads its pointer x in — the list column's leading edge is its
+    /// origin, so the pointer's x *is* the target column width.
+    private static let dragSpace = "inspectorList"
 
     var body: some View {
         GeometryReader { geo in
@@ -28,11 +39,18 @@ struct InspectorRoot: View {
             // List hides only in the narrow, detail-only fallback; otherwise it's the full panel
             // (no detail) or the leading column (two-column).
             let showList = !showDetail || twoColumn
+            // Never let the column eat the detail on a narrow inspector: cap it to leave the detail at
+            // least a readable strip, then clamp the persisted width into the drag bounds.
+            let maxAllowed = max(Self.minListWidth, min(Self.maxListWidth, geo.size.width - 260))
+            let width = max(Self.minListWidth, min(CGFloat(listColumnWidth), maxAllowed))
             HStack(spacing: 0) {
                 if showList {
-                    list
-                        .frame(maxWidth: twoColumn ? Self.listColumnWidth : .infinity)
-                    if twoColumn { Divider() }
+                    if twoColumn {
+                        list.frame(width: width)
+                        columnDivider(maxAllowed: maxAllowed)
+                    } else {
+                        list.frame(maxWidth: .infinity)
+                    }
                 }
                 if showDetail {
                     InspectorDetailContent()
@@ -41,9 +59,32 @@ struct InspectorRoot: View {
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .coordinateSpace(.named(Self.dragSpace))
             .animation(.easeOut(duration: 0.12), value: showDetail)
             .animation(.easeOut(duration: 0.12), value: twoColumn)
         }
+    }
+
+    /// The draggable seam between the list and the detail. A hairline `Divider` under a wider,
+    /// invisible grab strip: the pointer flips to the resize cursor on hover, the drag retunes the
+    /// column width (clamped so neither side starves), and a double-click snaps back to the default.
+    private func columnDivider(maxAllowed: CGFloat) -> some View {
+        Divider()
+            .overlay {
+                Color.clear
+                    .frame(width: 10)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(coordinateSpace: .named(Self.dragSpace))
+                            .onChanged { value in
+                                listColumnWidth = Double(max(Self.minListWidth, min(value.location.x, maxAllowed)))
+                            }
+                    )
+                    .onTapGesture(count: 2) { listColumnWidth = Double(Self.defaultListWidth) }
+            }
     }
 }
 
