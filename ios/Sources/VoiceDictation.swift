@@ -386,6 +386,9 @@ final class VoiceRecordingBar: UIView {
     var onCancel: (() -> Void)?
     /// The stop button was tapped — finish recording and transcribe.
     var onStop: (() -> Void)?
+    /// The pill hid itself (success, cancel, or an auto-dismissed error) — the
+    /// owner restores the keyboard here, on every exit path.
+    var onDismissed: (() -> Void)?
 
     private let capsule = UIView()
     private let cancelButton = UIButton(type: .system)
@@ -555,6 +558,7 @@ final class VoiceRecordingBar: UIView {
         dot.layer.removeAllAnimations()
         dot.alpha = 1
         isHidden = true
+        onDismissed?()
     }
 
     private func stopTimer() {
