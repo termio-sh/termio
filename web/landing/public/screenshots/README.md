@@ -34,3 +34,6 @@ The four feature cards currently use stylized CSS diagrams (agent list, live
 sessions, branch tree, privacy toggles). Those are fine as diagrams, but if you
 want real crops, drop e.g. `multi-agent.png`, `sessions.png`, `worktrees.png` and
 I'll swap them in the same way.
+
+
+![alt text](image.png)
