@@ -122,7 +122,7 @@ struct IssueSummary: Identifiable, Hashable, Sendable {
 }
 
 /// One comment in the detail thread.
-struct IssueComment: Identifiable, Sendable {
+struct IssueComment: Identifiable, Equatable, Sendable {
     let id: Int
     let author: String
     let avatarURL: URL?
@@ -131,7 +131,7 @@ struct IssueComment: Identifiable, Sendable {
 }
 
 /// The full item: the summary plus its markdown body and comment thread.
-struct IssueDetail: Sendable {
+struct IssueDetail: Equatable, Sendable {
     let summary: IssueSummary
     let bodyMarkdown: String
     let authorAvatarURL: URL?
@@ -142,7 +142,7 @@ struct IssueDetail: Sendable {
 /// The branch facts Checkout needs from a pull request — which head ref to fetch,
 /// and whether it lives in a fork (a fork's branch is only reachable through the
 /// `refs/pull/N/head` ref).
-struct PullRequestGitInfo: Sendable {
+struct PullRequestGitInfo: Equatable, Sendable {
     let headRef: String
     let crossRepository: Bool
 }

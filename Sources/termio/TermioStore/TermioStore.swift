@@ -211,8 +211,16 @@ final class TermioStore: ObservableObject {
     /// render its saved issue against another repo's model.
     @Published private(set) var issuesModels: [String: IssuesPanelModel] = [:]
 
-    /// Registers (or refreshes) the Issues model for its repo root. Called by `IssuesView`.
+    /// Fetched issue / PR detail, keyed by *remote* identity so it outlives the per-repo
+    /// `IssuesPanelModel` instances above — the fix for the detail re-fetching (spinner) on
+    /// every session switch. See `IssueDetailCache`.
+    let issueDetailCache = IssueDetailCache()
+
+    /// Registers (or refreshes) the Issues model for its repo root, wiring it to the shared
+    /// detail cache so a fresh model (a remount, or a different worktree of the same repo)
+    /// reads previously fetched detail instead of hitting GitHub again. Called by `IssuesView`.
     func registerIssuesModel(_ model: IssuesPanelModel) {
+        model.attachDetailCache(issueDetailCache)
         issuesModels[model.repoRoot] = model
     }
 

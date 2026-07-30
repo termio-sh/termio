@@ -525,6 +525,13 @@ private struct IssueRowContextMenu: NSViewRepresentable {
 /// `MarkdownHTML` in a themed web view); a pull request adds the Conversation |
 /// Files switch — files diff natively in the `GitDiffView` overlay (which stacks
 /// on top of this one) against the fetched PR refs, JetBrains-style, no checkout needed.
+/// Identity for the detail's load `.task`: the open item *and* the model driving it, so a
+/// model swap (session switch to another repo) re-triggers the load even at the same issue number.
+private struct DetailTaskKey: Hashable {
+    let number: Int
+    let model: ObjectIdentifier
+}
+
 struct IssueDetailView: View {
     let item: IssueSummary
     @ObservedObject var model: IssuesPanelModel
@@ -549,7 +556,12 @@ struct IssueDetailView: View {
         // tab bar included) with the terminal background so the header doesn't fall
         // through to the host's `windowBackgroundColor` and seam against the body.
         .background(Color(nsColor: settings.terminalBackgroundColor))
-        .task(id: item.number) { await model.loadDetail(for: item) }
+        // Key on the model instance too: a session switch can swap in a different repo's model
+        // while `item.number` is unchanged, and without re-firing here that fresh model would sit
+        // on a spinner (its `loadDetail` never called). Re-firing costs nothing on a cache hit.
+        .task(id: DetailTaskKey(number: item.number, model: ObjectIdentifier(model))) {
+            await model.loadDetail(for: item)
+        }
         .onExitCommand(perform: onBack)
     }
 
@@ -648,8 +660,9 @@ struct IssueDetailView: View {
                 files: model.prFiles, patches: model.prFilePatches,
                 repoRoot: model.repoRoot, settings: settings, onClose: onBack
             )
-        } else if model.detail == nil, model.detailError == nil {
-            // The file list arrives with the detail; show a spinner until it lands.
+        } else if model.prFilesLoading || (model.detail == nil && model.detailError == nil) {
+            // The file list streams in behind the conversation (see `loadDetail`); show a
+            // spinner while it's still in flight, so an early tap on Files isn't a wrong "No Files".
             ProgressView()
                 .controlSize(.small)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

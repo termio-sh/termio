@@ -44,6 +44,12 @@ final class IssuesPanelModel: ObservableObject {
     let repoRoot: String
     private var provider: GitHubIssueProvider?
 
+    /// The app-level detail cache (keyed by remote identity), injected by the store on register
+    /// so fetched detail outlives this — inherently transient — model instance. See
+    /// `IssueDetailCache` and `TermioStore.registerIssuesModel`.
+    private var detailCache: IssueDetailCache?
+    func attachDetailCache(_ cache: IssueDetailCache) { detailCache = cache }
+
     init(repoRoot: String) {
         self.repoRoot = repoRoot
     }
@@ -58,17 +64,35 @@ final class IssuesPanelModel: ObservableObject {
     /// Entry point on appear: restore the Keychain token, resolve the binding
     /// from the origin remote, and load.
     func start() async {
-        if provider == nil, let token = GitHubIssueAuth.storedToken() {
-            provider = GitHubIssueProvider(token: token)
-        }
+        await ensureReady()
         guard provider != nil else {
             phase = .disconnected
             return
         }
         guard !didStart else { return }
         didStart = true
-        await resolveContainer()
         await loadList()
+    }
+
+    /// Coalesced one-time getters for the token + binding, so a freshly-created model (a session
+    /// switch remounts `IssuesView` with an empty one) is usable the moment *any* caller needs it
+    /// — `loadDetail` in particular, which must reach the container to form its cache key. The
+    /// `Task` handle dedupes a concurrent `start()` + `loadDetail` into a single git resolve.
+    private var readyTask: Task<Void, Never>?
+    /// Whether the binding has been resolved once. Gates on this rather than `container == nil`, so
+    /// an *unbound* repo (no github.com remote leaves `container` nil) resolves once, not on every
+    /// `loadDetail`. Reset by `disconnect()` so a reconnect re-resolves.
+    private var didResolveContainer = false
+    private func ensureReady() async {
+        if provider == nil, let token = GitHubIssueAuth.storedToken() {
+            provider = GitHubIssueProvider(token: token)
+        }
+        guard provider != nil, !didResolveContainer else { return }
+        if let readyTask { return await readyTask.value }
+        let task = Task { await resolveContainer() }
+        readyTask = task
+        await task.value
+        readyTask = nil
     }
 
     // MARK: Connect / disconnect
@@ -100,7 +124,13 @@ final class IssuesPanelModel: ObservableObject {
         items = []
         openItem = nil
         detail = nil
+        // The token is gone, so a later reconnect (possibly a different account) must not read
+        // this account's cached private-repo detail.
+        detailCache?.clear()
         didStart = false
+        // Re-resolve the binding on the next reconnect (possibly a different account/repo).
+        didResolveContainer = false
+        readyTask = nil
         phase = .disconnected
         errorMessage = nil
         recovery = nil
@@ -133,6 +163,7 @@ final class IssuesPanelModel: ObservableObject {
             container = nil
             phase = .unbound
         }
+        didResolveContainer = true
     }
 
     /// The repo's labels, for the filter menu — loaded once per pane.
@@ -178,38 +209,147 @@ final class IssuesPanelModel: ObservableObject {
         isLoading = false
     }
 
+    /// How long a cached entry counts as fresh enough to skip revalidation — the
+    /// stale-while-revalidate dedupe window (SWR's `dedupingInterval`). Rapid tab / session
+    /// flipping inside it reads the cache with no network at all; past it the cached copy still
+    /// shows instantly, but a silent background refresh confirms it.
+    private static let revalidateAfter: TimeInterval = 30
+
     func loadDetail(for item: IssueSummary) async {
+        // A session switch remounts `IssuesView` with a brand-new, empty model, so make this
+        // self-sufficient rather than assuming `start()` has already run: resolve the token +
+        // binding here if needed. Without the container the cache key can't be formed, so every
+        // open would fall straight through to the network — which is what made the cache look
+        // useless on exactly the switch path it exists for.
+        await ensureReady()
         guard let provider, let container else { return }
-        // Maximizing hoists the detail into the full-window host, which remounts the view and
-        // re-fires its `.task` — but the model outlives that. Skip the wipe-and-refetch when this
-        // exact item is already loaded, so a layout change costs no spinner or network round-trip.
-        if openItem?.number == item.number, detail != nil { return }
+        // Same item already loaded in this instance (e.g. a maximize remount): nothing to do.
+        if openItem?.number == item.number, detail != nil, !prFilesLoading { return }
         // The model's own record of which item is open, independent of what drives the UI.
         openItem = item
+
+        // Warm: a prior fetch of this remote item is cached — possibly by another session, a
+        // different worktree of the same repo, or the model this replaced. Render it instantly:
+        // no `detail = nil` wipe, no spinner.
+        if let cached = detailCache?.entry(container, item.number) {
+            apply(cached)
+            if item.kind == .pullRequest, !cached.filesLoaded {
+                // Only the conversation was cached (opened, then switched away before the file
+                // list landed): fetch just the files now — the conversation already shows.
+                await loadPRFiles(item, provider: provider, container: container,
+                                  conversation: cached.detail)
+            } else if Date().timeIntervalSince(cached.fetchedAt) >= Self.revalidateAfter {
+                // Stale-while-revalidate: confirm in the background, past the dedupe window.
+                do {
+                    let fresh = try await fetchEntry(item, provider: provider, container: container)
+                    guard openItem?.number == item.number else { return }
+                    detailCache?.store(fresh, container, item.number)
+                    // Only republish on a real change, so an unchanged refresh never flickers.
+                    if !fresh.sameContent(as: cached) { apply(fresh) }
+                } catch {
+                    // Revalidation failed (offline, rate limit): the cached copy already shows.
+                }
+            }
+            return
+        }
+
+        // Cold: nothing cached — wipe to the spinner and fetch the conversation.
         detail = nil
         detailError = nil
         prFiles = []
         prFilePatches = [:]
         prInfo = nil
+        prFilesLoading = false
         do {
+            let conversation = try await provider.detail(item.number, in: container)
+            guard openItem?.number == item.number else { return }  // user moved on mid-fetch
+            detail = conversation
+            // Cache the conversation the moment it lands — before a PR's heavy file list — so a
+            // switch-away still warms the cache. `filesLoaded: false` marks the pending files.
+            detailCache?.store(
+                .init(detail: conversation, prFiles: [], prFilePatches: [:], prInfo: nil,
+                      filesLoaded: item.kind != .pullRequest, fetchedAt: Date()),
+                container, item.number)
             if item.kind == .pullRequest {
-                async let loadedDetail = provider.detail(item.number, in: container)
-                async let info = provider.pullRequestGitInfo(item.number, in: container)
-                async let files = provider.pullRequestFiles(item.number, in: container)
-                let loadedFiles = try await files
-                (detail, prInfo) = try await (loadedDetail, info)
-                prFiles = loadedFiles.map(\.change)
-                // The diff arrives inline with the file list — key each file's patch by
-                // path so the Files tab renders with no further network or git work.
-                prFilePatches = Dictionary(
-                    uniqueKeysWithValues: loadedFiles.compactMap { file in
-                        file.patch.map { (file.change.path, $0) }
-                    })
-            } else {
-                detail = try await provider.detail(item.number, in: container)
+                await loadPRFiles(item, provider: provider, container: container,
+                                  conversation: conversation)
             }
         } catch {
             detailError = error.localizedDescription
+        }
+    }
+
+    /// Fetches a PR's branch facts + changed files (`/files` carries every patch inline, the heavy
+    /// part) and folds them into the already-shown conversation, upgrading the cache entry to
+    /// `filesLoaded: true`. Runs behind the conversation so the default tab never waits on it; a
+    /// failure just leaves the Files tab empty rather than erroring the whole detail.
+    private func loadPRFiles(_ item: IssueSummary, provider: GitHubIssueProvider,
+                             container: IssueContainer, conversation: IssueDetail) async {
+        prFilesLoading = true
+        async let info = provider.pullRequestGitInfo(item.number, in: container)
+        async let files = provider.pullRequestFiles(item.number, in: container)
+        do {
+            let (prI, loadedFiles) = try await (info, files)
+            guard openItem?.number == item.number else { prFilesLoading = false; return }
+            let mapped = prFileMapping(loadedFiles)
+            prInfo = prI
+            prFiles = mapped.changes
+            prFilePatches = mapped.patches
+            detailCache?.store(
+                .init(detail: conversation, prFiles: mapped.changes, prFilePatches: mapped.patches,
+                      prInfo: prI, filesLoaded: true, fetchedAt: Date()),
+                container, item.number)
+        } catch {
+            // The conversation stays; the Files tab simply shows no files.
+        }
+        prFilesLoading = false
+    }
+
+    /// Maps GitHub's `/files` payload into the git pane's `GitChange` rows plus each file's inline
+    /// unified-diff patch keyed by path — what the Files tab renders with no further network or git
+    /// work. Absent patch keys are files GitHub gave none for (binary / diff too large to inline).
+    private func prFileMapping(
+        _ files: [PullRequestFile]
+    ) -> (changes: [GitChange], patches: [String: String]) {
+        let patches = Dictionary(
+            uniqueKeysWithValues: files.compactMap { file in
+                file.patch.map { (file.change.path, $0) }
+            })
+        return (files.map(\.change), patches)
+    }
+
+    /// Publishes a fetched entry into the pane's detail state.
+    private func apply(_ entry: IssueDetailCache.Entry) {
+        detail = entry.detail
+        prFiles = entry.prFiles
+        prFilePatches = entry.prFilePatches
+        prInfo = entry.prInfo
+        prFilesLoading = false
+        detailError = nil
+    }
+
+    /// One network round-trip for an item's full detail: the conversation, and for a PR its git
+    /// info and changed files (with each file's inline patch keyed by path). Pure fetch — no
+    /// state writes — so both the cold and revalidation paths share it.
+    private func fetchEntry(
+        _ item: IssueSummary,
+        provider: GitHubIssueProvider,
+        container: IssueContainer
+    ) async throws -> IssueDetailCache.Entry {
+        if item.kind == .pullRequest {
+            async let loadedDetail = provider.detail(item.number, in: container)
+            async let info = provider.pullRequestGitInfo(item.number, in: container)
+            async let files = provider.pullRequestFiles(item.number, in: container)
+            let (detail, prInfo, loadedFiles) = try await (loadedDetail, info, files)
+            let mapped = prFileMapping(loadedFiles)
+            return .init(
+                detail: detail, prFiles: mapped.changes, prFilePatches: mapped.patches,
+                prInfo: prInfo, filesLoaded: true, fetchedAt: Date())
+        } else {
+            let detail = try await provider.detail(item.number, in: container)
+            return .init(
+                detail: detail, prFiles: [], prFilePatches: [:], prInfo: nil,
+                filesLoaded: true, fetchedAt: Date())
         }
     }
 
@@ -221,4 +361,10 @@ final class IssuesPanelModel: ObservableObject {
     /// tab renders. Absent keys are files GitHub gave no patch for (binary / too large).
     @Published private(set) var prFilePatches: [String: String] = [:]
     @Published private(set) var prInfo: PullRequestGitInfo?
+
+    /// The PR's file list is still in flight *after* the conversation has already rendered —
+    /// the two are fetched separately so the (small, fast) conversation isn't gated behind the
+    /// (heavy — every patch inline) `/files` response. Drives the Files tab's own spinner so a
+    /// user who taps Files early sees loading, not a wrong "No Files".
+    @Published private(set) var prFilesLoading = false
 }
