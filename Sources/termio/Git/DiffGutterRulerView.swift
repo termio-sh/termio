@@ -106,8 +106,18 @@ final class DiffGutterRulerView: NSRulerView {
                 band.origin.x = 0
                 band.size.width = ruleThickness
                 if line.isBand { band = band.insetBy(dx: 0, dy: -DiffDocument.bandPadding) }
-                fill.setFill()
-                band.fill()
+                // Clip the wash to the same top margin the numbers respect: a row scrolled
+                // partly under the header must not fill the sliver above the content clip, or
+                // its tint seams into the header (issue #176 — the green top-left sliver).
+                let topClip = bounds.minY + topClipInset
+                if band.minY < topClip {
+                    band.size.height -= topClip - band.minY
+                    band.origin.y = topClip
+                }
+                if band.height > 0 {
+                    fill.setFill()
+                    band.fill()
+                }
             }
 
             guard case .code(let kind) = line.role else { continue }
