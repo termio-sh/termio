@@ -57,6 +57,8 @@ final class DiffDocument {
     static let bandFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
     /// Extra breathing room drawn around a band row (the fill is expanded to match).
     static let bandPadding: CGFloat = 3
+    /// Leading added between every line — a touch of air so the diff doesn't read as a dense wall.
+    static let codeLineSpacing: CGFloat = 4
 
     // MARK: Building
 
@@ -65,8 +67,16 @@ final class DiffDocument {
     /// than a handful of lines collapse to a band keeping 3 lines of context on the
     /// side(s) that face a change, and `expanded` bands splice their lines back in.
     static func build(rows: [DiffRow], expanded: Set<Int>, codeFont: NSFont) -> DiffDocument {
-        let items = displayItems(rows: rows, expanded: expanded)
+        build(items: displayItems(rows: rows, expanded: expanded), allRows: rows, codeFont: codeFont)
+    }
 
+    /// Composes several files into one stacked document (github.com "Files changed"): each file's
+    /// folded rows, prefixed by a full-width header row. Row ids **must** already be globally unique
+    /// across files (offset per file upstream) so band expansion and the syntax pass stay
+    /// unambiguous. One document means one scroll, and selection / ⌘F run continuously across files.
+    /// The shared assembly: lays the display items down as one attributed string with per-paragraph
+    /// metadata. `allRows` sizes the gutter columns (which sides carry numbers, and the widest).
+    private static func build(items: [DisplayItem], allRows: [DiffRow], codeFont: NSFont) -> DiffDocument {
         var text = String()
         text.reserveCapacity(items.reduce(0) { $0 + $1.textLength + 1 })
         var lines: [Line] = []
@@ -98,13 +108,19 @@ final class DiffDocument {
             .font: codeFont,
             .foregroundColor: NSColor.labelColor,
         ])
+        // A little air between lines — the diff reads tighter than prose, so a few points of leading
+        // lift the whole document. Bands and headers re-set their own styles below, with the same lift.
+        let baseStyle = NSMutableParagraphStyle()
+        baseStyle.lineSpacing = codeLineSpacing
+        attributed.addAttribute(.paragraphStyle, value: baseStyle,
+                                range: NSRange(location: 0, length: attributed.length))
         styleBandsAndEmphasis(attributed, items: items, lines: lines)
 
         return DiffDocument(
             attributed: attributed,
             lines: lines,
-            hasOldGutter: rows.contains { $0.kind != .hunk && $0.oldLine != nil },
-            hasNewGutter: rows.contains { $0.kind != .hunk && $0.newLine != nil },
+            hasOldGutter: allRows.contains { $0.kind != .hunk && $0.oldLine != nil },
+            hasNewGutter: allRows.contains { $0.kind != .hunk && $0.newLine != nil },
             maxLineNumber: maxLineNumber
         )
     }
@@ -137,6 +153,7 @@ final class DiffDocument {
                                               items: [DisplayItem], lines: [Line]) {
         let bandStyle = NSMutableParagraphStyle()
         bandStyle.alignment = .center
+        bandStyle.lineSpacing = codeLineSpacing
         bandStyle.paragraphSpacingBefore = bandPadding
         bandStyle.paragraphSpacing = bandPadding
 

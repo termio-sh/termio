@@ -35,6 +35,11 @@ struct DiffTextPane: NSViewRepresentable {
     /// Bumped when the find bar closes, so the text view reclaims first responder and its
     /// ← / → walk and Esc work again.
     var reclaimFocus: Int = 0
+    /// Embedded mode: the pane is stacked inside an outer scroll (the multi-file card list), so it
+    /// must not scroll or grab focus itself — it grows to its content and reports that height back so
+    /// the SwiftUI card can size to it, letting the outer list own the scroll.
+    var embedded: Bool = false
+    var onContentHeight: ((CGFloat) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -68,6 +73,13 @@ struct DiffTextPane: NSViewRepresentable {
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
+        // Embedded panes are sized to their content by the SwiftUI card, so they never actually scroll
+        // — but keep the scroll view otherwise standard (only auto-hide the overlay scroller) so its
+        // ruler still lays out to the full height. Disabling the scroller knocks the gutter short.
+        if embedded {
+            scrollView.autohidesScrollers = true
+            scrollView.scrollerStyle = .overlay
+        }
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
         scrollView.backgroundColor = backgroundColor
@@ -89,6 +101,10 @@ struct DiffTextPane: NSViewRepresentable {
         // exposed strip, so without a full invalidation the gutter's absolutely
         // positioned numbers desync into a garbled smear (the editor's ruler learned
         // this the hard way).
+        context.coordinator.scrollView = scrollView
+        context.coordinator.embedded = embedded
+        context.coordinator.onContentHeight = onContentHeight
+
         textView.postsFrameChangedNotifications = true
         context.coordinator.observeFrame(of: textView)
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -96,13 +112,16 @@ struct DiffTextPane: NSViewRepresentable {
 
         apply(to: textView, layoutManager: layoutManager, ruler: ruler,
               coordinator: context.coordinator)
+        context.coordinator.reportHeightIfNeeded()
 
-        // Keys (← → walk, Esc) should work the moment the overlay lands, without
-        // a click first. Deferred one turn — at make time the view has no window yet.
-        DispatchQueue.main.async { [weak textView] in
-            guard let textView, let window = textView.window else { return }
-            if window.firstResponder === window || window.firstResponder is NSTextView == false {
-                window.makeFirstResponder(textView)
+        // Keys (← → walk, Esc) should work the moment the overlay lands, without a click first —
+        // but an embedded pane must not steal focus (many stacked panes would fight over it).
+        if !embedded {
+            DispatchQueue.main.async { [weak textView] in
+                guard let textView, let window = textView.window else { return }
+                if window.firstResponder === window || window.firstResponder is NSTextView == false {
+                    window.makeFirstResponder(textView)
+                }
             }
         }
         return scrollView
@@ -127,6 +146,10 @@ struct DiffTextPane: NSViewRepresentable {
         context.coordinator.updateFind(query: findQuery, options: findOptions,
                                        focusedIndex: findFocusedIndex, in: textView)
         context.coordinator.reclaimFocusIfNeeded(reclaimFocus, in: textView)
+
+        context.coordinator.onContentHeight = onContentHeight
+        // A band-expand or a syntax pass changes the content height; re-measure so the card resizes.
+        context.coordinator.reportHeightIfNeeded()
     }
 
     /// Swaps the document in when it changed (initial load, band expand) and lays the
@@ -180,6 +203,27 @@ struct DiffTextPane: NSViewRepresentable {
         var appliedStyled: Int?
         weak var ruler: DiffGutterRulerView?
         var onMatchesChanged: ((Int) -> Void)?
+        // Embedded (card-stacked) sizing: measure the laid-out content and hand its height to SwiftUI.
+        weak var scrollView: NSScrollView?
+        var embedded = false
+        var onContentHeight: ((CGFloat) -> Void)?
+        private var reportedHeight: CGFloat = -1
+
+        /// Measure the text's laid-out height and report it (once, on change) so the SwiftUI card sizes
+        /// to fit and the outer list scrolls. No-op unless embedded.
+        func reportHeightIfNeeded() {
+            guard embedded, let scrollView,
+                  let textView = scrollView.documentView as? DiffTextView,
+                  let layoutManager = textView.layoutManager,
+                  let container = textView.textContainer else { return }
+            layoutManager.ensureLayout(for: container)
+            let height = layoutManager.usedRect(for: container).height
+                + textView.textContainerInset.height * 2
+            guard abs(height - reportedHeight) > 0.5 else { return }
+            reportedHeight = height
+            let callback = onContentHeight
+            DispatchQueue.main.async { callback?(height) }
+        }
         /// The same incremental-find engine the code editor uses — highlights and semantics
         /// stay identical across the two ⌘F surfaces.
         private let find = TextFindEngine()
@@ -231,7 +275,11 @@ struct DiffTextPane: NSViewRepresentable {
             NotificationCenter.default.addObserver(
                 forName: NSView.frameDidChangeNotification, object: textView, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.ruler?.needsDisplay = true }
+                MainActor.assumeIsolated {
+                    self?.ruler?.needsDisplay = true
+                    // A width change re-wraps the text, so the content height moves — re-measure.
+                    self?.reportHeightIfNeeded()
+                }
             }
         }
 

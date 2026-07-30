@@ -19,22 +19,24 @@ struct PRFilesSplitView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var selection: String?
-    /// Narrow mode only: whether we've drilled from the file list into a file's diff.
-    @State private var narrowShowingDiff = false
 
-    /// The list rail's width — the changed-files column, a touch wider than the sidebar
-    /// since PR paths run deep.
-    private static let listWidth: CGFloat = 260
-    /// Below this the file list and the diff can't both breathe, so the view collapses to a single
-    /// navigable column (list → tap → diff → back) — the same single-column, master→detail idiom the
-    /// issue/PR detail (and the whole inspector) already uses. Above it, side-by-side has room.
-    private static let sideBySideMinWidth: CGFloat = 620
+    /// The changed-files rail width for a given pane width — a third of the pane, clamped so neither
+    /// the list (deep PR paths) nor the diff starves as the right section resizes. Fixed-width rails
+    /// force an all-or-nothing breakpoint; scaling it lets side-by-side engage far sooner.
+    private static func railWidth(for paneWidth: CGFloat) -> CGFloat {
+        min(280, max(190, paneWidth * 0.32))
+    }
+    /// Below this the file list and a usable diff can't both fit, so the view collapses to a single
+    /// navigable column (list → tap → diff → back) — the same master→detail idiom the issue/PR detail
+    /// (and the whole inspector) already uses. Driven purely by the *right section's* own width, so
+    /// widening the inspector — or maximizing — brings the list back beside the diff.
+    private static let sideBySideMinWidth: CGFloat = 500
 
     var body: some View {
         GeometryReader { geo in
             Group {
                 if geo.size.width >= Self.sideBySideMinWidth {
-                    sideBySide
+                    sideBySide(railWidth: Self.railWidth(for: geo.size.width))
                 } else {
                     narrow
                 }
@@ -51,10 +53,10 @@ struct PRFilesSplitView: View {
     // MARK: Layouts
 
     /// Wide: GitHub Desktop's side-by-side — the file list rail beside the selected file's diff.
-    private var sideBySide: some View {
+    private func sideBySide(railWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
             fileList(onSelect: { _ in })
-                .frame(width: Self.listWidth)
+                .frame(width: railWidth)
                 .background(Color(nsColor: settings.terminalBackgroundColor).opacity(0.4))
             Rectangle()
                 .fill(Color.primary.opacity(0.08))
@@ -64,43 +66,14 @@ struct PRFilesSplitView: View {
         }
     }
 
-    /// Narrow: one column at a time — the file list, or (after a tap) the selected file's diff behind
-    /// a "‹ Files" back bar. The arrow-key walk inside the diff still steps files without popping out.
-    @ViewBuilder
+    /// Narrow: no room for a list rail beside a readable diff, so every file's diff stacks in one
+    /// continuous scroll (github.com "Files changed"), the files separated by full-width headers —
+    /// you see *all* the files, not one at a time, and selection / ⌘F run across the whole set.
     private var narrow: some View {
-        if narrowShowingDiff, selection != nil {
-            VStack(spacing: 0) {
-                narrowBackBar
-                detail.frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        } else {
-            fileList(onSelect: { _ in narrowShowingDiff = true })
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    /// The narrow-mode back control, sized like the pane's other header bars.
-    private var narrowBackBar: some View {
-        HStack(spacing: 4) {
-            Button { narrowShowingDiff = false } label: {
-                HStack(spacing: 2) {
-                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                    Text("Files").font(.system(size: 12, weight: .medium))
-                }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            Text("\(files.count) file\(files.count == 1 ? "" : "s")")
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 10)
-        .frame(height: GitChangesView.topBarHeight)
-        .background(Color(nsColor: settings.terminalBackgroundColor))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
-        }
+        StackedDiffBody(
+            files: files, patches: patches, repoRoot: repoRoot,
+            settings: settings, onClose: onClose
+        )
     }
 
     // MARK: List rail
@@ -292,6 +265,185 @@ private struct PRFileDiffBody: View {
         let code = rows.filter { $0.kind != .hunk }
         guard code.count <= 8000, code.reduce(0, { $0 + $1.text.count }) <= 600_000 else { return }
 
+        let styled = await DiffHighlighter.shared.styledLines(
+            newSide: code.filter { $0.kind == .context || $0.kind == .addition },
+            oldSide: code.filter { $0.kind == .context || $0.kind == .deletion },
+            language: language,
+            theme: colorScheme == .dark ? "xcode-dark" : "xcode",
+            font: settings.resolvedTerminalFont()
+        )
+        guard !Task.isCancelled else { return }
+        styledLines = styled
+    }
+}
+
+// MARK: - Stacked multi-file diff (narrow mode)
+
+/// Narrow mode's right section: GitHub's "Files changed" — each changed file is its own collapsible
+/// card, stacked in one outer scroll. The card's header is real SwiftUI (so the path sits flush-left
+/// and the header visually owns the diff beneath it, as one bordered unit); the diff body reuses the
+/// shared `DiffTextPane` in embedded, content-sized mode, so the outer list — not each pane — scrolls.
+private struct StackedDiffBody: View {
+    let files: [GitChange]
+    let patches: [String: String]
+    let repoRoot: String
+    @ObservedObject var settings: AppSettings
+    let onClose: () -> Void
+
+    /// Paths of the files folded shut.
+    @State private var collapsed: Set<String> = []
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(files, id: \.path) { change in
+                    FileDiffCard(
+                        change: change,
+                        patch: patches[change.path],
+                        repoRoot: repoRoot,
+                        settings: settings,
+                        collapsed: collapsed.contains(change.path),
+                        onToggle: {
+                            if collapsed.contains(change.path) { collapsed.remove(change.path) }
+                            else { collapsed.insert(change.path) }
+                        },
+                        onClose: onClose
+                    )
+                }
+            }
+            .padding(10)
+        }
+        .background(Color(nsColor: settings.terminalBackgroundColor))
+        .onExitCommand(perform: onClose)
+    }
+}
+
+/// One file as a collapsible card: a flush-left header bar (chevron, status letter, path, `+/−`) over
+/// the file's diff. Collapsed shows only the header; expanded lazily parses the patch and renders it
+/// in an embedded `DiffTextPane` sized to its content, so the outer list owns the scroll.
+private struct FileDiffCard: View {
+    let change: GitChange
+    let patch: String?
+    let repoRoot: String
+    @ObservedObject var settings: AppSettings
+    let collapsed: Bool
+    let onToggle: () -> Void
+    let onClose: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var rows: [DiffRow] = []
+    @State private var document: DiffDocument?
+    @State private var styledLines: [Int: NSAttributedString] = [:]
+    @State private var expanded: Set<Int> = []
+    @State private var contentHeight: CGFloat = 0
+    @State private var loaded = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            if !collapsed {
+                Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+                diffBody
+            }
+        }
+        .background(Color(nsColor: settings.terminalBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+        )
+        // Parse lazily — only when the card is (or becomes) expanded.
+        .task(id: collapsed) {
+            if !collapsed, !loaded { await load() }
+        }
+    }
+
+    /// The title bar — the whole row toggles the fold; the disclosure chevron mirrors the state.
+    private var header: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 8) {
+                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 11)
+                Text(change.status.letter)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(change.status.tint)
+                Text(change.path)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                HStack(spacing: 5) {
+                    if change.additions > 0 { Text("+\(change.additions)").foregroundStyle(.green) }
+                    if change.deletions > 0 { Text("−\(change.deletions)").foregroundStyle(.red) }
+                }
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .fixedSize()
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(Color.primary.opacity(0.05))
+        }
+        .buttonStyle(.plain)
+        .help(change.path)
+    }
+
+    @ViewBuilder
+    private var diffBody: some View {
+        if let document {
+            DiffTextPane(
+                document: document,
+                styled: styledLines,
+                font: settings.resolvedTerminalFont(),
+                backgroundColor: settings.terminalBackgroundColor,
+                numberColor: settings.gutterInk(for: colorScheme),
+                onExpand: { id in expanded.insert(id); rebuildDocument() },
+                onWalk: { _ in false },
+                onClose: onClose,
+                embedded: true,
+                onContentHeight: { contentHeight = $0 }
+            )
+            .frame(height: max(contentHeight, 24))
+        } else if !loaded {
+            ProgressView().controlSize(.small)
+                .frame(maxWidth: .infinity).frame(height: 44)
+        } else {
+            Text(change.isBinary
+                 ? "Binary file — open it on GitHub to view."
+                 : "This diff is too large to show here — open the file on GitHub.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+        }
+    }
+
+    private func load() async {
+        loaded = true
+        guard let patch, !patch.isEmpty else { rows = []; document = nil; return }
+        let parsed = await GitService.parseDiffText(patch)
+        rows = parsed
+        document = parsed.isEmpty
+            ? nil
+            : DiffDocument.build(rows: parsed, expanded: expanded,
+                                 codeFont: settings.resolvedTerminalFont())
+        await buildStyled(parsed)
+    }
+
+    private func rebuildDocument() {
+        document = DiffDocument.build(rows: rows, expanded: expanded,
+                                      codeFont: settings.resolvedTerminalFont())
+    }
+
+    private func buildStyled(_ parsed: [DiffRow]) async {
+        let url = URL(fileURLWithPath: repoRoot).appendingPathComponent(change.path)
+        guard let language = FileEditorView.highlightLanguage(for: url) else { return }
+        let code = parsed.filter { $0.kind != .hunk }
+        guard code.count <= 8000, code.reduce(0, { $0 + $1.text.count }) <= 600_000 else { return }
         let styled = await DiffHighlighter.shared.styledLines(
             newSide: code.filter { $0.kind == .context || $0.kind == .addition },
             oldSide: code.filter { $0.kind == .context || $0.kind == .deletion },

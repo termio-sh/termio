@@ -50,6 +50,11 @@ final class IssuesPanelModel: ObservableObject {
 
     var capabilities: IssueCapabilities? { provider?.capabilities }
 
+    /// Whether the one-time resolve-and-load has run for this model. The model is registered on
+    /// the store (see `TermioStore.registerIssuesModel`), whose `.task` re-fires on every remount
+    /// — so the initial git resolve + list pull must run once, not on each maximize toggle.
+    private var didStart = false
+
     /// Entry point on appear: restore the Keychain token, resolve the binding
     /// from the origin remote, and load.
     func start() async {
@@ -60,6 +65,8 @@ final class IssuesPanelModel: ObservableObject {
             phase = .disconnected
             return
         }
+        guard !didStart else { return }
+        didStart = true
         await resolveContainer()
         await loadList()
     }
@@ -78,6 +85,7 @@ final class IssuesPanelModel: ObservableObject {
             let token = try await GitHubIssueAuth.waitForToken(code)
             GitHubIssueAuth.store(token: token)
             provider = GitHubIssueProvider(token: token)
+            didStart = true
             await resolveContainer()
             await loadList()
         } catch {
@@ -92,6 +100,7 @@ final class IssuesPanelModel: ObservableObject {
         items = []
         openItem = nil
         detail = nil
+        didStart = false
         phase = .disconnected
         errorMessage = nil
         recovery = nil
@@ -171,6 +180,10 @@ final class IssuesPanelModel: ObservableObject {
 
     func loadDetail(for item: IssueSummary) async {
         guard let provider, let container else { return }
+        // Maximizing hoists the detail into the full-window host, which remounts the view and
+        // re-fires its `.task` — but the model outlives that. Skip the wipe-and-refetch when this
+        // exact item is already loaded, so a layout change costs no spinner or network round-trip.
+        if openItem?.number == item.number, detail != nil { return }
         // The model's own record of which item is open, independent of what drives the UI.
         openItem = item
         detail = nil
