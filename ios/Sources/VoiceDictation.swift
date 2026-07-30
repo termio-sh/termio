@@ -127,10 +127,15 @@ final class VoiceDictation: NSObject {
         }
     }
 
-    /// Taps the mic through AVAudioEngine and writes straight to an AAC file.
-    /// Unlike AVAudioRecorder, stopping the engine flushes every frame the tap
-    /// has delivered, so the tail is never clipped and no drain delay is needed
-    /// — Apple's recommended path for recording.
+    /// Taps the mic through AVAudioEngine and writes straight to a WAV (linear
+    /// PCM) file. PCM keeps every delivered frame on disk the instant it's
+    /// written — there's no encoder buffering un-emitted frames — so an AAC
+    /// clip's classic missing-tail can't happen. The one remaining requirement
+    /// is that the AVAudioFile is actually deallocated to finalize (patch the
+    /// WAV header sizes); AVAudioFile has no close(), so `teardownEngine` drops
+    /// the last strong reference to it — which is why the tap below reaches the
+    /// file through `self` instead of capturing it, keeping `audioFile` the
+    /// single lasting owner. See developer.apple.com/forums/thread/710683.
     private func beginRecording() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
@@ -142,22 +147,31 @@ final class VoiceDictation: NSObject {
         guard format.sampleRate > 0 else { throw Failure.recordingFailed }
 
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("termio-dictation-\(UUID().uuidString).m4a")
-        // AAC in an m4a container (both providers accept it), written at the
-        // mic's own rate/channels so the tap buffers need no format conversion.
+            .appendingPathComponent("termio-dictation-\(UUID().uuidString).wav")
+        // 16-bit linear PCM in a WAV container (both providers accept it),
+        // recorded at the mic's own rate/channels so the tap buffers need no
+        // resampling on the way in.
         let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: format.sampleRate,
             AVNumberOfChannelsKey: format.channelCount,
-            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
         ]
         let file = try AVAudioFile(forWriting: url, settings: settings)
 
         recordedFrames = 0
         inputSampleRate = format.sampleRate
         meterLevel = 0
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            guard let self else { return }
+        self.audioFile = file
+        // Reach the file through `self` (not a capture), taking only a transient
+        // strong ref per call, so `audioFile` stays its single lasting owner —
+        // niling that in teardown then deterministically finalizes the WAV.
+        // A small buffer (~21 ms at 48 kHz) keeps little audio un-delivered
+        // between tap calls, so stop clips as little of the tail as possible.
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            guard let self, let file = audioFile else { return }
             try? file.write(from: buffer)
             recordedFrames += AVAudioFramePosition(buffer.frameLength)
             meterLevel = Self.level(of: buffer)
@@ -166,7 +180,6 @@ final class VoiceDictation: NSObject {
         engine.prepare()
         try engine.start()
         self.engine = engine
-        self.audioFile = file
         self.fileURL = url
     }
 
@@ -197,14 +210,34 @@ final class VoiceDictation: NSObject {
         cleanUp()
     }
 
+    /// How long to keep recording past the stop tap. The mic → HAL → tap
+    /// pipeline still holds the most recent audio when the user taps stop;
+    /// tearing down that instant clips it. Draining ~0.3 s lets the tail flush
+    /// through the tap (a couple of buffers) before teardown — Voice Memos and
+    /// friends do the same trailing-capture rather than cut on the keystroke.
+    private static let stopDrain: TimeInterval = 0.3
+
     /// Stops recording and transcribes the clip. `completion` fires on the main
-    /// queue with the transcript or the reason it failed. Stopping the engine
-    /// flushes the tap cleanly, so the whole clip is on disk — no drain wait.
+    /// queue with the transcript or the reason it failed. `teardownEngine`
+    /// finalizes the WAV before we read it, so the whole clip is on disk.
     func stopAndTranscribe(completion: @escaping (Result<String, Failure>) -> Void) {
         guard let fileURL, engine != nil else {
             completion(.failure(.recordingFailed))
             return
         }
+        // Keep the tap running a beat so the pipeline's in-flight tail lands
+        // before we tear down; the pill is already on "Transcribing…" so this
+        // costs no visible wait beyond the network round-trip.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.stopDrain) { [weak self] in
+            guard let self, engine != nil else { return }  // cancelled mid-drain
+            finish(fileURL: fileURL, completion: completion)
+        }
+    }
+
+    /// Tears down after the drain window and kicks off transcription.
+    private func finish(
+        fileURL: URL, completion: @escaping (Result<String, Failure>) -> Void
+    ) {
         // Teardown first so the tap has stopped and recordedFrames is final.
         teardownEngine()
         deactivateSession()
@@ -228,12 +261,15 @@ final class VoiceDictation: NSObject {
         }
     }
 
-    /// Stops the engine and closes the file, flushing every delivered frame.
+    /// Stops the engine, removes the tap (after which no tap block runs), then
+    /// drops the last strong reference to the AVAudioFile — its only close()
+    /// path — which synchronously finalizes the WAV header so the whole clip is
+    /// on disk before the caller reads it.
     private func teardownEngine() {
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         engine = nil
-        audioFile = nil   // closing the AVAudioFile flushes its remaining frames
+        audioFile = nil
     }
 
     private func cleanUp() {
@@ -376,9 +412,9 @@ private extension TranscriptionProvider {
         }
         body.appendString("--\(boundary)\r\n")
         body.appendString(
-            "Content-Disposition: form-data; name=\"file\"; filename=\"audio.m4a\"\r\n"
+            "Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n"
         )
-        body.appendString("Content-Type: audio/m4a\r\n\r\n")
+        body.appendString("Content-Type: audio/wav\r\n\r\n")
         body.append(audioData)
         body.appendString("\r\n--\(boundary)--\r\n")
         request.httpBody = body
