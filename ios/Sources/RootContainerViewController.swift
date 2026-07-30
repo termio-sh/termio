@@ -1,14 +1,13 @@
 import TermioShared
 import UIKit
 
-/// The shell: the home is two tabs — Projects (the strip + project list, with
-/// its pushed project pages) and Chats (the Mac's loose agent sessions),
-/// mirroring the desktop sidebar's Chats/Projects pairing as the two top-level
-/// destinations. The switcher is a compact Telegram-scale glass pill floating
-/// bottom-LEFT (`HomeTabPill` — see there for why the system tab bar doesn't
-/// fit), leaving the bottom-right corner to each screen's own ＋ (the Slack
-/// compose corner) at the pill's own 64pt scale, so the bottom edge reads as
-/// one balanced bar on every home screen — pushed project pages included.
+/// The shell: four home tabs — Projects (including its pushed project pages),
+/// Chats, Terminals, and Settings — mirror the desktop app's main destinations.
+/// The switcher is a compact, centered glass pill floating above the home
+/// indicator (`HomeTabPill` — see there for why the system tab bar doesn't fit).
+/// Screen-specific actions stay beside their page title, leaving the bottom
+/// edge to one stable navigation surface on every home screen, pushed project
+/// pages included.
 /// Tapping a session anywhere slides its terminal in full-screen over the
 /// whole thing, and "back" slides it away to reveal the tabs wherever they
 /// were. Screens draw their own chrome (large titles, glass buttons, the
@@ -54,7 +53,7 @@ final class RootContainerViewController: UIViewController {
         nav.additionalSafeAreaInsets.bottom = 76
         return nav
     }()
-    /// The bottom-left floating switcher between the three.
+    /// The floating switcher between the four top-level destinations.
     private let tabPill = HomeTabPill(items: [
         (title: "Projects", icon: .folder),
         (title: "Chats", icon: .bubbleChat),
@@ -76,9 +75,17 @@ final class RootContainerViewController: UIViewController {
     /// runs are handled too.
     private weak var activeScreen: UIViewController?
 
+    private var themeObserver: NSObjectProtocol?
+
+    deinit {
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        themeObserver = installThemeBackdrop()
 
         // All tab stacks are permanent base layers: added once, always behind
         // any terminal, only ever toggled hidden — so each tab keeps its
@@ -102,8 +109,20 @@ final class RootContainerViewController: UIViewController {
         }
         tabPill.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tabPill)
+        let phoneWidth = tabPill.widthAnchor.constraint(
+            equalTo: view.widthAnchor,
+            constant: -24
+        )
+        // Fill an iPhone's bottom edge while keeping the four destinations
+        // compact on iPad. The lower-priority fill constraint yields to the
+        // readable-width cap on a wide canvas.
+        phoneWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            tabPill.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            tabPill.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            tabPill.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 12),
+            tabPill.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -12),
+            tabPill.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
+            phoneWidth,
             tabPill.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
         ])
 

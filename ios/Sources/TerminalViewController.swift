@@ -766,19 +766,11 @@ final class TerminalViewController: UIViewController {
         return TerminalTheme(light: light, dark: dark)
     }
 
-    /// A dynamic color mirroring the active theme slot's background, so the
-    /// canvas behind the transparent surface always matches — including the
-    /// unpainted band under the keyboard guide and the safe areas.
-    private static func backdropColor() -> UIColor {
-        UIColor { traits in
-            let settings = MobileSettings.shared
-            let dark = traits.userInterfaceStyle == .dark
-            let name = dark ? settings.darkThemeName : settings.lightThemeName
-            return GhosttyThemeCatalog.theme(named: name)
-                .flatMap { UIColor(ghosttyHex: $0.background) }
-                ?? (dark ? .black : .white)
-        }
-    }
+    /// The canvas behind the transparent surface — the theme background, shared
+    /// with the app chrome so the terminal and its surrounding pages read as one
+    /// continuous color (covers the unpainted band under the keyboard guide and
+    /// the safe areas too). See `ThemeBackdrop`.
+    private static func backdropColor() -> UIColor { ThemeBackdrop.color }
 
     /// The settings-driven half of the surface config — the single place the
     /// appearance keys are named, so creation and the live re-style path

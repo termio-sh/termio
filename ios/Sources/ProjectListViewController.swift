@@ -37,6 +37,7 @@ final class ProjectListViewController: UIViewController {
     private var connectingGraceTimer: Timer?
     private var rosterObserver: NSObjectProtocol?
     private var linkStateObserver: NSObjectProtocol?
+    private var themeObserver: NSObjectProtocol?
 
     init(store: RosterStore) {
         self.store = store
@@ -47,9 +48,9 @@ final class ProjectListViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // A full page, not a drawer: plain system background, like the
-        // Messages inbox.
-        view.backgroundColor = .systemBackground
+        // A full page, not a drawer. Tinted to the terminal theme so the whole
+        // app reads as one canvas (the rows/table draw clear over it).
+        themeObserver = installThemeBackdrop()
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
@@ -74,6 +75,9 @@ final class ProjectListViewController: UIViewController {
         }
         if let linkStateObserver {
             NotificationCenter.default.removeObserver(linkStateObserver)
+        }
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
         }
         connectingGraceTimer?.invalidate()
     }

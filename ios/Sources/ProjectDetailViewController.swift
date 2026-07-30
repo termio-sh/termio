@@ -3,11 +3,10 @@ import TermioShared
 import UIKit
 
 /// One project's page: its sessions as a plain list, with the ＋ (new session
-/// per enabled agent) floating bottom-right — the compose corner, same as the
-/// Chats tab. Pushed from the Projects root; tapping a session slides its
-/// terminal in over everything, so coming back lands here. Tracks the live
-/// roster by the project's stable key and pops itself if the Mac closes the
-/// project.
+/// per enabled agent) beside the project title. Pushed from the Projects root;
+/// tapping a session slides its terminal in over everything, so coming back
+/// lands here. Tracks the live roster by the project's stable key and pops
+/// itself if the Mac closes the project.
 final class ProjectDetailViewController: UIViewController {
     private let store: RosterStore
     private let projectKey: String
@@ -21,6 +20,7 @@ final class ProjectDetailViewController: UIViewController {
     private let addButton = UIButton(type: .system)
     private let emptyState = ListEmptyStateView()
     private var rosterObserver: NSObjectProtocol?
+    private var themeObserver: NSObjectProtocol?
 
     /// `project` is the caller's row — the live roster entry at push time.
     init(store: RosterStore, project: MockProject) {
@@ -34,12 +34,11 @@ final class ProjectDetailViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        themeObserver = installThemeBackdrop()
+        configureAddButton()
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
-        // Added last so it floats over the list.
-        configureAddButton()
         reload()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -51,6 +50,9 @@ final class ProjectDetailViewController: UIViewController {
     deinit {
         if let rosterObserver {
             NotificationCenter.default.removeObserver(rosterObserver)
+        }
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
         }
     }
 
@@ -92,7 +94,8 @@ final class ProjectDetailViewController: UIViewController {
         pageTitle.lineBreakMode = .byTruncatingTail
         pageTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let bar = UIStackView(arrangedSubviews: [back, pageTitle])
+        let spacer = UIView()
+        let bar = UIStackView(arrangedSubviews: [back, pageTitle, spacer, addButton])
         bar.axis = .horizontal
         bar.alignment = .center
         bar.spacing = 10
@@ -113,12 +116,17 @@ final class ProjectDetailViewController: UIViewController {
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            bar.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -12),
+            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             back.widthAnchor.constraint(equalToConstant: 40),
             back.heightAnchor.constraint(equalToConstant: 40),
+            addButton.widthAnchor.constraint(equalToConstant: 40),
+            addButton.heightAnchor.constraint(equalToConstant: 40),
             // Indented to the title's left edge (past the back chevron).
             context.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 62),
-            context.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -16),
+            context.trailingAnchor.constraint(
+                lessThanOrEqualTo: addButton.leadingAnchor,
+                constant: -8
+            ),
             context.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 0),
         ])
 
@@ -135,14 +143,14 @@ final class ProjectDetailViewController: UIViewController {
         return anchor
     }
 
-    // MARK: - Add button (the floating ＋)
+    // MARK: - Add button
 
-    /// The Mac project menu's "New … Session" actions — ＋ floats bottom-right
-    /// like Slack's compose button, the same corner every home screen uses,
-    /// balancing the tab pill bottom-left. Live rosters only; the bundled mock
-    /// can't start anything.
+    /// The Mac project menu's "New … Session" actions. The control belongs to
+    /// this page, so it sits beside the title rather than competing with the
+    /// persistent navigation surface. Live rosters only; the bundled mock
+    /// cannot start anything.
     private func configureAddButton() {
-        addButton.applyGlassIcon(.add, boxSize: 26)
+        addButton.applyGlassIcon(.add, boxSize: 22)
         addButton.tintColor = .label
         addButton.accessibilityLabel = "New session in \(project.name)"
         addButton.showsMenuAsPrimaryAction = true
@@ -151,16 +159,6 @@ final class ProjectDetailViewController: UIViewController {
                 guard let self else { return completion([]) }
                 completion(store.newSessionActions(in: project))
             },
-        ])
-        addButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(addButton)
-        NSLayoutConstraint.activate([
-            addButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            // The tab pill's own scale (64pt, 8pt above the safe area), so the
-            // two ends of the bottom edge read as one balanced bar.
-            addButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            addButton.widthAnchor.constraint(equalToConstant: 64),
-            addButton.heightAnchor.constraint(equalToConstant: 64),
         ])
     }
 
@@ -186,8 +184,8 @@ final class ProjectDetailViewController: UIViewController {
         tableView.keyboardDismissMode = .onDrag
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "session")
         tableView.translatesAutoresizingMaskIntoConstraints = false
-        // The floating ＋ sits over the list; reserve room so the last rows
-        // scroll clear of it.
+        // The floating tab pill sits over the list; reserve room so the last
+        // rows scroll clear of it.
         tableView.contentInset.bottom = 80
         tableView.verticalScrollIndicatorInsets.bottom = 80
         view.addSubview(tableView)

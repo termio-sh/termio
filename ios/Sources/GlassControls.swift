@@ -61,73 +61,89 @@ enum GlassChrome {
     }
 }
 
-/// The home's compact tab switcher: a small glass capsule floating in the
-/// bottom-LEFT corner, paired with whatever action button a tab floats
-/// bottom-right. Hand-rolled on purpose: the iOS 26 system tab bar auto-sizes
-/// but always owns the bottom center — the only native way to left-align the
-/// group is a `.search`-role tab's detached circle, whose semantics ("select
-/// the search tab") can't host a ＋ menu.
+/// The home's compact tab switcher: one centered glass capsule floating above
+/// the home indicator. Hand-rolled on purpose: the app keeps each tab's
+/// navigation controller alive (and terminals outside those stacks) to avoid
+/// tearing down libghostty surfaces, so a system `UITabBarController` cannot
+/// own this navigation hierarchy.
 ///
-/// Recipe follows Telegram's TabBarComponent at its exact metrics: a 64pt bar
-/// (56pt items + 4pt inner inset), icon over a semibold-10 label (icon area
-/// 8pt from the top, label 8pt from the bottom), equal-width items padded
-/// ~10pt, capsule radius = height/2, and — the detail that makes it read
-/// finished — a sliding selection capsule behind the active item
-/// (Telegram's selectionFrame, the full 56pt item).
-final class HomeTabPill: UIView {
+/// The geometry follows the compact iOS tab-bar language: a 64pt bar (56pt
+/// items + 4pt inner inset), icon over a short label, equal-width destinations,
+/// and a sliding selection capsule behind the active item. State is redundant
+/// by design: the selected destination has a stronger glyph, primary ink,
+/// neutral enclosure, and the accessibility selected trait. The enclosure is
+/// a tint rather than a second glass layer; stacking glass on glass made the
+/// active state disappear over dark terminal themes.
+final class HomeTabPill: UIView, UIGestureRecognizerDelegate {
     var onSelect: ((Int) -> Void)?
 
     private var buttons: [UIButton] = []
-    /// The tab glyphs, kept to pick each tab's own selection animation.
-    private let icons: [HugeIcon]
-    /// The sliding selected-item capsule. Telegram's is the system liquid
-    /// lens (private API, warps the content below); the public equivalent is
-    /// an interactive `UIGlassEffect` — real refraction, not a flat fill —
-    /// resting on a faint tint like their lens's restingBackgroundColor.
-    /// Pre-26 falls back to the flat current-chat-pill fill.
+    private let titles: [String]
+    private let regularImages: [UIImage]
+    private let selectedImages: [UIImage]
+    private let selectionFeedback = UISelectionFeedbackGenerator()
+    private var isDraggingSelection = false
+    private var dragOriginIndex = 0
+    private var dragStartCenterX: CGFloat = 0
+    /// UIKit lays the visual-effect content view out after this view. Keeping
+    /// the reference lets us flush that inner pass before measuring a button
+    /// for the manually framed selection capsule.
+    private weak var glassContentView: UIView?
+
+    /// A quiet, neutral enclosure lets the stronger monochrome glyph carry
+    /// meaning without introducing a color that doesn't belong to Termio's
+    /// black/white brand. Orange remains reserved for attention status.
     private let selection: UIView = {
-        if #available(iOS 26.0, *) {
-            let glass = UIGlassEffect(style: .regular)
-            glass.isInteractive = true
-            glass.tintColor = UIColor.label.withAlphaComponent(0.08)
-            let view = UIVisualEffectView(effect: glass)
-            view.layer.cornerRadius = 28
-            view.clipsToBounds = true
-            return view
-        }
         let view = UIView()
-        view.backgroundColor = UIColor.label.withAlphaComponent(0.08)
+        view.backgroundColor = UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor.white.withAlphaComponent(0.13)
+                : UIColor.black.withAlphaComponent(0.065)
+        }
         view.layer.cornerRadius = 28
+        view.layer.cornerCurve = .continuous
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
         return view
     }()
     private var selectedIndex = 0
 
     init(items: [(title: String, icon: HugeIcon)]) {
-        icons = items.map(\.icon)
+        titles = items.map(\.title)
+        regularImages = items.map { $0.icon.strokeImage(boxSize: 21) }
+        // The reference uses outline → fill. Hugeicons deliberately remain
+        // outline-based across Termio, so a heavier selected stroke provides
+        // the equivalent shape cue without mixing icon families.
+        selectedImages = items.map { $0.icon.strokeImage(boxSize: 21, strokeWeight: 2.0) }
         super.init(frame: .zero)
         let glass = GlassChrome.makeView(interactive: true)
         glass.translatesAutoresizingMaskIntoConstraints = false
         glass.layer.cornerRadius = 32
+        glass.layer.cornerCurve = .continuous
         glass.clipsToBounds = true
         addSubview(glass)
 
+        glassContentView = glass.contentView
         glass.contentView.addSubview(selection)
 
         buttons = items.enumerated().map { index, item in
             var config = UIButton.Configuration.plain()
-            // The same Hugeicons stroke marks the Mac sidebar (and the project
-            // rows one screen up) draw, instead of SF Symbols — one icon
-            // family across both apps. A 21pt box inks ~18pt wide, matching
-            // the drawn area of Telegram's ~28px tab icons.
-            config.image = item.icon.strokeImage(boxSize: 21)
+            config.image = regularImages[index]
             config.imagePlacement = .top
             config.imagePadding = 3
             config.attributedTitle = AttributedString(
                 item.title,
-                attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 10, weight: .semibold)])
+                attributes: AttributeContainer([
+                    .font: UIFont.systemFont(ofSize: 10, weight: .medium),
+                ])
             )
             config.contentInsets = NSDirectionalEdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12)
             let button = UIButton(configuration: config)
+            button.accessibilityLabel = item.title
+            button.accessibilityIdentifier = "home.tab.\(item.title.lowercased())"
+            button.addAction(UIAction { [weak self] _ in
+                self?.selectionFeedback.prepare()
+            }, for: .touchDown)
             button.addAction(UIAction { [weak self] _ in
                 self?.select(index, animated: true)
                 self?.onSelect?(index)
@@ -152,6 +168,12 @@ final class HomeTabPill: UIView {
             stack.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor),
             heightAnchor.constraint(equalToConstant: 64),
         ])
+
+        let selectionPan = UIPanGestureRecognizer(target: self, action: #selector(handleSelectionPan(_:)))
+        selectionPan.delegate = self
+        selectionPan.cancelsTouchesInView = true
+        addGestureRecognizer(selectionPan)
+
         select(0, animated: false)
     }
 
@@ -160,7 +182,10 @@ final class HomeTabPill: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        selection.frame = selectionFrame()
+        glassContentView?.layoutIfNeeded()
+        if !isDraggingSelection {
+            selection.frame = selectionFrame()
+        }
     }
 
     private func selectionFrame() -> CGRect {
@@ -170,102 +195,183 @@ final class HomeTabPill: UIView {
     }
 
     func select(_ index: Int, animated: Bool) {
+        guard buttons.indices.contains(index) else { return }
         let changed = selectedIndex != index
         selectedIndex = index
+        updateButtonStates(animated: animated && changed)
+        if animated, changed { selectionFeedback.selectionChanged() }
+        settleSelection(at: index, velocityX: 0, animated: animated)
+    }
+
+    private func updateButtonStates(animated: Bool) {
         for (i, button) in buttons.enumerated() {
-            // The active tab gets the accent, like Telegram's
-            // selectedTextColor — crossfaded, never snapped.
-            let target: UIColor = i == index ? tintColor : .secondaryLabel
-            if animated, button.tintColor != target {
+            let selected = i == selectedIndex
+            let update = {
+                var config = button.configuration
+                config?.image = selected ? self.selectedImages[i] : self.regularImages[i]
+                config?.baseForegroundColor = selected ? .label : .secondaryLabel
+                config?.attributedTitle = AttributedString(
+                    self.titles[i],
+                    attributes: AttributeContainer([
+                        .font: UIFont.systemFont(
+                            ofSize: 10,
+                            weight: selected ? .semibold : .medium
+                        ),
+                    ])
+                )
+                button.configuration = config
+                if selected {
+                    button.accessibilityTraits.insert(.selected)
+                } else {
+                    button.accessibilityTraits.remove(.selected)
+                }
+            }
+            if animated {
                 UIView.transition(
-                    with: button, duration: 0.22,
-                    options: [.transitionCrossDissolve, .allowUserInteraction]
-                ) { button.tintColor = target }
+                    with: button,
+                    duration: 0.18,
+                    options: [
+                        .transitionCrossDissolve,
+                        .allowUserInteraction,
+                        .beginFromCurrentState,
+                    ],
+                    animations: update
+                )
             } else {
-                button.tintColor = target
+                update()
             }
         }
-        // Telegram rests each tab icon on the last frame of a hand-animated
-        // 48pt Lottie and replays it once on every select. Same idea, hand-
-        // keyed in Core Animation per icon — in-place character moves with
-        // overshoot, never a size pop.
-        if animated, changed, !UIAccessibility.isReduceMotionEnabled,
-           buttons.indices.contains(index) {
-            playSelectionAnimation(on: buttons[index], icon: icons[index])
-        }
-        layoutIfNeeded()
-        let settle = { self.selection.frame = self.selectionFrame() }
-        // Under Reduce Motion the indicator snaps rather than spring-travelling between tabs
-        // (the tint still cross-dissolves above, which Reduce Motion permits).
+    }
+
+    private func settleSelection(at index: Int, velocityX: CGFloat, animated: Bool) {
+        glassContentView?.layoutIfNeeded()
+        let targetFrame = selectionFrame(for: index)
+        let distance = targetFrame.midX - selection.frame.midX
+        let relativeVelocity = abs(distance) > 1
+            ? max(-8, min(8, velocityX / distance))
+            : 0
+        let carriedMomentum = abs(velocityX) > 180
+
+        let settle = { self.selection.frame = targetFrame }
         if animated, !UIAccessibility.isReduceMotionEnabled {
-            UIView.animate(withDuration: 0.35, delay: 0,
-                           usingSpringWithDamping: 0.8, initialSpringVelocity: 0.2,
-                           options: .curveEaseOut, animations: settle)
+            UIView.animate(
+                withDuration: carriedMomentum ? 0.38 : 0.32,
+                delay: 0,
+                usingSpringWithDamping: carriedMomentum ? 0.86 : 1,
+                initialSpringVelocity: relativeVelocity,
+                options: [.allowUserInteraction, .beginFromCurrentState],
+                animations: settle
+            )
         } else {
             settle()
         }
     }
 
-    /// The character set: the gear engages with a springy turn, the chat
-    /// bubble rocks as if mid-conversation, the folder does a small
-    /// hop-and-tip as if opening. All one-shot and size-stable.
-    private func playSelectionAnimation(on button: UIButton, icon: HugeIcon) {
-        guard let layer = button.imageView?.layer else { return }
-        layer.removeAnimation(forKey: "tabSelect")
-        let animation: CAAnimation
-        switch icon {
-        case .settings:
-            // A third turn lands on the Hugeicons cog's 6-tooth symmetry, so
-            // the snap back to the model value after the spring is invisible.
-            let spin = CASpringAnimation(keyPath: "transform.rotation.z")
-            spin.fromValue = 0
-            spin.toValue = CGFloat.pi * 2 / 3
-            spin.mass = 1
-            spin.stiffness = 170
-            spin.damping = 13
-            spin.initialVelocity = 4
-            spin.duration = spin.settlingDuration
-            animation = spin
-        case .bubbleChat:
-            animation = Self.characterMove(
-                rotationDegrees: [0, 8, -6, 3, 0],
-                x: [0, 1.2, -1.2, 0.4, 0],
-                y: [0, 0, 0, 0, 0],
-                duration: 0.55
-            )
-        default: // the folder, and any future tab without its own move
-            animation = Self.characterMove(
-                rotationDegrees: [0, -7, 3, -1, 0],
-                x: [0, 0, 0, 0, 0],
-                y: [0, -2.5, 0.3, -0.6, 0],
-                duration: 0.5
-            )
-        }
-        layer.add(animation, forKey: "tabSelect")
+    private func selectionFrame(for index: Int) -> CGRect {
+        guard buttons.indices.contains(index) else { return .zero }
+        return buttons[index].convert(buttons[index].bounds, to: selection.superview)
+            .insetBy(dx: 0, dy: 4)
     }
 
-    /// A grouped in-place keyframe move (tilt + nudge), eased per segment —
-    /// the hand-keyed stand-in for Telegram's per-icon Lottie files.
-    private static func characterMove(
-        rotationDegrees: [CGFloat], x: [CGFloat], y: [CGFloat], duration: CFTimeInterval
-    ) -> CAAnimation {
-        func keyframes(_ keyPath: String, _ values: [CGFloat]) -> CAKeyframeAnimation {
-            let anim = CAKeyframeAnimation(keyPath: keyPath)
-            anim.values = values
-            anim.timingFunctions = Array(
-                repeating: CAMediaTimingFunction(name: .easeInEaseOut),
-                count: max(values.count - 1, 1)
-            )
-            return anim
+    private func nearestIndex(to centerX: CGFloat) -> Int {
+        buttons.indices.min {
+            abs(selectionFrame(for: $0).midX - centerX)
+                < abs(selectionFrame(for: $1).midX - centerX)
+        } ?? selectedIndex
+    }
+
+    private func rubberBandedCenter(_ proposedCenter: CGFloat) -> CGFloat {
+        guard let first = buttons.indices.first, let last = buttons.indices.last else {
+            return proposedCenter
         }
-        let group = CAAnimationGroup()
-        group.animations = [
-            keyframes("transform.rotation.z", rotationDegrees.map { $0 * .pi / 180 }),
-            keyframes("transform.translation.x", x),
-            keyframes("transform.translation.y", y),
-        ]
-        group.duration = duration
-        return group
+        let lowerBound = selectionFrame(for: first).midX
+        let upperBound = selectionFrame(for: last).midX
+        let dimension = max(selection.bounds.width, 1)
+
+        if proposedCenter < lowerBound {
+            return lowerBound - rubberBandDistance(lowerBound - proposedCenter, dimension: dimension)
+        }
+        if proposedCenter > upperBound {
+            return upperBound + rubberBandDistance(proposedCenter - upperBound, dimension: dimension)
+        }
+        return proposedCenter
+    }
+
+    private func rubberBandDistance(_ offset: CGFloat, dimension: CGFloat) -> CGFloat {
+        let constant: CGFloat = 0.55
+        return (offset * dimension * constant) / (dimension + constant * offset)
+    }
+
+    private func projectedCenter(from centerX: CGFloat, velocityX: CGFloat) -> CGFloat {
+        // UIScrollView.DecelerationRate.fast (0.99) keeps a flick useful within
+        // this short four-stop control without letting it fly across the bar.
+        let decelerationRate = UIScrollView.DecelerationRate.fast.rawValue
+        return centerX + (velocityX / 1000) * decelerationRate / (1 - decelerationRate)
+    }
+
+    @objc
+    private func handleSelectionPan(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            glassContentView?.layoutIfNeeded()
+            if let liveFrame = selection.layer.presentation()?.frame {
+                selection.frame = liveFrame
+            }
+            selection.layer.removeAllAnimations()
+            isDraggingSelection = true
+            dragOriginIndex = selectedIndex
+            dragStartCenterX = selection.center.x
+            selectionFeedback.prepare()
+
+        case .changed:
+            let translationX = gesture.translation(in: self).x
+            selection.center.x = rubberBandedCenter(dragStartCenterX + translationX)
+
+            let previewIndex = nearestIndex(to: selection.center.x)
+            if previewIndex != selectedIndex {
+                selectedIndex = previewIndex
+                updateButtonStates(animated: true)
+                selectionFeedback.selectionChanged()
+                selectionFeedback.prepare()
+            }
+
+        case .ended:
+            let velocityX = gesture.velocity(in: self).x
+            let targetIndex = nearestIndex(
+                to: projectedCenter(from: selection.center.x, velocityX: velocityX)
+            )
+            finishSelectionPan(at: targetIndex, velocityX: velocityX, commit: true)
+
+        case .cancelled, .failed:
+            finishSelectionPan(at: dragOriginIndex, velocityX: 0, commit: false)
+
+        default:
+            break
+        }
+    }
+
+    private func finishSelectionPan(at index: Int, velocityX: CGFloat, commit: Bool) {
+        let changedFromPreview = selectedIndex != index
+        selectedIndex = index
+        updateButtonStates(animated: changedFromPreview)
+        if changedFromPreview {
+            selectionFeedback.selectionChanged()
+        }
+
+        isDraggingSelection = false
+        settleSelection(at: index, velocityX: velocityX, animated: true)
+
+        if commit, index != dragOriginIndex {
+            onSelect?(index)
+        }
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer, buttons.count > 1 else {
+            return true
+        }
+        let velocity = pan.velocity(in: self)
+        return abs(velocity.x) > abs(velocity.y)
     }
 }
 
@@ -275,8 +381,8 @@ extension HugeIcon {
     /// directly. Same stroke recipe (1.5px-on-24 with the hairline floor,
     /// round caps); the path is inset by the stroke's half-width so round
     /// caps at the glyph's edge don't clip against the bitmap bounds.
-    func strokeImage(boxSize: CGFloat) -> UIImage {
-        let lineWidth = max(1.1, boxSize * 1.5 / viewBox)
+    func strokeImage(boxSize: CGFloat, strokeWeight: CGFloat = 1.5) -> UIImage {
+        let lineWidth = max(1.1, boxSize * strokeWeight / viewBox)
         let bounds = CGRect(x: 0, y: 0, width: boxSize, height: boxSize)
         let path = HugeIconShape(icon: self)
             .path(in: bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2))

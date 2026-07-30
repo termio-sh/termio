@@ -397,18 +397,14 @@ final class TerminalAccessoryBar: UIInputView {
         glass.layer.cornerRadius = 26
         glass.layer.cornerCurve = .continuous
 
-        // iMessage's (+) chips aren't flat — each is a diagonal gradient
-        // squircle. We mirror its palette: a dark camera lens, the Photos
-        // rainbow, a red-orange audio capsule, and the Files blue.
+        // Deliberately NOT iMessage's rainbow chips: termio stays monochrome,
+        // so each source is one neutral chip with a thin outline glyph — the
+        // Hugeicons look, done natively in SF Symbols (see makeMenuRow).
         let rows = UIStackView(arrangedSubviews: [
-            makeMenuRow(title: "Camera", symbol: "camera.fill",
-                        colors: [Self.hex(0x8A8F98), Self.hex(0x3A3D42)]) { [weak self] in self?.onAttach?(.camera) },
-            makeMenuRow(title: "Photos", symbol: "photo.fill",
-                        colors: [Self.hex(0xFCC72E), Self.hex(0xF6499A), Self.hex(0x3E9BFE)]) { [weak self] in self?.onAttach?(.photos) },
-            makeMenuRow(title: "Voice", symbol: "waveform",
-                        colors: [Self.hex(0xFF8A5B), Self.hex(0xFB2C55)]) { [weak self] in self?.startVoiceRecording() },
-            makeMenuRow(title: "Files", symbol: "folder.fill",
-                        colors: [Self.hex(0x39B9FF), Self.hex(0x0A7BFF)]) { [weak self] in self?.onAttach?(.files) },
+            makeMenuRow(title: "Camera", symbol: "camera") { [weak self] in self?.onAttach?(.camera) },
+            makeMenuRow(title: "Photos", symbol: "photo") { [weak self] in self?.onAttach?(.photos) },
+            makeMenuRow(title: "Voice", symbol: "waveform") { [weak self] in self?.startVoiceRecording() },
+            makeMenuRow(title: "Files", symbol: "folder") { [weak self] in self?.onAttach?(.files) },
         ])
         rows.axis = .vertical
         rows.translatesAutoresizingMaskIntoConstraints = false
@@ -416,7 +412,7 @@ final class TerminalAccessoryBar: UIInputView {
 
         // Bottom-left corner of the card sits just above the (+) key.
         let anchor = attachButton.convert(attachButton.bounds, to: window)
-        let size = CGSize(width: 258, height: 4 * 54 + 12)
+        let size = CGSize(width: 236, height: 4 * 54 + 12)
         let card = UIView(frame: CGRect(
             x: max(8, anchor.minX),
             y: anchor.minY - size.height - 8,
@@ -486,11 +482,11 @@ final class TerminalAccessoryBar: UIInputView {
         }
     }
 
-    /// One source row in the newest-Messages style: a filled SF symbol in a
-    /// tinted rounded chip on the leading edge, then the label — the iMessage
-    /// (+) app-row look, cleaner than the plain UIMenu icon-on-the-right shape.
+    /// One source row: a thin outline SF symbol in a single neutral chip on
+    /// the leading edge, then the label — the iMessage (+) app-row layout, but
+    /// monochrome instead of its per-source rainbow, to match termio's restraint.
     private func makeMenuRow(
-        title: String, symbol: String, colors: [UIColor], handler: @escaping () -> Void
+        title: String, symbol: String, handler: @escaping () -> Void
     ) -> UIView {
         let button = UIButton(type: .system)
         button.heightAnchor.constraint(equalToConstant: 54).isActive = true
@@ -499,22 +495,28 @@ final class TerminalAccessoryBar: UIInputView {
             handler()
         }, for: .touchUpInside)
 
-        let chip = GradientChipView(colors: colors)
+        // One neutral fill for every source — the color is gone on purpose.
+        let chip = UIView()
+        chip.backgroundColor = .tertiarySystemFill
+        chip.layer.cornerRadius = 19
+        chip.layer.cornerCurve = .continuous
         chip.isUserInteractionEnabled = false
         chip.translatesAutoresizingMaskIntoConstraints = false
 
+        // Outline (non-.fill) glyph at a light weight: the airy Hugeicons look,
+        // in the label color rather than white-on-color.
         let icon = UIImageView(image: UIImage(
             systemName: symbol,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
         ))
-        icon.tintColor = .white
+        icon.tintColor = .label
         icon.contentMode = .center
         icon.translatesAutoresizingMaskIntoConstraints = false
         chip.addSubview(icon)
 
         let label = UILabel()
         label.text = title
-        label.font = .systemFont(ofSize: 17)
+        label.font = .systemFont(ofSize: 18)
         label.textColor = .label
         label.isUserInteractionEnabled = false
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -525,8 +527,8 @@ final class TerminalAccessoryBar: UIInputView {
         NSLayoutConstraint.activate([
             chip.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 16),
             chip.centerYAnchor.constraint(equalTo: button.centerYAnchor),
-            chip.widthAnchor.constraint(equalToConstant: 34),
-            chip.heightAnchor.constraint(equalToConstant: 34),
+            chip.widthAnchor.constraint(equalToConstant: 38),
+            chip.heightAnchor.constraint(equalToConstant: 38),
             icon.centerXAnchor.constraint(equalTo: chip.centerXAnchor),
             icon.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
             label.leadingAnchor.constraint(equalTo: chip.trailingAnchor, constant: 12),
@@ -534,16 +536,6 @@ final class TerminalAccessoryBar: UIInputView {
             label.trailingAnchor.constraint(lessThanOrEqualTo: button.trailingAnchor, constant: -16),
         ])
         return button
-    }
-
-    /// 0xRRGGBB → UIColor, for the fixed iMessage-style chip palette.
-    static func hex(_ rgb: UInt32) -> UIColor {
-        UIColor(
-            red: CGFloat((rgb >> 16) & 0xFF) / 255,
-            green: CGFloat((rgb >> 8) & 0xFF) / 255,
-            blue: CGFloat(rgb & 0xFF) / 255,
-            alpha: 1
-        )
     }
 
     /// Shows the attach (+) — only sessions with a Mac behind them can
@@ -755,25 +747,3 @@ final class RepeatingKeyButton: UIButton {
     }
 }
 
-/// A rounded chip filled with a top-left→bottom-right gradient — the depth
-/// iMessage gives its (+) source icons, which a flat tint can't match.
-final class GradientChipView: UIView {
-    private let gradient = CAGradientLayer()
-
-    init(colors: [UIColor]) {
-        super.init(frame: .zero)
-        gradient.colors = colors.map(\.cgColor)
-        gradient.startPoint = CGPoint(x: 0, y: 0)
-        gradient.endPoint = CGPoint(x: 1, y: 1)
-        layer.addSublayer(gradient)
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        gradient.frame = bounds
-        // iMessage's source chips are full circles, not rounded squares.
-        gradient.cornerRadius = bounds.height / 2
-    }
-}

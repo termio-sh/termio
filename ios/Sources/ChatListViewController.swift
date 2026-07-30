@@ -6,8 +6,8 @@ import UIKit
 /// listed flat — the phone twin of the desktop sidebar's Chats section. The
 /// sessions ARE the content: no project page in between, a row goes straight
 /// to its terminal, like the ChatGPT chat list. ＋ starts a new chat in one
-/// tap — the Mac picks the agent, the same default ⌘N launches — with the
-/// per-agent menu kept behind a long-press.
+/// tap from the title bar — the Mac picks the agent, the same default ⌘N
+/// launches — with the per-agent menu kept behind a long-press.
 final class ChatListViewController: UIViewController {
     private let store: RosterStore
 
@@ -17,6 +17,7 @@ final class ChatListViewController: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .grouped)
     private let emptyState = ListEmptyStateView()
     private var rosterObserver: NSObjectProtocol?
+    private var themeObserver: NSObjectProtocol?
 
     init(store: RosterStore) {
         self.store = store
@@ -27,12 +28,11 @@ final class ChatListViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        themeObserver = installThemeBackdrop()
+        configureNewChatButton()
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
-        // Added last so it floats over the list, opposite the home tab pill.
-        configureNewChatButton()
         refilter()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -44,6 +44,9 @@ final class ChatListViewController: UIViewController {
     deinit {
         if let rosterObserver {
             NotificationCenter.default.removeObserver(rosterObserver)
+        }
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
         }
     }
 
@@ -60,7 +63,7 @@ final class ChatListViewController: UIViewController {
         pageTitle.textColor = .label
 
         let spacer = UIView()
-        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer])
+        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer, newChatButton])
         bar.axis = .horizontal
         bar.alignment = .center
         bar.spacing = 8
@@ -71,17 +74,18 @@ final class ChatListViewController: UIViewController {
             bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             bar.heightAnchor.constraint(equalToConstant: 40),
+            newChatButton.widthAnchor.constraint(equalToConstant: 40),
+            newChatButton.heightAnchor.constraint(equalToConstant: 40),
         ])
         return bar
     }
 
-    /// ＋ floats bottom-right, opposite the home tab pill — the compose corner.
-    /// A TAP presents the agent picker directly: choosing which agent to start
-    /// IS the primary action, not a default hidden behind a long-press. Deferred
-    /// so it always reflects the roster's current enabled agents (and the button
-    /// hides while unpaired).
+    /// The page-local ＋ lives beside "Chats", while the bottom edge belongs to
+    /// navigation. A tap presents the agent picker directly: choosing which
+    /// agent to start is the primary action. Deferred so it always reflects the
+    /// roster's current enabled agents (and the button hides while unpaired).
     private func configureNewChatButton() {
-        newChatButton.applyGlassIcon(.add, boxSize: 26)
+        newChatButton.applyGlassIcon(.add, boxSize: 22)
         newChatButton.tintColor = .label
         newChatButton.accessibilityLabel = "New Chat"
         newChatButton.showsMenuAsPrimaryAction = true
@@ -93,16 +97,6 @@ final class ChatListViewController: UIViewController {
                 }
                 completion(store.newSessionActions(in: chatsProject))
             },
-        ])
-        newChatButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(newChatButton)
-        NSLayoutConstraint.activate([
-            newChatButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            // The tab pill's own scale (64pt, 8pt above the safe area), so the
-            // two ends of the bottom edge read as one balanced bar.
-            newChatButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            newChatButton.widthAnchor.constraint(equalToConstant: 64),
-            newChatButton.heightAnchor.constraint(equalToConstant: 64),
         ])
     }
 
@@ -119,8 +113,8 @@ final class ChatListViewController: UIViewController {
         tableView.keyboardDismissMode = .onDrag
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
         tableView.translatesAutoresizingMaskIntoConstraints = false
-        // The floating pill/＋ sit over the list; reserve room so the last
-        // rows scroll clear of them (64pt pill + margins).
+        // The floating pill sits over the list; reserve room so the last rows
+        // scroll clear of it (64pt pill + margins).
         tableView.contentInset.bottom = 80
         tableView.verticalScrollIndicatorInsets.bottom = 80
         view.addSubview(tableView)

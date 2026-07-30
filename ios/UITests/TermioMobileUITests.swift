@@ -57,6 +57,40 @@ final class TermioMobileUITests: XCTestCase {
         app.buttons["Recent Activity"].tap()
     }
 
+    func testHomeTabSelectionSwitchesDestinations() {
+        let app = launch("list")
+        let projects = app.buttons["home.tab.projects"]
+        let chats = app.buttons["home.tab.chats"]
+        let terminals = app.buttons["home.tab.terminals"]
+        XCTAssertTrue(projects.waitForExistence(timeout: 8))
+        XCTAssertTrue(projects.isSelected)
+
+        chats.tap()
+        XCTAssertTrue(app.staticTexts["Chats"].waitForExistence(timeout: 3))
+        XCTAssertTrue(chats.isSelected)
+        XCTAssertFalse(projects.isSelected)
+
+        terminals.tap()
+        XCTAssertTrue(app.staticTexts["Terminals"].waitForExistence(timeout: 3))
+        XCTAssertTrue(terminals.isSelected)
+        XCTAssertFalse(chats.isSelected)
+    }
+
+    func testHomeTabSelectionCanBeDragged() {
+        let app = launch("list")
+        let projects = app.buttons["home.tab.projects"]
+        let terminals = app.buttons["home.tab.terminals"]
+        XCTAssertTrue(projects.waitForExistence(timeout: 8))
+
+        let start = projects.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = terminals.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        XCTAssertTrue(app.staticTexts["Terminals"].waitForExistence(timeout: 3))
+        XCTAssertTrue(terminals.isSelected)
+        XCTAssertFalse(projects.isSelected)
+    }
+
     // MARK: - Session screen (direct terminal input)
 
     func testOpenSessionFromNeedsYouStripPushesTerminal() {

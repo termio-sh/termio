@@ -462,7 +462,13 @@ final class VoiceRecordingBar: UIView {
         super.init(frame: .zero)
         isHidden = true
 
-        capsule.backgroundColor = .secondarySystemBackground
+        // No solid fill — the bar sits on the keyboard-style input view's native
+        // material, so the pill stays that same color instead of floating a
+        // lighter `secondarySystemBackground` surface over it. A hairline border
+        // keeps the pill's shape legible against the keyboard (color re-resolved
+        // per appearance in layoutSubviews, since a CALayer border is static).
+        capsule.backgroundColor = .clear
+        capsule.layer.borderWidth = 1
         capsule.layer.cornerCurve = .continuous
         capsule.translatesAutoresizingMaskIntoConstraints = false
         addSubview(capsule)
@@ -479,11 +485,13 @@ final class VoiceRecordingBar: UIView {
         cancelButton.accessibilityLabel = "Cancel recording"
         cancelButton.addAction(UIAction { [weak self] _ in self?.onCancel?() }, for: .touchUpInside)
 
-        // Stop: the red circle with a white rounded square — Messages' stop.
-        stopButton.backgroundColor = .systemRed
+        // Stop: Messages' circle-with-rounded-square, but monochrome — a solid
+        // `.label` disc with a `.systemBackground` glyph, so it inverts cleanly
+        // in both appearances instead of shouting in red.
+        stopButton.backgroundColor = .label
         stopButton.accessibilityLabel = "Stop and transcribe"
         stopButton.addAction(UIAction { [weak self] _ in self?.onStop?() }, for: .touchUpInside)
-        stopGlyph.backgroundColor = .white
+        stopGlyph.backgroundColor = .systemBackground
         stopGlyph.layer.cornerRadius = 3.5
         stopGlyph.layer.cornerCurve = .continuous
         stopGlyph.isUserInteractionEnabled = false
@@ -548,6 +556,7 @@ final class VoiceRecordingBar: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         capsule.layer.cornerRadius = capsule.bounds.height / 2
+        capsule.layer.borderColor = UIColor.separator.resolvedColor(with: traitCollection).cgColor
         cancelButton.layer.cornerRadius = cancelButton.bounds.height / 2
         stopButton.layer.cornerRadius = stopButton.bounds.height / 2
     }
@@ -631,12 +640,21 @@ private final class WaveformView: UIView {
         super.init(frame: frame)
         for _ in 0..<barCount {
             let bar = CALayer()
-            bar.backgroundColor = UIColor.systemRed.cgColor
+            // Monochrome, not the recording-red iMessage uses — the height
+            // variation already carries the "I'm listening" liveliness.
+            bar.backgroundColor = UIColor.label.cgColor
             bar.cornerRadius = barWidth / 2
             layer.addSublayer(bar)
             bars.append(bar)
         }
         translatesAutoresizingMaskIntoConstraints = false
+
+        // A `.label` CGColor is baked at assignment, so re-resolve it when the
+        // appearance flips — otherwise the bars keep the old mode's shade.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: WaveformView, _) in
+            let resolved = UIColor.label.resolvedColor(with: self.traitCollection).cgColor
+            self.bars.forEach { $0.backgroundColor = resolved }
+        }
     }
 
     @available(*, unavailable)

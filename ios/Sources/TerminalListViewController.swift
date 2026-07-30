@@ -7,9 +7,9 @@ import UIKit
 /// section, and the exact mirror of the Chats tab for shells instead of agents.
 /// Loose terminals used to fall through as a project *folder* you had to tap
 /// into; promoting them to their own tab keeps a live shell one tap away, the
-/// same shape Chats already got. A row goes straight to its terminal. ＋ opens a
-/// new plain shell at `~` — no agent to pick, so (unlike Chats) it carries no
-/// per-agent menu.
+/// same shape Chats already got. A row goes straight to its terminal. The
+/// title-bar ＋ opens a new plain shell at `~` — no agent to pick, so (unlike
+/// Chats) it carries no per-agent menu.
 final class TerminalListViewController: UIViewController {
     private let store: RosterStore
 
@@ -19,6 +19,7 @@ final class TerminalListViewController: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .grouped)
     private let emptyState = ListEmptyStateView()
     private var rosterObserver: NSObjectProtocol?
+    private var themeObserver: NSObjectProtocol?
 
     init(store: RosterStore) {
         self.store = store
@@ -29,12 +30,11 @@ final class TerminalListViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        themeObserver = installThemeBackdrop()
+        configureNewTerminalButton()
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
-        // Added last so it floats over the list, opposite the home tab pill.
-        configureNewTerminalButton()
         refilter()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -46,6 +46,9 @@ final class TerminalListViewController: UIViewController {
     deinit {
         if let rosterObserver {
             NotificationCenter.default.removeObserver(rosterObserver)
+        }
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
         }
     }
 
@@ -62,7 +65,7 @@ final class TerminalListViewController: UIViewController {
         pageTitle.textColor = .label
 
         let spacer = UIView()
-        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer])
+        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer, newTerminalButton])
         bar.axis = .horizontal
         bar.alignment = .center
         bar.spacing = 8
@@ -73,40 +76,30 @@ final class TerminalListViewController: UIViewController {
             bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             bar.heightAnchor.constraint(equalToConstant: 40),
+            newTerminalButton.widthAnchor.constraint(equalToConstant: 40),
+            newTerminalButton.heightAnchor.constraint(equalToConstant: 40),
         ])
         return bar
     }
 
-    /// ＋ floats bottom-right, opposite the home tab pill — the compose corner.
-    /// A TAP presents the menu the issue asks for: New Terminal (a plain login
-    /// shell the Mac gathers into the loose `.terminals` funnel) and New SSH (an
-    /// `ssh <host>` terminal). New SSH is a read-only pick from the Mac's
-    /// `~/.ssh/config` aliases — the phone never types a host — so it's deferred
-    /// to always reflect the Mac's current config. Shown whenever paired: New
-    /// Terminal is project-less now, so it can seed the first terminal too.
+    /// The page-local ＋ lives beside "Terminals", while the bottom edge belongs
+    /// to navigation. Its menu contains New Terminal (a plain login shell the
+    /// Mac gathers into the loose `.terminals` funnel) and New SSH. New SSH is
+    /// a read-only pick from the Mac's `~/.ssh/config` aliases — the phone never
+    /// types a host — so it's deferred to reflect the current config.
     private func configureNewTerminalButton() {
-        newTerminalButton.applyGlassIcon(.add, boxSize: 26)
+        newTerminalButton.applyGlassIcon(.add, boxSize: 22)
         newTerminalButton.tintColor = .label
         newTerminalButton.accessibilityLabel = "New Terminal"
         newTerminalButton.showsMenuAsPrimaryAction = true
         newTerminalButton.menu = UIMenu(children: [
             UIAction(
                 title: "New Terminal",
-                image: UIImage(systemName: "terminal")
+                image: HugeIcon.terminal.strokeImage(boxSize: 22)
             ) { [weak self] _ in self?.store.startNewTerminal() },
             UIDeferredMenuElement.uncached { [weak self] completion in
                 completion([self?.sshMenu() ?? UIMenu()])
             },
-        ])
-        newTerminalButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(newTerminalButton)
-        NSLayoutConstraint.activate([
-            newTerminalButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            // The tab pill's own scale (64pt, 8pt above the safe area), so the
-            // two ends of the bottom edge read as one balanced bar.
-            newTerminalButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            newTerminalButton.widthAnchor.constraint(equalToConstant: 64),
-            newTerminalButton.heightAnchor.constraint(equalToConstant: 64),
         ])
     }
 
@@ -115,7 +108,7 @@ final class TerminalListViewController: UIViewController {
     /// host. An empty config shows a disabled hint pointing back to the Mac, so
     /// the item never dead-ends on a tap.
     private func sshMenu() -> UIMenu {
-        let icon = UIImage(systemName: "network")
+        let icon = HugeIcon.network.strokeImage(boxSize: 22)
         let hosts = store.sshHosts
         guard !hosts.isEmpty else {
             let hint = UIAction(title: "Add hosts in ~/.ssh/config on your Mac") { _ in }
@@ -144,8 +137,8 @@ final class TerminalListViewController: UIViewController {
         tableView.keyboardDismissMode = .onDrag
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
         tableView.translatesAutoresizingMaskIntoConstraints = false
-        // The floating pill/＋ sit over the list; reserve room so the last
-        // rows scroll clear of them (64pt pill + margins).
+        // The floating pill sits over the list; reserve room so the last rows
+        // scroll clear of it (64pt pill + margins).
         tableView.contentInset.bottom = 80
         tableView.verticalScrollIndicatorInsets.bottom = 80
         view.addSubview(tableView)

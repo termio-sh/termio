@@ -54,6 +54,7 @@ final class SettingsViewController: UITableViewController {
     private static let privacyURL = URL(string: "https://termio.sh/privacy")!
 
     private var stateObserver: NSObjectProtocol?
+    private var themeObserver: NSObjectProtocol?
 
     init() {
         super.init(style: .insetGrouped)
@@ -66,6 +67,9 @@ final class SettingsViewController: UITableViewController {
         if let stateObserver {
             NotificationCenter.default.removeObserver(stateObserver)
         }
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
     }
 
     /// False when the page lives as the home's Settings tab — nothing to
@@ -76,6 +80,10 @@ final class SettingsViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Settings"
+        // Tint the backdrop behind the inset cards to the terminal theme, so
+        // Settings matches every other page when the theme changes (the cards
+        // stay standard grouped-cells for legibility).
+        themeObserver = installThemeBackdrop()
         if showsCloseButton {
             // A real glass ✕ at a Telegram-scale target, not the slim system
             // Done text item.
@@ -213,6 +221,8 @@ final class AppearanceSettingsViewController: UITableViewController {
         case appearance, lightTheme, darkTheme, fontSize
     }
 
+    private var themeObserver: NSObjectProtocol?
+
     init() {
         super.init(style: .insetGrouped)
     }
@@ -220,9 +230,16 @@ final class AppearanceSettingsViewController: UITableViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    deinit {
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Appearance"
+        themeObserver = installThemeBackdrop()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -312,6 +329,8 @@ final class AppearanceSettingsViewController: UITableViewController {
 final class TerminalKeyboardSettingsViewController: UITableViewController {
     private let settings = MobileSettings.shared
 
+    private var themeObserver: NSObjectProtocol?
+
     init() {
         super.init(style: .insetGrouped)
     }
@@ -319,9 +338,16 @@ final class TerminalKeyboardSettingsViewController: UITableViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    deinit {
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Terminal Keyboard"
+        themeObserver = installThemeBackdrop()
     }
 
     // MARK: - Table
@@ -385,6 +411,8 @@ final class VoiceSettingsViewController: UITableViewController {
     /// The provider whose key the Key section is showing — the current choice.
     private var provider: TranscriptionProvider { settings.transcriptionProvider }
 
+    private var themeObserver: NSObjectProtocol?
+
     init() {
         super.init(style: .insetGrouped)
     }
@@ -392,9 +420,16 @@ final class VoiceSettingsViewController: UITableViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    deinit {
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Voice"
+        themeObserver = installThemeBackdrop()
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int {
@@ -529,6 +564,7 @@ final class ConnectivitySettingsViewController: UITableViewController {
     }
 
     private var stateObserver: NSObjectProtocol?
+    private var themeObserver: NSObjectProtocol?
 
     init() {
         super.init(style: .insetGrouped)
@@ -541,11 +577,15 @@ final class ConnectivitySettingsViewController: UITableViewController {
         if let stateObserver {
             NotificationCenter.default.removeObserver(stateObserver)
         }
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Connectivity"
+        themeObserver = installThemeBackdrop()
         stateObserver = NotificationCenter.default.addObserver(
             forName: CompanionLink.stateDidChange, object: nil, queue: .main
         ) { [weak self] _ in
