@@ -1,0 +1,51 @@
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Etc/UTC"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: "swift"
+    directories:
+      - "/"
+      - "/Shared"
+      - "/companion"
+      - "/ios"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Etc/UTC"
+    groups:
+      swift-packages:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: "npm"
+    directory: "/web/landing"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Etc/UTC"
+    groups:
+      landing:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
