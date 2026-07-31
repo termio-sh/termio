@@ -111,7 +111,10 @@ final class HomeTabPill: UIView, UIGestureRecognizerDelegate {
 
     init(items: [(title: String, icon: HugeIcon)]) {
         titles = items.map(\.title)
-        icons = items.map { $0.icon.strokeImage(boxSize: 21) }
+        // Larger + a touch heavier than the 21/1.5 first pass: at 21 the glyphs read small and
+        // hairline in the glass pill next to the 34pt Mac toolbar weight, so lift the drawn box to
+        // 24 and the stroke to 1.7 for a firmer, more legible tab icon (same in every state).
+        icons = items.map { $0.icon.strokeImage(boxSize: 24, strokeWeight: 1.7) }
         super.init(frame: .zero)
         let glass = GlassChrome.makeView(interactive: true)
         glass.translatesAutoresizingMaskIntoConstraints = false

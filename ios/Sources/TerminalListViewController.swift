@@ -35,6 +35,7 @@ final class TerminalListViewController: UIViewController {
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
+        configureFab()
         refilter()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -65,7 +66,7 @@ final class TerminalListViewController: UIViewController {
         pageTitle.textColor = .label
 
         let spacer = UIView()
-        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer, newTerminalButton])
+        let bar = UIStackView(arrangedSubviews: [pageTitle, spacer])
         bar.axis = .horizontal
         bar.alignment = .center
         bar.spacing = 8
@@ -76,19 +77,34 @@ final class TerminalListViewController: UIViewController {
             bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             bar.heightAnchor.constraint(equalToConstant: 40),
-            newTerminalButton.widthAnchor.constraint(equalToConstant: 40),
-            newTerminalButton.heightAnchor.constraint(equalToConstant: 40),
         ])
         return bar
     }
 
-    /// The page-local ＋ lives beside "Terminals", while the bottom edge belongs
-    /// to navigation. Its menu contains New Terminal (a plain login shell the
-    /// Mac gathers into the loose `.terminals` funnel) and New SSH. New SSH is
-    /// a read-only pick from the Mac's `~/.ssh/config` aliases — the phone never
-    /// types a host — so it's deferred to reflect the current config.
+    /// The compose ＋ floats in the bottom-right corner as a glass FAB, above the
+    /// tab pill — thumb-reachable and clear of the large title. Added after the
+    /// table so it sits above the rows.
+    private func configureFab() {
+        newTerminalButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(newTerminalButton)
+        NSLayoutConstraint.activate([
+            newTerminalButton.trailingAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            // Clear the 64pt tab pill (which sits 8pt off the safe-area bottom)
+            // with an 8pt gap above it: 64 + 8 + 8.
+            newTerminalButton.bottomAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -80),
+            newTerminalButton.widthAnchor.constraint(equalToConstant: 52),
+            newTerminalButton.heightAnchor.constraint(equalToConstant: 52),
+        ])
+    }
+
+    /// The compose menu: New Terminal (a plain login shell the Mac gathers into
+    /// the loose `.terminals` funnel) and New SSH. New SSH is a read-only pick
+    /// from the Mac's `~/.ssh/config` aliases — the phone never types a host —
+    /// so it's deferred to reflect the current config.
     private func configureNewTerminalButton() {
-        newTerminalButton.applyGlassIcon(.add, boxSize: 22)
+        newTerminalButton.applyGlassIcon(.add, boxSize: 24)
         newTerminalButton.tintColor = .label
         newTerminalButton.accessibilityLabel = "New Terminal"
         newTerminalButton.showsMenuAsPrimaryAction = true

@@ -39,6 +39,7 @@ final class ProjectDetailViewController: UIViewController {
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
+        configureFab()
         reload()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -95,7 +96,7 @@ final class ProjectDetailViewController: UIViewController {
         pageTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let spacer = UIView()
-        let bar = UIStackView(arrangedSubviews: [back, pageTitle, spacer, addButton])
+        let bar = UIStackView(arrangedSubviews: [back, pageTitle, spacer])
         bar.axis = .horizontal
         bar.alignment = .center
         bar.spacing = 10
@@ -119,13 +120,11 @@ final class ProjectDetailViewController: UIViewController {
             bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
             back.widthAnchor.constraint(equalToConstant: 40),
             back.heightAnchor.constraint(equalToConstant: 40),
-            addButton.widthAnchor.constraint(equalToConstant: 40),
-            addButton.heightAnchor.constraint(equalToConstant: 40),
             // Indented to the title's left edge (past the back chevron).
             context.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 62),
             context.trailingAnchor.constraint(
-                lessThanOrEqualTo: addButton.leadingAnchor,
-                constant: -8
+                lessThanOrEqualTo: view.trailingAnchor,
+                constant: -12
             ),
             context.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 0),
         ])
@@ -145,12 +144,28 @@ final class ProjectDetailViewController: UIViewController {
 
     // MARK: - Add button
 
-    /// The Mac project menu's "New … Session" actions. The control belongs to
-    /// this page, so it sits beside the title rather than competing with the
-    /// persistent navigation surface. Live rosters only; the bundled mock
-    /// cannot start anything.
+    /// The compose ＋ floats in the bottom-right corner as a glass FAB, above
+    /// the tab pill — matching the Terminals/Chats lists. Added after the table
+    /// so it sits above the rows.
+    private func configureFab() {
+        addButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(addButton)
+        NSLayoutConstraint.activate([
+            addButton.trailingAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            // Clear the 64pt tab pill (which sits 8pt off the safe-area bottom)
+            // with an 8pt gap above it: 64 + 8 + 8.
+            addButton.bottomAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -80),
+            addButton.widthAnchor.constraint(equalToConstant: 52),
+            addButton.heightAnchor.constraint(equalToConstant: 52),
+        ])
+    }
+
+    /// The Mac project menu's "New … Session" actions. Live rosters only; the
+    /// bundled mock cannot start anything.
     private func configureAddButton() {
-        addButton.applyGlassIcon(.add, boxSize: 22)
+        addButton.applyGlassIcon(.add, boxSize: 24)
         addButton.tintColor = .label
         addButton.accessibilityLabel = "New session in \(project.name)"
         addButton.showsMenuAsPrimaryAction = true
