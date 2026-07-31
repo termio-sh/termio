@@ -68,9 +68,12 @@ extension TermioStore {
     /// the pane you're looking at when it belongs to this project, else the
     /// project's last session (a cross-project selection is ignored, so a
     /// background agent's sibling never gets dragged into another project's group).
-    /// The split axis alternates across the anchor's current one, tiling-WM style —
-    /// a lone anchor opens side by side. With no pane to anchor to (an empty
-    /// project) it falls back to a plain `addSession`.
+    /// A lone anchor opens side by side; further spawns land on the *far side*
+    /// of the anchor's divider, stacked on the cross axis — the anchor (the
+    /// agent you're watching) keeps its full pane and its companions tile up
+    /// opposite it, instead of the anchor being carved smaller on every spawn.
+    /// With no pane to anchor to (an empty project) it falls back to a plain
+    /// `addSession`.
     ///
     /// With `takeFocus` false the selection stays where the user put it: the new
     /// pane is mounted invisibly instead (see `activateInBackground`), so its
@@ -107,21 +110,19 @@ extension TermioStore {
         // rows and draws its ┌/└ bracket (see `splitLinkMarks`).
         projects[projectIndex].sessions.insert(newSession, at: anchorIndex + 1)
 
-        // Alternate the split axis across the anchor's current one; a lone anchor
-        // (no enclosing branch) opens side by side.
-        let group = groupIndex(containing: anchorID)
-        let direction: SplitDirection
-        if let group, let current = splitGroups[group].branchDirection(childLeaf: anchorID) {
-            direction = current == .horizontal ? .vertical : .horizontal
+        // A lone anchor opens side by side; an anchor that already has a
+        // neighbour keeps its full pane, with the newcomer stacked into the
+        // opposite side of its divider (see `splitting(oppositeLeaf:adding:)`).
+        if let group = groupIndex(containing: anchorID) {
+            if splitGroups[group].branchDirection(childLeaf: anchorID) != nil {
+                splitGroups[group] = splitGroups[group]
+                    .splitting(oppositeLeaf: anchorID, adding: newSession.id)
+            } else {
+                splitGroups[group] = splitGroups[group]
+                    .splitting(leaf: anchorID, direction: .horizontal, adding: newSession.id)
+            }
         } else {
-            direction = .horizontal
-        }
-
-        if let group {
-            splitGroups[group] = splitGroups[group]
-                .splitting(leaf: anchorID, direction: direction, adding: newSession.id)
-        } else {
-            splitGroups.append(.split(SplitBranch(direction: direction, ratio: 0.5,
+            splitGroups.append(.split(SplitBranch(direction: .horizontal, ratio: 0.5,
                                                   first: .leaf(anchorID),
                                                   second: .leaf(newSession.id))))
         }
@@ -254,6 +255,27 @@ extension TermioStore {
     func toggleSelectedPaneZoom() {
         guard splitRoot != nil else { return }
         isPaneZoomed.toggle()
+    }
+
+    /// The pane `id` would trade places with when moved `direction`, or `nil`
+    /// when nothing lies that way — what greys out the "Move Pane" menu items.
+    /// Uses the same directional scoring as focus movement, so "Move Left" and
+    /// ⌥⌘← always agree on which pane is the neighbour.
+    func movePaneTarget(of id: Session.ID, _ direction: PaneFocusDirection) -> Session.ID? {
+        groupIndex(containing: id).flatMap { splitGroups[$0].pane(direction, of: id) }
+    }
+
+    /// Moves a pane by trading places with its directional neighbour (tmux's
+    /// swap-pane) — the context menu's "Move Pane". The tree's shape and every
+    /// divider ratio stay put; only the two leaves change slots. Zoom is
+    /// dropped so the result is visible, and the selection sticks with the
+    /// moved pane.
+    func movePane(_ id: Session.ID, _ direction: PaneFocusDirection) {
+        guard let group = groupIndex(containing: id),
+              let target = movePaneTarget(of: id, direction) else { return }
+        splitGroups[group] = splitGroups[group].swapping(id, and: target)
+        selectedSessionID = id
+        isPaneZoomed = false
     }
 
     /// Moves pane focus directionally (⌥⌘ arrows), scored on the visible

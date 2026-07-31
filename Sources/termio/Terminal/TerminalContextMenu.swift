@@ -95,16 +95,50 @@ final class TerminalContextMenu: NSObject {
         // `paste_from_clipboard` binding so bracketed paste is preserved.
         menu.addItem(surfaceItem("Copy", action: "copy:", symbol: "doc.on.doc"))
         menu.addItem(surfaceItem("Paste", action: "paste:", symbol: "doc.on.clipboard"))
+        // The session's CLI handle (`claude@ab12cd34`), shown verbatim in the
+        // title — the exact string `termio sessions send/read` takes, so wiring
+        // one agent to drive another is a right-click instead of a `list`
+        // round-trip.
+        if let handle = clickedHandle {
+            menu.addItem(storeItem("Copy “\(handle)”", action: #selector(copyHandle), symbol: "at"))
+        }
         menu.addItem(.separator())
         menu.addItem(storeItem("Split Right", action: #selector(splitRight), symbol: "rectangle.split.2x1"))
         menu.addItem(storeItem("Split Down", action: #selector(splitDown), symbol: "rectangle.split.1x2"))
+        // Rearranging without drag-and-drop: each direction trades the clicked
+        // pane with its neighbour that way (tmux's swap-pane), scored by the
+        // same geometry ⌥⌘-arrow focus uses. Directions with no neighbour are
+        // greyed out rather than hidden, so the submenu's shape is stable.
+        if let id = clickedSessionID, let store, store.isInSplitGroup(id) {
+            let submenu = NSMenu()
+            submenu.autoenablesItems = false
+            let directions: [(String, String, Selector, PaneFocusDirection)] = [
+                ("Left", "arrow.left", #selector(movePaneLeft), .left),
+                ("Right", "arrow.right", #selector(movePaneRight), .right),
+                ("Up", "arrow.up", #selector(movePaneUp), .up),
+                ("Down", "arrow.down", #selector(movePaneDown), .down),
+            ]
+            for (title, symbol, action, direction) in directions {
+                let item = storeItem(title, action: action, symbol: symbol)
+                item.isEnabled = store.movePaneTarget(of: id, direction) != nil
+                submenu.addItem(item)
+            }
+            let parent = NSMenuItem(title: "Move Pane", action: nil, keyEquivalent: "")
+            parent.image = NSImage(systemSymbolName: "arrow.up.and.down.and.arrow.left.and.right",
+                                   accessibilityDescription: nil)
+            parent.submenu = submenu
+            menu.addItem(parent)
+        }
         // "Ungroup" is the layout half: the pane leaves the split group but its
         // session stays alive in the sidebar — the same action the sidebar row
-        // names "Ungroup" (the inverse of "Group with"). "Close Session" is the destructive half and is
-        // always offered; closing a split session prunes its pane on the way
-        // out, so the layout needs no separate cleanup.
+        // names "Ungroup" (the inverse of "Group with"). Its glyph is Split
+        // Right's with a slash through it: un-split. "Close Session" is the
+        // destructive half and is always offered; closing a split session
+        // prunes its pane on the way out, so the layout needs no separate
+        // cleanup.
         if store?.splitRoot != nil {
-            menu.addItem(storeItem("Ungroup", action: #selector(ungroup), symbol: "rectangle"))
+            menu.addItem(storeItem("Ungroup", action: #selector(ungroup),
+                                   symbol: "rectangle.split.2x1.slash"))
         }
         if clickedSessionID != nil {
             menu.addItem(storeItem("Close Session", action: #selector(closeSession), symbol: "xmark"))
@@ -131,9 +165,31 @@ final class TerminalContextMenu: NSObject {
         clickedView.flatMap(sessionID(for:))
     }
 
+    /// The clicked session's CLI handle (`<agent>@<8-char-id>`), the address
+    /// every `termio sessions` command takes.
+    private var clickedHandle: String? {
+        guard let store, let session = clickedSessionID.flatMap(store.session(_:))
+        else { return nil }
+        return store.sessionHandle(for: session)
+    }
+
+    @objc private func copyHandle() {
+        guard let handle = clickedHandle else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(handle, forType: .string)
+    }
+
     @objc private func splitRight() { store?.splitSelectedPane(.horizontal) }
     @objc private func splitDown() { store?.splitSelectedPane(.vertical) }
     @objc private func ungroup() { store?.ungroupSelectedPane() }
+    @objc private func movePaneLeft() { movePane(.left) }
+    @objc private func movePaneRight() { movePane(.right) }
+    @objc private func movePaneUp() { movePane(.up) }
+    @objc private func movePaneDown() { movePane(.down) }
+    private func movePane(_ direction: PaneFocusDirection) {
+        guard let id = clickedSessionID else { return }
+        store?.movePane(id, direction)
+    }
     @objc private func closeSession() {
         guard let id = clickedSessionID else { return }
         store?.closeSession(id)

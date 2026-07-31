@@ -94,6 +94,55 @@ indirect enum SplitNode: Codable, Hashable {
         }
     }
 
+    /// Adds `newLeaf` on the far side of `target`'s divider: finds the branch
+    /// that has `target` as a direct child and splits the *sibling* subtree on
+    /// the cross axis, so `target`'s own pane keeps its full extent. This is the
+    /// spawn placement rule — an agent that keeps spawning companions stays
+    /// full-height while the companions stack up opposite it. A miss returns
+    /// the tree unchanged.
+    func splitting(oppositeLeaf target: Session.ID, adding newLeaf: Session.ID) -> SplitNode {
+        switch self {
+        case .leaf:
+            return self
+        case .split(var branch):
+            let cross: SplitDirection = branch.direction == .horizontal ? .vertical : .horizontal
+            if branch.first == .leaf(target) {
+                branch.second = .split(SplitBranch(direction: cross, ratio: 0.5,
+                                                   first: branch.second, second: .leaf(newLeaf)))
+            } else if branch.second == .leaf(target) {
+                branch.first = .split(SplitBranch(direction: cross, ratio: 0.5,
+                                                  first: branch.first, second: .leaf(newLeaf)))
+            } else {
+                branch.first = branch.first.splitting(oppositeLeaf: target, adding: newLeaf)
+                branch.second = branch.second.splitting(oppositeLeaf: target, adding: newLeaf)
+            }
+            return .split(branch)
+        }
+    }
+
+    /// Trades the positions of two leaves, leaving the tree's shape and every
+    /// divider ratio untouched — the "Move Pane" primitive (tmux's swap-pane).
+    /// Swapping is what keeps moving a one-click menu action: the layout offers
+    /// no ambiguous drop targets to negotiate, panes only change places.
+    func swapping(_ a: Session.ID, and b: Session.ID) -> SplitNode {
+        // Both leaves must be present, or the rewrite below would *replace* the
+        // present one with the absent one — a dangling pane, not a swap.
+        guard contains(a), contains(b) else { return self }
+        return swapped(a, b)
+    }
+
+    private func swapped(_ a: Session.ID, _ b: Session.ID) -> SplitNode {
+        switch self {
+        case .leaf(a): return .leaf(b)
+        case .leaf(b): return .leaf(a)
+        case .leaf: return self
+        case .split(var branch):
+            branch.first = branch.first.swapped(a, b)
+            branch.second = branch.second.swapped(a, b)
+            return .split(branch)
+        }
+    }
+
     /// Removes a leaf, collapsing its parent branch into the surviving sibling
     /// (muxy's unwrap-one-level close). Returns `nil` when the removal consumes
     /// the whole tree.
