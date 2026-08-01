@@ -76,7 +76,14 @@ final class TerminalContextMenu: NSObject {
         clickedLinkURL = TerminalLinkState.hoveredURL
             .flatMap(URL.init(string:))
             .flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
-        NSMenu.popUpContextMenu(makeMenu(), with: event, for: target)
+        // popUp — not popUpContextMenu(_:with:for:) — presents exactly the menu we
+        // built. Passing the surface as the `for:` view makes AppKit merge in the
+        // system's automatic text-input extras (the "AutoFill" submenu, Services)
+        // because the ghostty surface is an NSTextInputClient; those are meaningless
+        // over a terminal, so we position the menu ourselves and skip the augmentation.
+        makeMenu().popUp(positioning: nil,
+                         at: target.convert(event.locationInWindow, from: nil),
+                         in: target)
         return true
     }
 
@@ -129,6 +136,16 @@ final class TerminalContextMenu: NSObject {
             parent.submenu = submenu
             menu.addItem(parent)
         }
+        // "Flip Layout" turns just the divider that holds the clicked pane and
+        // its neighbour from side-by-side to stacked (or back) — the honest
+        // inverse of the "Split Right"/"Split Down" that made the pair. Nested
+        // splits stay put, matching iTerm2's local, per-pane model (which has no
+        // whole-layout transpose). Only offered when the pane is in a group, so
+        // there is always a branch to flip.
+        if let id = clickedSessionID, let store, store.isInSplitGroup(id) {
+            menu.addItem(storeItem("Flip Layout", action: #selector(flipLayout),
+                                   symbol: "arrow.triangle.2.circlepath"))
+        }
         // "Ungroup" is the layout half: the pane leaves the split group but its
         // session stays alive in the sidebar — the same action the sidebar row
         // names "Ungroup" (the inverse of "Group with"). Its glyph is Split
@@ -175,6 +192,10 @@ final class TerminalContextMenu: NSObject {
     @objc private func splitRight() { store?.splitSelectedPane(.horizontal) }
     @objc private func splitDown() { store?.splitSelectedPane(.vertical) }
     @objc private func ungroup() { store?.ungroupSelectedPane() }
+    @objc private func flipLayout() {
+        guard let id = clickedSessionID else { return }
+        store?.flipPaneLayout(id)
+    }
     @objc private func movePaneLeft() { movePane(.left) }
     @objc private func movePaneRight() { movePane(.right) }
     @objc private func movePaneUp() { movePane(.up) }

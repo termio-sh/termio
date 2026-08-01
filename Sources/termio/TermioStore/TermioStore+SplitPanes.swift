@@ -301,6 +301,19 @@ extension TermioStore {
         isPaneZoomed = false
     }
 
+    /// Flips the layout of the branch immediately enclosing a pane — side-by-side
+    /// ⇄ stacked — via the context menu's "Flip Layout". Only that one divider's
+    /// axis turns; the tree's shape, its ratios, and every other pane stay put,
+    /// the same restraint "Move Pane" keeps. Zoom is dropped so the result is
+    /// visible and the selection sticks with the flipped pane. A no-op when the
+    /// pane isn't grouped (a lone pane has no branch to flip).
+    func flipPaneLayout(_ id: Session.ID) {
+        guard let group = groupIndex(containing: id) else { return }
+        splitGroups[group] = splitGroups[group].flippingBranch(containing: id)
+        selectedSessionID = id
+        isPaneZoomed = false
+    }
+
     /// Moves pane focus directionally (⌥⌘ arrows), scored on the visible
     /// group's normalized geometry. No-op without splits or when nothing lies
     /// that way.

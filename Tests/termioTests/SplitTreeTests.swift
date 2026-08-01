@@ -140,4 +140,37 @@ final class SplitTreeTests: XCTestCase {
                        CGRect(x: 10, y: 45, width: 100, height: 25))
         XCTAssertEqual(PaneDropZone.center.highlightRect(in: frame), frame)
     }
+
+    /// "Flip Layout" turns only the innermost branch: an A│B pair nested under C
+    /// rotates from side-by-side to stacked, while C keeps its own axis, ratio,
+    /// and slot. Both children and the ratio survive the flip.
+    func testFlippingTurnsOnlyTheInnermostBranch() {
+        let inner = SplitBranch(direction: .horizontal, ratio: 0.3,
+                                first: .leaf(run1), second: .leaf(run2))
+        let tree = SplitNode.split(SplitBranch(direction: .vertical, ratio: 0.5,
+                                               first: .leaf(agent), second: .split(inner)))
+        let flipped = tree.flippingBranch(containing: run1)
+
+        guard case let .split(outer) = flipped,
+              case let .split(rotated) = outer.second else {
+            return XCTFail("expected the outer branch and its inner split to survive")
+        }
+        // The outer branch is byte-for-byte the same; only the inner axis turned.
+        XCTAssertEqual(outer.direction, .vertical)
+        XCTAssertEqual(outer.first, .leaf(agent))
+        XCTAssertEqual(rotated.direction, .vertical)   // was .horizontal
+        XCTAssertEqual(rotated.ratio, 0.3)             // ratio preserved
+        XCTAssertEqual(flipped.leafIDs, [agent, run1, run2])
+    }
+
+    /// Flipping a pane that has no enclosing branch, or a leaf that isn't in the
+    /// tree, changes nothing.
+    func testFlippingMissIsANoOp() {
+        let lone = SplitNode.leaf(agent)
+        XCTAssertEqual(lone.flippingBranch(containing: agent), lone)
+
+        let tree = SplitNode.split(SplitBranch(direction: .horizontal, ratio: 0.5,
+                                               first: .leaf(agent), second: .leaf(run1)))
+        XCTAssertEqual(tree.flippingBranch(containing: run3), tree)
+    }
 }

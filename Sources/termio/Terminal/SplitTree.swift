@@ -243,6 +243,27 @@ indirect enum SplitNode: Codable, Hashable {
         }
     }
 
+    /// Flips the axis of the branch that has `leaf` as a direct child —
+    /// side-by-side ⇄ stacked — keeping both children and the divider ratio.
+    /// This is the innermost split only: nesting stays put, so flipping an
+    /// A│B pair that sits under C rotates just A and B, never C. Like
+    /// `swapping`, it changes one thing about one pair and leaves the rest of
+    /// the tree byte-for-byte. A miss returns the tree unchanged.
+    func flippingBranch(containing leaf: Session.ID) -> SplitNode {
+        switch self {
+        case .leaf:
+            return self
+        case .split(var branch):
+            if branch.first == .leaf(leaf) || branch.second == .leaf(leaf) {
+                branch.direction = branch.direction == .horizontal ? .vertical : .horizontal
+                return .split(branch)
+            }
+            branch.first = branch.first.flippingBranch(containing: leaf)
+            branch.second = branch.second.flippingBranch(containing: leaf)
+            return .split(branch)
+        }
+    }
+
     /// Writes a divider's ratio (clamped), leaving the rest of the tree intact.
     func updatingRatio(branchID: UUID, to ratio: Double) -> SplitNode {
         switch self {
