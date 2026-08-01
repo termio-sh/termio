@@ -278,6 +278,29 @@ extension TermioStore {
         isPaneZoomed = false
     }
 
+    /// Lands a modifier-dragged pane on `target` (issue #183). An edge zone
+    /// re-splits the target with the dragged pane on that side — the pane
+    /// leaves its old slot first, its vacated space collapsing into the
+    /// sibling exactly as if it had closed, so one gesture subsumes move +
+    /// re-split + orientation. The center zone trades places, same as "Move
+    /// Pane". Dropping a pane on itself, or across groups, is a no-op — the
+    /// self-drop guard matters, because removing the pane and then missing
+    /// the (gone) target would otherwise drop it from the tree entirely.
+    func dropPane(_ source: Session.ID, onto target: Session.ID, zone: PaneDropZone) {
+        guard source != target,
+              let group = groupIndex(containing: source),
+              group == groupIndex(containing: target) else { return }
+        if let direction = zone.splitDirection {
+            guard let vacated = splitGroups[group].removing(leaf: source) else { return }
+            splitGroups[group] = vacated.splitting(leaf: target, direction: direction,
+                                                   adding: source, slot: zone.slot)
+        } else {
+            splitGroups[group] = splitGroups[group].swapping(source, and: target)
+        }
+        selectedSessionID = source
+        isPaneZoomed = false
+    }
+
     /// Moves pane focus directionally (⌥⌘ arrows), scored on the visible
     /// group's normalized geometry. No-op without splits or when nothing lies
     /// that way.

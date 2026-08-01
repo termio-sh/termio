@@ -181,6 +181,12 @@ struct TerminalPane: View {
                     }
                 }
             }
+            // The ⌘⌥⇧ drag's preview (issue #183): the drop-zone highlight is
+            // what resolves the ambiguity a drag-rearrange otherwise has — you
+            // see the half (or the swap) the release would commit.
+            if let drag = store.paneDrag, let layout, !zoomed {
+                PaneDragOverlay(drag: drag, layout: layout)
+            }
         }
     }
 
@@ -632,6 +638,49 @@ private final class TerminalFocusDriver {
             // is occasionally skipped during SwiftUI/AppKit reconciliation.
             _ = previous.resignFirstResponder()
         }
+    }
+}
+
+/// The visual half of the ⌘⌥⇧ pane drag (issue #183): a wash over the lifted
+/// source pane plus a highlight over the region the release would commit —
+/// the half of the target the pane would occupy, or the whole target for a
+/// swap. Geometry comes straight from the tree's `layout`, so the preview and
+/// the drop can never disagree. The tint family is the file-drop wash's
+/// desaturated blue-grey, not accent blue.
+private struct PaneDragOverlay: View {
+    let drag: PaneDragState
+    let layout: SplitNode.PaneLayout
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var tint: Color {
+        colorScheme == .dark
+            ? Color(.sRGB, red: 0.62, green: 0.70, blue: 0.82, opacity: 1)
+            : Color(.sRGB, red: 0.40, green: 0.52, blue: 0.68, opacity: 1)
+    }
+
+    var body: some View {
+        ZStack {
+            // The source pane reads as "lifted": a faint wash, no border.
+            if let source = layout.frames[drag.source] {
+                Rectangle()
+                    .fill(tint.opacity(colorScheme == .dark ? 0.08 : 0.07))
+                    .frame(width: source.width, height: source.height)
+                    .position(x: source.midX, y: source.midY)
+            }
+            // Fill only, no border — the same restraint as the file-drop wash
+            // above (and ghostty's own split-drag overlay): the rect's edge
+            // already draws the zone boundary, a stroke would just say it twice.
+            if let target = drag.target, target != drag.source,
+               let zone = drag.zone, let frame = layout.frames[target] {
+                let rect = zone.highlightRect(in: frame)
+                Rectangle()
+                    .fill(tint.opacity(colorScheme == .dark ? 0.20 : 0.17))
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(.easeOut(duration: 0.12), value: drag)
     }
 }
 

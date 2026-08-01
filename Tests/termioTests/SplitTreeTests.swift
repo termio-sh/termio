@@ -79,4 +79,65 @@ final class SplitTreeTests: XCTestCase {
                                                first: .leaf(agent), second: .leaf(run1)))
         XCTAssertEqual(tree.splitting(oppositeLeaf: run3, adding: run2), tree)
     }
+
+    /// The drag-drop slot: `.first` lands the added pane on the leading side of
+    /// the new divider (a drop on the left/top half), where the default keeps
+    /// "Split Right"/"Split Down"'s trailing placement.
+    func testSplittingLeadingSlotPutsNewcomerFirst() {
+        let split = SplitNode.leaf(agent)
+            .splitting(leaf: agent, direction: .horizontal, adding: run1, slot: .first)
+        guard case let .split(branch) = split else {
+            return XCTFail("expected a branch")
+        }
+        XCTAssertEqual(branch.direction, .horizontal)
+        XCTAssertEqual(branch.first, .leaf(run1))
+        XCTAssertEqual(branch.second, .leaf(agent))
+    }
+
+    /// An edge drop is remove-then-resplit: the dragged pane's old slot
+    /// collapses into its sibling, and the target divides on the drop zone's
+    /// axis with the dragged pane on the dropped side. From `[agent | run1]`,
+    /// dropping `agent` onto `run1`'s bottom half yields `[run1 / agent]`.
+    func testEdgeDropRecomposesAroundTheTarget() {
+        let tree = SplitNode.split(SplitBranch(direction: .horizontal, ratio: 0.7,
+                                               first: .leaf(agent), second: .leaf(run1)))
+        let zone = PaneDropZone.bottom
+        let vacated = tree.removing(leaf: agent)!
+        let dropped = vacated.splitting(leaf: run1, direction: zone.splitDirection!,
+                                        adding: agent, slot: zone.slot)
+
+        let frames = dropped.layout(in: CGRect(x: 0, y: 0, width: 1, height: 1),
+                                    dividerThickness: 0).frames
+        XCTAssertEqual(dropped.leafIDs, [run1, agent])
+        // Stacked now: run1 owns the full-width top half, agent the bottom.
+        XCTAssertEqual(frames[run1]!.width, 1, accuracy: 0.001)
+        XCTAssertGreaterThanOrEqual(frames[agent]!.minY, frames[run1]!.maxY - 0.001)
+    }
+
+    /// The drop-zone hit regions (top-left-origin space): a middle box swaps,
+    /// and outside it the nearest edge wins, so the regions are the four
+    /// corner-to-corner triangles.
+    func testDropZoneRegions() {
+        let size = CGSize(width: 100, height: 100)
+        XCTAssertEqual(PaneDropZone.zone(at: CGPoint(x: 50, y: 50), in: size), .center)
+        XCTAssertEqual(PaneDropZone.zone(at: CGPoint(x: 65, y: 65), in: size), .center)
+        XCTAssertEqual(PaneDropZone.zone(at: CGPoint(x: 5, y: 50), in: size), .left)
+        XCTAssertEqual(PaneDropZone.zone(at: CGPoint(x: 95, y: 50), in: size), .right)
+        XCTAssertEqual(PaneDropZone.zone(at: CGPoint(x: 50, y: 5), in: size), .top)
+        XCTAssertEqual(PaneDropZone.zone(at: CGPoint(x: 50, y: 95), in: size), .bottom)
+        // Diagonal tie-breaking: near a corner the closer edge wins.
+        XCTAssertEqual(PaneDropZone.zone(at: CGPoint(x: 10, y: 20), in: size), .left)
+        XCTAssertEqual(PaneDropZone.zone(at: CGPoint(x: 20, y: 10), in: size), .top)
+    }
+
+    /// The highlight previews exactly what the drop commits: the occupied half
+    /// for an edge, the whole pane for a swap.
+    func testDropZoneHighlightMatchesOutcome() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 50)
+        XCTAssertEqual(PaneDropZone.left.highlightRect(in: frame),
+                       CGRect(x: 10, y: 20, width: 50, height: 50))
+        XCTAssertEqual(PaneDropZone.bottom.highlightRect(in: frame),
+                       CGRect(x: 10, y: 45, width: 100, height: 25))
+        XCTAssertEqual(PaneDropZone.center.highlightRect(in: frame), frame)
+    }
 }

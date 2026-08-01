@@ -89,6 +89,11 @@ final class TermioStore: ObservableObject {
     /// pane. `TerminalPane` honours it only while a split is on screen.
     @Published var isPaneZoomed = false
 
+    /// The in-flight ⌘⌥⇧ pane drag (issue #183): written by `PaneDragRearrange`
+    /// as the pointer moves, read by `TerminalPane` to draw the drop-zone
+    /// highlight. Transient gesture state, never persisted.
+    @Published var paneDrag: PaneDragState?
+
     /// Activation *requests* for sessions that are neither selected nor in the
     /// visible group: a background spawn's fresh pane, a `send` target never
     /// shown. `TerminalPane` folds these into its own `activated` list — the
@@ -748,6 +753,9 @@ final class TermioStore: ObservableObject {
         linkClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             guard let self,
                   event.modifierFlags.contains(.command),
+                  // ⌘⌥⇧+press is the pane-rearrange chord (see `PaneDragRearrange`);
+                  // that gesture owns the click even when a link is hovered.
+                  !PaneDragRearrange.isRearrangeChord(event.modifierFlags),
                   let url = TerminalLinkState.hoveredURL else { return event }
             self.openTerminalLink(url, surfaceWorkingDirectory: nil)
             return nil
