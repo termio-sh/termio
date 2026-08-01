@@ -882,14 +882,17 @@ private struct IssueWebView: NSViewRepresentable {
 /// `ContextMenuWebView`. AppKit otherwise injects a grab-bag onto a `WKWebView` menu
 /// (Look Up / Translate / Search / Copy Link with Highlight / Share / Speech / Services)
 /// — none of it fits a read-only issue thread. Whitelisting by identifier keeps Copy
-/// (text selection) plus Open/Copy Link (an actual link under the cursor) and drops all
-/// the rest.
+/// (text selection) plus Copy Link (a link's URL under the cursor) and drops the rest.
+///
+/// "Open Link" is deliberately *not* kept: the nav delegate only diverts `.linkActivated`
+/// navigations to the browser, but the context-menu item fires a different navigation type
+/// that would load the target *inside* this webview (unauthenticated), replacing the
+/// conversation. A left-click already opens links in the browser, so the item is redundant.
 private final class IssueDetailWKWebView: WKWebView {
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         let keep: Set<String> = [
             "WKMenuItemIdentifierCopy",
-            "WKMenuItemIdentifierOpenLink",
             "WKMenuItemIdentifierCopyLink",
         ]
         menu.items = menu.items.filter { item in
