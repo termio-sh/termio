@@ -76,7 +76,14 @@ final class TerminalContextMenu: NSObject {
         clickedLinkURL = TerminalLinkState.hoveredURL
             .flatMap(URL.init(string:))
             .flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
-        NSMenu.popUpContextMenu(makeMenu(), with: event, for: target)
+        // popUp — not popUpContextMenu(_:with:for:) — presents exactly the menu we
+        // built. Passing the surface as the `for:` view makes AppKit merge in the
+        // system's automatic text-input extras (the "AutoFill" submenu, Services)
+        // because the ghostty surface is an NSTextInputClient; those are meaningless
+        // over a terminal, so we position the menu ourselves and skip the augmentation.
+        makeMenu().popUp(positioning: nil,
+                         at: target.convert(event.locationInWindow, from: nil),
+                         in: target)
         return true
     }
 
