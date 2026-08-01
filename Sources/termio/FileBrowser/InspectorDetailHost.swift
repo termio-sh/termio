@@ -36,26 +36,48 @@ struct InspectorRoot: View {
             let showDetail = store.isDetailPresented && !store.inspectorMaximized
             // Two-column when there's room AND the user hasn't collapsed the list to focus the detail.
             let twoColumn = showDetail && geo.size.width >= Self.twoColumnMinWidth && !store.inspectorListCollapsed
-            // List hides only in the narrow, detail-only fallback; otherwise it's the full panel
-            // (no detail) or the leading column (two-column).
-            let showList = !showDetail || twoColumn
             // Never let the column eat the detail on a narrow inspector: cap it to leave the detail at
             // least a readable strip, then clamp the persisted width into the drag bounds.
             let maxAllowed = max(Self.minListWidth, min(Self.maxListWidth, geo.size.width - 260))
             let width = max(Self.minListWidth, min(CGFloat(listColumnWidth), maxAllowed))
-            HStack(spacing: 0) {
-                if showList {
-                    if twoColumn {
-                        list.frame(width: width)
-                        columnDivider(maxAllowed: maxAllowed)
-                    } else {
-                        list.frame(maxWidth: .infinity)
-                    }
+            // Whether the always-mounted list is fully hidden under the detail (narrow or
+            // list-collapsed fallback) — inert to clicks and assistive tech, but still alive.
+            let listCovered = showDetail && !twoColumn
+            ZStack(alignment: .topLeading) {
+                // The list is ALWAYS mounted at real size. `List(children:)` holds the file tree's
+                // disclosure state inside the view, and both unmounting the list (the old narrow
+                // detail-only branch) and squeezing it to zero width tear down its backing outline
+                // view — the tree came back fully collapsed after closing a file. So the hidden
+                // states keep the list laid out full-width and let the opaque detail cover it.
+                // The frames are a single structural branch (nil = no-op) for the same reason: an
+                // if/else between fixed-width and flexible would give the list two SwiftUI
+                // identities, resetting the tree on the two-column ↔ full transition.
+                HStack(spacing: 0) {
+                    list
+                        .frame(width: twoColumn ? width : nil)
+                        .frame(maxWidth: twoColumn ? nil : .infinity)
+                        .allowsHitTesting(!listCovered)
+                        .accessibilityHidden(listCovered)
+                    Spacer(minLength: 0)
                 }
+                // The detail overlays everything right of the list column (`InspectorDetailContent`
+                // is opaque): beside the list in two-column, covering the whole panel — list still
+                // alive beneath — in the narrow or list-collapsed fallbacks.
                 if showDetail {
                     InspectorDetailContent()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.leading, twoColumn ? width + 1 : 0)
                         .transition(.opacity)
+                }
+                // The divider rides ABOVE the detail: it straddles the seam at `width`, and the
+                // detail layer starts at `width + 1`, which would otherwise swallow the trailing
+                // half of its 10pt grab strip — dragging from the detail side would miss.
+                if twoColumn {
+                    HStack(spacing: 0) {
+                        Color.clear.frame(width: width).allowsHitTesting(false)
+                        columnDivider(maxAllowed: maxAllowed)
+                        Spacer(minLength: 0)
+                    }
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
