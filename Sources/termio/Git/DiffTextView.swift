@@ -324,6 +324,24 @@ final class DiffTextView: NSTextView {
         onClose?()
     }
 
+    /// A minimal right-click menu: Copy, plus Close. NSTextView's default would inject
+    /// the read-only text grab-bag (Look Up / Translate / Speech / Share / Services) a
+    /// diff has no use for; returning our own menu — without calling `super` — drops all
+    /// of it, matching the editor's and reader's stripped menus.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+        if onClose != nil {
+            menu.addItem(.separator())
+            let close = NSMenuItem(title: "Close", action: #selector(closeFromMenu), keyEquivalent: "")
+            close.target = self
+            menu.addItem(close)
+        }
+        return menu
+    }
+
+    @objc private func closeFromMenu() { onClose?() }
+
     override func mouseDown(with event: NSEvent) {
         if let anchor = expandableBand(at: event) {
             onExpand?(anchor)

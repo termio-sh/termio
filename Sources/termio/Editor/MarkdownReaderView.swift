@@ -23,6 +23,7 @@ struct MarkdownReaderView: View {
         MarkdownReaderWebView(
             html: MarkdownReaderRenderer.document(source, theme: theme, fontFamily: settings.fontFamily),
             baseURL: fileURL.deletingLastPathComponent(),
+            fileURL: fileURL,
             background: settings.terminalBackgroundColor
         )
     }
@@ -35,6 +36,7 @@ struct MarkdownReaderView: View {
 private struct MarkdownReaderWebView: NSViewRepresentable {
     let html: String
     let baseURL: URL
+    let fileURL: URL
     let background: NSColor
 
     /// `loadHTMLString` pages get no filesystem access in the WebContent process, so a
@@ -55,6 +57,7 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(LocalFileSchemeHandler(), forURLScheme: Self.fileScheme)
         let view = ContextMenuWebView(frame: .zero, configuration: config)
+        view.fileURL = fileURL
         view.setValue(false, forKey: "drawsBackground")
         view.navigationDelegate = context.coordinator
         view.loadHTMLString(html, baseURL: schemeBaseURL)
@@ -119,15 +122,31 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
 /// A `WKWebView` that appends a "Close" to its right-click menu, so the Markdown preview closes
 /// terminal-style like the source editor — the overlay has no chrome button.
 private final class ContextMenuWebView: WKWebView {
+    /// The document on disk, so the menu can reveal it in Finder (like the file tree's row menu).
+    var fileURL: URL?
+
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         // Strip the reader's menu down to Copy — a read-only document doesn't need Reload / Look Up
-        // / Translate / Share / Services — then add a prominent Close so it's not buried.
+        // / Translate / Share, and the OS-injected AutoFill / Services grab-bag is meaningless over
+        // a rendered doc. Whitelisting Copy by identifier drops all of it. Then add the actions that
+        // *do* fit a file preview: Reveal in Finder (an explicit item, not a flaky Services shortcut)
+        // and a prominent Close so it isn't buried.
         menu.items = menu.items.filter { $0.identifier?.rawValue == "WKMenuItemIdentifierCopy" }
-        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        menu.addItem(.separator())
+        if fileURL != nil {
+            let reveal = NSMenuItem(title: "Reveal in Finder", action: #selector(revealInFinder), keyEquivalent: "")
+            reveal.target = self
+            menu.addItem(reveal)
+        }
         let close = NSMenuItem(title: "Close", action: #selector(closeEditorOverlay), keyEquivalent: "")
         close.target = self
         menu.addItem(close)
+    }
+
+    @objc private func revealInFinder() {
+        guard let fileURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([fileURL])
     }
 
     @objc private func closeEditorOverlay() {
