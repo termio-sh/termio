@@ -73,6 +73,9 @@ final class TerminalViewController: UIViewController {
         return v
     }()
     private var settingsObserver: NSObjectProtocol?
+    /// System edit menu over the live selection (Copy/Paste), presented at
+    /// the touch-selection release point.
+    private lazy var editMenuInteraction = UIEditMenuInteraction(delegate: self)
     /// Bottom pin of the surface — its constant tracks the keyboard overlap
     /// (0 when the keyboard is away), see keyboardFrameWillChange.
     private var terminalBottomConstraint: NSLayoutConstraint?
@@ -387,6 +390,9 @@ final class TerminalViewController: UIViewController {
 
     private func configureTerminal() {
         terminalView.delegate = self
+        // The floating Copy/Paste menu the touch-selection gesture summons
+        // (see terminalTouchSelectionEnded).
+        terminalView.addInteraction(editMenuInteraction)
         // Scrolling the terminal is reading; give the rows back to content.
         // Dropping first responder only hides the keyboard — tapping the
         // surface refocuses (the wrapper's touch path takes it back).
@@ -1114,6 +1120,21 @@ extension TerminalViewController: TerminalSurfaceTitleDelegate, TerminalSurfaceC
     }
 }
 
+extension TerminalViewController: TerminalSurfaceTouchSelectionDelegate, UIEditMenuInteractionDelegate {
+    /// The long-press selection gesture ended: the selection (if any) is live
+    /// on the surface, rendered by ghostty itself. Float the system edit menu
+    /// at the release point — its Copy/Paste come from the first responder's
+    /// standard edit actions (the terminal view), so labels, order, and
+    /// localization are the system's own. No selection still shows Paste,
+    /// Termius's tap-and-hold shape.
+    func terminalTouchSelectionEnded(hasSelection _: Bool, at point: CGPoint) {
+        let config = UIEditMenuConfiguration(
+            identifier: "termio.terminal.selection", sourcePoint: point
+        )
+        editMenuInteraction.presentEditMenu(with: config)
+    }
+}
+
 extension TerminalViewController: TerminalSurfaceRendererHealthDelegate {
     /// libghostty flipped its renderer health. `healthy == false` means it just
     /// tripped the failsafe that paints the "This terminal is non-functional"
@@ -1255,6 +1276,27 @@ private final class DisplayTerminalView: UITerminalView {
             return
         }
         super.insertText(text)
+    }
+
+    /// Paste — the edit menu over a touch selection and hardware Cmd+V both
+    /// land here. The clipboard goes through `insertText`, whose
+    /// multi-character path rides the wrapper's sendText: bracketed once the
+    /// TUI enabled mode 2004 (Claude Code's parser only ingests paste in that
+    /// form), raw before then — the same delivery a Mac paste gets.
+    /// `hasStrings` gates the menu item without tripping the system paste
+    /// prompt; the `.string` read waits for the user-initiated action. Copy
+    /// needs no override: the wrapper's `copy(_:)` already reads the core's
+    /// live selection.
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(UIResponderStandardEditActions.paste(_:)) {
+            return UIPasteboard.general.hasStrings
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        insertText(text)
     }
 
     // MARK: - Software-keyboard delete auto-repeat (phantom document)
