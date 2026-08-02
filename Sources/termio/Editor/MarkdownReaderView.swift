@@ -17,8 +17,9 @@ struct MarkdownReaderView: View {
     @ObservedObject var settings: AppSettings
     let colorScheme: ColorScheme
     /// "Add to Chat" in the reader's right-click menu — injected by `FileEditorView`
-    /// alongside the editor's, so both faces of the overlay offer the same verb.
-    var addToChat: (() -> Void)? = nil
+    /// alongside the editor's, so both faces of the overlay offer the same verb. The
+    /// argument is the reader's selected text, `nil` when nothing is selected.
+    var addToChat: ((String?) -> Void)? = nil
     var canAddToChat: (() -> Bool)? = nil
 
     var body: some View {
@@ -44,7 +45,7 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
     let baseURL: URL
     let fileURL: URL
     let background: NSColor
-    var addToChat: (() -> Void)?
+    var addToChat: ((String?) -> Void)?
     var canAddToChat: (() -> Bool)?
 
     /// `loadHTMLString` pages get no filesystem access in the WebContent process, so a
@@ -134,9 +135,10 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
 private final class ContextMenuWebView: WKWebView {
     /// The document on disk, so the menu can reveal it in Finder (like the file tree's row menu).
     var fileURL: URL?
-    /// "Add to Chat": types the document's path into the selected agent session's prompt.
-    /// The gate is read at menu-open time; a plain-shell session shows no item.
-    var addToChat: (() -> Void)?
+    /// "Add to Chat": the argument is the reader's selected text (`nil` = no selection,
+    /// the owner inserts the document's path instead). The gate is read at menu-open
+    /// time; a plain-shell session shows no item.
+    var addToChat: ((String?) -> Void)?
     var canAddToChat: (() -> Bool)?
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
@@ -163,7 +165,14 @@ private final class ContextMenuWebView: WKWebView {
         menu.addItem(close)
     }
 
-    @objc private func addToChatAction() { addToChat?() }
+    /// The web view's selection lives in the WebContent process, so it's read via JS at
+    /// click time: a non-empty selection goes over as the snippet, else `nil` for the path.
+    @objc private func addToChatAction() {
+        evaluateJavaScript("window.getSelection().toString()") { [weak self] result, _ in
+            let text = (result as? String).flatMap { $0.isEmpty ? nil : $0 }
+            self?.addToChat?(text)
+        }
+    }
 
     @objc private func revealInFinder() {
         guard let fileURL else { return }

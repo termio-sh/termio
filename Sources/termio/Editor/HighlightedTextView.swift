@@ -36,10 +36,12 @@ struct HighlightedTextView: NSViewRepresentable {
     /// Appends a "Close" item to the right-click menu — the editor closes terminal-style, alongside
     /// the toolbar button. Left off wherever the text view isn't the closable editor overlay.
     var showsCloseMenuItem: Bool = false
-    /// "Add to Chat" in the right-click menu: types the document's path into the selected
-    /// agent session's prompt. Injected (the text view has no reach into the store);
-    /// `canAddToChat` is read at menu-open time, so a plain-shell session shows no item.
-    var addToChat: (() -> Void)? = nil
+    /// "Add to Chat" in the right-click menu. The argument is the selected text, `nil`
+    /// when nothing is selected — the owner sends the selection as a pasted snippet, or
+    /// falls back to the document's path (Cursor's split: selection → snippet, file →
+    /// reference). Injected (the text view has no reach into the store); `canAddToChat`
+    /// is read at menu-open time, so a plain-shell session shows no item.
+    var addToChat: ((String?) -> Void)? = nil
     var canAddToChat: (() -> Bool)? = nil
     /// Invoked when the user presses ⌘S — flushes the buffer to disk immediately.
     let onSave: () -> Void
@@ -336,9 +338,9 @@ private final class SavingTextView: NSTextView {
     /// When set, the right-click menu carries a trailing "Close" — the editor's only close
     /// affordance now that it has no chrome button (terminal-style, matching how a session closes).
     var showsCloseMenuItem = false
-    /// "Add to Chat": types the document's path into the selected agent session's prompt.
-    /// The gate is read at menu-open time; a plain-shell session shows no item.
-    var addToChat: (() -> Void)?
+    /// "Add to Chat": the argument is the selected text (`nil` = whole file, the owner
+    /// inserts its path). The gate is read at menu-open time; a plain shell shows no item.
+    var addToChat: ((String?) -> Void)?
     var canAddToChat: (() -> Bool)?
     /// Full-width wash under the caret's line; `.clear` (or a read-only buffer) draws nothing.
     var currentLineColor: NSColor = .clear { didSet { needsDisplay = true } }
@@ -388,7 +390,10 @@ private final class SavingTextView: NSTextView {
         }
         menu.addItem(.separator())
         if canAddToChat?() == true {
-            let add = NSMenuItem(title: "Add to Chat", action: #selector(addToChatAction), keyEquivalent: "")
+            // The title says which of the two payloads will land: the selected text as
+            // a pasted snippet, or (no selection) the document's path.
+            let title = selectedRange().length > 0 ? "Add Selection to Chat" : "Add to Chat"
+            let add = NSMenuItem(title: title, action: #selector(addToChatAction), keyEquivalent: "")
             add.target = self
             menu.addItem(add)
         }
@@ -398,7 +403,11 @@ private final class SavingTextView: NSTextView {
         return menu
     }
 
-    @objc private func addToChatAction() { addToChat?() }
+    @objc private func addToChatAction() {
+        let range = selectedRange()
+        let selection = range.length > 0 ? (string as NSString).substring(with: range) : nil
+        addToChat?(selection)
+    }
 
     /// AppKit appends its own grab-bag — AutoFill, Services — to a text view's menu AFTER
     /// `menu(for:)` returns, so the minimal menu above still opened with them at the bottom.

@@ -270,6 +270,19 @@ final class TermioStore: ObservableObject {
         return surface(for: session, in: project).send(Self.promptToken(for: url) + " ")
     }
 
+    /// Types selected text into the selected session's prompt, wrapped in bracketed
+    /// paste so its newlines land as one pasted block instead of submitting line by
+    /// line. Unconditional wrapping is safe here because every caller is gated on the
+    /// session running a coding agent, and agent TUIs all enable mode 2004 — the same
+    /// convention the iOS upload path relies on.
+    @discardableResult
+    func addSnippetToSelectedSessionPrompt(_ text: String) -> Bool {
+        guard let id = selectedSessionID, let session = session(id),
+              let project = project(for: id) else { return false }
+        return surface(for: session, in: project)
+            .send("\u{1B}[200~" + text + "\u{1B}[201~")
+    }
+
     /// The shell-quoted token to insert at a prompt for a URL. A `file://` URL becomes
     /// its local path (the file-tree/Finder case, so the prompt gets a usable path);
     /// any other scheme — an https GitHub issue/PR dragged from the Issues pane —

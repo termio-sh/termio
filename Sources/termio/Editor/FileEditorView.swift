@@ -26,6 +26,16 @@ struct FileEditorView: View {
     /// the gate and the prompt insertion live on the store.
     @EnvironmentObject private var store: TermioStore
 
+    /// Cursor's split, shared by both faces: a selection goes over as the pasted
+    /// snippet itself; no selection means the document, which lands as its path.
+    private func addToChat(selection: String?) {
+        if let selection {
+            _ = store.addSnippetToSelectedSessionPrompt(selection)
+        } else {
+            _ = store.addPathToSelectedSessionPrompt(url)
+        }
+    }
+
     @Environment(\.colorScheme) private var colorScheme
 
     /// Edit shows the Highlightr source editor; Preview renders the Markdown as a themed
@@ -186,7 +196,7 @@ struct FileEditorView: View {
                 fileURL: url,
                 settings: settings,
                 colorScheme: colorScheme,
-                addToChat: { _ = store.addPathToSelectedSessionPrompt(url) },
+                addToChat: { addToChat(selection: $0) },
                 canAddToChat: { store.selectedSessionRunsAgent }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -212,7 +222,7 @@ struct FileEditorView: View {
                     if count > 0, findFocusedIndex >= count { findFocusedIndex = 0 }
                 },
                 showsCloseMenuItem: true,
-                addToChat: { _ = store.addPathToSelectedSessionPrompt(url) },
+                addToChat: { addToChat(selection: $0) },
                 canAddToChat: { store.selectedSessionRunsAgent },
                 onSave: saveNow
             )
