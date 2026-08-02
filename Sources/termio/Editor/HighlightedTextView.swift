@@ -382,6 +382,27 @@ private final class SavingTextView: NSTextView {
         return menu
     }
 
+    /// AppKit appends its own grab-bag — AutoFill, Services — to a text view's menu AFTER
+    /// `menu(for:)` returns, so the minimal menu above still opened with them at the bottom.
+    /// They only exist at open time; whitelist the four actions the menu builds and drop
+    /// everything else (the MarkdownReaderView treatment).
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        guard showsCloseMenuItem else { return }
+        let allowed: Set<Selector> = [
+            #selector(cut(_:)), #selector(copy(_:)), #selector(paste(_:)),
+            #selector(closeEditorOverlay),
+        ]
+        menu.items.removeAll { item in
+            guard !item.isSeparatorItem else { return false }
+            guard let action = item.action else { return true }
+            return !allowed.contains(action)
+        }
+        while menu.items.last?.isSeparatorItem == true {
+            menu.removeItem(at: menu.items.count - 1)
+        }
+    }
+
     @objc private func closeEditorOverlay() {
         // The same teardown the toolbar X used to post — `TerminalPane` flushes and clears the editor.
         NotificationCenter.default.post(name: .termioCloseContentOverlay, object: nil)

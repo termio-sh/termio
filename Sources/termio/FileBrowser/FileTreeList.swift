@@ -240,6 +240,13 @@ private struct RowContextMenu: NSViewRepresentable {
         @objc private func showMenu(_ recognizer: NSClickGestureRecognizer) {
             guard let hostView else { return }
             let menu = NSMenu()
+            // Cursor's explorer verb, leading the menu: the row lands in the agent's
+            // prompt as a shell-quoted path — the same token a drag onto the terminal
+            // inserts. Gated live at open time; a plain shell has no chat to add to.
+            if actions?.canAddToChat() == true {
+                menu.addItem(menuItem("Add to Chat", #selector(addToChat)))
+                menu.addItem(.separator())
+            }
             if isDirectory {
                 menu.addItem(menuItem("New File", #selector(newFile)))
                 menu.addItem(menuItem("New Folder", #selector(newFolder)))
@@ -254,6 +261,8 @@ private struct RowContextMenu: NSViewRepresentable {
             menu.addItem(menuItem("Delete", #selector(deleteItem)))
             menu.popUp(positioning: nil, at: recognizer.location(in: hostView), in: hostView)
         }
+
+        @objc private func addToChat() { actions?.addToChat(target) }
 
         private func menuItem(_ title: String, _ action: Selector) -> NSMenuItem {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")

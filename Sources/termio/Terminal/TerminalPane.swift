@@ -268,7 +268,7 @@ struct TerminalPane: View {
               let session = store.session(id),
               let project = store.project(for: id) else { return false }
         requestTerminalFocus(for: id, reason: .fileDrop)
-        let text = urls.map { Self.dropToken(for: $0) }.joined(separator: " ") + " "
+        let text = urls.map { TermioStore.promptToken(for: $0) }.joined(separator: " ") + " "
         if store.surface(for: session, in: project).send(text) { return true }
 
         // The shell may not be attached yet (a freshly opened session whose surface
@@ -281,21 +281,6 @@ struct TerminalPane: View {
             }
         }
         return true
-    }
-
-    /// The shell-quoted token to insert for a dropped URL. A `file://` URL becomes
-    /// its local path (the file-tree/Finder case, so the prompt gets a usable path);
-    /// any other scheme — an https GitHub issue/PR dragged from the Issues pane —
-    /// keeps its full `absoluteString`, since stripping to `.path` would drop the
-    /// scheme and host and leave a meaningless `/owner/repo/issues/123` fragment.
-    private static func dropToken(for url: URL) -> String {
-        shellQuoted(url.isFileURL ? url.path : url.absoluteString)
-    }
-
-    /// Single-quotes a path for the shell, escaping any embedded single quote the
-    /// POSIX way (`'\''`), so a dropped path is always one safe token.
-    private static func shellQuoted(_ path: String) -> String {
-        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private func dumpSelectedTerminalLayers() {

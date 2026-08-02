@@ -253,6 +253,32 @@ final class TermioStore: ObservableObject {
     /// so the pane resumes from here instead. In-memory only, like the registry.
     var gitPaneModes: [String: GitPaneMode] = [:]
 
+    /// Whether the selected session is running a coding agent (not a plain shell) —
+    /// gates the file tree's "Add to Chat" row action.
+    var selectedSessionRunsAgent: Bool {
+        guard let id = selectedSessionID, let session = session(id) else { return false }
+        return !session.agent.isShell
+    }
+
+    /// Types a file's shell-quoted path (plus a trailing space) into the selected
+    /// session's terminal — the file tree's "Add to Chat", the menu twin of dropping
+    /// the row on the terminal (`TerminalPane.sendPaths`, which shares these tokens).
+    @discardableResult
+    func addPathToSelectedSessionPrompt(_ url: URL) -> Bool {
+        guard let id = selectedSessionID, let session = session(id),
+              let project = project(for: id) else { return false }
+        return surface(for: session, in: project).send(Self.promptToken(for: url) + " ")
+    }
+
+    /// The shell-quoted token to insert at a prompt for a URL. A `file://` URL becomes
+    /// its local path (the file-tree/Finder case, so the prompt gets a usable path);
+    /// any other scheme — an https GitHub issue/PR dragged from the Issues pane —
+    /// keeps its full `absoluteString`, since stripping to `.path` would drop the
+    /// scheme and host and leave a meaningless `/owner/repo/issues/123` fragment.
+    static func promptToken(for url: URL) -> String {
+        shellQuoted(url.isFileURL ? url.path : url.absoluteString)
+    }
+
     /// Which pane the trailing inspector shows — the file tree or git changes. Set by the toolbar's
     /// segmented switch and read by `FileBrowserView`. (The inspector's open/closed state is owned by
     /// the app delegate's `NSSplitViewItem`, not mirrored here, so the two cannot desync.)

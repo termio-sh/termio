@@ -96,4 +96,11 @@ struct FileTreeActions {
     let newFolder: (_ directory: URL) -> Void
     let rename: (URL) -> Void
     let delete: (URL) -> Void
+    /// Types the row's path into the selected session's agent prompt — Cursor's
+    /// "Add File to Chat" verb, on the same shell-quoted token a drag onto the
+    /// terminal inserts.
+    let addToChat: (URL) -> Void
+    /// Read at menu-open time so the item tracks the live session: a plain shell
+    /// has no chat to add to, so the row doesn't offer one.
+    let canAddToChat: () -> Bool
 }
