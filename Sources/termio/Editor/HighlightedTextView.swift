@@ -409,25 +409,28 @@ private final class SavingTextView: NSTextView {
         addToChat?(selection)
     }
 
-    /// AppKit appends its own grab-bag — AutoFill, Services — to a text view's menu AFTER
-    /// `menu(for:)` returns, so the minimal menu above still opened with them at the bottom.
-    /// They only exist at open time; whitelist the four actions the menu builds and drop
-    /// everything else (the MarkdownReaderView treatment).
-    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
-        super.willOpenMenu(menu, with: event)
-        guard showsCloseMenuItem else { return }
-        let allowed: Set<Selector> = [
-            #selector(cut(_:)), #selector(copy(_:)), #selector(paste(_:)),
-            #selector(addToChatAction), #selector(closeEditorOverlay),
-        ]
-        menu.items.removeAll { item in
-            guard !item.isSeparatorItem else { return false }
-            guard let action = item.action else { return true }
-            return !allowed.contains(action)
+    /// AppKit appends AutoFill + Services to an EDITABLE text view's context menu after
+    /// BOTH `menu(for:)` and `willOpenMenu` — no override in that pipeline can strip
+    /// them (the read-only diff view never gets them, which is why its plain
+    /// `menu(for:)` sufficed). So the right-click menu is popped OUTSIDE the pipeline,
+    /// the file tree's `popUp` shape, which AppKit never augments.
+    override func rightMouseDown(with event: NSEvent) {
+        guard showsCloseMenuItem, let menu = menu(for: event) else {
+            return super.rightMouseDown(with: event)
         }
-        while menu.items.last?.isSeparatorItem == true {
-            menu.removeItem(at: menu.items.count - 1)
-        }
+        menu.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
+    }
+
+    /// The Services injector asks this before adding its submenu; refusing kills
+    /// Services at the source — it covers the ctrl-click path, which still runs
+    /// AppKit's own context-menu pipeline.
+    override func validRequestor(
+        forSendType sendType: NSPasteboard.PasteboardType?,
+        returnType: NSPasteboard.PasteboardType?
+    ) -> Any? {
+        showsCloseMenuItem
+            ? nil
+            : super.validRequestor(forSendType: sendType, returnType: returnType)
     }
 
     @objc private func closeEditorOverlay() {
