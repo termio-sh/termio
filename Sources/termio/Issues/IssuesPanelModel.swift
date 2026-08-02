@@ -251,6 +251,28 @@ final class IssuesPanelModel: ObservableObject {
     /// shows instantly, but a silent background refresh confirms it.
     private static let revalidateAfter: TimeInterval = 30
 
+    /// Confirms the open detail against GitHub once its cached copy has aged past the dedupe
+    /// window — the revalidate half of stale-while-revalidate, shared by the warm `loadDetail`
+    /// path, a same-item reopen, and app refocus. This is what lets a detail notice an
+    /// out-of-band state change: a PR closed by `gh` in a terminal or on github.com keeps
+    /// showing its stale Open badge until some interaction lands here.
+    func revalidateOpenDetail() async {
+        await ensureReady()
+        guard let provider, let container, let item = openItem else { return }
+        guard let cached = cache?.entry(container, item.number),
+              Date().timeIntervalSince(cached.fetchedAt) >= Self.revalidateAfter
+        else { return }
+        do {
+            let fresh = try await fetchEntry(item, provider: provider, container: container)
+            guard openItem?.number == item.number else { return }
+            cache?.store(fresh, container, item.number)
+            // Only republish on a real change, so an unchanged refresh never flickers.
+            if !fresh.sameContent(as: cached) { apply(fresh) }
+        } catch {
+            // Revalidation failed (offline, rate limit): the cached copy already shows.
+        }
+    }
+
     func loadDetail(for item: IssueSummary) async {
         // A session switch remounts `IssuesView` with a brand-new, empty model, so make this
         // self-sufficient rather than assuming `start()` has already run: resolve the token +
@@ -259,8 +281,13 @@ final class IssuesPanelModel: ObservableObject {
         // useless on exactly the switch path it exists for.
         await ensureReady()
         guard let provider, let container else { return }
-        // Same item already loaded in this instance (e.g. a maximize remount): nothing to do.
-        if openItem?.number == item.number, detail != nil, !prFilesLoading { return }
+        // Same item already loaded in this instance (e.g. a maximize remount): the content
+        // already shows — just confirm it, so a reopen picks up a state change that happened
+        // while the detail was up (a PR closed out of band).
+        if openItem?.number == item.number, detail != nil, !prFilesLoading {
+            await revalidateOpenDetail()
+            return
+        }
         // The model's own record of which item is open, independent of what drives the UI.
         openItem = item
 
@@ -274,17 +301,8 @@ final class IssuesPanelModel: ObservableObject {
                 // list landed): fetch just the files now — the conversation already shows.
                 await loadPRFiles(item, provider: provider, container: container,
                                   conversation: cached.detail)
-            } else if Date().timeIntervalSince(cached.fetchedAt) >= Self.revalidateAfter {
-                // Stale-while-revalidate: confirm in the background, past the dedupe window.
-                do {
-                    let fresh = try await fetchEntry(item, provider: provider, container: container)
-                    guard openItem?.number == item.number else { return }
-                    cache?.store(fresh, container, item.number)
-                    // Only republish on a real change, so an unchanged refresh never flickers.
-                    if !fresh.sameContent(as: cached) { apply(fresh) }
-                } catch {
-                    // Revalidation failed (offline, rate limit): the cached copy already shows.
-                }
+            } else {
+                await revalidateOpenDetail()
             }
             return
         }

@@ -226,6 +226,13 @@ final class TermioStore: ObservableObject {
     /// previously fetched list + detail instead of hitting GitHub again. Called by `IssuesView`.
     func registerIssuesModel(_ model: IssuesPanelModel) {
         model.attachCache(issueCache)
+        // The list DATA survives a remount through the cache, but the query — the
+        // Issues/Pull Requests kind, the filters — lives on the model instance. Hand it
+        // to the successor, or every remount (session switch, tab switch) snaps the pane
+        // back to the default Issues kind under whatever detail is open.
+        if let outgoing = issuesModels[model.repoRoot], outgoing !== model {
+            model.query = outgoing.query
+        }
         issuesModels[model.repoRoot] = model
     }
 

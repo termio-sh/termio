@@ -34,18 +34,32 @@ struct IssuesView: View {
         listPane
             .task(id: repoRoot) {
                 store.registerIssuesModel(model)
+                // An already-open detail dictates the list it sits over: exiting a PR
+                // must reveal Pull Requests (a restored detail is the one case the
+                // registry can't cover — no predecessor model after a relaunch), with
+                // its row still selected. Pre-`start()` the kind write is inert: the
+                // query didSet's loadList bails until the phase is ready.
+                if let open = store.openIssueDetail {
+                    if model.query.kind != open.kind { model.query.kind = open.kind }
+                    if selection != open.number { selection = open.number }
+                }
                 await model.start()
             }
             // Selection IS the open gesture; route it to the center overlay. Follow the
-            // overlay back: when it closes, release the selection so the same row reopens.
+            // overlay back: when it closes, release the selection so the same row reopens
+            // — and revalidate the list, so an item whose state changed while its detail
+            // was up (a PR closed out of band) doesn't come back as a stale open row.
             .onChange(of: selection) { _, selected in
                 guard let selected,
                       let item = model.items.first(where: { $0.number == selected })
                 else { return }
                 store.openIssueDetail = item
             }
-            .onChange(of: store.openIssueDetail) { _, item in
-                if item == nil { selection = nil }
+            .onChange(of: store.openIssueDetail) { was, item in
+                if item == nil {
+                    selection = nil
+                    if was != nil { Task { await model.loadList(force: true) } }
+                }
             }
     }
 
@@ -562,8 +576,21 @@ struct IssueDetailView: View {
         .task(id: DetailTaskKey(number: item.number, model: ObjectIdentifier(model))) {
             await model.loadDetail(for: item)
         }
+        // GitHub Desktop's focus-refresh: coming back to the app re-confirms the open
+        // item, so a PR closed on github.com while this detail sat on screen updates
+        // its state badge instead of holding a stale Open.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification
+        )) { _ in
+            Task { await model.revalidateOpenDetail() }
+        }
         .onExitCommand(perform: onBack)
     }
+
+    /// The freshest identity we hold for the open item: the fetched detail's summary when it
+    /// has landed (it carries state changes — open → closed/merged — that the immutable
+    /// `item` passed in at open time cannot), else that opening summary.
+    private var current: IssueSummary { model.detail?.summary ?? item }
 
     /// The item identity on the left; actions on the right — all buttons are
     /// `TreeHeaderButton`s (the explorer header's quiet hover style), so they
@@ -573,9 +600,9 @@ struct IssueDetailView: View {
     private var header: some View {
         HStack(spacing: 6) {
             OcticonView(
-                icon: item.state.octicon(for: item.kind),
+                icon: current.state.octicon(for: current.kind),
                 size: 14,
-                color: item.state.tint(for: item.kind)
+                color: current.state.tint(for: current.kind)
             )
             .frame(width: 15)
             Text(item.identifier)
