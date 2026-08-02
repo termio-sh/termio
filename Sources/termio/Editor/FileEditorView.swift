@@ -22,6 +22,10 @@ struct FileEditorView: View {
     /// Dismisses the overlay (clears `store.openFileURL`) and hands focus back to the terminal.
     let onClose: () -> Void
 
+    /// For the right-click "Add to Chat" on both faces (editor and Markdown reader):
+    /// the gate and the prompt insertion live on the store.
+    @EnvironmentObject private var store: TermioStore
+
     @Environment(\.colorScheme) private var colorScheme
 
     /// Edit shows the Highlightr source editor; Preview renders the Markdown as a themed
@@ -181,7 +185,9 @@ struct FileEditorView: View {
                 source: text,
                 fileURL: url,
                 settings: settings,
-                colorScheme: colorScheme
+                colorScheme: colorScheme,
+                addToChat: { _ = store.addPathToSelectedSessionPrompt(url) },
+                canAddToChat: { store.selectedSessionRunsAgent }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -206,6 +212,8 @@ struct FileEditorView: View {
                     if count > 0, findFocusedIndex >= count { findFocusedIndex = 0 }
                 },
                 showsCloseMenuItem: true,
+                addToChat: { _ = store.addPathToSelectedSessionPrompt(url) },
+                canAddToChat: { store.selectedSessionRunsAgent },
                 onSave: saveNow
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -36,6 +36,11 @@ struct HighlightedTextView: NSViewRepresentable {
     /// Appends a "Close" item to the right-click menu — the editor closes terminal-style, alongside
     /// the toolbar button. Left off wherever the text view isn't the closable editor overlay.
     var showsCloseMenuItem: Bool = false
+    /// "Add to Chat" in the right-click menu: types the document's path into the selected
+    /// agent session's prompt. Injected (the text view has no reach into the store);
+    /// `canAddToChat` is read at menu-open time, so a plain-shell session shows no item.
+    var addToChat: (() -> Void)? = nil
+    var canAddToChat: (() -> Bool)? = nil
     /// Invoked when the user presses ⌘S — flushes the buffer to disk immediately.
     let onSave: () -> Void
 
@@ -61,6 +66,8 @@ struct HighlightedTextView: NSViewRepresentable {
         let textView = SavingTextView(frame: .zero, textContainer: container)
         textView.onSave = onSave
         textView.showsCloseMenuItem = showsCloseMenuItem
+        textView.addToChat = addToChat
+        textView.canAddToChat = canAddToChat
         textView.delegate = context.coordinator
         textView.isEditable = isEditable
         textView.isSelectable = true
@@ -329,6 +336,10 @@ private final class SavingTextView: NSTextView {
     /// When set, the right-click menu carries a trailing "Close" — the editor's only close
     /// affordance now that it has no chrome button (terminal-style, matching how a session closes).
     var showsCloseMenuItem = false
+    /// "Add to Chat": types the document's path into the selected agent session's prompt.
+    /// The gate is read at menu-open time; a plain-shell session shows no item.
+    var addToChat: (() -> Void)?
+    var canAddToChat: (() -> Bool)?
     /// Full-width wash under the caret's line; `.clear` (or a read-only buffer) draws nothing.
     var currentLineColor: NSColor = .clear { didSet { needsDisplay = true } }
     /// Background wash on a bracket pair when the caret sits against one of them.
@@ -376,11 +387,18 @@ private final class SavingTextView: NSTextView {
             menu.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
         }
         menu.addItem(.separator())
+        if canAddToChat?() == true {
+            let add = NSMenuItem(title: "Add to Chat", action: #selector(addToChatAction), keyEquivalent: "")
+            add.target = self
+            menu.addItem(add)
+        }
         let close = NSMenuItem(title: "Close", action: #selector(closeEditorOverlay), keyEquivalent: "")
         close.target = self
         menu.addItem(close)
         return menu
     }
+
+    @objc private func addToChatAction() { addToChat?() }
 
     /// AppKit appends its own grab-bag — AutoFill, Services — to a text view's menu AFTER
     /// `menu(for:)` returns, so the minimal menu above still opened with them at the bottom.
@@ -391,7 +409,7 @@ private final class SavingTextView: NSTextView {
         guard showsCloseMenuItem else { return }
         let allowed: Set<Selector> = [
             #selector(cut(_:)), #selector(copy(_:)), #selector(paste(_:)),
-            #selector(closeEditorOverlay),
+            #selector(addToChatAction), #selector(closeEditorOverlay),
         ]
         menu.items.removeAll { item in
             guard !item.isSeparatorItem else { return false }
