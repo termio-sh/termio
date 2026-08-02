@@ -503,7 +503,7 @@ private struct PRFileRow: View {
         .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .background(OutlineSelectionStyleStripper())
+        .background(OutlineViewFixups())
         .listRowInsets(EdgeInsets())
         .listRowSeparator(.hidden)
         .listRowBackground(

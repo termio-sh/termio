@@ -501,7 +501,7 @@ private struct GitChangeRow: View {
         .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .background(OutlineSelectionStyleStripper())
+        .background(OutlineViewFixups())
         .draggable(fileURL)
         .listRowInsets(EdgeInsets())
         .listRowSeparator(.hidden)

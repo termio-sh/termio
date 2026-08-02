@@ -110,10 +110,10 @@ private struct FileRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
-        // Strip the source list's blue selection fill at the AppKit layer, so the only
-        // selection cue is our `SidebarRowHighlight` below. Lives in a row so it can
-        // walk up to the enclosing outline view.
-        .background(OutlineSelectionStyleStripper())
+        // Strip the source list's blue selection fill and restore the mouse-wheel
+        // scroll increment at the AppKit layer (see `OutlineViewFixups`). Lives in a
+        // row so it can walk up to the enclosing outline view.
+        .background(OutlineViewFixups())
         // Capture that same outline view (a row is the one place the walk-up reaches
         // it) so `FileBrowserView` can expand this folder on the click that selected it.
         .background(OutlineViewCapture(onFound: captureOutline))
@@ -407,7 +407,7 @@ private struct EmptyAreaContextMenu: NSViewRepresentable {
 /// `FileBrowserView` can expand a folder programmatically when its row is selected —
 /// the click that selects a row is the only reliable signal (the outline view swallows
 /// primary-click recognizers in its own mouse tracking). Mounted *inside a row* (like
-/// `OutlineSelectionStyleStripper`), so the outline view is a real ancestor on its
+/// `OutlineViewFixups`), so the outline view is a real ancestor on its
 /// superview chain — a `.background` on the List sits in a sibling subtree and can't
 /// reach it.
 private struct OutlineViewCapture: NSViewRepresentable {
@@ -434,32 +434,44 @@ private struct OutlineViewCapture: NSViewRepresentable {
     }
 }
 
-/// A zero-size helper that finds the `NSOutlineView` hosting the file tree (by
-/// walking up from its own placement inside a row) and sets its
-/// `selectionHighlightStyle` to `.none`. That strips the source list's blue accent
-/// fill while leaving selection itself intact — so the List keeps native, drag-
-/// friendly selection and `SidebarRowHighlight` is the only thing that paints it.
-/// Re-applied on every update because each row mounts one, so any list rebuild
-/// reasserts the style. Shared with the left sidebar (`SidebarView`), which is the
-/// same `.sidebar`-style source list and needs the identical strip.
-struct OutlineSelectionStyleStripper: NSViewRepresentable {
+/// A zero-size helper that finds the `NSTableView`/`NSOutlineView` backing a List
+/// (by walking up from its own placement inside a row) and corrects two AppKit-layer
+/// details SwiftUI gets wrong for our lists. Re-applied on every update because each
+/// row mounts one, so any list rebuild reasserts both. Shared by the left sidebar,
+/// this file tree, and the Issues / PR-files / git-changes lists.
+///
+/// - `selectionHighlightStyle = .none` strips the source list's blue accent fill
+///   while leaving selection itself intact — the List keeps native, drag-friendly
+///   selection and `SidebarRowHighlight` is the only thing that paints it.
+/// - `verticalLineScroll = 24` restores mouse-wheel scrolling. These lists all set
+///   `defaultMinListRowHeight` to 1 so rows self-size, but SwiftUI writes that
+///   minimum into `NSTableView.rowHeight`, and AppKit mirrors `rowHeight` into the
+///   enclosing scroll view's `verticalLineScroll` — the per-line increment every
+///   non-precise (physical wheel) scroll event is multiplied by. At 1pt a wheel
+///   notch barely moves the list; 24 is what a default-height List gets, so wheels
+///   feel like every other Mac list. Trackpads send precise pixel deltas and never
+///   consult it.
+struct OutlineViewFixups: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
-        DispatchQueue.main.async { Self.strip(from: view) }
+        DispatchQueue.main.async { Self.apply(from: view) }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { Self.strip(from: nsView) }
+        DispatchQueue.main.async { Self.apply(from: nsView) }
     }
 
-    private static func strip(from view: NSView) {
+    private static func apply(from view: NSView) {
         var ancestor = view.superview
         while let current = ancestor {
             // NSOutlineView is an NSTableView subclass, so this catches the tree.
             if let table = current as? NSTableView {
                 if table.selectionHighlightStyle != .none {
                     table.selectionHighlightStyle = .none
+                }
+                if let scroll = table.enclosingScrollView, scroll.verticalLineScroll != 24 {
+                    scroll.verticalLineScroll = 24
                 }
                 return
             }

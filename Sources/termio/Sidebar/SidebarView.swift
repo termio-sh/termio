@@ -86,7 +86,7 @@ private struct SidebarSectionHeader: View {
                 SidebarRowContextMenu(items: menuItems) { isMenuOpen = $0 }
             }
         }
-        .background(OutlineSelectionStyleStripper())
+        .background(OutlineViewFixups())
         .listRowBackground(
             SidebarRowHighlight(isSelected: false, isHovering: isMenuOpen, chrome: chrome)
                 .animation(.easeInOut(duration: 0.12), value: isMenuOpen)
@@ -681,7 +681,7 @@ private struct ProjectHeader: View {
         // Strip the source list's native blue accent (the ring/fill AppKit paints on a
         // right-clicked or selected row) at the NSOutlineView layer, so our own
         // highlights are the only selection cue — same treatment the file tree uses.
-        .background(OutlineSelectionStyleStripper())
+        .background(OutlineViewFixups())
         .listRowBackground(
             SidebarRowHighlight(isSelected: false, isHovering: isMenuOpen, chrome: chrome)
                 .animation(.easeInOut(duration: 0.12), value: isMenuOpen)
