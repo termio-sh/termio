@@ -270,17 +270,26 @@ final class TermioStore: ObservableObject {
         return surface(for: session, in: project).send(Self.promptToken(for: url) + " ")
     }
 
-    /// Types selected text into the selected session's prompt, wrapped in bracketed
+    /// Pastes selected text into the selected session's prompt, wrapped in bracketed
     /// paste so its newlines land as one pasted block instead of submitting line by
     /// line. Unconditional wrapping is safe here because every caller is gated on the
     /// session running a coding agent, and agent TUIs all enable mode 2004 — the same
     /// convention the iOS upload path relies on.
+    ///
+    /// The bytes go RAW into the PTY (the backend session's input), NOT through
+    /// `state.send`: that routes into `ghostty_surface_text`, whose input encoder
+    /// re-encodes the ESC of a hand-written `\e[200~` as an escape KEYPRESS (CSI 27u
+    /// under the kitty keyboard protocol agents enable) — the TUI then shows a
+    /// literal `[200~`. Bracketed-paste framing only means anything as verbatim
+    /// PTY input.
     @discardableResult
     func addSnippetToSelectedSessionPrompt(_ text: String) -> Bool {
         guard let id = selectedSessionID, let session = session(id),
               let project = project(for: id) else { return false }
-        return surface(for: session, in: project)
-            .send("\u{1B}[200~" + text + "\u{1B}[201~")
+        let state = surface(for: session, in: project)
+        guard case let .inMemory(backend) = state.configuration.backend else { return false }
+        backend.sendInput(Data(("\u{1B}[200~" + text + "\u{1B}[201~").utf8))
+        return true
     }
 
     /// The shell-quoted token to insert at a prompt for a URL. A `file://` URL becomes
