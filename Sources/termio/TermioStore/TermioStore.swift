@@ -247,6 +247,12 @@ final class TermioStore: ObservableObject {
         inspectorProjectPath.flatMap { issuesModels[$0] }
     }
 
+    /// The git pane's inner mode (Changes / History) per repo root — the same continuity
+    /// the Issues pane's kind gets through its model registry: an inspector tab flip or
+    /// session switch remounts `GitChangesView` with its `@State` mode back at Changes,
+    /// so the pane resumes from here instead. In-memory only, like the registry.
+    var gitPaneModes: [String: GitPaneMode] = [:]
+
     /// Which pane the trailing inspector shows — the file tree or git changes. Set by the toolbar's
     /// segmented switch and read by `FileBrowserView`. (The inspector's open/closed state is owned by
     /// the app delegate's `NSSplitViewItem`, not mirrored here, so the two cannot desync.)

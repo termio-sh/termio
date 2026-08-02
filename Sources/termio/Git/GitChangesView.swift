@@ -43,6 +43,12 @@ struct GitChangesView: View {
     /// several become the targets of the batch context-menu actions.
     @State private var selection = Set<String>()
 
+    /// The last working-tree diff opened from this list. Closing the overlay releases
+    /// `selection` (so clicking the same row reopens it), but this row keeps the
+    /// selected grey — back from a full-screen diff, the list still shows which file
+    /// it was (the Issues list's rule).
+    @State private var lastOpenedPath: String?
+
     init(repoRoot: String, changeCount: Binding<Int>, isPaneVisible: (() -> Bool)? = nil) {
         self.repoRoot = repoRoot
         self._changeCount = changeCount
@@ -63,8 +69,24 @@ struct GitChangesView: View {
             // count would just echo the fetch limit — meaningless, so no bar.
             if mode == .changes { bottomBar }
         }
-        .task(id: repoRoot) { await model.load() }
+        .task(id: repoRoot) {
+            // Resume the remembered inner mode, then let an open overlay override it:
+            // the detail dictates the list it sits over (the Issues pane's rule), so a
+            // restored History diff never sits on a Changes list. Re-selecting the
+            // working-tree row is the mount-time half of the `openDiff` follow below,
+            // which only fires on change and so misses a diff that was already open.
+            if let remembered = store.gitPaneModes[repoRoot] { mode = remembered }
+            if let request = store.openDiff, request.repoRoot == repoRoot {
+                mode = request.commit == nil ? .changes : .history
+                if request.commit == nil {
+                    selection = [request.change.path]
+                    lastOpenedPath = request.change.path
+                }
+            }
+            await model.load()
+        }
         .task(id: mode) { if mode == .history { await model.loadHistory() } }
+        .onChange(of: mode) { _, mode in store.gitPaneModes[repoRoot] = mode }
         // Replay any refresh that arrived while the inspector was collapsed, the
         // moment the pane is actually shown again (either signal can fire first
         // depending on how the view was re-attached).
@@ -86,8 +108,9 @@ struct GitChangesView: View {
         // and release a lone selection so clicking the same row reopens its diff. The
         // `openFileURL` guards keep a diff↔preview hand-off from reading as a close.
         .onChange(of: store.openDiff) { _, request in
-            if let request, request.commit == nil, selection != [request.change.path] {
-                selection = [request.change.path]
+            if let request, request.commit == nil {
+                lastOpenedPath = request.change.path
+                if selection != [request.change.path] { selection = [request.change.path] }
             }
             if request == nil, store.openFileURL == nil {
                 Task { await model.load() }
@@ -233,7 +256,10 @@ struct GitChangesView: View {
                 fileURL: fileURL(for: change),
                 font: settings.interfaceFont,
                 chrome: chrome,
-                isSelected: selection.contains(change.path),
+                // The lone last-opened row stays grey after its overlay closes; a live
+                // multi-selection takes over the moment one exists.
+                isSelected: selection.contains(change.path)
+                    || (selection.isEmpty && lastOpenedPath == change.path),
                 onDiscard: { pendingDiscard = [change] }
             )
             .contextMenu { contextMenu(for: change) }

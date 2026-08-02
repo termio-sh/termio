@@ -19,6 +19,10 @@ struct GitHistoryView: View {
     @State private var expanded: String?
     /// Files per commit, fetched lazily on first expand and kept for the session.
     @State private var filesByCommit: [String: [GitChange]] = [:]
+    /// The last file diff opened from this list — its row keeps the selected grey after
+    /// the overlay closes (the Issues list's rule), so coming back from a full-screen
+    /// diff still shows which file it was.
+    @State private var lastOpenedFile: (sha: String, path: String)?
 
     var body: some View {
         Group {
@@ -53,6 +57,13 @@ struct GitHistoryView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // ← / → walk the open overlay across the commit's files; the last-opened
+        // memory chases the shown file so the grey lands on the right row on close.
+        .onChange(of: store.openDiff) { _, request in
+            if let request, let sha = request.commit {
+                lastOpenedFile = (sha, request.change.path)
+            }
+        }
     }
 
     /// The changed-file rows shown under an expanded commit — a loading placeholder until
@@ -72,8 +83,13 @@ struct GitHistoryView: View {
                         change: file,
                         font: font,
                         chrome: chrome,
-                        isSelected: store.openDiff?.commit == commit.sha && store.openDiff?.change.path == file.path
+                        isSelected: (store.openDiff?.commit == commit.sha
+                            && store.openDiff?.change.path == file.path)
+                            || (store.openDiff == nil
+                                && lastOpenedFile?.sha == commit.sha
+                                && lastOpenedFile?.path == file.path)
                     ) {
+                        lastOpenedFile = (commit.sha, file.path)
                         store.openDiff = GitDiffRequest(repoRoot: repoRoot, change: file,
                                                         commit: commit.sha, siblings: files)
                     }
