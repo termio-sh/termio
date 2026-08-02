@@ -232,6 +232,9 @@ final class TermioStore: ObservableObject {
         // back to the default Issues kind under whatever detail is open.
         if let outgoing = issuesModels[model.repoRoot], outgoing !== model {
             model.query = outgoing.query
+            // And the last-opened item: its row keeps the selected grey after the
+            // detail closes, a memory that must survive the same remounts.
+            model.openItem = outgoing.openItem
         }
         issuesModels[model.repoRoot] = model
     }

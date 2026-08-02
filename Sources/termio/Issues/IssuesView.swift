@@ -300,7 +300,12 @@ struct IssuesView: View {
                     item: item,
                     font: settings.interfaceFont,
                     chrome: chrome,
+                    // `openItem` outlives the closed overlay, so the last-opened row
+                    // keeps the selected grey — back from a full-screen detail, the
+                    // list still shows which item it was. (`selection` itself is
+                    // released on close so clicking the same row can reopen it.)
                     isSelected: selection == item.number
+                        || model.openItem?.number == item.number
                 )
                 // Drag a row out as its GitHub URL — the terminal pane catches the
                 // drop and inserts the full link at the prompt (see
