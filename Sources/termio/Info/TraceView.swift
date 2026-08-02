@@ -165,7 +165,10 @@ private struct TraceWebView: NSViewRepresentable {
     let background: NSColor
 
     func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView()
+        // PreviewWebView: right-click stripped to Copy — the rendered trace is
+        // read-only, so WebKit's Reload / Look Up / Services grab-bag has nothing
+        // to act on.
+        let view = PreviewWebView()
         view.setValue(false, forKey: "drawsBackground")
         view.navigationDelegate = context.coordinator
         view.loadHTMLString(html, baseURL: nil)
