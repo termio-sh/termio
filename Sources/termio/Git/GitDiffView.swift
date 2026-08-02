@@ -19,6 +19,10 @@ struct GitDiffView: View {
     /// scrolling, and the same keys in the focused Changes list walk via selection).
     var onNavigate: ((GitDiffRequest) -> Void)? = nil
 
+    /// For the right-click "Add to Chat": the gate and the prompt insertion live
+    /// on the store.
+    @EnvironmentObject private var store: TermioStore
+
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var rows: [DiffRow] = []
@@ -211,7 +215,19 @@ struct GitDiffView: View {
                     findMatchCount = count
                     if count > 0, findFocusedIndex >= count { findFocusedIndex = 0 }
                 },
-                reclaimFocus: findReclaim
+                reclaimFocus: findReclaim,
+                // Cursor's split, like the editor: a selection goes over as the pasted
+                // snippet; no selection means the diffed file, which lands as its path.
+                addToChat: { selection in
+                    if let selection {
+                        _ = store.addSnippetToSelectedSessionPrompt(selection)
+                    } else {
+                        let url = URL(fileURLWithPath: request.repoRoot)
+                            .appendingPathComponent(request.change.path)
+                        _ = store.addPathToSelectedSessionPrompt(url)
+                    }
+                },
+                canAddToChat: { store.selectedSessionRunsAgent }
             )
             .overlay(alignment: .topTrailing) {
                 if findBarVisible {

@@ -40,6 +40,11 @@ struct DiffTextPane: NSViewRepresentable {
     /// the SwiftUI card can size to it, letting the outer list own the scroll.
     var embedded: Bool = false
     var onContentHeight: ((CGFloat) -> Void)? = nil
+    /// "Add to Chat" in the right-click menu: the argument is the selected diff text,
+    /// `nil` when nothing is selected (the owner inserts the diffed file's path instead).
+    /// Left `nil` where the pane has no chat to feed (the embedded PR file cards).
+    var addToChat: ((String?) -> Void)? = nil
+    var canAddToChat: (() -> Bool)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -59,6 +64,8 @@ struct DiffTextPane: NSViewRepresentable {
         textView.onExpand = onExpand
         textView.onWalk = onWalk
         textView.onClose = onClose
+        textView.addToChat = addToChat
+        textView.canAddToChat = canAddToChat
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = false
@@ -134,6 +141,11 @@ struct DiffTextPane: NSViewRepresentable {
         textView.onExpand = onExpand
         textView.onWalk = onWalk
         textView.onClose = onClose
+        // Re-assign per update: the closures capture the CURRENT request (← / → walks
+        // swap the diffed file in place), so a stale capture would insert the previous
+        // file's path.
+        textView.addToChat = addToChat
+        textView.canAddToChat = canAddToChat
         scrollView.backgroundColor = backgroundColor
         scrollView.contentView.backgroundColor = backgroundColor
         textView.backgroundColor = backgroundColor
@@ -303,6 +315,10 @@ final class DiffTextView: NSTextView {
     var onExpand: ((Int) -> Void)?
     var onWalk: ((Int) -> Bool)?
     var onClose: (() -> Void)?
+    /// "Add to Chat": the argument is the selected diff text (`nil` = no selection,
+    /// the owner inserts the diffed file's path). Gate read at menu-open time.
+    var addToChat: ((String?) -> Void)?
+    var canAddToChat: (() -> Bool)?
 
     override func keyDown(with event: NSEvent) {
         let hasModifiers = !event.modifierFlags
@@ -331,6 +347,15 @@ final class DiffTextView: NSTextView {
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
         menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+        if canAddToChat?() == true {
+            menu.addItem(.separator())
+            // The title says which payload lands: the selected diff text as a pasted
+            // snippet, or (no selection) the diffed file's path.
+            let title = selectedRange().length > 0 ? "Add Selection to Chat" : "Add to Chat"
+            let add = NSMenuItem(title: title, action: #selector(addToChatAction), keyEquivalent: "")
+            add.target = self
+            menu.addItem(add)
+        }
         if onClose != nil {
             menu.addItem(.separator())
             let close = NSMenuItem(title: "Close", action: #selector(closeFromMenu), keyEquivalent: "")
@@ -338,6 +363,12 @@ final class DiffTextView: NSTextView {
             menu.addItem(close)
         }
         return menu
+    }
+
+    @objc private func addToChatAction() {
+        let range = selectedRange()
+        let selection = range.length > 0 ? (string as NSString).substring(with: range) : nil
+        addToChat?(selection)
     }
 
     @objc private func closeFromMenu() { onClose?() }

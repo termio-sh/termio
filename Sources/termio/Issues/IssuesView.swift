@@ -319,7 +319,14 @@ struct IssuesView: View {
                 // un-styleable accent border (the file tree learned the same, see
                 // `FileTreeList.RowContextMenu`). A secondary-click recognizer on the
                 // row's own view pops the menu, so nothing emphasizes the row.
-                .background(IssueRowContextMenu(url: item.url))
+                .background(IssueRowContextMenu(
+                    url: item.url,
+                    addToChat: { [weak store] in
+                        guard let url = item.url else { return }
+                        _ = store?.addPathToSelectedSessionPrompt(url)
+                    },
+                    canAddToChat: { [weak store] in store?.selectedSessionRunsAgent ?? false }
+                ))
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -451,6 +458,11 @@ private extension View {
 /// menu is suppressed when there is none (mirrors `FileTreeList.RowContextMenu`).
 private struct IssueRowContextMenu: NSViewRepresentable {
     let url: URL?
+    /// "Add to Chat": types the item's GitHub URL into the selected agent session's
+    /// prompt — the same token dragging the row onto the terminal inserts. The gate
+    /// is read at menu-open time; a plain-shell session shows no item.
+    var addToChat: (() -> Void)? = nil
+    var canAddToChat: (() -> Bool)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -458,12 +470,16 @@ private struct IssueRowContextMenu: NSViewRepresentable {
         let view = NSView(frame: .zero)
         context.coordinator.owner = view
         context.coordinator.url = url
+        context.coordinator.addToChat = addToChat
+        context.coordinator.canAddToChat = canAddToChat
         context.coordinator.attach()
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.url = url
+        context.coordinator.addToChat = addToChat
+        context.coordinator.canAddToChat = canAddToChat
         context.coordinator.attach()
     }
 
@@ -475,6 +491,8 @@ private struct IssueRowContextMenu: NSViewRepresentable {
     final class Coordinator: NSObject {
         weak var owner: NSView?
         var url: URL?
+        var addToChat: (() -> Void)?
+        var canAddToChat: (() -> Bool)?
         private weak var hostView: NSView?
         private var recognizer: NSClickGestureRecognizer?
 
@@ -501,10 +519,17 @@ private struct IssueRowContextMenu: NSViewRepresentable {
         @objc private func showMenu(_ recognizer: NSClickGestureRecognizer) {
             guard let hostView, url != nil else { return }
             let menu = NSMenu()
+            // The agent verb leads, like the file tree's rows.
+            if canAddToChat?() == true {
+                menu.addItem(menuItem("Add to Chat", #selector(addToChatAction)))
+                menu.addItem(.separator())
+            }
             menu.addItem(menuItem("Copy Link", #selector(copyLink)))
             menu.addItem(menuItem("Open in Browser", #selector(openInBrowser)))
             menu.popUp(positioning: nil, at: recognizer.location(in: hostView), in: hostView)
         }
+
+        @objc private func addToChatAction() { addToChat?() }
 
         private func menuItem(_ title: String, _ action: Selector) -> NSMenuItem {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
@@ -556,6 +581,10 @@ struct IssueDetailView: View {
     @ObservedObject var model: IssuesPanelModel
     @ObservedObject var settings: AppSettings
     let onBack: () -> Void
+
+    /// For the conversation's right-click "Add to Chat": the gate and the prompt
+    /// insertion live on the store.
+    @EnvironmentObject private var store: TermioStore
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -666,7 +695,18 @@ struct IssueDetailView: View {
                     detail,
                     theme: TraceTheme.resolve(settings: settings, colorScheme: colorScheme)
                 ),
-                background: settings.terminalBackgroundColor
+                background: settings.terminalBackgroundColor,
+                // Selected conversation text goes over as the pasted snippet; a
+                // selection-less click hands the agent the item's GitHub URL — the
+                // same token dragging the list row inserts.
+                addToChat: { selection in
+                    if let selection {
+                        _ = store.addSnippetToSelectedSessionPrompt(selection)
+                    } else if let url = item.url {
+                        _ = store.addPathToSelectedSessionPrompt(url)
+                    }
+                },
+                canAddToChat: { store.selectedSessionRunsAgent }
             )
             // Fill like the error/progress branches below: without this, SwiftUI can size the
             // representable from the WKWebView's intrinsic (near-zero while it's mid-load), which
@@ -868,6 +908,11 @@ private enum IssueDetailHTML {
 private struct IssueWebView: NSViewRepresentable {
     let html: String
     let background: NSColor
+    /// "Add to Chat" in the conversation's right-click menu — selection as pasted
+    /// snippet, `nil` (no selection) as the item's GitHub URL. Injected by
+    /// `IssueDetailView`, which holds both the item and the store.
+    var addToChat: ((String?) -> Void)? = nil
+    var canAddToChat: (() -> Bool)? = nil
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -876,6 +921,8 @@ private struct IssueWebView: NSViewRepresentable {
         config.setURLSchemeHandler(context.coordinator.assetHandler,
                                    forURLScheme: GitHubAssetSchemeHandler.scheme)
         let view = IssueDetailWKWebView(frame: .zero, configuration: config)
+        view.addToChat = addToChat
+        view.canAddToChat = canAddToChat
         view.setValue(false, forKey: "drawsBackground")
         view.navigationDelegate = context.coordinator
         view.loadHTMLString(html, baseURL: nil)
@@ -883,6 +930,10 @@ private struct IssueWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
+        // Re-assign per update: the closures capture the open item, which a list
+        // click swaps in place.
+        (view as? IssueDetailWKWebView)?.addToChat = addToChat
+        (view as? IssueDetailWKWebView)?.canAddToChat = canAddToChat
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
             view.loadHTMLString(html, baseURL: nil)
@@ -921,6 +972,11 @@ private struct IssueWebView: NSViewRepresentable {
 /// that would load the target *inside* this webview (unauthenticated), replacing the
 /// conversation. A left-click already opens links in the browser, so the item is redundant.
 private final class IssueDetailWKWebView: WKWebView {
+    /// "Add to Chat": the argument is the selected conversation text (`nil` = no
+    /// selection, the owner inserts the item's GitHub URL). Gate read at menu-open.
+    var addToChat: ((String?) -> Void)?
+    var canAddToChat: (() -> Bool)?
+
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         let keep: Set<String> = [
@@ -930,6 +986,21 @@ private final class IssueDetailWKWebView: WKWebView {
         menu.items = menu.items.filter { item in
             guard let id = item.identifier?.rawValue else { return false }
             return keep.contains(id)
+        }
+        if canAddToChat?() == true {
+            if !menu.items.isEmpty { menu.addItem(.separator()) }
+            let add = NSMenuItem(title: "Add to Chat", action: #selector(addToChatAction), keyEquivalent: "")
+            add.target = self
+            menu.addItem(add)
+        }
+    }
+
+    /// The web view's selection lives in the WebContent process, so it's read via JS
+    /// at click time: non-empty selection → snippet, else `nil` for the item's URL.
+    @objc private func addToChatAction() {
+        evaluateJavaScript("window.getSelection().toString()") { [weak self] result, _ in
+            let text = (result as? String).flatMap { $0.isEmpty ? nil : $0 }
+            self?.addToChat?(text)
         }
     }
 }
