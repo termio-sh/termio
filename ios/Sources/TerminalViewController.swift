@@ -390,9 +390,8 @@ final class TerminalViewController: UIViewController {
 
     private func configureTerminal() {
         terminalView.delegate = self
-        // The floating Copy/Paste menu the touch-selection gesture summons
-        // (see terminalTouchSelectionEnded).
-        terminalView.addInteraction(editMenuInteraction)
+        // Long-press → floating Paste menu (see wirePasteMenu).
+        wirePasteMenu()
         // Scrolling the terminal is reading; give the rows back to content.
         // Dropping first responder only hides the keyboard — tapping the
         // surface refocuses (the wrapper's touch path takes it back).
@@ -1120,43 +1119,41 @@ extension TerminalViewController: TerminalSurfaceTitleDelegate, TerminalSurfaceC
     }
 }
 
-extension TerminalViewController: TerminalSurfaceTouchSelectionDelegate, UIEditMenuInteractionDelegate {
-    /// The long-press selection gesture ended: the selection (if any) is live
-    /// on the surface, rendered by ghostty itself. Float the system edit menu
-    /// at the release point. No selection still shows Paste, Termius's
-    /// tap-and-hold shape.
-    func terminalTouchSelectionEnded(hasSelection: Bool, at point: CGPoint) {
-        guard hasSelection || UIPasteboard.general.hasStrings else { return }
+extension TerminalViewController: UIEditMenuInteractionDelegate {
+    /// Long-press → the system edit menu with a single Paste (Termius's
+    /// hold-to-paste shape). Cross-app paste is the feature; in-terminal
+    /// selection/copy was tried and cut as not worth its complexity — the
+    /// TUI's own copy affordances and the session trace cover reading.
+    private func presentPasteMenu(at point: CGPoint) {
         let config = UIEditMenuConfiguration(
-            identifier: "termio.terminal.selection", sourcePoint: point
+            identifier: "termio.terminal.paste", sourcePoint: point
         )
         editMenuInteraction.presentEditMenu(with: config)
     }
 
-    /// Explicit menu items, NOT the responder-chain suggestions: the system
+    fileprivate func wirePasteMenu() {
+        terminalView.addInteraction(editMenuInteraction)
+        terminalView.onPasteMenuRequested = { [weak self] point in
+            self?.presentPasteMenu(at: point)
+        }
+    }
+
+    /// An explicit item, NOT the responder-chain suggestions: the system
     /// builds suggested actions from the first responder, and the terminal
     /// deliberately isn't one after a bare long-press (becoming it summons
-    /// the keyboard — the churn the selection gesture suppresses). Relying
-    /// on suggestions made the menu come up empty in any session the user
-    /// hadn't tapped into first.
+    /// the keyboard). Relying on suggestions made the menu come up empty in
+    /// any session the user hadn't tapped into first.
     func editMenuInteraction(
         _: UIEditMenuInteraction,
         menuFor _: UIEditMenuConfiguration,
         suggestedActions _: [UIMenuElement]
     ) -> UIMenu? {
-        var actions: [UIAction] = []
-        if terminalView.terminalHasSelection {
-            actions.append(UIAction(title: "Copy") { [weak self] _ in
-                self?.terminalView.copy(nil)
-            })
-        }
-        if UIPasteboard.general.hasStrings {
-            actions.append(UIAction(title: "Paste") { [weak self] _ in
+        guard UIPasteboard.general.hasStrings else { return nil }
+        return UIMenu(options: .displayInline, children: [
+            UIAction(title: "Paste") { [weak self] _ in
                 self?.terminalView.paste(nil)
-            })
-        }
-        guard !actions.isEmpty else { return nil }
-        return UIMenu(options: .displayInline, children: actions)
+            },
+        ])
     }
 }
 
@@ -1269,6 +1266,62 @@ private final class DisplayTerminalView: UITerminalView {
     let keyBar = TerminalAccessoryBar()
     override var inputAccessoryView: UIView? { keyBar }
 
+    /// Long-press anywhere → the owner floats a Paste menu at the finger.
+    /// App-owned recognizer (the wrapper's own long-press stays disarmed
+    /// without its selection delegates): cross-app paste is the one
+    /// clipboard feature the phone terminal supports — in-terminal
+    /// selection/copy was cut as not worth its complexity.
+    var onPasteMenuRequested: ((CGPoint) -> Void)?
+    /// The current touch sequence presented the paste menu — its release is
+    /// not a tap (must not summon the keyboard over the menu), and the
+    /// wrapper's tap-dismiss must not collapse the keyboard under it either.
+    /// Reset when the next touch lands.
+    private var touchSequencePresentedPasteMenu = false
+    private var pasteLongPressInstalled = false
+    private lazy var pasteLongPress: UILongPressGestureRecognizer = {
+        let gesture = UILongPressGestureRecognizer(
+            target: self, action: #selector(pasteLongPressFired(_:))
+        )
+        // 0.3s matches the system text views' long-press feel.
+        gesture.minimumPressDuration = 0.3
+        gesture.allowableMovement = 10
+        gesture.cancelsTouchesInView = false
+        return gesture
+    }()
+
+    func installPasteLongPressIfNeeded() {
+        guard !pasteLongPressInstalled, window != nil else { return }
+        pasteLongPressInstalled = true
+        addGestureRecognizer(pasteLongPress)
+    }
+
+    @objc private func pasteLongPressFired(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        touchSequencePresentedPasteMenu = true
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        onPasteMenuRequested?(gesture.location(in: self))
+    }
+
+    /// The wrapper disarms every long-press unless its selection delegates
+    /// are adopted — allow ours through; and only when the clipboard has
+    /// text, so a menu with nothing to offer never eats the hold.
+    override func gestureRecognizerShouldBegin(
+        _ gestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        if gestureRecognizer === pasteLongPress {
+            return UIPasteboard.general.hasStrings
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    /// The wrapper's tap-dismiss resigns on any unscrolled release; when
+    /// that release just presented the paste menu, keep the keyboard as it
+    /// was — collapsing it would yank the layout under the menu.
+    override func resignFirstResponder() -> Bool {
+        if touchSequencePresentedPasteMenu { return false }
+        return super.resignFirstResponder()
+    }
+
     /// The software keyboard's Return arrives as `insertText("\n")`, and the
     /// wrapper routes it through `sendText` — which rides inside bracketed
     /// paste once the TUI enabled mode 2004, so Claude Code reads a pasted
@@ -1303,15 +1356,13 @@ private final class DisplayTerminalView: UITerminalView {
         super.insertText(text)
     }
 
-    /// Paste — the edit menu over a touch selection and hardware Cmd+V both
-    /// land here. The clipboard goes through `insertText`, whose
-    /// multi-character path rides the wrapper's sendText: bracketed once the
-    /// TUI enabled mode 2004 (Claude Code's parser only ingests paste in that
-    /// form), raw before then — the same delivery a Mac paste gets.
-    /// `hasStrings` gates the menu item without tripping the system paste
-    /// prompt; the `.string` read waits for the user-initiated action. Copy
-    /// needs no override: the wrapper's `copy(_:)` already reads the core's
-    /// live selection.
+    /// Paste — the long-press menu and hardware Cmd+V both land here. The
+    /// clipboard goes through `insertText`, whose multi-character path rides
+    /// the wrapper's sendText: bracketed once the TUI enabled mode 2004
+    /// (Claude Code's parser only ingests paste in that form), raw before
+    /// then — the same delivery a Mac paste gets. `hasStrings` gates the
+    /// menu item without tripping the system paste prompt; the `.string`
+    /// read waits for the user-initiated action.
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(UIResponderStandardEditActions.paste(_:)) {
             return UIPasteboard.general.hasStrings
@@ -1495,6 +1546,7 @@ private final class DisplayTerminalView: UITerminalView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         installScrollHookIfNeeded()
+        installPasteLongPressIfNeeded()
     }
 
     /// The wrapper's own pan-to-scroll recognizer (direct touches, single
@@ -1612,6 +1664,7 @@ private final class DisplayTerminalView: UITerminalView {
             // A finger that lands while the fling pump is alive is stopping or
             // continuing the scroll — never a keyboard tap.
             touchSequenceScrolled = scrollPump != nil
+            touchSequencePresentedPasteMenu = false
             wasFirstResponderAtTouchDown = isFirstResponder
             suppressTouchDownKeyboardRetake = true
         }
@@ -1635,10 +1688,9 @@ private final class DisplayTerminalView: UITerminalView {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
         guard touches.contains(where: { $0.type == .direct }) else { return }
-        // A touch that became a long-press selection is not a tap: summoning
-        // the keyboard here would slide it up over the edit menu the
-        // selection just presented, killing Copy/Paste under it.
-        let wasTap = !touchSequenceScrolled && !touchSequenceWasSelection
+        // A touch that presented the paste menu is not a tap: summoning the
+        // keyboard here would slide it up over the menu it just floated.
+        let wasTap = !touchSequenceScrolled && !touchSequencePresentedPasteMenu
         touchSequenceScrolled = false
         if wasTap, !wasFirstResponderAtTouchDown, window != nil {
             _ = becomeFirstResponder()

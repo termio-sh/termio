@@ -466,8 +466,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/jiweiyuan/libghostty-swift";
 			requirement = {
-				kind = branch;
-				branch = "touch-selection";
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.14;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
