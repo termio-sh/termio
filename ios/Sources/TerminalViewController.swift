@@ -1128,6 +1128,10 @@ extension TerminalViewController: UIEditMenuInteractionDelegate {
         let config = UIEditMenuConfiguration(
             identifier: "termio.terminal.paste", sourcePoint: point
         )
+        // Deterministically above the finger: at the raw touch point the
+        // balloon can flip below it — under the hand — and "when the menu
+        // appeared" becomes "when the hand lifted".
+        config.preferredArrowDirection = .down
         editMenuInteraction.presentEditMenu(with: config)
     }
 
@@ -1154,6 +1158,15 @@ extension TerminalViewController: UIEditMenuInteractionDelegate {
                 self?.terminalView.paste(nil)
             },
         ])
+    }
+
+    /// Scope the terminal's resign guard to the menu's actual lifetime.
+    func editMenuInteraction(
+        _: UIEditMenuInteraction,
+        willDismissMenuFor _: UIEditMenuConfiguration,
+        animator _: any UIEditMenuInteractionAnimating
+    ) {
+        terminalView.pasteMenuDidDismiss()
     }
 }
 
@@ -1272,10 +1285,10 @@ private final class DisplayTerminalView: UITerminalView {
     /// clipboard feature the phone terminal supports — in-terminal
     /// selection/copy was cut as not worth its complexity.
     var onPasteMenuRequested: ((CGPoint) -> Void)?
-    /// The current touch sequence presented the paste menu — its release is
-    /// not a tap (must not summon the keyboard over the menu), and the
-    /// wrapper's tap-dismiss must not collapse the keyboard under it either.
-    /// Reset when the next touch lands.
+    /// The paste menu is on screen (set at gesture `.began`, cleared when
+    /// the menu dismisses — with a next-touch reset as belt-and-braces).
+    /// While set, the wrapper's tap-dismiss must not collapse the keyboard
+    /// under the menu.
     private var touchSequencePresentedPasteMenu = false
     private var pasteLongPressInstalled = false
     private lazy var pasteLongPress: UILongPressGestureRecognizer = {
@@ -1284,32 +1297,83 @@ private final class DisplayTerminalView: UITerminalView {
         )
         // 0.3s matches the system text views' long-press feel.
         gesture.minimumPressDuration = 0.3
-        gesture.allowableMovement = 10
-        gesture.cancelsTouchesInView = false
+        // 20pt, not the 10pt default: a thumb planted for 300ms drifts a few
+        // points routinely, and a failed press with zero feedback reads as
+        // "the gesture is unreliable". A deliberate scroll blows past 20
+        // immediately.
+        gesture.allowableMovement = 20
+        // Cancel the touch once the menu gesture wins: the wrapper's pan
+        // must not scroll the viewport under the open menu, and the release
+        // arrives as touchesCancelled so the tap-to-keyboard path never runs.
+        gesture.cancelsTouchesInView = true
         return gesture
     }()
+
+    /// Warmed at touch-down, fired at gesture `.began`: an unprepared
+    /// generator adds Taptic-Engine spin-up (~50-200ms) to the confirmation
+    /// cue, and time-to-first-feedback is what sets perceived gesture speed.
+    private let pasteHaptic = UIImpactFeedbackGenerator(style: .light)
+
+    /// Cached gate for the paste long-press. `hasStrings` is a synchronous
+    /// XPC round-trip to pasteboardd — too slow for
+    /// `gestureRecognizerShouldBegin`, which runs exactly when the
+    /// long-press timer fires and the user is waiting for feedback.
+    /// Pasteboard changes land while backgrounded, so the foreground
+    /// re-check is mandatory; the changeCount compare keeps it to one query.
+    private var clipboardHasStrings = UIPasteboard.general.hasStrings
+    private var clipboardChangeCount = UIPasteboard.general.changeCount
+    private var clipboardObservers: [NSObjectProtocol] = []
+
+    private func refreshClipboardGate() {
+        let count = UIPasteboard.general.changeCount
+        guard count != clipboardChangeCount else { return }
+        clipboardChangeCount = count
+        clipboardHasStrings = UIPasteboard.general.hasStrings
+    }
+
+    deinit {
+        for observer in clipboardObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
 
     func installPasteLongPressIfNeeded() {
         guard !pasteLongPressInstalled, window != nil else { return }
         pasteLongPressInstalled = true
         addGestureRecognizer(pasteLongPress)
+        clipboardObservers = [
+            NotificationCenter.default.addObserver(
+                forName: UIPasteboard.changedNotification, object: nil, queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.refreshClipboardGate() } },
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.refreshClipboardGate() } },
+        ]
+    }
+
+    /// The menu left the screen — the resign guard is scoped to exactly the
+    /// menu's lifetime, so controller-driven resigns (pane close, scroll
+    /// handoff) work again immediately.
+    func pasteMenuDidDismiss() {
+        touchSequencePresentedPasteMenu = false
     }
 
     @objc private func pasteLongPressFired(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
         touchSequencePresentedPasteMenu = true
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        pasteHaptic.impactOccurred()
         onPasteMenuRequested?(gesture.location(in: self))
     }
 
     /// The wrapper disarms every long-press unless its selection delegates
     /// are adopted — allow ours through; and only when the clipboard has
-    /// text, so a menu with nothing to offer never eats the hold.
+    /// text (cached — see clipboardHasStrings), so a menu with nothing to
+    /// offer never eats the hold.
     override func gestureRecognizerShouldBegin(
         _ gestureRecognizer: UIGestureRecognizer
     ) -> Bool {
         if gestureRecognizer === pasteLongPress {
-            return UIPasteboard.general.hasStrings
+            return clipboardHasStrings
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
@@ -1667,6 +1731,10 @@ private final class DisplayTerminalView: UITerminalView {
             touchSequencePresentedPasteMenu = false
             wasFirstResponderAtTouchDown = isFirstResponder
             suppressTouchDownKeyboardRetake = true
+            // Warm the Taptic Engine while the 0.3s hold runs, so the
+            // long-press confirmation lands AT the timer, not after
+            // engine spin-up.
+            if clipboardHasStrings { pasteHaptic.prepare() }
         }
         super.touchesBegan(touches, with: event)
         suppressTouchDownKeyboardRetake = false
@@ -1688,9 +1756,10 @@ private final class DisplayTerminalView: UITerminalView {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
         guard touches.contains(where: { $0.type == .direct }) else { return }
-        // A touch that presented the paste menu is not a tap: summoning the
-        // keyboard here would slide it up over the menu it just floated.
-        let wasTap = !touchSequenceScrolled && !touchSequencePresentedPasteMenu
+        // The paste long-press never reaches here: winning the gesture
+        // cancels its touch (touchesCancelled), so an ended touch that
+        // didn't scroll really is a tap.
+        let wasTap = !touchSequenceScrolled
         touchSequenceScrolled = false
         if wasTap, !wasFirstResponderAtTouchDown, window != nil {
             _ = becomeFirstResponder()
