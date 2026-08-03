@@ -1123,15 +1123,40 @@ extension TerminalViewController: TerminalSurfaceTitleDelegate, TerminalSurfaceC
 extension TerminalViewController: TerminalSurfaceTouchSelectionDelegate, UIEditMenuInteractionDelegate {
     /// The long-press selection gesture ended: the selection (if any) is live
     /// on the surface, rendered by ghostty itself. Float the system edit menu
-    /// at the release point — its Copy/Paste come from the first responder's
-    /// standard edit actions (the terminal view), so labels, order, and
-    /// localization are the system's own. No selection still shows Paste,
-    /// Termius's tap-and-hold shape.
-    func terminalTouchSelectionEnded(hasSelection _: Bool, at point: CGPoint) {
+    /// at the release point. No selection still shows Paste, Termius's
+    /// tap-and-hold shape.
+    func terminalTouchSelectionEnded(hasSelection: Bool, at point: CGPoint) {
+        guard hasSelection || UIPasteboard.general.hasStrings else { return }
         let config = UIEditMenuConfiguration(
             identifier: "termio.terminal.selection", sourcePoint: point
         )
         editMenuInteraction.presentEditMenu(with: config)
+    }
+
+    /// Explicit menu items, NOT the responder-chain suggestions: the system
+    /// builds suggested actions from the first responder, and the terminal
+    /// deliberately isn't one after a bare long-press (becoming it summons
+    /// the keyboard — the churn the selection gesture suppresses). Relying
+    /// on suggestions made the menu come up empty in any session the user
+    /// hadn't tapped into first.
+    func editMenuInteraction(
+        _: UIEditMenuInteraction,
+        menuFor _: UIEditMenuConfiguration,
+        suggestedActions _: [UIMenuElement]
+    ) -> UIMenu? {
+        var actions: [UIAction] = []
+        if terminalView.terminalHasSelection {
+            actions.append(UIAction(title: "Copy") { [weak self] _ in
+                self?.terminalView.copy(nil)
+            })
+        }
+        if UIPasteboard.general.hasStrings {
+            actions.append(UIAction(title: "Paste") { [weak self] _ in
+                self?.terminalView.paste(nil)
+            })
+        }
+        guard !actions.isEmpty else { return nil }
+        return UIMenu(options: .displayInline, children: actions)
     }
 }
 
