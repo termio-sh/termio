@@ -1635,7 +1635,10 @@ private final class DisplayTerminalView: UITerminalView {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
         guard touches.contains(where: { $0.type == .direct }) else { return }
-        let wasTap = !touchSequenceScrolled
+        // A touch that became a long-press selection is not a tap: summoning
+        // the keyboard here would slide it up over the edit menu the
+        // selection just presented, killing Copy/Paste under it.
+        let wasTap = !touchSequenceScrolled && !touchSequenceWasSelection
         touchSequenceScrolled = false
         if wasTap, !wasFirstResponderAtTouchDown, window != nil {
             _ = becomeFirstResponder()
