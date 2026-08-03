@@ -349,10 +349,9 @@ final class DiffTextView: NSTextView {
         menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
         if canAddToChat?() == true {
             menu.addItem(.separator())
-            // The title says which payload lands: the selected diff text as a pasted
-            // snippet, or (no selection) the diffed file's path.
-            let title = selectedRange().length > 0 ? "Add Selection to Chat" : "Add to Chat"
-            let add = NSMenuItem(title: title, action: #selector(addToChatAction), keyEquivalent: "")
+            // One name everywhere (Cursor's): a selection goes over as the pasted
+            // snippet, none means the diffed file's path — context says which.
+            let add = NSMenuItem(title: "Add to Chat", action: #selector(addToChatAction), keyEquivalent: "")
             add.target = self
             add.image = NSImage(systemSymbolName: "plus.bubble", accessibilityDescription: nil)
             menu.addItem(add)
