@@ -244,7 +244,9 @@ private struct RowContextMenu: NSViewRepresentable {
             // prompt as a shell-quoted path — the same token a drag onto the terminal
             // inserts. Gated live at open time; a plain shell has no chat to add to.
             if actions?.canAddToChat() == true {
-                menu.addItem(menuItem("Add to Chat", #selector(addToChat)))
+                let add = menuItem("Add to Chat", #selector(addToChat))
+                add.image = NSImage(systemSymbolName: "plus.bubble", accessibilityDescription: nil)
+                menu.addItem(add)
                 menu.addItem(.separator())
             }
             if isDirectory {

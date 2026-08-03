@@ -395,6 +395,7 @@ private final class SavingTextView: NSTextView {
             let title = selectedRange().length > 0 ? "Add Selection to Chat" : "Add to Chat"
             let add = NSMenuItem(title: title, action: #selector(addToChatAction), keyEquivalent: "")
             add.target = self
+            add.image = NSImage(systemSymbolName: "plus.bubble", accessibilityDescription: nil)
             menu.addItem(add)
         }
         let close = NSMenuItem(title: "Close", action: #selector(closeEditorOverlay), keyEquivalent: "")

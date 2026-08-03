@@ -153,6 +153,7 @@ private final class ContextMenuWebView: WKWebView {
         if canAddToChat?() == true {
             let add = NSMenuItem(title: "Add to Chat", action: #selector(addToChatAction), keyEquivalent: "")
             add.target = self
+            add.image = NSImage(systemSymbolName: "plus.bubble", accessibilityDescription: nil)
             menu.addItem(add)
         }
         if fileURL != nil {

@@ -521,7 +521,9 @@ private struct IssueRowContextMenu: NSViewRepresentable {
             let menu = NSMenu()
             // The agent verb leads, like the file tree's rows.
             if canAddToChat?() == true {
-                menu.addItem(menuItem("Add to Chat", #selector(addToChatAction)))
+                let add = menuItem("Add to Chat", #selector(addToChatAction))
+                add.image = NSImage(systemSymbolName: "plus.bubble", accessibilityDescription: nil)
+                menu.addItem(add)
                 menu.addItem(.separator())
             }
             menu.addItem(menuItem("Copy Link", #selector(copyLink)))
@@ -991,6 +993,7 @@ private final class IssueDetailWKWebView: WKWebView {
             if !menu.items.isEmpty { menu.addItem(.separator()) }
             let add = NSMenuItem(title: "Add to Chat", action: #selector(addToChatAction), keyEquivalent: "")
             add.target = self
+            add.image = NSImage(systemSymbolName: "plus.bubble", accessibilityDescription: nil)
             menu.addItem(add)
         }
     }
