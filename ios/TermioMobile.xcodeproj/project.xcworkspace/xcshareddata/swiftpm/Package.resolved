@@ -1,32 +1,32 @@
 {
-  "pins" : [
+  "pins": [
     {
-      "identity" : "highlightr",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/raspu/Highlightr.git",
-      "state" : {
-        "revision" : "05e7fcc63b33925cd0c1faaa205cdd5681e7bbef",
-        "version" : "2.3.0"
+      "identity": "highlightr",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/raspu/Highlightr.git",
+      "state": {
+        "revision": "05e7fcc63b33925cd0c1faaa205cdd5681e7bbef",
+        "version": "2.3.0"
       }
     },
     {
-      "identity" : "libghostty-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/jiweiyuan/libghostty-swift",
-      "state" : {
-        "revision" : "611af68c33428be364fd29f119ce83c524d8ebd8",
-        "version" : "1.0.14"
+      "identity": "libghostty-swift",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/jiweiyuan/libghostty-swift",
+      "state": {
+        "branch": "touch-selection",
+        "revision": "524649a89f93d546559430be974472b15ba600d4"
       }
     },
     {
-      "identity" : "msdisplaylink",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Lakr233/MSDisplayLink.git",
-      "state" : {
-        "revision" : "1ba3e769b734e456317fa7e45321fa7f53eefb67",
-        "version" : "2.1.0"
+      "identity": "msdisplaylink",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/Lakr233/MSDisplayLink.git",
+      "state": {
+        "revision": "1ba3e769b734e456317fa7e45321fa7f53eefb67",
+        "version": "2.1.0"
       }
     }
   ],
-  "version" : 2
+  "version": 2
 }
