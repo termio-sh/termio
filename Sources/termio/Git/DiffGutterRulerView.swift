@@ -229,7 +229,10 @@ final class DiffGutterRulerView: NSRulerView {
         let dotWidth: CGFloat = 1.2
         let originX = (rect.midX - width / 2).rounded()
         // The arrow leans toward the code it reveals, the dots sit on the hidden side.
-        let pointsUp = direction == .up
+        // `.up` reveals the lines nearest the code *below* the band, so its arrow points
+        // down at that code; `.down`'s arrow points up. The enum names the direction the
+        // reveal reads from, not the arrow's pointing — do not "simplify" the mapping.
+        let pointsUp = direction == .down
         let block = NSRect(x: originX, y: rect.midY - (arrowHeight + gap + dotWidth) / 2,
                            width: width, height: arrowHeight + gap + dotWidth)
         let dotsY = pointsUp ? block.minY : block.maxY - dotWidth
