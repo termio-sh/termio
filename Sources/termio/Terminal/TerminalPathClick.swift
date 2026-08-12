@@ -39,11 +39,8 @@ enum TerminalPathScanner {
     /// too is what lets `package.json` open even when the cwd read is `~`.
     static func resolve(in row: String, nearColumn: Int, baseDirectories: [String]) -> Match? {
         let bases = orderedUnique(baseDirectories)
-        let ordered = tokens(in: row).sorted {
-            $0.distance(to: nearColumn) < $1.distance(to: nearColumn)
-        }
-        for token in ordered {
-            if let match = validate(token, baseDirectories: bases) {
+        for candidate in candidates(in: row, nearColumn: nearColumn) {
+            if let match = validate(candidate, baseDirectories: bases) {
                 return match
             }
         }
@@ -57,17 +54,54 @@ enum TerminalPathScanner {
 
     // MARK: - Tokenising
 
+    /// How many adjacent whitespace tokens may be rejoined into one candidate. Four
+    /// covers the shapes that occur in practice (`Application Support/…`, `My Project
+    /// Notes.md`) while keeping the widening from wandering across a whole row.
+    private static let maximumJoinedTokens = 4
+
     /// A whitespace-delimited run of the row, with the character range it occupies so
     /// candidates can be ranked by how close they are to the click column.
     private struct Token {
         let text: String
         let start: Int
         let end: Int
+    }
 
-        func distance(to column: Int) -> Int {
-            if column >= start, column < end { return 0 }
-            return min(abs(column - start), abs(column - end))
+    /// Every spelling on the row worth checking, precise-first: each whitespace token,
+    /// plus the runs of adjacent tokens that a path containing a space would have been
+    /// torn into. Ordered by distance to the click and then by width, so the token the
+    /// user actually pointed at is checked before any widened span — the filesystem
+    /// gate then decides, and the widening only ever costs extra misses.
+    private static func candidates(in row: String, nearColumn column: Int) -> [String] {
+        let tokens = tokens(in: row)
+        guard !tokens.isEmpty else { return [] }
+        let characters = Array(row)
+
+        var ranked: [(text: String, distance: Int, width: Int)] = []
+        for start in tokens.indices {
+            for end in start..<min(start + maximumJoinedTokens, tokens.count) {
+                let span = (lower: tokens[start].start, upper: tokens[end].end)
+                // A widened span exists only to repair a path the whitespace split tore
+                // in half, so it has to cover the click. Widening away from the pointer
+                // would let a row of prose join into something that happens to exist.
+                if end > start, !(span.lower <= column && column < span.upper) { continue }
+                let text = end == start
+                    ? tokens[start].text
+                    : String(characters[span.lower..<span.upper])
+                ranked.append((text, distance(from: span.lower, to: span.upper, column: column), end - start + 1))
+            }
         }
+
+        return ranked.enumerated().sorted {
+            if $0.element.distance != $1.element.distance { return $0.element.distance < $1.element.distance }
+            if $0.element.width != $1.element.width { return $0.element.width < $1.element.width }
+            return $0.offset < $1.offset
+        }.map(\.element.text)
+    }
+
+    private static func distance(from lower: Int, to upper: Int, column: Int) -> Int {
+        if column >= lower, column < upper { return 0 }
+        return min(abs(column - lower), abs(column - upper))
     }
 
     private static func tokens(in row: String) -> [Token] {
@@ -102,10 +136,10 @@ enum TerminalPathScanner {
     /// but the de-prefixed form hits, that's the file the tool meant.
     private static let diffPrefixes = ["a/", "b/", "c/", "i/", "o/", "w/"]
 
-    private static func validate(_ token: Token, baseDirectories: [String]) -> Match? {
+    private static func validate(_ token: String, baseDirectories: [String]) -> Match? {
         // Strip wrapping punctuation first — a closing `).` sits *after* the `:line`
         // suffix (`(file.swift:10).`), so peeling the line has to see a clean tail.
-        let (rawPath, line) = peelLineColumn(strip(token.text))
+        let (rawPath, line) = peelLineColumn(strip(token))
         let stripped = strip(rawPath)
         guard !stripped.isEmpty else { return nil }
 
@@ -155,11 +189,40 @@ enum TerminalPathScanner {
     }
 
     private static func pathVariants(_ path: String) -> [String] {
-        var variants = [path]
-        for prefix in diffPrefixes where path.hasPrefix(prefix) {
-            variants.append(String(path.dropFirst(prefix.count)))
+        var variants: [String] = []
+        func add(_ value: String) {
+            guard !value.isEmpty, !variants.contains(value) else { return }
+            variants.append(value)
+            for prefix in diffPrefixes where value.hasPrefix(prefix) {
+                let dePrefixed = String(value.dropFirst(prefix.count))
+                guard !dePrefixed.isEmpty, !variants.contains(dePrefixed) else { continue }
+                variants.append(dePrefixed)
+            }
         }
+        add(path)
+        add(unescapingShellBackslashes(path))
         return variants
+    }
+
+    /// Folds shell backslash escapes into the character they escape: a shell echoes
+    /// `src/my\ file.ts`, but the name on disk is `src/my file.ts`.
+    private static func unescapingShellBackslashes(_ path: String) -> String {
+        guard path.contains("\\") else { return path }
+        var result = ""
+        var escaping = false
+        for character in path {
+            if escaping {
+                result.append(character)
+                escaping = false
+            } else if character == "\\" {
+                escaping = true
+            } else {
+                result.append(character)
+            }
+        }
+        // A lone trailing backslash isn't an escape; keep it so the spelling stays honest.
+        if escaping { result.append("\\") }
+        return result
     }
 
     private static func urls(for path: String, baseDirectories: [String]) -> [URL] {
@@ -183,7 +246,7 @@ extension TermioStore {
     /// lets the click fall through to the terminal untouched.
     @MainActor
     func openBarePathUnderCommandClick(_ event: NSEvent) -> Bool {
-        guard let window = event.window else { pathClickLog("no window"); return false }
+        guard let window = event.window else { return false }
         let windowPoint = event.locationInWindow
 
         // Find the surface by enumerating terminal views and testing which one's frame
@@ -191,20 +254,21 @@ extension TermioStore {
         // would return instead (ghostty disables link detection under mouse reporting,
         // so this fallback must not depend on the same z-order hitTest gives).
         guard let (terminal, state) = terminalSurface(at: windowPoint, in: window) else {
-            pathClickLog("no terminal surface under click")
             return false
         }
+        let surfaceID = surfaces.first(where: { $0.value === state })?.key
+        // The paths an `ssh` session prints live on the remote box. Resolving them
+        // against the local filesystem is worse than doing nothing: `src/main.rs`
+        // exists on both machines, so the click would quietly open the wrong file.
+        if let surfaceID, session(surfaceID)?.sshHost != nil { return false }
         guard let metrics = state.surfaceSize,
               metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0 else {
-            pathClickLog("no surfaceSize")
             return false
         }
         guard case .inMemory(let session) = state.configuration.backend else {
-            pathClickLog("backend not inMemory")
             return false
         }
         guard let viewport = session.readViewportText() else {
-            pathClickLog("nil viewport text")
             return false
         }
 
@@ -215,25 +279,21 @@ extension TermioStore {
         let scale = terminal.window?.backingScaleFactor ?? 2
         let cellWidth = CGFloat(metrics.cellWidthPixels) / scale
         let cellHeight = CGFloat(metrics.cellHeightPixels) / scale
-        guard cellWidth > 0, cellHeight > 0 else { pathClickLog("zero cell size"); return false }
+        guard cellWidth > 0, cellHeight > 0 else { return false }
 
         let column = Int(local.x / cellWidth)
         let rowIndex = Int((terminal.bounds.height - local.y) / cellHeight)
         let rows = viewport.components(separatedBy: "\n")
-        let bases = pathBaseDirectories(for: state)
-        pathClickLog("local=\(local) bounds=\(terminal.bounds.size) cell=\(cellWidth)x\(cellHeight) "
-            + "col=\(column) row=\(rowIndex) rows=\(rows.count) bases=\(bases)")
-        guard rowIndex >= 0, rowIndex < rows.count else { pathClickLog("row out of range"); return false }
-        pathClickLog("rowText=<\(rows[rowIndex])>")
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
 
         guard let match = TerminalPathScanner.resolve(
-            in: rows[rowIndex], nearColumn: column, baseDirectories: bases
+            in: rows[rowIndex],
+            nearColumn: column,
+            baseDirectories: pathBaseDirectories(surfaceID: surfaceID, state: state)
         ) else {
-            pathClickLog("no path resolved on row")
             return false
         }
 
-        pathClickLog("OPEN \(match.url.path) line=\(match.line.map(String.init) ?? "nil")")
         openFileReadOnly = true
         openFileLine = match.line
         openFileURL = match.url
@@ -249,7 +309,6 @@ extension TermioStore {
         guard let root = window.contentView else { return nil }
         var terminals: [TerminalView] = []
         collectTerminalViews(under: root, into: &terminals)
-        pathClickLog("terminalViews=\(terminals.count)")
         for terminal in terminals {
             let local = terminal.convert(windowPoint, from: nil)
             guard terminal.bounds.contains(local),
@@ -269,25 +328,18 @@ extension TermioStore {
     /// project root. The project root is the reliable anchor — the terminal cwd can be
     /// stale or unreported (no OSC 7), which is why a bare `package.json` must still
     /// resolve against the project the surface belongs to.
-    private func pathBaseDirectories(for state: TerminalViewState) -> [String] {
+    private func pathBaseDirectories(surfaceID: UUID?, state: TerminalViewState) -> [String] {
         var bases: [String] = []
-        if let id = surfaces.first(where: { $0.value === state })?.key {
+        if let surfaceID {
             // Live cwd straight from the kernel (`PROC_PIDVNODEPATHINFO`), the reliable
             // anchor: it tracks a plain `cd` even when the shell never emits OSC 7 — the
             // exact case where the OSC 7 `workingDirectory` read is stale (still `~`).
-            if let liveCwd = ptyProcesses[id]?.currentWorkingDirectory() { bases.append(liveCwd) }
-            if let worktree = session(id)?.worktreePath { bases.append(worktree) }
-            if let project = project(for: id) { bases.append(project.path) }
+            if let liveCwd = ptyProcesses[surfaceID]?.currentWorkingDirectory() { bases.append(liveCwd) }
+            if let worktree = session(surfaceID)?.worktreePath { bases.append(worktree) }
+            if let project = project(for: surfaceID) { bases.append(project.path) }
         }
         if let cwd = state.workingDirectory { bases.append(cwd) }
         if let workspace = selectedSessionWorkspace { bases.append(workspace) }
         return bases
     }
-}
-
-/// Temporary trace for the cmd-click path fallback while it's being brought up. Only
-/// fires on a cmd-left-click with no libghostty-detected link, so it is not chatty.
-@MainActor
-private func pathClickLog(_ message: @autoclosure () -> String) {
-    NSLog("[PATHCLICK] %@", message())
 }

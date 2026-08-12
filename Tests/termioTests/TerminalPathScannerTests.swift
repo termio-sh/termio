@@ -96,6 +96,33 @@ final class TerminalPathScannerTests: XCTestCase {
         XCTAssertEqual(match?.url, file.standardizedFileURL)
     }
 
+    // MARK: - Paths that contain a space
+
+    func testPathWithSpaceIsRejoinedFromAdjacentTokens() throws {
+        let file = try touch("Application Support/settings.json")
+        // The shell prints the name unquoted, so a whitespace split tears it in half.
+        let row = "wrote Application Support/settings.json"
+        XCTAssertEqual(resolve(row, near: 8)?.url, file.standardizedFileURL)
+        XCTAssertEqual(resolve(row, near: 25)?.url, file.standardizedFileURL)
+    }
+
+    func testQuotedPathWithSpace() throws {
+        let file = try touch("my notes.md")
+        XCTAssertEqual(resolve("cat \"my notes.md\"", near: 6)?.url, file.standardizedFileURL)
+    }
+
+    func testBackslashEscapedSpace() throws {
+        let file = try touch("my notes.md")
+        XCTAssertEqual(resolve("cat my\\ notes.md", near: 5)?.url, file.standardizedFileURL)
+    }
+
+    func testRejoiningNeverWidensAwayFromTheClick() throws {
+        try touch("Application Support/settings.json")
+        // Clicking `wrote` must not drag the span rightwards onto a file the user
+        // never pointed at — only spans covering the click are considered.
+        XCTAssertNil(resolve("wrote Application Support/settings.json", near: 2))
+    }
+
     // MARK: - The false-positive guard
 
     func testNonexistentPathReturnsNil() {
