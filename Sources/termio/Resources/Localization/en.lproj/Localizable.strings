@@ -810,6 +810,10 @@
 	<string>Sessions</string>
 	<key>Settings</key>
 	<string>Settings</string>
+	<key>Settings file</key>
+	<string>Settings file</string>
+	<key>Settings you change are written to ~/.termio/settings.json; anything you haven’t changed follows Termio’s defaults.</key>
+	<string>Settings you change are written to ~/.termio/settings.json; anything you haven’t changed follows Termio’s defaults.</string>
 	<key>Settings…</key>
 	<string>Settings…</string>
 	<key>Shortcuts must include ⌘ so they can’t shadow a key an agent or the shell needs. While recording, press ⌫ to remove a shortcut, or esc to cancel.</key>

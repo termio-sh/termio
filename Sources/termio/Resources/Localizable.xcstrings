@@ -5244,6 +5244,26 @@
           }
         }
       }
+    },
+    "Settings file": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设置文件"
+          }
+        }
+      }
+    },
+    "Settings you change are written to ~/.termio/settings.json; anything you haven’t changed follows Termio’s defaults.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你改动过的设置会写入 ~/.termio/settings.json；没有改过的项跟随 Termio 的默认值。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

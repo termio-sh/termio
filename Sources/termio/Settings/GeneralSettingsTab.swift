@@ -77,6 +77,11 @@ struct GeneralSettingsTab: View {
                 SectionHeaderLabel(title: localized("Notifications"))
             }
             Section {
+                SettingsFileRow()
+            } header: {
+                SectionHeaderLabel(title: localized("Settings file"))
+            }
+            Section {
                 Toggle(isOn: $settings.githubIntegrationEnabled) {
                     SettingsLabel(
                         .huge(.github),
@@ -90,6 +95,30 @@ struct GeneralSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Points at `settings.json` so the file is discoverable from the window that
+/// writes it. Reveals the file once it exists, and its folder before that — a
+/// fresh install has changed nothing yet, so there is no file to select.
+private struct SettingsFileRow: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            SettingsLabel(
+                .huge(.fileDoc),
+                title: localized("Settings file"),
+                subtext: localized("Settings you change are written to ~/.termio/settings.json; anything you haven’t changed follows Termio’s defaults.")
+            )
+            Spacer()
+            Button(localized("Reveal in Finder")) {
+                let file = SettingsStore.defaultURL
+                if FileManager.default.fileExists(atPath: file.path) {
+                    NSWorkspace.shared.activateFileViewerSelecting([file])
+                } else {
+                    NSWorkspace.shared.open(file.deletingLastPathComponent())
+                }
+            }
+        }
     }
 }
 

@@ -1,0 +1,114 @@
+---
+title: 设置
+description: Termio 的每一项设置、它的默认值，以及背后的 settings.json 键——你可以在设置窗口里改，也可以在编辑器里改。
+x-i18n:
+  source_path: settings.mdx
+  source_hash: 63ef6dbdcf99264a4d52fe624fd96205eda3f4adcafed045cdb5c244e1a83421
+  generated_at: 2026-08-12
+---
+
+用 `⌘,` 打开**设置**。下面的每一项也都可以当成文件来编辑，所以你的这套配置可以放进
+dotfiles 仓库，而不是只存在于一个窗口里。
+
+## 设置存在哪里 [#where-settings-live]
+
+你改动过的设置会写入：
+
+```
+~/.termio/settings.json
+```
+
+里面只有你真正改过的项。没有动过的设置根本不会被写进去——它会一直跟随 Termio 的默认值，
+也就是说以后版本里变得更好的默认值仍然能传到你这里。这样文件也短到可以一眼读完。
+
+取值顺序是：
+
+1. **`settings.json`**——你自己选的，无论是在窗口里还是手改的
+2. **`~/.config/ghostty/config`**——如果你本来就用 Ghostty，首次启动时它的字体和主题会成为
+   Termio 的默认值
+3. **Termio 内置的默认值**
+
+所以从文件里删掉一个键，并不会把它重置成某个随意的值，而是把这项设置交还给 Ghostty 或内置默认值。
+**设置 ▸ 通用 ▸ 设置文件 ▸ 在“访达”中显示**可以打开这个文件。
+
+键位是另一个文件 `~/.termio/keybindings.json`，见[键盘快捷键](/docs/keyboard)。
+
+## 外观 [#appearance]
+
+| 设置 | 作用 | 默认值 | 键 |
+| --- | --- | --- | --- |
+| 浅色主题 | 浅色外观下使用的 Ghostty 格式主题 | Termio 自带 | `appearance.lightThemeName` |
+| 深色主题 | 深色外观下使用的主题 | Termio 自带 | `appearance.darkThemeName` |
+| 外观 | 跟随系统，或固定为浅色/深色 | `system` | `appearance.mode` |
+| 字体 | 终端字体 | `SF Mono` | `appearance.fontFamily` |
+| 大小 | 终端字号（点） | `13` | `appearance.fontSize` |
+| 加粗字形 | 把字形画得略重一些 | `false` | `appearance.fontThicken` |
+| 代码行高 | 编辑器和 diff 的行高，按字号的倍数计 | `1.5` | `appearance.codeLineHeight` |
+| 光标 | `block`、`bar` 或 `underline` | `block` | `appearance.cursorStyle` |
+| 闪烁 | 光标是否闪烁 | `true` | `appearance.cursorBlink` |
+| 窗口内边距 | 终端与窗口边缘之间的点数 | `8` | `appearance.windowPadding` |
+| 不透明度 | 窗口背景不透明度，`0`–`1` | `1.0` | `appearance.backgroundOpacity` |
+| 模糊 | 半透明窗口背后的模糊半径 | `0` | `appearance.backgroundBlur` |
+| 界面字体 | Termio 自身界面的字体；留空表示系统字体 | 系统字体 | `interface.fontFamily` |
+| 界面字号 | 该界面字体的大小 | `13` | `interface.fontSize` |
+| 行间距 | 侧栏行额外的内边距点数 | `2` | `interface.rowPadding` |
+
+字号还有实时快捷键：`⌘=`、`⌘-`、`⌘0`。
+
+## 终端 [#terminal]
+
+| 设置 | 作用 | 默认值 | 键 |
+| --- | --- | --- | --- |
+| 回滚缓冲 | 每个会话保留的历史（MB） | `10` | `terminal.scrollbackMegabytes` |
+| 选中即拷贝 | 不按 `⌘C` 也拷贝选中内容 | `false` | `terminal.copyOnSelect` |
+
+## 通用 [#general]
+
+| 设置 | 作用 | 默认值 | 键 |
+| --- | --- | --- | --- |
+| 会话控制 | 让 Agent 驱动同项目的其他会话，并安装 `termio` skill | `false` | `agents.sessionControlEnabled` |
+| Agent 实时状态 | 安装各 Agent 的 hooks，侧栏才能显示工作中和需要你 | `false` | `agents.hooksEnabled` |
+| 任务完成 | Agent 完成或需要你时发送通知 | `true` | `notifications.taskCompletion` |
+| 播放声音 | 给该通知加上提示音 | `false` | `notifications.sound` |
+| GitHub | 为使用 GitHub 远端的项目显示 Issues 窗格 | `true` | `github.integrationEnabled` |
+
+语言和 `termio` 命令行工具也在这个标签页里，但都不存进 `settings.json`：语言跟随 macOS 自己的
+按 App 设置，命令行工具则是 Termio 安装到你 `PATH` 上的一个文件。
+
+## Agent [#agents]
+
+Agent 标签页写入的是列表而不是单个值，所以没有可以引用的默认值——起点是空列表。
+
+| 设置 | 作用 | 键 |
+| --- | --- | --- |
+| 已添加的 Agent | 你添加到列表里的 Agent | `agents.added` |
+| 启用 | 从新建会话选择器里隐藏的 Agent | `agents.disabled` |
+| 顺序 | 拖动决定的 Agent 显示顺序 | `agents.order` |
+| 命令 | 按 Agent 覆盖启动命令 | `agents.commandOverrides` |
+| 跳过权限确认 | 以各自的绕过参数启动的 Agent | `agents.bypassPermissions` |
+| 新建聊天的 Agent | `⌘N` 启动哪个 Agent；未设置表示上次用过的那个 | `chats.defaultAgent` |
+
+开箱只启用 Claude Code、Codex 和纯终端。见 [Agent](/docs/agents) 与
+[自定义 Agent](/docs/custom-agents)。
+
+## 侧栏 [#sidebar]
+
+| 设置 | 作用 | 默认值 | 键 |
+| --- | --- | --- | --- |
+| 排序 | `name` 或 `recentActivity`；置顶项目始终排在前面 | `name` | `sidebar.projectSortOrder` |
+
+这一项不在设置窗口里，而在侧栏自己的工具栏排序菜单中。
+
+## 没有需要存储内容的标签页 [#tabs-with-nothing-to-store]
+
+- **键盘**——重新绑定任意快捷键，写入 `keybindings.json`。见[键盘快捷键](/docs/keyboard)。
+- **SSH**——以 `~/.ssh/config` 为准，绝不回写这个文件。
+- **用量**——读取各 Agent CLI 自己的凭据，显示你距离额度还有多少。Termio 自己不存任何东西。
+- **移动设备**——[iPhone 伴侣应用](/docs/iphone)的配对与远程访问。
+- **社区**——去哪里找到这个项目。
+
+## 不会进入这个文件的东西 [#what-stays-out-of-the-file]
+
+有些 Termio 记住的东西并不是设置，所以不该放进一个你会提交或拷到另一台 Mac 的文件里：最近打开的项目、
+上次聊天用的 Agent、你为用量标签页授权过的 Agent，以及你是否已经回答过会话控制的询问。这些都留在
+macOS 自己的偏好存储里。

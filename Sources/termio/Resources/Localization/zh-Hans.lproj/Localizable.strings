@@ -810,6 +810,10 @@
 	<string>会话</string>
 	<key>Settings</key>
 	<string>设置</string>
+	<key>Settings file</key>
+	<string>设置文件</string>
+	<key>Settings you change are written to ~/.termio/settings.json; anything you haven’t changed follows Termio’s defaults.</key>
+	<string>你改动过的设置会写入 ~/.termio/settings.json；没有改过的项跟随 Termio 的默认值。</string>
 	<key>Settings…</key>
 	<string>设置…</string>
 	<key>Shortcuts must include ⌘ so they can’t shadow a key an agent or the shell needs. While recording, press ⌫ to remove a shortcut, or esc to cancel.</key>

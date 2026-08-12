@@ -1,0 +1,120 @@
+---
+title: Settings
+description: Every setting Termio has, what it defaults to, and the settings.json key behind it — so you can change it in the window or in your editor.
+---
+
+Open **Settings** with `⌘,`. Everything below can also be edited as a file, so
+your setup can live in a dotfiles repo instead of in a window.
+
+## Where settings live
+
+Settings you change are written to:
+
+```
+~/.termio/settings.json
+```
+
+Only what you actually changed is in there. A setting you never touched isn't
+written at all — it keeps following Termio's default, which means a default that
+improves in a later version still reaches you. It also keeps the file short
+enough to read at a glance.
+
+Values resolve in this order:
+
+1. **`settings.json`** — what you chose, in the window or by hand
+2. **`~/.config/ghostty/config`** — if you already use Ghostty, its font and
+   theme become Termio's defaults on first launch
+3. **Termio's built-in default**
+
+So deleting a key from the file doesn't reset it to some arbitrary value; it
+hands that setting back to Ghostty or the built-in default. **Settings ▸ General ▸
+Settings file ▸ Reveal in Finder** opens the file.
+
+Keybindings are a separate file, `~/.termio/keybindings.json` — see
+[Keyboard shortcuts](/docs/keyboard).
+
+## Appearance
+
+| Setting | What it does | Default | Key |
+| --- | --- | --- | --- |
+| Light theme | Ghostty-format theme used in light appearance | Termio's own | `appearance.lightThemeName` |
+| Dark theme | Theme used in dark appearance | Termio's own | `appearance.darkThemeName` |
+| Appearance | Follow the system, or pin light or dark | `system` | `appearance.mode` |
+| Font | Terminal font family | `SF Mono` | `appearance.fontFamily` |
+| Size | Terminal font size in points | `13` | `appearance.fontSize` |
+| Thicken glyphs | Draws glyphs slightly heavier | `false` | `appearance.fontThicken` |
+| Code line height | Line height in the editor and diffs, as a multiple of the font size | `1.5` | `appearance.codeLineHeight` |
+| Cursor | `block`, `bar`, or `underline` | `block` | `appearance.cursorStyle` |
+| Blink | Whether the cursor blinks | `true` | `appearance.cursorBlink` |
+| Window padding | Points between the terminal and the window edge | `8` | `appearance.windowPadding` |
+| Opacity | Window background opacity, `0`–`1` | `1.0` | `appearance.backgroundOpacity` |
+| Blur | Background blur radius behind a translucent window | `0` | `appearance.backgroundBlur` |
+| Interface font | Font for Termio's own chrome; empty means the system font | system | `interface.fontFamily` |
+| Interface size | Size of that chrome font | `13` | `interface.fontSize` |
+| Row density | Extra points of padding in sidebar rows | `2` | `interface.rowPadding` |
+
+Font size also has live shortcuts: `⌘=`, `⌘-`, `⌘0`.
+
+## Terminal
+
+| Setting | What it does | Default | Key |
+| --- | --- | --- | --- |
+| Scrollback | Megabytes of history kept per session | `10` | `terminal.scrollbackMegabytes` |
+| Copy on select | Copies the selection without `⌘C` | `false` | `terminal.copyOnSelect` |
+
+## General
+
+| Setting | What it does | Default | Key |
+| --- | --- | --- | --- |
+| Session control | Lets an agent drive its sibling sessions, and installs the `termio` skill | `false` | `agents.sessionControlEnabled` |
+| Live agent status | Installs each agent's hooks so the sidebar can show working and needs-you | `false` | `agents.hooksEnabled` |
+| Task completion | Posts a notification when an agent finishes or needs you | `true` | `notifications.taskCompletion` |
+| Play sound | Adds a sound to that notification | `false` | `notifications.sound` |
+| GitHub | Shows the Issues pane for projects with a GitHub remote | `true` | `github.integrationEnabled` |
+
+Language and the `termio` command-line tool are also on this tab. Neither is
+stored in `settings.json`: the language follows macOS's own per-app setting, and
+the CLI is a file Termio installs on your `PATH`.
+
+## Agents
+
+The Agents tab writes lists rather than single values, so these have no default
+to quote — an empty list is the starting point.
+
+| Setting | What it does | Key |
+| --- | --- | --- |
+| Added agents | Agents you added to the list | `agents.added` |
+| Enabled | Agents hidden from the new-session picker | `agents.disabled` |
+| Order | The order agents appear in, set by dragging | `agents.order` |
+| Command | A per-agent launch command override | `agents.commandOverrides` |
+| Skip permission prompts | Agents launched with their own bypass flag | `agents.bypassPermissions` |
+| New Chat agent | Which agent `⌘N` starts; unset means the last one used | `chats.defaultAgent` |
+
+Out of the box only Claude Code, Codex, and the plain terminal are enabled. See
+[Agents](/docs/agents) and [Custom agents](/docs/custom-agents).
+
+## Sidebar
+
+| Setting | What it does | Default | Key |
+| --- | --- | --- | --- |
+| Sort | `name` or `recentActivity`; pinned projects always sort first | `name` | `sidebar.projectSortOrder` |
+
+This one isn't in the Settings window — it's the sort menu in the sidebar's own
+toolbar.
+
+## Tabs with nothing to store
+
+- **Keyboard** — rebind any shortcut; written to `keybindings.json`. See
+  [Keyboard shortcuts](/docs/keyboard).
+- **SSH** — reads `~/.ssh/config` as the source of truth and never rewrites it.
+- **Usage** — reads each agent CLI's own credentials to show where you stand
+  against your limits. Termio stores nothing of its own.
+- **Mobile** — pairing and remote access for the [iPhone companion](/docs/iphone).
+- **Community** — where to find the project.
+
+## What stays out of the file
+
+Some things Termio remembers aren't settings, so they don't belong in a file you
+would commit or copy to another Mac: your recent projects, which agent your last
+chat used, which agents you authorized for the Usage tab, and whether you have
+answered the session-control prompt. Those stay in macOS's own preference store.
