@@ -1,10 +1,11 @@
 ---
 title: 移动端 Agent UI 协议 —— PTY 之上的旁路结构面（ACP 词汇）
-status: draft (v2)
+status: draft (v3)
 type: design
 created: 2026-07-11
-updated: 2026-08-03
+updated: 2026-08-12
 related:
+  - agent-abstraction-and-configuration.md
   - remote-access-relay-strategy.md
   - session-share.md
   - session-daemon-architecture.md
@@ -264,7 +265,11 @@ Claude Code 的 `PreToolUse` / `PermissionRequest` hook 把问题结构化地交
 
 1. `PermissionRequest` 是否也支持"空输出 = 走原流程"（文档只写了 allow/deny）。
 2. hook 阻塞数秒时 Claude 的 TUI 画什么（有无难看的中间态）。
-3. Codex / Grok 的 hook 有没有任何决策通道；没有就老实留在 observed 级。
+3. Codex 的 `~/.codex/hooks.json` 有没有决策回写通道。已知的一半答案：Codex
+   **确实**把审批当一等协议对象 —— 但那是在 app-server 上（`requestApproval`，
+   waku 与 linkcode 都从那里拿），属于 §8.1 的通道 ③，跑 TUI 时用不上。
+   所以问题精确化为"通道 ① 上有没有同一个东西"；没有就老实把 `questions.decide`
+   填 `none`，留在 observed 级。
 
 ## 7. iOS 的镜头（lens）：默认 GUI，终端一键可达，不做偏好设置迷宫
 
@@ -303,7 +308,46 @@ iOS 已经建好的东西立刻全部生效：长按粘贴、语音听写、系�
 触控没有原生审批、dormant session 没有字节可放；**不是因为 TUI 不好**。
 桌面端不套用这个结论 —— Mac 上终端就是产品本身。
 
-## 8. Per-agent adapter（单一方案，无分档）
+## 8. Per-agent adapter：三条信号通道，与 data/code 的那条线
+
+### 8.1 三条通道，Termio 只能用两条
+
+每个主流 coding agent 都对外暴露三条结构通道。**VT 屏幕不在这张表里** —— 这就是本节的结论：
+
+| 通道 | 形态 | Claude Code | Codex | 对 TUI 的要求 |
+|---|---|---|---|---|
+| ① hook / plugin | agent 在生命周期点执行外部命令；部分点还能回写决策 | `~/.claude/settings.json` 的 hooks，`PreToolUse` 可返回 `permissionDecision` | `~/.codex/hooks.json` | **无** —— TUI 照常跑 |
+| ② transcript | agent 自己把整轮对话落成 JSONL | `~/.claude/projects/**/<session>.jsonl` | `~/.codex/sessions/**` 的 rollout JSONL | **无** |
+| ③ sidecar 协议 | 一条结构化的 stdio/HTTP 会话协议 | `--input-format stream-json`（NDJSON） | app-server（JSON-RPC over stdio） | **换掉 TUI**：进程由它启动 |
+
+①② 对 TUI 零侵入，它们**就是**内容面与交互面的信号源。③ 是三者里最富的一条
+（waku 与 linkcode 整个产品都建在它上面，§12），但它**替代运行时** ——
+用了它，屏幕上那个 TUI 就不存在了。Termio 的产品承诺是真 TUI，
+所以 ③ 只在不涉及会话的场合可用：探测 agent 是否装了、读它的 plugin/skill 目录。
+
+推论，也是本设计对"手机上怎么做 GUI"的一句话回答：
+**两条零侵入通道已经覆盖了"读什么"（②）和"现在在等什么答案"（①），
+读格子只剩 §6.4 observed 级那一个降级出口。**
+
+### 8.2 外部证据：两家把 ③ 走到底的产品，恰好证明了 ② 的必要性
+
+- **waku**（egoist，Rust/GPUI）：7 个 provider 走 6 种 transport，全部是长会话结构协议 ——
+  Codex app-server、ACP（Cursor CLI / Grok Build）、OpenCode HTTP+SSE、Pi NDJSON RPC、
+  Claude streaming-input NDJSON、Amp NDJSON。**但它依然回去读 Claude 自己的 JSONL**：
+  `$CLAUDE_CONFIG_DIR/projects/**/<session>.jsonl`，沿 `parentUuid` 链做 checkpoint 与 fork。
+  一个手里已经握着直播协议的客户端仍然把磁盘当真值 —— 协议流只属于当次连接，
+  transcript 才是持久事实。这是 §4"字节面随进程死、结构面随磁盘活"的外部佐证。
+- **linkcode**（arcboxlabs，TS）：local daemon + 每 agent 一个 adapter → zod schema 归一化 →
+  同一份 wire message 发给 Electron 桌面、浏览器和 Expo 手机端，手机经 relay tunnel
+  收到的**是同一批消息**。它的第一原则是"schema 是唯一数据契约，先改 schema 再改实现，
+  每个信任边界（网络、IPC、agent 输出）都在运行时校验"。对 Termio 有用的不是它的 daemon，
+  而是这条：**手机不是一个特例客户端，只是同一个契约的又一个订阅者**（§3 L2 已如此定义）。
+
+两家都**没有终端**。这把 Termio 的位置划清楚了：市面上"agent GUI"的通行做法是
+**换掉运行时来换取结构**；Termio 是**保住运行时、从旁路取结构**。
+代价是 §11 那四条不可替代能力必须在不动 PTY 的前提下拿到 —— 拿不到就不该做这个视图。
+
+### 8.3 Adapter 接口
 
 方案只有一个：**每个 session = PTY（必有）+ 至多一个 AgentAdapter（可无）**。
 adapter 是唯一抽象,所有 agent 走同一接口、同一 host 管线、同一协议 —— 不存在
@@ -332,6 +376,59 @@ protocol AgentAdapter {
   有 transcript 发现;normalizer 从 `SessionTraceRenderer` 的解析循环重构而来
   (一次性 HTML → 增量 tail → update 事件),提升到 host 层(TermioStore),
   macOS UI 是它的 1 号进程内订阅者。
+
+### 8.4 哪些进 manifest，哪些必须是 Swift —— 诚实划线
+
+`agent-abstraction-and-configuration.md` 已经把 agent 收敛成一个 JSON 文件，
+而且现有 manifest 走得比印象中更远。以 `Resources/agents/codex.json` 为例，
+今天已经是数据的有：会话发现（`resume.discover` 的 `root`/`format`/`id`/`cwd`）、
+hook 安装位置与方言（`hooks.file`/`dialect`/`events`/`conversation`）、
+`capturesTranscript`、`skills.dir`、以及 `titleStatus`。
+
+值得单独记一笔：**十个随附 manifest 里没有一条描述屏幕网格。**
+`titleStatus` 读的是 OSC 标题字符串，不是 cell buffer；旧 schema 里那个
+screen-scrape 的 `status` 正则字段在实际发布的 manifest 中一条都没用上。
+"不解析 VT 屏幕"在配置层已经是既成事实，本设计要做的是让内容面与交互面**保持**这个性质。
+
+内容面/交互面需要新增的，同样只是"位置与键名"，不是逻辑：
+
+```json
+"transcript": {
+  "dialect": "codex",
+  "root": "~/.codex/sessions",
+  "match": "glob:**/rollout-*-{id}.jsonl",
+  "conversation": "payload.id"
+},
+"questions": {
+  "on": "PreToolUse",
+  "decide": "claude",
+  "title": "tool_name",
+  "detail": "tool_input"
+}
+```
+
+两个字段都从**封闭集**里选，与 `resume` / `hooks.dialect` 的既有做法同构：
+
+- `transcript.dialect` ∈ `claude | codex | grok` —— 恰好是 `SessionTraceRenderer`
+  今天已经实现的三种形状。
+- `questions.decide` ∈ `claude`（hook 能回写 `permissionDecision`，走 §6.4 declared 级）
+  `| none`（hook 只报状态，退到 observed 级）。这一个字段就决定了某个 agent
+  在手机上是"可点的审批卡"还是"带光标的列表 + 方向键"，**客户端不需要知道**。
+
+**不做的事：不发明一套 JSONPath 映射 DSL，让 manifest 描述"怎么解析一条 JSONL"。**
+那会直接违反 agent-abstraction 的原则（config 只选行为，不表达逻辑），
+而且证据不站在它那边：waku 每个 provider 是一份数百行的 Rust
+（`claude_session.rs` 507 行、`opencode_session.rs` 530、`grok_session.rs` 384），
+linkcode 的 `native/claude-code.ts` 2155 行、整个 agent-adapter 包约 25k 行。
+**两家产品级实现里没有任何一个 agent 是纯数据配出来的。**
+一种没见过的 transcript 形状 = 一次真实的代码改动，这是正确的定价；
+假装它是数据，只会换来一个既难写又难测的迷你解释器。
+
+于是那条线落在：
+**"这个 agent 的东西在哪、叫什么" = manifest；"这种形状怎么读" = Swift 里的封闭 dialect 集。**
+新增一个已知形状的 agent（例如又一个写 Claude 形状 JSONL 的 fork）= 零代码；
+新增一种真的没见过的形状 = 一个文件里的一个 case。这也正好是 §10 阶段 1
+把 `SessionTraceRenderer` 那三套 switch 拆成 dialect 时的切法。
 
 ## 9. 多客户端 envelope 三规则（ACP 缺失、Termio 补齐）
 
@@ -408,11 +505,13 @@ bracketed-paste 原子注入已把窗口压到极小；性质同 tmux 双人，�
   adapter 解析必须宽容（沿用 TraceRenderer 的 lenient 风格）,破坏时降级不崩溃。
   可借鉴 herdr 的热更新 manifest 思路,把解析规则做成可下发数据。
 
-## 12. Prior Art（2026-07-10/11 调研，2026-08-03 复核 Happy）
+## 12. Prior Art（2026-07-10/11 调研，2026-08-03 复核 Happy，2026-08-12 新增 linkcode / waku）
 
 | 产品 | 架构 | 对 Termio 的启示 |
 |---|---|---|
 | Happy (slopus/happy) | CLI 包装 + E2EE relay + RN app;**双 launcher**:local=tail JSONL,remote=Agent SDK 直播 | 见下方复核 |
+| **linkcode (arcboxlabs)** | local daemon + 每 agent 一个 adapter → zod 归一化 → 桌面/浏览器/Expo 手机端同一份 wire message,手机走 relay tunnel | 手机 = 同契约的又一个订阅者(§8.2);schema-first 与运行时校验;**无终端** |
+| **waku (egoist)** | 原生 Rust/GPUI 桌面;7 provider / 6 transport 全走结构协议;仍回读 Claude JSONL 做 checkpoint 与 fork | 三通道表(§8.1)的直接来源;"transcript 才是持久事实"的外部佐证;**无终端** |
 | vibe-kanban (BloopAI) | 编排器;各家原生 stream-json → 自有 NormalizedEntry | 跨 agent 统一 schema 的词汇;resume token 模型;拒绝 ACP 的理由 |
 | sarea（本机 repo） | 原生 SwiftUI chat-first;stream-json headless | iOS 视图层蓝本:ChatMessageContent、内联审批卡、tool 折叠 |
 | herdr.dev | **同架构竞品**:PTY host + 真 TUI + 读屏 manifest + hooks | 验证 PTY 路线;其空档（无移动端/结构面）= Termio 差异化;热更新 manifest 可偷 |
