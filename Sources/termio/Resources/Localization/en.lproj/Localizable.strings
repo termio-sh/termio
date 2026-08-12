@@ -366,6 +366,8 @@
 	<string>Focus Pane Right</string>
 	<key>Focus Pane Up</key>
 	<string>Focus Pane Up</string>
+	<key>Font</key>
+	<string>Font</string>
 	<key>Font name</key>
 	<string>Font name</string>
 	<key>General</key>

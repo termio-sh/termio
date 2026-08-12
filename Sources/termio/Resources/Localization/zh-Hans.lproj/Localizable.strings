@@ -366,6 +366,8 @@
 	<string>聚焦右侧窗格</string>
 	<key>Focus Pane Up</key>
 	<string>聚焦上方窗格</string>
+	<key>Font</key>
+	<string>字体</string>
 	<key>Font name</key>
 	<string>字体名称</string>
 	<key>General</key>
