@@ -30,6 +30,11 @@ final class TerminalViewController: UIViewController {
     /// freed the surface and raced libghostty's render threads.
     var onRequestBack: (() -> Void)?
 
+    /// Set by the session container: switch to this session's conversation.
+    /// Absent for a plain shell, which has no conversation — the button then
+    /// never appears rather than appearing dead.
+    var onRequestChat: (() -> Void)?
+
     /// Interactive back-swipe hooks (set by RootContainerViewController). The
     /// rightward drag is finger-tracked instead of a discrete pop: `Began`
     /// starts the interactive transition, `Changed` reports the horizontal
@@ -51,6 +56,10 @@ final class TerminalViewController: UIViewController {
     private var fitDebounce: DispatchWorkItem?
     private lazy var shellSession = ShellSession(shell: defaultSandboxShell)
     private var companion: CompanionTransport?
+    /// Non-nil when the session container owns the socket. Its lifetime is the
+    /// container's: this view attaches when it needs bytes and leaves the
+    /// connection running when it goes away.
+    private let borrowedTransport: CompanionTransport?
     private var companionSession: InMemoryTerminalSession?
     private let headerBar = UIStackView()
     private let contextLabel = UILabel()
@@ -116,25 +125,31 @@ final class TerminalViewController: UIViewController {
     init(session: MockSession) {
         self.session = session
         backend = .demoShell
+        borrowedTransport = nil
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
     }
 
     /// A companion terminal: bridges a real Mac session's PTY when `session`
     /// carries a roster id, else streams whatever the server serves (PoC mode).
-    init(companionURL: URL, session: MockSession? = nil) {
+    ///
+    /// `transport` is the session container's socket. Both views of a session
+    /// ride one connection, so when the container already has one open this
+    /// view borrows it — and never starts or stops what it does not own.
+    init(companionURL: URL, session: MockSession? = nil, transport: CompanionTransport? = nil) {
         self.session = session ?? MockSession(
             title: companionURL.host ?? "companion",
             project: "companion", agent: RosterAgent.terminal, status: .idle,
             subtitle: "", time: ""
         )
         backend = .companion(companionURL)
+        borrowedTransport = transport
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
     }
 
     deinit {
-        companion?.stop()
+        if borrowedTransport == nil { companion?.stop() }
         uploadClient?.stop()
         restylePump?.invalidate()
         if let settingsObserver {
@@ -188,7 +203,9 @@ final class TerminalViewController: UIViewController {
             case .demoShell:
                 shellSession.start()
             case .companion:
-                companion?.start()
+                // A borrowed socket is already connected (the chat has been
+                // reading over it); this view only adds its claim on the PTY.
+                if borrowedTransport == nil { companion?.start() } else { companion?.attachPTY() }
             }
         } else if case .companion = backend {
             // Re-entering a parked session claims the PTY's winsize back —
@@ -301,9 +318,31 @@ final class TerminalViewController: UIViewController {
             overflow.alpha = 0
             overflow.isUserInteractionEnabled = false
         }
+        // The switch to the conversation. A visible control rather than a menu
+        // item: it is the one thing on this header a user reaches for often,
+        // and it must be as cheap as the chat's switch back to here.
+        let chat = UIButton(type: .system)
+        chat.applyGlassSymbol("bubble.left.and.bubble.right", pointSize: 15)
+        chat.accessibilityIdentifier = "terminal.chat"
+        chat.accessibilityLabel = localized("Chat")
+        chat.tintColor = .label
+        chat.isHidden = onRequestChat == nil
+        chat.addAction(UIAction { [weak self] _ in self?.onRequestChat?() }, for: .touchUpInside)
+        // Balances the two right-hand buttons so the title stays centered.
+        let leftSpacer = UIView()
+        leftSpacer.isUserInteractionEnabled = false
+
         headerBar.addArrangedSubview(back)
+        headerBar.addArrangedSubview(leftSpacer)
         headerBar.addArrangedSubview(titles)
+        headerBar.addArrangedSubview(chat)
         headerBar.addArrangedSubview(overflow)
+        NSLayoutConstraint.activate([
+            chat.widthAnchor.constraint(equalToConstant: 44),
+            chat.heightAnchor.constraint(equalToConstant: 44),
+            leftSpacer.widthAnchor.constraint(equalTo: chat.widthAnchor),
+        ])
+        leftSpacer.isHidden = chat.isHidden
         headerBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(headerBar)
         NSLayoutConstraint.activate([
@@ -353,6 +392,12 @@ final class TerminalViewController: UIViewController {
     /// back into view. The view was only hidden (never removed from the
     /// window), so `viewDidAppear` does not fire — re-run the parts that must
     /// happen on every return.
+    /// Hand back the keyboard when the session switches to its other view —
+    /// this screen is only hidden, not dismissed, so nothing else resigns it.
+    func dropKeyboard() {
+        terminalView.resignFirstResponder()
+    }
+
     func prepareForReappearance() {
         if !drawerOpen { focusInput() }
         // Re-entering a parked companion session claims the PTY's winsize back —
@@ -692,7 +737,8 @@ final class TerminalViewController: UIViewController {
         case .demoShell:
             return shellSession.terminalSession
         case .companion(let url):
-            let transport = CompanionTransport(url: url, attachSessionID: session.rosterID)
+            let transport = borrowedTransport
+                ?? CompanionTransport(url: url, attachSessionID: session.rosterID)
             // The phone mirrors the Mac's PTY through a live libghostty surface,
             // which answers terminal queries (XTVERSION, DA, DSR) on its own. The
             // Mac's authoritative surface already answered; the phone's duplicate

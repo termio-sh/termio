@@ -105,6 +105,11 @@ final class CompanionServer {
     private let port: UInt16
     private let rosterProvider: () -> CompanionRoster
     private let ptyForSession: (String) -> PTYProcess?
+    /// Whether a session already has a shell behind it. Separate from
+    /// `ptyForSession` because that one *starts* one: asking it "is this live?"
+    /// on the content plane would make reading a finished conversation spawn a
+    /// process, which is the opposite of what this plane is for.
+    private let sessionIsLive: (String) -> Bool
     /// Creates a session for a `start` request. A nil agent is the phone's
     /// bare New Chat — the store resolves it through the same default-agent
     /// policy as ⌘N. Returns the new session's wire id plus the agent wire id
@@ -130,6 +135,9 @@ final class CompanionServer {
     /// and an attach is keystroke access to a shell.
     private var authenticatedWireByConnection: [ObjectIdentifier: Int] = [:]
     private var bridges: [ObjectIdentifier: PTYBridge] = [:]
+    /// One content-plane pump per connection, cancelled when it drops so a
+    /// vanished phone stops a session's transcript watch.
+    private var eventPumps: [ObjectIdentifier: Task<Void, Never>] = [:]
     private var lastRoster: CompanionRoster?
     private var pollTimer: Timer?
     private var ticks = 0
@@ -143,6 +151,7 @@ final class CompanionServer {
         port: UInt16 = CompanionServer.defaultPort,
         rosterProvider: @escaping () -> CompanionRoster,
         ptyForSession: @escaping (String) -> PTYProcess?,
+        sessionIsLive: @escaping (String) -> Bool,
         startSession: @escaping (String, String?) -> (sessionID: String, agentID: String)?,
         stopSession: @escaping (String) -> Bool,
         startScratchTerminal: @escaping () -> (sessionID: String, agentID: String)?,
@@ -152,6 +161,7 @@ final class CompanionServer {
         self.port = port
         self.rosterProvider = rosterProvider
         self.ptyForSession = ptyForSession
+        self.sessionIsLive = sessionIsLive
         self.startSession = startSession
         self.stopSession = stopSession
         self.startScratchTerminal = startScratchTerminal
@@ -268,6 +278,9 @@ final class CompanionServer {
                 bridge.pty.claimHostOwnership()
             }
         }
+        eventPumps[id]?.cancel()
+        eventPumps[id] = nil
+        Task { await AgentEventStore.shared.unsubscribeAll(client: id) }
         connectionByID[id]?.cancel()
         connectionByID[id] = nil
         connections.remove(id)
@@ -411,6 +424,8 @@ final class CompanionServer {
             handleReadDiff(projectID: projectID, path: path, status: status, on: connection)
         case .trace(let sessionID, let dark):
             handleTrace(sessionID: sessionID, dark: dark, on: connection)
+        case .subscribeEvents(let sessionID, let since):
+            handleSubscribeEvents(sessionID: sessionID, since: since, on: connection)
         case .sshConfigHosts:
             sendControl(.sshConfigList(hosts: Self.parseSSHConfigHosts()), to: connection)
         case .unsupported(let type):
@@ -423,7 +438,7 @@ final class CompanionServer {
                 "ignoring unsupported control \(Self.loggableTag(type), privacy: .public)"
             )
         case .auth, .exit, .error, .started, .fileList, .file, .written, .uploaded,
-             .searchResults, .traceHTML, .sshConfigList, .changes, .diff:
+             .searchResults, .traceHTML, .sshConfigList, .changes, .diff, .agentEvents:
             break
         }
     }
@@ -472,6 +487,62 @@ final class CompanionServer {
             )
         }
         sendControl(.traceHTML(sessionID: sessionID, html: html), to: connection)
+    }
+
+    // MARK: - Content plane
+
+    /// Subscribe a phone to a session's conversation events, replaying the gap
+    /// since the cursor it holds and then streaming updates.
+    ///
+    /// This deliberately reuses `traceProvider`, which already resolves a
+    /// transcript from disk for a session the Mac never opened — so a dormant
+    /// session, whose terminal has no bytes left to send, still answers with its
+    /// full history.
+    ///
+    /// A session with no transcript is answered with an empty batch rather than
+    /// an `.error`: this connection is also the PTY bridge, and the phone treats
+    /// an error frame there as a fatal drop of the live terminal.
+    /// A cold subscribe on a long conversation replays thousands of events, and
+    /// the socket has a frame cap — so the backlog goes out in chunks rather
+    /// than one frame that would be dropped for being too large.
+    private static let eventBatchSize = 400
+
+    private func handleSubscribeEvents(sessionID: String, since: Int, on connection: NWConnection) {
+        guard let (path, title) = traceProvider(sessionID) else {
+            Log.companion.notice("subscribeEvents: no transcript for this session")
+            sendControl(.agentEvents(sessionID: sessionID, events: []), to: connection)
+            return
+        }
+
+        // The header rides ahead of the backlog so the phone can title the view
+        // and show live-vs-dormant before the conversation finishes decoding.
+        // Liveness is the byte plane's question, so ask the byte plane: a
+        // session with no PTY is one whose terminal has nothing left to show,
+        // which is exactly when the phone should default to this lens. Asked
+        // without starting one — reading a conversation must never be what
+        // brings a session back to life.
+        let live = sessionIsLive(sessionID)
+        let header = AgentEvent(
+            seq: 0, role: .system,
+            payload: .sessionInfo(title: title, model: nil, state: live ? .live : .dormant))
+        sendControl(.agentEvents(sessionID: sessionID, events: [header]), to: connection)
+
+        let client = ObjectIdentifier(connection)
+        eventPumps[client]?.cancel()
+        eventPumps[client] = Task { [weak self] in
+            let stream = await AgentEventStore.shared.subscribe(
+                client: client, sessionID: sessionID, transcriptPath: path, since: since)
+            for await batch in stream {
+                guard !Task.isCancelled else { return }
+                for chunk in stride(from: 0, to: batch.count, by: Self.eventBatchSize) {
+                    let slice = Array(batch[chunk..<min(chunk + Self.eventBatchSize, batch.count)])
+                    await MainActor.run {
+                        self?.sendControl(
+                            .agentEvents(sessionID: sessionID, events: slice), to: connection)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - File plane (read-only)
@@ -1176,6 +1247,14 @@ extension TermioStore {
         guard let (_, session) = findCompanionSession(wireID) else { return false }
         closeSession(session.id)
         return true
+    }
+
+    /// Whether a session already has a shell, without starting one. The read
+    /// paths (trace, content plane) use this where `companionPTY` would have
+    /// side effects.
+    func companionSessionIsLive(_ wireID: String) -> Bool {
+        guard let (_, session) = findCompanionSession(wireID) else { return false }
+        return ptyProcesses[session.id] != nil
     }
 
     /// Resolve a session's transcript path and display title for a phone

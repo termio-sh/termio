@@ -332,6 +332,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             ptyForSession: { [weak store] id in
                 store?.companionPTY(for: id)
             },
+            sessionIsLive: { [weak store] id in
+                store?.companionSessionIsLive(id) ?? false
+            },
             startSession: { [weak store] projectID, agent in
                 store?.companionStartSession(projectID: projectID, agent: agent)
             },

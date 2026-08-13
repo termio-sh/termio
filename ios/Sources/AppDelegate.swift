@@ -53,13 +53,28 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
                 )
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                let terminal = TerminalViewController(companionURL: url, session: session)
-                root.open(terminal, sessionKey: session?.key, animated: false)
+                // An agent session opens as its conversation; a plain shell —
+                // and `-open-inspector`, which asks for the terminal's own file
+                // drawer — opens the terminal directly.
+                let opensChat = session.map {
+                    $0.rosterID != nil && $0.agent.id != RosterAgent.terminal.id
+                } ?? false
+                let terminal: TerminalViewController? =
+                    opensChat && !args.contains("-open-inspector")
+                    ? nil : TerminalViewController(companionURL: url, session: session)
+                let screen: UIViewController =
+                    terminal
+                    ?? SessionViewController(
+                        companionURL: url,
+                        session: session ?? MockSession(
+                            title: url.host ?? "companion", project: "", agent: .terminal,
+                            status: .idle, subtitle: "", time: ""))
+                root.open(screen, sessionKey: session?.key, animated: false)
                 // `-open-inspector` slides the file drawer out once attached,
                 // so simctl runs can screenshot the live tree.
                 if args.contains("-open-inspector") {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                        terminal.setDrawer(open: true, animated: false)
+                        terminal?.setDrawer(open: true, animated: false)
                     }
                 }
             }

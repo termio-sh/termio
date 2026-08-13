@@ -133,6 +133,21 @@ public enum CompanionControl: Codable, Sendable, Equatable {
     /// it into a `WKWebView` overlay. Large, so it rides the 8 MB-capped socket.
     case traceHTML(sessionID: String, html: String)
 
+    /// Phone → Mac: subscribe to a session's content plane. `since` is the
+    /// highest `seq` the client already holds, so 0 asks for the whole
+    /// conversation and a reconnect asks only for the gap — the same
+    /// durable-object-plus-cursor shape the PTY ring buffer uses, so the two
+    /// planes share one reconnect story instead of growing two.
+    ///
+    /// Valid for a dormant session: the transcript outlives the process, which
+    /// is the single strongest reason this plane exists.
+    case subscribeEvents(sessionID: String, since: Int)
+
+    /// Mac → phone: a batch of content-plane events, ascending by `seq`.
+    /// Batched rather than one frame per event because a cold subscribe
+    /// replays thousands at once.
+    case agentEvents(sessionID: String, events: [AgentEvent])
+
     /// Phone → Mac: list the hosts in the Mac's `~/.ssh/config`. The phone is
     /// sandboxed and has no `~/.ssh`, so the Mac reads it and the phone imports
     /// the results into its own SSH manager.
@@ -240,6 +255,12 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             return Self.json(["t": "trace", "session": sessionID, "dark": dark])
         case .traceHTML(let sessionID, let html):
             return Self.json(["t": "traceHTML", "session": sessionID, "html": html])
+        case .subscribeEvents(let sessionID, let since):
+            return Self.json(["t": "subscribeEvents", "session": sessionID, "since": since])
+        case .agentEvents(let sessionID, let events):
+            return Self.json([
+                "t": "agentEvents", "session": sessionID, "events": events.map(\.jsonObject),
+            ])
         case .sshConfigHosts:
             return #"{"t":"sshConfigHosts"}"#
         case .sshConfigList(let hosts):
@@ -401,6 +422,15 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             guard let sessionID = obj["session"] as? String,
                   let html = obj["html"] as? String else { return nil }
             return .traceHTML(sessionID: sessionID, html: html)
+        case "subscribeEvents":
+            guard let sessionID = obj["session"] as? String else { return nil }
+            return .subscribeEvents(sessionID: sessionID, since: obj["since"] as? Int ?? 0)
+        case "agentEvents":
+            guard let sessionID = obj["session"] as? String else { return nil }
+            // compactMap, not a failing map: one event type this build predates
+            // drops itself out of the batch rather than voiding the batch.
+            let raw = obj["events"] as? [[String: Any]] ?? []
+            return .agentEvents(sessionID: sessionID, events: raw.compactMap(AgentEvent.init(json:)))
         case "sshConfigHosts":
             return .sshConfigHosts
         case "sshConfigList":

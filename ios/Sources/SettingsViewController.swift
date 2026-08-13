@@ -251,19 +251,36 @@ final class AppearanceSettingsViewController: UITableViewController {
 
     // MARK: - Table
 
-    override func numberOfSections(in tableView: UITableView) -> Int { 1 }
+    override func numberOfSections(in tableView: UITableView) -> Int { 2 }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        Row.allCases.count
+        section == 0 ? Row.allCases.count : 1
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        localized("Terminal")
+        section == 0 ? localized("Terminal") : localized("Sessions")
+    }
+
+    override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        guard section == 1 else { return nil }
+        return localized("Switch between the terminal and the conversation from the session header.")
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        // A static four-row form; building cells directly beats reuse plumbing.
+        // A static form; building cells directly beats reuse plumbing.
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        guard indexPath.section == 0 else {
+            cell.textLabel?.text = localized("Open Sessions in Chat")
+            cell.selectionStyle = .none
+            let toggle = UISwitch()
+            toggle.isOn = settings.opensInChat
+            toggle.addAction(UIAction { [weak self, weak toggle] _ in
+                guard let self, let toggle else { return }
+                settings.opensInChat = toggle.isOn
+            }, for: .valueChanged)
+            cell.accessoryView = toggle
+            return cell
+        }
         switch Row(rawValue: indexPath.row) {
         case .appearance:
             cell.textLabel?.text = localized("Appearance")
@@ -306,6 +323,7 @@ final class AppearanceSettingsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        guard indexPath.section == 0 else { return }
         switch Row(rawValue: indexPath.row) {
         case .lightTheme:
             navigationController?.pushViewController(ThemePickerViewController(slot: .light), animated: true)

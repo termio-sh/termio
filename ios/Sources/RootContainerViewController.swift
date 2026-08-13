@@ -124,13 +124,16 @@ final class RootContainerViewController: UIViewController {
             guard let self else { return }
             // Coming back to a parked session reuses its screen: same surface,
             // scrollback and connection intact — no surface teardown/rebuild.
-            // Every session is the terminal itself (the iSH pattern): the
-            // agent's TUI is already the conversation UI, keys go straight in.
+            // An agent session opens as its conversation with the terminal one
+            // tap away; a plain shell has no conversation to read, so it is the
+            // terminal itself.
             let screen: UIViewController
             if let parked = recentTerminals[session.key] {
                 screen = parked
             } else if let companionURL, session.rosterID != nil {
-                screen = TerminalViewController(companionURL: companionURL, session: session)
+                screen = session.agent.id == RosterAgent.terminal.id
+                    ? TerminalViewController(companionURL: companionURL, session: session)
+                    : SessionViewController(companionURL: companionURL, session: session)
             } else {
                 screen = TerminalViewController(session: session)
             }
@@ -204,14 +207,16 @@ final class RootContainerViewController: UIViewController {
                 }
             }
         }
-        if let terminal = screen as? TerminalViewController {
-            terminal.onRequestBack = { [weak self] in self?.goHome() }
-            terminal.onBackBegan = { [weak self] in self?.beginInteractiveBack() }
-            terminal.onBackChanged = { [weak self] tx in self?.updateInteractiveBack(translationX: tx) }
-            terminal.onBackEnded = { [weak self] vx, commit in
+        if let sessionScreen = screen as? SessionScreen {
+            sessionScreen.onRequestBack = { [weak self] in self?.goHome() }
+            sessionScreen.onBackBegan = { [weak self] in self?.beginInteractiveBack() }
+            sessionScreen.onBackChanged = { [weak self] tx in
+                self?.updateInteractiveBack(translationX: tx)
+            }
+            sessionScreen.onBackEnded = { [weak self] vx, commit in
                 self?.finishInteractiveBack(velocityX: vx, commit: commit)
             }
-            terminal.onClose = { [weak self, weak screen] in
+            sessionScreen.onClose = { [weak self, weak screen] in
                 guard let screen else { return }
                 self?.close(screen)
             }
@@ -223,7 +228,7 @@ final class RootContainerViewController: UIViewController {
         let isReopen = screen.parent === self
         installIfNeeded(screen)
         if isReopen {
-            (screen as? TerminalViewController)?.prepareForReappearance()
+            (screen as? SessionScreen)?.prepareForReappearance()
         }
         store.currentSessionKey = sessionKey
         refreshHomeLists()
@@ -402,7 +407,7 @@ final class RootContainerViewController: UIViewController {
         // CAMetalLayer (with a dangling delegate) in the tree; drop it before
         // the next CoreAnimation commit can fault on it. See TerminalVC.
         screen.view.removeFromSuperview()
-        (screen as? TerminalViewController)?.releaseOrphanedSurfaceLayers()
+        (screen as? SessionScreen)?.releaseOrphanedSurfaceLayers()
         screen.removeFromParent()
     }
 }

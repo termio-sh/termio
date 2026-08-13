@@ -47,6 +47,7 @@ final class MobileSettings {
         static let fontSize = "appearance.fontSize"
         static let terminalKeys = "terminalKeyboard.keys"
         static let pushToTalk = "voice.pushToTalk"
+        static let opensInChat = "session.opensInChat"
         static let transcriptionProvider = "voice.provider"
     }
 
@@ -107,6 +108,17 @@ final class MobileSettings {
         }
     }
 
+    /// Which view a session opens in. Off — the terminal — is the default and
+    /// the product's position: the terminal is the interface, and the chat is
+    /// the second way to look at the same session, not a replacement for it.
+    /// Both views stay one tap apart whichever way this is set.
+    var opensInChat: Bool {
+        didSet {
+            defaults.set(opensInChat, forKey: Key.opensInChat)
+            notify()
+        }
+    }
+
     /// Which transcription service dictation uses — the user's Settings ▸ Voice
     /// choice. Each provider keeps its own key in the Keychain, so switching
     /// never loses the other's key.
@@ -125,6 +137,7 @@ final class MobileSettings {
             Key.fontSize: Self.defaultFontSize,
             Key.terminalKeys: TerminalKeyCatalog.defaultIDs,
             Key.pushToTalk: false,
+            Key.opensInChat: false,
             Key.transcriptionProvider: TranscriptionProvider.openAI.rawValue,
         ])
         appearanceMode = AppearanceMode(
@@ -136,6 +149,7 @@ final class MobileSettings {
         terminalKeyIDs = defaults.stringArray(forKey: Key.terminalKeys)
             ?? TerminalKeyCatalog.defaultIDs
         pushToTalkEnabled = defaults.bool(forKey: Key.pushToTalk)
+        opensInChat = defaults.bool(forKey: Key.opensInChat)
         transcriptionProvider = TranscriptionProvider(
             rawValue: defaults.string(forKey: Key.transcriptionProvider) ?? ""
         ) ?? .openAI

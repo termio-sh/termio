@@ -201,6 +201,16 @@
         }
       }
     },
+    "Chat": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "聊天"
+          }
+        }
+      }
+    },
     "Chats": {
       "localizations": {
         "zh-Hans": {
@@ -317,6 +327,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "连接失败"
+          }
+        }
+      }
+    },
+    "Copy": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拷贝"
           }
         }
       }
@@ -601,6 +621,16 @@
         }
       }
     },
+    "Message": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "消息"
+          }
+        }
+      }
+    },
     "My Devices": {
       "localizations": {
         "zh-Hans": {
@@ -721,6 +751,16 @@
         }
       }
     },
+    "No conversation yet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没有对话"
+          }
+        }
+      }
+    },
     "No projects open": {
       "localizations": {
         "zh-Hans": {
@@ -801,6 +841,16 @@
         }
       }
     },
+    "Not running — showing saved history": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未在运行 —— 显示已保存的记录"
+          }
+        }
+      }
+    },
     "OK": {
       "localizations": {
         "zh-Hans": {
@@ -837,6 +887,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "打开文件"
+          }
+        }
+      }
+    },
+    "Open Sessions in Chat": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以聊天打开会话"
           }
         }
       }
@@ -1101,6 +1161,16 @@
         }
       }
     },
+    "Scroll to Latest": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回到最新"
+          }
+        }
+      }
+    },
     "Scroll to bottom": {
       "localizations": {
         "zh-Hans": {
@@ -1141,12 +1211,32 @@
         }
       }
     },
+    "Send": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发送"
+          }
+        }
+      }
+    },
     "Send to Agent": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "发送给 Agent"
+          }
+        }
+      }
+    },
+    "Sessions": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话"
           }
         }
       }
@@ -1217,6 +1307,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "挂起前台进程"
+          }
+        }
+      }
+    },
+    "Switch between the terminal and the conversation from the session header.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在会话顶栏切换终端与对话。"
           }
         }
       }
@@ -1311,6 +1411,16 @@
         }
       }
     },
+    "Thinking": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "思考"
+          }
+        }
+      }
+    },
     "This diff was fetched without full context because the file is large, so the skipped lines aren't on the phone.": {
       "localizations": {
         "zh-Hans": {
@@ -1327,6 +1437,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "此文件夹为空。"
+          }
+        }
+      }
+    },
+    "Today": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今天"
           }
         }
       }
@@ -1501,6 +1621,16 @@
         }
       }
     },
+    "Yesterday": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "昨天"
+          }
+        }
+      }
+    },
     "Your ElevenLabs API key": {
       "localizations": {
         "zh-Hans": {
@@ -1521,12 +1651,42 @@
         }
       }
     },
+    "failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "失败"
+          }
+        }
+      }
+    },
+    "finished": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已完成"
+          }
+        }
+      }
+    },
     "plain text": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "纯文本"
+          }
+        }
+      }
+    },
+    "running": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "进行中"
           }
         }
       }
@@ -1631,6 +1791,26 @@
         }
       }
     },
+    "waiting for you": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等你回复"
+          }
+        }
+      }
+    },
+    "working…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "进行中…"
+          }
+        }
+      }
+    },
     "•••• Set": {
       "localizations": {
         "zh-Hans": {
@@ -1707,6 +1887,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "重新连接时需要再次扫描它的二维码。"
+          }
+        }
+      }
+    },
+    "+%lld more lines": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还有 %lld 行"
           }
         }
       }
