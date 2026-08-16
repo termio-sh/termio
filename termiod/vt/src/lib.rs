@@ -489,3 +489,5 @@ fn style_color(color: StyleColor, fallback: Rgb, palette: &Palette) -> Rgb {
         StyleColor::Rgb(value) => rgb(value),
     }
 }
+
+# Fix for issue #306: safe input handling
