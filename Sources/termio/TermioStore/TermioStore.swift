@@ -965,8 +965,10 @@ final class TermioStore: ObservableObject {
             .sink { [weak self] note in
                 guard let self,
                       let url = note.userInfo?[TerminalLinkKey.url] as? String else { return }
-                let cwd = (note.object as? TerminalViewState)?.workingDirectory
-                self.openTerminalLink(url, surfaceWorkingDirectory: cwd)
+                // The surface that fired it names the session, which is what says whose
+                // filesystem a bare path belongs to (see `openTerminalLink`).
+                let surface = note.object as? TerminalViewState
+                self.openTerminalLink(url, from: surface.flatMap { self.sessionID(ofSurface: $0) })
             }
 
         // Open the hovered hyperlink on cmd-click ourselves. ghostty's own `open_url` doesn't reach
@@ -978,7 +980,11 @@ final class TermioStore: ObservableObject {
         linkClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             guard let self, event.modifierFlags.contains(.command) else { return event }
             if let url = TerminalLinkState.hoveredURL {
-                self.openTerminalLink(url, surfaceWorkingDirectory: nil)
+                // ghostty reports the hovered link but not which surface it is in, so the
+                // clicked surface is found by geometry — the same way the bare-path fallback
+                // does it, and for the same reason: the session it names is what decides
+                // whether a path in that link may be resolved against local disk.
+                self.openTerminalLink(url, from: self.sessionUnderCommandClick(event))
                 return nil
             }
             // Nothing libghostty detected under the mouse — fall back to reconstructing
@@ -1527,7 +1533,13 @@ final class TermioStore: ObservableObject {
     /// **read-only** preview — the source, not an editable buffer, so a stray click can't change it.
     /// A web/mail link is handed to the system's default handler instead. Anything that resolves to
     /// neither (a dead path, a directory, an unknown scheme) is ignored.
-    func openTerminalLink(_ raw: String, surfaceWorkingDirectory: String?) {
+    ///
+    /// `sessionID` names the surface the link was clicked in, and it is not optional bookkeeping:
+    /// resolving a bare path reads **this Mac's** disk, so it may only be done for a session whose
+    /// filesystem is this Mac's. Both detectors — ghostty's own hyperlinks and the bare-path
+    /// fallback — end up here, which is why the device gate lives at this junction rather than on
+    /// one branch of it.
+    func openTerminalLink(_ raw: String, from sessionID: Session.ID?) {
         let link = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !link.isEmpty else { return }
 
@@ -1540,12 +1552,28 @@ final class TermioStore: ObservableObject {
             return
         }
 
-        // No scheme: treat as a filesystem path, absolute or relative to where the surface is `cd`'d.
-        let base = surfaceWorkingDirectory ?? selectedSessionWorkspace
+        // No scheme: a filesystem path, and the filesystem it would be resolved against is this
+        // Mac's. `src/main.rs` exists on both boxes, so a path printed by a session running
+        // elsewhere — over `ssh`, or on a termiod device, which runs the same in-memory backend a
+        // local shell does — names a file *there* and must not open the local one of that name.
+        // An OSC 8 target is an arbitrary string, so this is reachable without any bare-path
+        // detection at all; it also catches the day ghostty's own detector learns bare paths.
+        // A surface we cannot name is a surface whose device we do not know: declined, not assumed
+        // local — the same convention the bare-path fallback adopted.
+        guard let sessionID, let owner = session(sessionID), isOnThisMac(owner) else { return }
+
+        let base = linkResolutionBase(for: sessionID, owner: owner)
         let url: URL = (link as NSString).isAbsolutePath || base == nil
             ? URL(fileURLWithPath: link)
             : URL(fileURLWithPath: link, relativeTo: URL(fileURLWithPath: base!, isDirectory: true))
         presentFilePreview(url.standardizedFileURL)
+    }
+
+    /// The session a live surface belongs to. Surfaces are registered under their session id when
+    /// they are built, so this is the one way back from a delegate callback to the session that is
+    /// acting — and to the device that session is on.
+    func sessionID(ofSurface surface: TerminalViewState) -> Session.ID? {
+        surfaces.first { $0.value === surface }?.key
     }
 
     /// Covers the terminal with a read-only preview of a local `url`, but only
@@ -1584,11 +1612,12 @@ final class TermioStore: ObservableObject {
         return true
     }
 
-    /// The working directory of the selected session (its worktree, else the project root), used as
-    /// the fall-back base for resolving a relative path when the surface hasn't reported an OSC 7 cwd.
-    private var selectedSessionWorkspace: String? {
-        guard let id = selectedSessionID, let session = session(id), let project = project(for: id)
-        else { return nil }
-        return session.worktreePath ?? project.path
+    /// What a relative link from a surface is resolved against: the terminal's own reported cwd,
+    /// else the clicked session's worktree or project root (OSC 7 goes unreported often enough that
+    /// the workspace has to stand in). Every root here belongs to the session that printed the link;
+    /// the *selected* session used to stand in, and on a multi-device window it can be a session on
+    /// another machine, whose project root names a tree the clicked terminal has never been in.
+    private func linkResolutionBase(for id: Session.ID, owner: Session) -> String? {
+        surfaces[id]?.workingDirectory ?? owner.worktreePath ?? project(for: id)?.path
     }
 }

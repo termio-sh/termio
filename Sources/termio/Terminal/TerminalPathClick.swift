@@ -302,6 +302,18 @@ extension TermioStore {
         return true
     }
 
+    /// The session whose surface a cmd-click landed in, for the hovered-link path — which gets a
+    /// URL string from ghostty and no clue where it came from. `nil` when the click was not in a
+    /// terminal, or in one no session claims; `openTerminalLink` treats that as "device unknown"
+    /// and declines to touch local disk.
+    @MainActor
+    func sessionUnderCommandClick(_ event: NSEvent) -> Session.ID? {
+        guard let window = event.window,
+              let (_, state) = terminalSurface(at: event.locationInWindow, in: window)
+        else { return nil }
+        return sessionID(ofSurface: state)
+    }
+
     /// The terminal surface (and its state) whose frame contains `windowPoint`. Walks
     /// the whole view tree and geometry-tests each `TerminalView` rather than trusting
     /// `hitTest`, so a transparent overlay above the grid can't hide the surface.
