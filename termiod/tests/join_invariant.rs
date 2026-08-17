@@ -317,11 +317,12 @@ fn attaching_mid_flood_joins_the_stream_exactly_once() {
         }
     }
 
+    // The early client keeps reading: it is still the control for the second
+    // half of the invariant, and where it has got to is judged below, once the
+    // boundary is known.
     let _ = late.kill();
-    let _ = early.kill();
     drop(frames);
     let _ = late_reader.join();
-    let _ = early_reader.join();
 
     let snapshot = snapshot.expect("no S snapshot for the late client");
     assert_eq!(
@@ -377,11 +378,36 @@ fn attaching_mid_flood_joins_the_stream_exactly_once() {
 
     // The early client must be untouched by the barrier: attaching a second
     // client may not pause the PTY, drop bytes, or replay them.
-    let early_snapshot = early_bytes.lock().expect("early bytes").clone();
-    let early_counters: Vec<u64> = stream_lines(&early_snapshot)
-        .iter()
-        .filter_map(|line| parse_counter(line))
-        .collect();
+    //
+    // "Untouched" is about delivery, not about wall-clock position. This client
+    // is reading the flood from its very first byte while the late one joined
+    // 40k lines in, so on a slow or loaded machine it is legitimately behind at
+    // any instant — comparing the two positions the moment the late client is
+    // satisfied measures the reader, not the barrier. So drain until it passes
+    // the boundary. A barrier that really blocked it never gets there, and the
+    // deadline is what reports that.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let early_counters = loop {
+        let seen = early_bytes.lock().expect("early bytes").clone();
+        let counters: Vec<u64> = stream_lines(&seen)
+            .iter()
+            .filter_map(|line| parse_counter(line))
+            .collect();
+        if counters.last().is_some_and(|high| *high >= first_counter) {
+            break counters;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the early client stalled at {:?} and never reached {first_counter}, where the \
+             late client joined — the barrier blocked another client's delivery",
+            counters.last()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+
+    let _ = early.kill();
+    let _ = early_reader.join();
+
     assert!(
         early_counters.len() > LINES_PAST_BOUNDARY,
         "the early client received too little output to judge: {}",
@@ -389,10 +415,4 @@ fn attaching_mid_flood_joins_the_stream_exactly_once() {
     );
     // Ring replay can open the stream mid-line; only whole counters are judged.
     assert_consecutive(&early_counters[1..], "the early client");
-    let early_high = *early_counters.last().expect("early counters");
-    assert!(
-        early_high >= first_counter,
-        "the early client stalled at {early_high} while the late client joined at \
-         {first_counter} — the barrier blocked another client's delivery"
-    );
 }
