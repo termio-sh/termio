@@ -9,11 +9,13 @@ on:
     paths:
       - "ios/**"
       - "Shared/**"
+      - ".swiftlint.yml"
       - ".github/workflows/ios.yml"
   pull_request:
     paths:
       - "ios/**"
       - "Shared/**"
+      - ".swiftlint.yml"
       - ".github/workflows/ios.yml"
 
 concurrency:
@@ -25,7 +27,13 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      # Same config and severity split as the macOS workflow.
+      - name: Lint
+        run: |
+          which swiftlint || brew install swiftlint
+          swiftlint lint --reporter github-actions-logging
 
       - name: Build for iOS Simulator
         run: |

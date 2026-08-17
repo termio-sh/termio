@@ -1,20 +1,23 @@
+import TermioShared
 import Foundation
 import SwiftUI
 
 // MARK: - Models
 
 /// Which inspector pane the trailing column is showing — the file tree, the file
-/// search, the git changes list, or the session Info pane. Drives the segmented
-/// switch at the top of `FileBrowserView`.
-enum InspectorTab: Hashable, Sendable {
-    case files, search, changes, info
+/// search, the git changes list, the issue tracker, or the session Info pane.
+/// Drives the segmented switch at the top of `FileBrowserView`.
+enum InspectorTab: String, Hashable, Sendable, Codable {
+    case files, search, changes, issues, info
 }
 
-/// The git pane's own inner switch: the working-tree changes, or the commit
-/// history — GitHub Desktop's Changes / History split. Committing lives in the
-/// terminal; the GUI is for staging, reviewing diffs, and reading history.
+/// The git pane's own inner switch, in scope order: what isn't committed yet, what
+/// this branch would merge into another (the pull request about to be opened), and
+/// the commit history — GitHub Desktop's Changes / History split with its branch
+/// comparison promoted beside them. Committing lives in the terminal; the GUI is for
+/// staging, reviewing diffs, and reading history.
 enum GitPaneMode: Hashable, Sendable {
-    case changes, history
+    case changes, compare, history
 }
 
 /// One changed file in the working tree, as reported by `git status`. `path` is
@@ -120,6 +123,10 @@ struct GitDiffRequest: Hashable, Sendable {
     /// (`git show <sha>`) rather than the working-tree diff — the History tab's
     /// file rows carry the commit they belong to.
     var commit: String? = nil
+    /// When set, a `base...head` range: the overlay shows the file's three-dot
+    /// (merge-base) diff across it — the Issues pane's PR file rows, diffed over
+    /// fetched refs without a checkout.
+    var range: String? = nil
     /// The ordered set the overlay walks with ← / → — the whole Changes list, or
     /// the files of the commit being read. Also feeds the header's "n of m".
     var siblings: [GitChange] = []
@@ -127,19 +134,7 @@ struct GitDiffRequest: Hashable, Sendable {
     var name: String { change.name }
 }
 
-/// One rendered line of a unified diff: an added/removed/context line (with its old
-/// and/or new line number), or a hunk header (`@@ … @@`). The file-header lines of
-/// the raw diff are dropped during parsing — the overlay shows the filename itself.
-struct DiffRow: Identifiable, Sendable {
-    enum Kind: Sendable { case addition, deletion, context, hunk }
-    let id: Int
-    let kind: Kind
-    let text: String
-    let oldLine: Int?
-    let newLine: Int?
-    /// The changed span within a paired deletion/addition line, in `Character`
-    /// offsets — rendered with a stronger background so a one-word edit in a long
-    /// line reads at a glance. `nil` when the line has no counterpart or the two
-    /// sides share too little for a span to mean anything.
-    var emphasis: Range<Int>? = nil
-}
+/// One rendered line of a unified diff. The parse, the fold, and the intraline word diff
+/// all live in `TermioShared` so the Mac and the phone read a diff the same way; this is
+/// the desktop's name for the shared type.
+typealias DiffRow = DiffLine

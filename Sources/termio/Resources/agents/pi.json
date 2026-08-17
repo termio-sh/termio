@@ -13,6 +13,7 @@
   },
   "icon": { "asset": "pi-favicon" },
   "install": "https://pi.dev",
+  "skills": { "dir": "~/.pi/agent/skills" },
   "hooks": {
     "type": "plugin",
     "dir": "~/.pi/agent/extensions",

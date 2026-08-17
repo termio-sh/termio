@@ -12,7 +12,45 @@ Termio uses Ghostty-format themes, so anything from the wider Ghostty theme
 ecosystem works. Pick a light and a dark theme from **Settings ▸ Appearance** and
 Termio follows the system between them.
 
-To add your own, drop a Ghostty `.toml` theme file into:
+The two slots list the themes you have — Termio's own canvas plus whatever is in
+your Themes folder — not a catalog of hundreds you never chose.
+
+<DocsImage
+  src="/screenshots/docs/15-appearance-settings.png"
+  alt="Termio Appearance settings with System, Light, and Dark modes and separate light and dark terminal theme slots"
+  width={1664}
+  height={1288}
+/>
+
+If you already use Ghostty, there's nothing to pick on a fresh install: Termio
+reads your `~/.config/ghostty/config` on first launch and starts with the font and
+theme you chose there.
+
+## Getting more themes
+
+**Browse Themes…** opens a store of 50 well-known schemes — Dracula, Catppuccin,
+Gruvbox, Rose Pine, Solarized, and the rest — one variant per family, each one
+picked to stay readable through a working day. **Install** writes that theme into
+your Themes folder and selects it in the light or dark slot it belongs to.
+Nothing is downloaded: the schemes ship inside Termio.
+
+If a file of the same name is already in your Themes folder, Install stops and
+asks before replacing it — a theme you dropped in yourself is yours. **Remove**
+deletes the file, and asks first if you have edited it.
+
+To switch between the themes you have with your terminals as the preview, open
+the Command Palette (`⇧⌘P`) and pick **Change Theme…** — arrowing through the
+list restyles your open terminals live, Return keeps the theme, Escape puts it
+back.
+
+<DocsImage
+  src="/screenshots/docs/14-change-theme.png"
+  alt="The Change Theme palette over a Termio terminal with Catppuccin Latte selected and applied"
+  width={2424}
+  height={1664}
+/>
+
+To add a theme the store doesn't carry, drop a Ghostty-format theme file into:
 
 ```
 ~/Library/Application Support/termio/Themes/
@@ -31,20 +69,25 @@ while you work — `⌘=` to grow, `⌘-` to shrink, `⌘0` to reset.
 
 The same tab tunes the cursor (block, bar, or underline; steady or blinking) and
 the window itself — padding around the terminal, and background opacity and blur
-for a translucent window over your desktop.
+for a translucent window over your desktop. The app's own chrome lives here too:
+the sidebar's font and density.
 
 ## The rest of Settings
 
 The other tabs cover the rest of the app:
 
-- **General** — install the [`termio` command-line tool](/docs/session-control).
-- **Interface** — sidebar font and density.
+- **General** — install the [`termio` command-line tool](/docs/session-control),
+  and choose whether Termio installs its agent skill and raises task
+  notifications.
 - **Terminal** — scrollback history and text selection.
+- **SSH** — your `~/.ssh/config` hosts, with a Test Connection probe. Termio reads
+  that file as the source of truth and never rewrites it behind your back.
 - **Keyboard** — rebind any shortcut; see [Keyboard shortcuts](/docs/keyboard).
-- **Agents** — enable agents and turn on [session
+- **Agents** — add agents, enable them, and turn on [session
   control](/docs/session-control).
 - **Usage** — token usage for agents you sign in to (Claude Code, Codex). Termio
   reuses each CLI's own credentials to show you where you stand against your
   limits; it stores nothing of its own.
 - **Mobile** — pairing and remote access for the [iPhone
   companion](/docs/iphone).
+- **Community** — where to find the project: GitHub, Discord, and the WeChat group.

@@ -13,6 +13,11 @@ extension Notification.Name {
     /// made first responder, then deliberately resigned while the main window stays key.
     /// Fired from the command palette's "Debug: Orphan Terminal Focus".
     static let termioDebugOrphanFocus = Notification.Name("termio.debugOrphanFocus")
+
+    /// Dev-only: log the selected terminal's CALayer tree, to tell a doubled or
+    /// stale render layer from a presentation-timing artifact while a glitch is
+    /// on screen. Fired from the command palette's "Debug: Dump Terminal Layers".
+    static let termioDebugDumpLayers = Notification.Name("termio.debugDumpLayers")
 }
 
 /// Right column. Every session that has been opened stays *mounted* here for the
@@ -25,156 +30,40 @@ extension Notification.Name {
 /// prompt. That resize-on-every-switch was the visible flicker. Keeping each
 /// surface mounted and only toggling visibility means the view is never
 /// reparented or resized, so the shell never repaints and switching is instant.
+///
+/// A split group has to obey the same rule, so a pane's frame comes from its
+/// *own* group's layout (`SplitNode.paneFrames`), computed for every group
+/// rather than only the selected one. A group that is off screen therefore keeps
+/// the frames it had, and only a genuine geometry change — window resize,
+/// inspector toggle, ratio drag, group/ungroup, zoom — ever resizes a surface.
 struct TerminalPane: View {
     /// The pane area's named coordinate space — the fixed frame the split
     /// dividers' drags are measured in (see the ZStack's `coordinateSpace`).
     static let splitCoordinateSpace = "termio.splitPane"
     @EnvironmentObject var store: TermioStore
     @EnvironmentObject var settings: AppSettings
-    @Environment(\.colorScheme) private var colorScheme
     @State private var focusDriver = TerminalFocusDriver()
     @State private var activated: [Session.ID] = []
-    @State private var isDropTargeted = false
-
-    /// The wash painted over the terminal while a file is dragged onto it. The old fill was a flat
-    /// `accentColor.opacity(0.18)`, which read as a heavy, saturated blue. This is a much softer,
-    /// desaturated blue-grey: barely-there in light mode, a touch stronger in dark so it still
-    /// registers over a dark terminal without looking like a solid panel.
-    private var dropTint: Color {
-        colorScheme == .dark
-            ? Color(.sRGB, red: 0.62, green: 0.70, blue: 0.82, opacity: 0.10)
-            : Color(.sRGB, red: 0.40, green: 0.52, blue: 0.68, opacity: 0.09)
-    }
+    /// The pane the pointer is currently over during a drag. With splits, the drop
+    /// resolves to one pane, not the whole terminal group: the wash and the insert
+    /// both follow the pane under the pointer.
+    @State private var dropTargetPane: Session.ID?
 
     var body: some View {
         GeometryReader { geo in
+            // The terminal group fills the whole pane. File editors, diffs, PR/issue details and
+            // agent traces now open in the right inspector (see `InspectorDetailHost`) rather than
+            // covering the terminal, so this pane is only ever terminal surfaces + split dividers.
             let bounds = CGRect(origin: .zero, size: geo.size)
-            // The split tree only ever computes *geometry* — the surfaces below
-            // stay flat, permanently-mounted siblings in this one ZStack (never
-            // re-parented into a recursive split view), so creating or removing
-            // splits can't tear down a running shell. Muxy gets the same
-            // guarantee with an NSView registry; termio's surface cache plus
-            // frame-driven layout is the equivalent with the existing pattern.
             let layout = store.splitRoot?.layout(in: bounds)
-            // Zoom collapses the split to just the selected pane at full size
-            // and hides the dividers — the layout is otherwise untouched, so
-            // un-zooming snaps straight back to the same ratios.
             let zoomed = store.isPaneZoomed && layout != nil
-            ZStack {
-                if mounted.isEmpty {
-                    WelcomeView()
-                }
-                ForEach(mounted, id: \.session.id) { item in
-                    let id = item.session.id
-                    let paneFrame = zoomed
-                        ? (id == store.selectedSessionID ? bounds : nil)
-                        : layout?.frames[id]
-                    let isVisible = paneFrame != nil
-                        || (layout == nil && store.selectedSessionID == id)
-                    // Hidden sessions keep the full pane size, so returning to
-                    // them single-pane is still resize-free.
-                    let rect = paneFrame ?? bounds
-                    ManagedTerminalSurface(
-                        id: id,
-                        context: store.surface(for: item.session, in: item.project),
-                        isSelected: store.selectedSessionID == id,
-                        isVisible: isVisible,
-                        onFocused: { selectFocusedSurface(id) },
-                        requestFocus: { reason in
-                            requestTerminalFocus(for: id, reason: reason)
-                        }
-                    )
-                    .frame(width: rect.width, height: rect.height)
-                    .position(x: rect.midX, y: rect.midY)
-                    .opacity(isVisible ? 1 : 0)
-                    .allowsHitTesting(isVisible)
-                }
-                if let layout, !zoomed {
-                    // Identified by the (stable) branch id, so a divider keeps its
-                    // view identity — and its in-flight drag anchor — while its own
-                    // drag rewrites the ratio underneath it.
-                    ForEach(layout.dividers) { divider in
-                        SplitDividerHandle(spec: divider) { ratio in
-                            store.updateSplitRatio(branchID: divider.id, ratio: ratio)
-                        }
-                    }
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            // The dividers' drag gestures measure in this fixed space: a handle
-            // moves *with* its own drag, so a local-space translation chases its
-            // own coordinate origin and the divider oscillates under the cursor.
-            .coordinateSpace(name: Self.splitCoordinateSpace)
+            terminalGroup(bounds: bounds, layout: layout, zoomed: zoomed)
+                .frame(width: geo.size.width, height: geo.size.height)
+                .coordinateSpace(name: Self.splitCoordinateSpace)
         }
         // Paint the terminal's own background behind the pane, extending up under the toolbar so
         // the system toolbar material picks up a terminal tint instead of a flat grey band.
         .background(paneBackground.ignoresSafeArea(.container, edges: .top))
-        // A VSCode-style drop overlay: just a translucent accent wash over the whole
-        // terminal while a file is dragged over it (their `terminal-dropBackground`) —
-        // no border, only the background tint, fading in and out.
-        .overlay {
-            if isDropTargeted {
-                dropTint
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeOut(duration: 0.15), value: isDropTargeted)
-        // Double-clicking a file in the inspector covers the terminal pane with it (the surface
-        // keeps running underneath): an image/PDF/HTML in a read-only preview, anything else in the
-        // editor. Escape or the close button clears it and hands focus back to the selected session.
-        .overlay {
-            if let url = store.openFileURL {
-                let onClose = {
-                    store.openFileURL = nil
-                    requestSelectedTerminalFocus(reason: .overlayClosed)
-                }
-                Group {
-                    if FileActivation.isPreviewable(url) {
-                        FilePreviewView(url: url, settings: settings, onClose: onClose)
-                    } else {
-                        FileEditorView(url: url, settings: settings,
-                                       readOnly: store.openFileReadOnly,
-                                       jumpLine: store.openFileLine, onClose: onClose)
-                    }
-                }
-                .id(url)
-                .transition(.opacity)
-            }
-        }
-        // The fade is tied to presence (nil ↔ non-nil), NOT to the value: animating the
-        // value would crossfade content-to-content switches (arrow-key walking, clicking
-        // file after file), stacking two translucent copies — visible ghosting. Switching
-        // swaps instantly, Quick Look style; only open and close fade.
-        .animation(.easeOut(duration: 0.12), value: store.openFileURL != nil)
-        // Clicking a row in the inspector's Changes pane covers the terminal with that file's
-        // unified diff (the surface keeps running underneath), the git counterpart of the editor
-        // overlay above. Escape or the close button clears it.
-        .overlay {
-            if let request = store.openDiff {
-                GitDiffView(request: request, settings: settings, onClose: {
-                    store.openDiff = nil
-                    requestSelectedTerminalFocus(reason: .overlayClosed)
-                }, onNavigate: { store.openDiff = $0 })
-                .id(request)
-                .transition(.opacity)
-            }
-        }
-        .animation(.easeOut(duration: 0.12), value: store.openDiff != nil)
-        // The Info pane's "View Trace" covers the terminal with the session's rendered agent trace
-        // (dashboard + collapsible conversation), themed to match termio. Escape or the close button
-        // clears it, like the editor and diff overlays.
-        .overlay {
-            if let request = store.openTrace {
-                TraceView(request: request, settings: settings, onClose: {
-                    store.openTrace = nil
-                    requestSelectedTerminalFocus(reason: .overlayClosed)
-                })
-                .id(request)
-                .transition(.opacity)
-            }
-        }
-        .animation(.easeOut(duration: 0.12), value: store.openTrace != nil)
         // The ⌘⇧O/⌘⇧P palette lives in its own floating NSPanel (owned by
         // the app delegate — a SwiftUI overlay would render *under* the NSView
         // terminal surfaces); this only hands focus back to the terminal when
@@ -182,17 +71,17 @@ struct TerminalPane: View {
         .onChange(of: store.paletteMode) { _, mode in
             if mode == nil { requestSelectedTerminalFocus(reason: .paletteClosed) }
         }
-        // Dropping a file (dragged from the file-tree inspector or the Finder) inserts
-        // its shell-quoted path at the prompt — the prebuilt libghostty surface does not
-        // register for file drops itself, so the pane catches them and feeds the path to
-        // the selected session's surface. No trailing return, so the path is inserted for
-        // the user (or the agent) to act on rather than run.
-        .dropDestination(for: URL.self) { urls, _ in
-            sendPaths(urls)
-        } isTargeted: { isDropTargeted = $0 }
         // Every visible pane must be mounted — with splits that is all the
         // tree's leaves, not just the selection.
         .onChange(of: store.visiblePaneIDs, initial: true) { _, ids in
+            for id in ids where !activated.contains(id) {
+                activated.append(id)
+            }
+        }
+        // A background-driven session (a sibling spawn, a `send` to a pane never
+        // shown) mounts invisibly so its surface attaches without the selection
+        // moving; the focus paths all gate on visibility, so it stays silent.
+        .onChange(of: store.backgroundActivationIDs, initial: true) { _, ids in
             for id in ids where !activated.contains(id) {
                 activated.append(id)
             }
@@ -201,20 +90,24 @@ struct TerminalPane: View {
             if let id, !activated.contains(id) {
                 activated.append(id)
             }
-            // Switching sessions returns to the terminal: dismiss any open file editor so the
-            // newly selected session's surface is what's shown (the overlay's `.onDisappear`
-            // flushes any pending auto-save first). The diff overlay is dismissed for the same reason.
-            store.openFileURL = nil
-            store.openDiff = nil
-            store.openTrace = nil
+            // The inspector layout now follows the session: `TermioStore.selectedSessionID`
+            // saves the outgoing session's open detail and restores the incoming one's
+            // (issue #160), so we no longer clear the overlays here. The editor overlay's
+            // `.onDisappear` still flushes any pending auto-save when a restore replaces it.
             requestSelectedTerminalFocus(reason: .selectionChanged)
         }
         // The toolbar's close button posts this; tear the overlay down the same way the overlay's
         // own Esc / close does (clear the store, return focus to the selected session's terminal).
         .onReceive(NotificationCenter.default.publisher(for: .termioCloseContentOverlay)) { _ in
-            store.openFileURL = nil
-            store.openDiff = nil
-            store.openTrace = nil
+            // Tear down top-down: a stacked PR file diff closes first, revealing the detail;
+            // a second press then closes the detail (matching the overlay's own Esc handling).
+            if store.openDiff != nil {
+                store.openDiff = nil
+            } else {
+                store.openFileURL = nil
+                store.openTrace = nil
+                store.openIssueDetail = nil
+            }
             requestSelectedTerminalFocus(reason: .overlayClosed)
         }
         // Dev-only: perform the real AppKit failure while the main window stays key.
@@ -222,6 +115,9 @@ struct TerminalPane: View {
         // runloop, then uses the same orphan repair as a sibling-driven surface update.
         .onReceive(NotificationCenter.default.publisher(for: .termioDebugOrphanFocus)) { _ in
             injectTerminalFocusOrphan()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .termioDebugDumpLayers)) { _ in
+            dumpSelectedTerminalLayers()
         }
         // Window-key status is separate from surface focus, matching Ghostty. Becoming
         // key asks the driver to repair an orphan; it does not mutate a FocusState.
@@ -231,6 +127,99 @@ struct TerminalPane: View {
             else { return }
             requestSelectedTerminalFocus(reason: .windowBecameKey)
         }
+    }
+
+    /// The terminal-side ZStack: the flat mount for every terminal surface plus the split-tree
+    /// dividers. Extracted from `body` so it can be sized independently when a file preview
+    /// occupies the right column.
+    @ViewBuilder
+    private func terminalGroup(bounds: CGRect, layout: SplitNode.PaneLayout?, zoomed: Bool) -> some View {
+        // Geometry for *every* group, not just the one on screen. Visibility is
+        // decided separately, below: hiding a group must not move or resize its
+        // panes, because a frame change is a SIGWINCH the shell answers by
+        // repainting — the flash on the way back in (issue #245).
+        let paneFrames = SplitNode.paneFrames(of: store.splitGroups, in: bounds)
+        let visibleIDs = Set(store.visiblePaneIDs)
+        ZStack {
+            if mounted.isEmpty {
+                WelcomeView()
+            }
+            ForEach(mounted, id: \.session.id) { item in
+                let id = item.session.id
+                let isSelected = store.selectedSessionID == id
+                let isVisible = zoomed ? isSelected : visibleIDs.contains(id)
+                // Zoom is a real geometry change, so the zoomed pane does take the
+                // full bounds; its hidden siblings keep their laid-out frames. An
+                // ungrouped session has no split geometry and fills the pane.
+                let rect = zoomed && isSelected ? bounds : (paneFrames[id] ?? bounds)
+                ManagedTerminalSurface(
+                    context: store.surface(for: item.session, in: item.project),
+                    isSelected: isSelected,
+                    isVisible: isVisible,
+                    onFocused: { selectFocusedSurface(id) },
+                    requestFocus: { reason in
+                        requestTerminalFocus(for: id, reason: reason)
+                    }
+                )
+                .frame(width: rect.width, height: rect.height)
+                // Dropping a file (dragged from the file-tree inspector, the Issues list or
+                // the Finder) inserts its shell-quoted path at the prompt — the prebuilt
+                // libghostty surface does not register for file drops itself, so each pane
+                // catches them and feeds the path to *its own* session. No trailing return,
+                // so the path is inserted for the user (or the agent) to act on rather than run.
+                //
+                // This must sit above `.position`, which grows the modified view to fill the
+                // whole terminal group: a drop destination applied after it would accept the
+                // drag anywhere, and the topmost pane in the stack would swallow every drop.
+                .dropDestination(for: URL.self) { urls, _ in
+                    guard isVisible else { return false }
+                    return sendPaths(urls, to: id)
+                } isTargeted: { targeted in
+                    guard isVisible else { return }
+                    // Moving between panes can report the new pane's `true` before the old
+                    // pane's `false`; only the pane that still owns the highlight clears it.
+                    if targeted {
+                        dropTargetPane = id
+                    } else if dropTargetPane == id {
+                        dropTargetPane = nil
+                    }
+                }
+                .position(x: rect.midX, y: rect.midY)
+                .opacity(isVisible ? 1 : 0)
+                .allowsHitTesting(isVisible)
+            }
+            if let layout, !zoomed {
+                ForEach(layout.dividers) { divider in
+                    SplitDividerHandle(spec: divider) { ratio in
+                        store.updateSplitRatio(branchID: divider.id, ratio: ratio)
+                    }
+                }
+            }
+            // The handle that starts a rearrange, on the pane the pointer is
+            // near (see `PaneDragRearrange`). Never hit-testable: the press is
+            // taken by the event monitor, so this is purely the affordance.
+            if let layout, !zoomed, store.paneDrag == nil,
+               let hovered = store.paneHandleHover, let frame = layout.frames[hovered.pane] {
+                PaneGrabHandle(paneFrame: frame, isOverHandle: hovered.overHandle)
+                    .allowsHitTesting(false)
+            }
+            // The drag's preview (issue #183): the drop-zone highlight is what
+            // resolves the ambiguity a drag-rearrange otherwise has — you see
+            // the half (or the swap) the release would commit.
+            if let drag = store.paneDrag, let layout, !zoomed {
+                PaneDragOverlay(drag: drag, layout: layout, preview: store.paneDragPreview)
+            }
+            // Dragging a file or an issue in reads the same as dragging a pane around:
+            // the identical wash over the one pane the release would land in, sliding
+            // from pane to pane rather than blinking.
+            PaneDropWash(rect: dropTargetPane.map { id in
+                zoomed && store.selectedSessionID == id ? bounds : (paneFrames[id] ?? bounds)
+            } ?? .zero)
+        }
+        // Ghostty's own timing (`SurfaceDragSource`): the handle fades in and
+        // brightens rather than blinking. The drag overlay animates its own
+        // pieces — the highlight slides, the preview must not.
+        .animation(.easeInOut(duration: 0.15), value: store.paneHandleHover)
     }
 
     /// A surface becoming first responder is the source of truth for split selection.
@@ -292,23 +281,25 @@ struct TerminalPane: View {
         )
     }
 
-    /// Inserts the dropped files' paths into the selected session's terminal,
+    /// Inserts the dropped files' paths into the dropped-on pane's terminal,
     /// space-separated and each shell-quoted so spaces and other special characters
     /// survive. Focuses the session first (VSCode's focus-on-drop), and if its shell
     /// isn't attached yet, activates the session so its surface mounts and retries
     /// once it has come up. Returns whether a drop was accepted at all.
-    private func sendPaths(_ urls: [URL]) -> Bool {
+    private func sendPaths(_ urls: [URL], to id: Session.ID) -> Bool {
         guard !urls.isEmpty,
-              let id = store.selectedSessionID,
               let session = store.session(id),
               let project = store.project(for: id) else { return false }
+        // The drop is also a selection: the path lands where the pointer released, so
+        // that pane takes the write token before focus moves (`requestTerminalFocus`
+        // only focuses the selected session).
+        store.selectedSessionID = id
         requestTerminalFocus(for: id, reason: .fileDrop)
-        let text = urls.map { Self.shellQuoted($0.path) }.joined(separator: " ") + " "
+        let text = urls.map { TermioStore.promptToken(for: $0) }.joined(separator: " ") + " "
         if store.surface(for: session, in: project).send(text) { return true }
 
         // The shell may not be attached yet (a freshly opened session whose surface
-        // hasn't mounted). Activating it mounts the surface; retry a moment later, once.
-        store.selectedSessionID = id
+        // hasn't mounted). Selecting it above mounts the surface; retry a moment later, once.
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(300))
             if !store.surface(for: session, in: project).send(text) {
@@ -318,10 +309,13 @@ struct TerminalPane: View {
         return true
     }
 
-    /// Single-quotes a path for the shell, escaping any embedded single quote the
-    /// POSIX way (`'\''`), so a dropped path is always one safe token.
-    private static func shellQuoted(_ path: String) -> String {
-        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    private func dumpSelectedTerminalLayers() {
+        guard AppChannel.isDev,
+              let id = store.selectedSessionID,
+              let session = store.session(id),
+              let project = store.project(for: id) else { return }
+        let state = store.surface(for: session, in: project)
+        focusDriver.dumpLayers(of: state, sessionID: id)
     }
 
     private struct MountedSession {
@@ -394,7 +388,6 @@ private enum TerminalFocusReason {
 /// focus is handled from AppKit by TerminalFocusDriver, never by waiting for this value
 /// to transition through nil.
 private struct ManagedTerminalSurface: View {
-    let id: Session.ID
     let context: TerminalViewState
     let isSelected: Bool
     let isVisible: Bool
@@ -637,6 +630,33 @@ private final class TerminalFocusDriver {
         }
     }
 
+    /// Dev-only: log the resolved terminal view's layer tree. Emitted through
+    /// `print` as well as os_log so a dev app launched with `open --stdout`
+    /// lands the dump in the same file as the wrapper's own diagnostics.
+    func dumpLayers(of state: TerminalViewState, sessionID: Session.ID) {
+        func emit(_ message: String) {
+            print("[termio][layer dump] \(message)")
+            Log.app.notice("layer dump: \(message, privacy: .public)")
+        }
+        guard let window = mainWindow(), let root = window.contentView,
+              let target = terminalView(matching: state, under: root) else {
+            emit("no terminal view resolved for \(sessionID.uuidString.prefix(8))")
+            return
+        }
+        emit("session=\(sessionID.uuidString.prefix(8)) viewFrame=\(NSStringFromRect(target.frame)) bounds=\(NSStringFromRect(target.bounds))")
+        guard let rootLayer = target.layer else {
+            emit("view has no backing layer")
+            return
+        }
+        func describe(_ layer: CALayer, depth: Int) {
+            let indent = String(repeating: "  ", count: depth)
+            let cls = String(describing: type(of: layer))
+            emit("\(indent)\(cls) frame=\(NSStringFromRect(layer.frame)) scale=\(layer.contentsScale) hidden=\(layer.isHidden) opacity=\(layer.opacity) hasContents=\(layer.contents != nil)")
+            layer.sublayers?.forEach { describe($0, depth: depth + 1) }
+        }
+        describe(rootLayer, depth: 0)
+    }
+
     private func isCurrent(_ strength: Strength, generation: Int) -> Bool {
         switch strength {
         case .replaceResponder: generation == replaceGeneration
@@ -645,9 +665,7 @@ private final class TerminalFocusDriver {
     }
 
     private func mainWindow() -> NSWindow? {
-        NSApp.windows.first {
-            $0.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName
-        }
+        AppDelegate.mainWindow
     }
 
     private func terminalView(
@@ -673,6 +691,140 @@ private final class TerminalFocusDriver {
             // Ghostty does this explicitly too: in practice the normal focus callback
             // is occasionally skipped during SwiftUI/AppKit reconciliation.
             _ = previous.resignFirstResponder()
+        }
+    }
+}
+
+/// The pane's drag affordance: ghostty's ellipsis strip on the top edge, drawn
+/// while the pointer is on it. Drawing only — the press that starts the drag is
+/// hit-tested in `PaneDragRearrange`, so this never stands between the pointer
+/// and the terminal.
+private struct PaneGrabHandle: View {
+    let paneFrame: CGRect
+    /// True once the pointer is on the handle itself rather than in the band
+    /// that reveals it: ghostty's two strengths, present then ready.
+    let isOverHandle: Bool
+
+    var body: some View {
+        let rect = PaneDragRearrange.handleRect(in: paneFrame.size)
+        Image(systemName: "ellipsis")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.primary.opacity(isOverHandle ? 0.8 : 0.3))
+            .frame(width: rect.width, height: rect.height)
+            .position(x: paneFrame.minX + rect.midX, y: paneFrame.minY + rect.midY)
+            .transition(.opacity)
+    }
+}
+
+/// The visual half of the pane drag (issue #183): a wash over the lifted source
+/// pane, a highlight over the region the release would commit — the half of the
+/// target the pane would occupy, or the whole target for a swap — and a scaled
+/// still of the pane riding under the pointer. Geometry comes straight from the
+/// tree's `layout`, so the preview and the drop can never disagree. The tint
+/// family is the file-drop wash's desaturated blue-grey, not accent blue.
+/// Where a release would land: a fill in the split tint over one pane (or one half of
+/// it), no border — the rect's own edge already draws the boundary, a stroke would say
+/// it twice. Shared by the pane-rearrange drag and by dragging a file or an issue in,
+/// so both drags speak with the same highlight.
+///
+/// Always mounted and hidden by opacity, because a view that survives every target
+/// change is what lets SwiftUI interpolate the rect — the wash then slides from pane to
+/// pane instead of blinking out and back in somewhere else. Leaving every target keeps
+/// the last rect and only fades it; animating the frame to nothing reads as the wash
+/// shrinking away rather than releasing.
+private struct PaneDropWash: View {
+    /// `.zero` when the pointer is over nothing droppable.
+    let rect: CGRect
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var lastRect: CGRect = .zero
+
+    static func tint(for scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(.sRGB, red: 0.62, green: 0.70, blue: 0.82, opacity: 1)
+            : Color(.sRGB, red: 0.40, green: 0.52, blue: 0.68, opacity: 1)
+    }
+
+    var body: some View {
+        let drawn = rect == .zero ? lastRect : rect
+        return Rectangle()
+            .fill(Self.tint(for: colorScheme).opacity(colorScheme == .dark ? 0.20 : 0.17))
+            .frame(width: drawn.width, height: drawn.height)
+            .position(x: drawn.midX, y: drawn.midY)
+            .opacity(rect == .zero ? 0 : 1)
+            .allowsHitTesting(false)
+            .animation(.easeInOut(duration: 0.15), value: drawn)
+            .animation(.easeInOut(duration: 0.15), value: rect == .zero)
+            .onChange(of: rect) { _, new in
+                if new != .zero { lastRect = new }
+            }
+    }
+}
+
+private struct PaneDragOverlay: View {
+    /// Ghostty's own drag-image scale (`SurfaceDragSource.previewScale`).
+    private static let previewScale: CGFloat = 0.2
+
+    let drag: PaneDragState
+    let layout: SplitNode.PaneLayout
+    /// The pane as it looked when picked up, or nil when the surface could not
+    /// be captured — the drag then runs without a preview rather than showing an
+    /// empty card.
+    let preview: NSImage?
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The pointer in the pane area's coordinate space, rebuilt from the pane it
+    /// is over plus the local point the hit test already resolved.
+    private var pointerCenter: CGPoint? {
+        guard let pointer = drag.pointer, let frame = layout.frames[pointer.pane] else { return nil }
+        return CGPoint(x: frame.minX + pointer.local.x, y: frame.minY + pointer.local.y)
+    }
+
+    private var tint: Color { PaneDropWash.tint(for: colorScheme) }
+
+    /// The half (or whole pane) the release would fill, or `.zero` when the
+    /// pointer is over nothing droppable.
+    private var highlightRect: CGRect {
+        guard let target = drag.target, target != drag.source,
+              let zone = drag.zone, let frame = layout.frames[target]
+        else { return .zero }
+        return zone.highlightRect(in: frame)
+    }
+
+    var body: some View {
+        ZStack {
+            liftedSource
+            PaneDropWash(rect: highlightRect)
+            draggedPreview
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// The pane you picked up, faintly washed so it reads as lifted.
+    @ViewBuilder private var liftedSource: some View {
+        if let source = layout.frames[drag.source] {
+            Rectangle()
+                .fill(tint.opacity(colorScheme == .dark ? 0.08 : 0.07))
+                .frame(width: source.width, height: source.height)
+                .position(x: source.midX, y: source.midY)
+        }
+    }
+
+    /// A still of the dragged pane under the pointer, at ghostty's drag-image
+    /// scale and translucent like the image a real dragging session carries — an
+    /// opaque card reads as a second window dropped on the layout. Never
+    /// animated: an interpolated position is a preview that lags the mouse.
+    @ViewBuilder private var draggedPreview: some View {
+        if let preview, let center = pointerCenter {
+            Image(nsImage: preview)
+                .resizable()
+                .interpolation(.medium)
+                .frame(width: preview.size.width * Self.previewScale,
+                       height: preview.size.height * Self.previewScale)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
+                .opacity(0.8)
+                .position(center)
+                .animation(nil, value: drag)
         }
     }
 }
@@ -721,3 +873,4 @@ private struct SplitDividerHandle: View {
             .position(x: spec.frame.midX, y: spec.frame.midY)
     }
 }
+

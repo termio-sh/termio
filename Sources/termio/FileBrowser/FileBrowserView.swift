@@ -21,57 +21,68 @@ struct FileBrowserView: View {
     /// Bumped to collapse the whole tree: it is the file list's `.id`, so changing it
     /// rebuilds the list fresh — and a fresh `List(children:)` starts fully collapsed.
     @State private var treeGeneration = 0
+    /// Bumped after `applyTreeChanges` mutates realized directories in place, so the
+    /// list runs an update pass and the mutation reaches the rows (the `root`
+    /// reference itself never changes on an incremental reload).
+    @State private var treeRevision = 0
+    /// Bumped per `refresh()` call; an off-main root read that finishes after a newer
+    /// refresh (or after the project moved) compares stale and discards its result,
+    /// so roots can never land out of order.
+    @State private var refreshGeneration = 0
+    /// Reload targets accumulated while a reload is already in flight, keyed by URL
+    /// so repeat events for one directory coalesce. Unioned rather than replaced —
+    /// a newer batch must never orphan an older disjoint one, or those directories
+    /// would stay stale until their next event. Drained by `runPendingReloads`.
+    @State private var pendingReloads: [URL: FileNode] = [:]
+    /// True while `runPendingReloads`'s serial loop is draining; batches arriving
+    /// meanwhile just extend `pendingReloads` and become the next lap.
+    @State private var reloadInFlight = false
     /// Watches the project root on disk and bumps its `changeToken` when anything under
     /// it changes, so the tree stays live with an agent's edits (see `onChange` below).
     @StateObject private var watcher = FileTreeWatcher()
+    /// A watcher bump that arrived while the inspector was collapsed. The view stays in
+    /// the hierarchy when the pane is hidden, so without parking, every disk change under
+    /// the project root would rebuild the tree (a full outline re-diff plus a `git status`)
+    /// that nobody can see — on a busy root that is a continuous main-thread drain. Same
+    /// parking pattern as `GitPanelModel`; replayed once when the pane is next visible.
+    @State private var pendingWatcherRefresh = false
 
-    /// The directory the tree is rooted at: the selected session's worktree if it
-    /// has one, otherwise its project folder. `nil` when nothing is selected.
-    /// A loose terminal roots at its *live* cwd instead (falling back to the cwd
-    /// persisted from the last run, then `$HOME`) — the session owns its path, so
-    /// the tree, search, and changes panes all follow a `cd`. Real projects keep
-    /// their stable root; the anchor is the point of a project.
-    private var projectPath: String? {
-        guard let id = store.selectedSessionID, let project = store.project(for: id) else { return nil }
-        if project.kind == .terminals {
-            return store.workingDirectory(for: id)
-                ?? store.session(id)?.lastWorkingDirectory
-                ?? project.path
-        }
-        return store.session(id)?.worktreePath ?? project.path
+    /// The host of the selected session when it is an SSH session. Non-nil means the
+    /// local disk isn't this session's disk: `inspectorProjectPath` resolves to nil,
+    /// so the watcher, the root read, and the drop target all stand down on their own.
+    private var sshHost: String? {
+        store.selectedSessionID.flatMap(store.session)?.sshHost
     }
 
+    /// The directory the tree is rooted at — see `TermioStore.inspectorProjectPath`.
+    private var projectPath: String? { store.inspectorProjectPath }
+
     var body: some View {
-        VStack(spacing: 0) {
-            switch store.inspectorTab {
-            case .files:
-                if let root { header(root: root) }
-                content
-            case .search:
-                if let root {
-                    FileSearchView(
-                        rootURL: root.url,
-                        font: settings.interfaceFont,
-                        onDismiss: { store.inspectorTab = .files },
-                        onOpen: { url, line in store.openFileInEditor(url, at: line) }
-                    )
-                    // Fresh identity per project, so a stale query/result set
-                    // doesn't carry over when the root moves.
-                    .id(root.url)
+        ZStack {
+            // The Files pane is ALWAYS mounted; a tab switch merely covers it. A
+            // fresh `List(children:)` re-realizes every row of the outline, which
+            // on a huge root (a home directory) costs whole seconds per switch —
+            // and loses the tree's disclosure state besides (#207). Same
+            // always-mounted-under-an-opaque-overlay shape as `InspectorRoot`.
+            Group {
+                if let host = sshHost {
+                    // Fresh identity per host, so tree state never leaks between hosts.
+                    RemoteFileTreeView(host: host)
+                        .id(host)
                 } else {
-                    noProject
+                    VStack(spacing: 0) {
+                        if let root { header(root: root) }
+                        content
+                    }
                 }
-            case .changes:
-                if let repoRoot = projectPath {
-                    // Fresh identity per repo, so the panel model (selection, draft message,
-                    // PR status) resets cleanly when the selected project moves.
-                    GitChangesView(repoRoot: repoRoot, changeCount: $store.gitChangeCount)
-                        .id(repoRoot)
-                } else {
-                    content
-                }
-            case .info:
-                SessionInfoView()
+            }
+            .allowsHitTesting(store.inspectorTab == .files)
+            .accessibilityHidden(store.inspectorTab != .files)
+            if store.inspectorTab != .files {
+                activePane
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Opaque terminal background so the live tree never shows through.
+                    .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
             }
         }
         // The file column lives on the terminal side, so it takes the terminal's own background
@@ -106,12 +117,42 @@ struct FileBrowserView: View {
             seedChangeCount()
             watcher.watch(projectPath)
         }
-        // The project root changed on disk (an agent wrote, renamed, or removed a
-        // file): rebuild the tree from disk. Keep the Changes badge fresh too, unless
-        // the Changes pane is open — it owns the count live while visible.
-        .onChange(of: watcher.changeToken) {
+        // Files changed under the root (an agent wrote, renamed, or removed some):
+        // reload just the realized directories that were touched. Never fires for
+        // version-control metadata (see `FileTreeWatcher`). Keep the Changes badge
+        // fresh too — edits move the dirty count — unless the Changes pane is open;
+        // it owns the count live while visible. A hidden pane parks one full refresh
+        // instead (see `pendingWatcherRefresh`).
+        .onChange(of: watcher.treeToken) {
+            guard store.inspectorVisible else {
+                pendingWatcherRefresh = true
+                return
+            }
+            applyTreeChanges()
+            if store.inspectorTab != .changes { seedChangeCount() }
+        }
+        // Git metadata moved meaningfully (a stage, commit, or checkout): the tree
+        // shows none of it, so only the Changes badge needs a re-count.
+        .onChange(of: watcher.gitToken) {
+            guard store.inspectorVisible else {
+                pendingWatcherRefresh = true
+                return
+            }
+            if store.inspectorTab != .changes { seedChangeCount() }
+        }
+        .onChange(of: store.inspectorVisible) { _, visible in
+            guard visible, pendingWatcherRefresh else { return }
+            pendingWatcherRefresh = false
             refresh()
             if store.inspectorTab != .changes { seedChangeCount() }
+        }
+        // Covering or uncovering the always-mounted tree resets its scroll view's
+        // wheel increment (SwiftUI re-configures the scroll view on the overlay
+        // flip, and no row update follows to heal it — see `OutlineViewFixups`);
+        // reassert once the switch's update pass has settled.
+        .onChange(of: store.inspectorTab) {
+            let outline = browserState.outlineView
+            DispatchQueue.main.async { OutlineViewFixups.assertWheelIncrement(on: outline) }
         }
         .onChange(of: browserState.selection) {
             // The table fires native selection on a clean click — reliably, unlike a
@@ -165,11 +206,67 @@ struct FileBrowserView: View {
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
     }
 
+    /// The non-Files pane covering the always-mounted tree (see `body`).
+    @ViewBuilder
+    private var activePane: some View {
+        switch store.inspectorTab {
+        case .files:
+            EmptyView()
+        case .search:
+            if sshHost != nil {
+                remoteUnavailable(pane: localized("Search"))
+            } else if let root {
+                FileSearchView(
+                    rootURL: root.url,
+                    onDismiss: { store.inspectorTab = .files },
+                    onOpen: { url, line in store.openFileInEditor(url, at: line) }
+                )
+                // Fresh identity per project, so a stale query/result set
+                // doesn't carry over when the root moves.
+                .id(root.url)
+            } else {
+                noProject
+            }
+        case .changes:
+            if sshHost != nil {
+                remoteUnavailable(pane: localized("Changes"))
+            } else if let repoRoot = projectPath {
+                // Fresh identity per repo, so the panel model (selection, draft message,
+                // PR status) resets cleanly when the selected project moves.
+                // The visibility closure reads the store live (weakly — the model may
+                // outlive a closing window), so a collapsed inspector parks the pane's
+                // auto-refresh even while this view stays in the hierarchy.
+                GitChangesView(
+                    repoRoot: repoRoot,
+                    changeCount: $store.gitChangeCount,
+                    isPaneVisible: { [weak store] in store?.inspectorVisible ?? true }
+                )
+                .id(repoRoot)
+            } else {
+                noProject
+            }
+        case .issues:
+            if sshHost != nil {
+                remoteUnavailable(pane: localized("Issues"))
+            } else if let repoRoot = projectPath {
+                // Fresh identity per repo, like Changes: the panel model (connection
+                // phase, binding, list, pushed-in detail) resets when the project moves.
+                IssuesView(repoRoot: repoRoot)
+                    .id(repoRoot)
+            } else {
+                noProject
+            }
+        case .info:
+            SessionInfoView()
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
         if let root {
             FileTreeList(
                 nodes: root.children ?? [],
+                revision: treeRevision,
                 selection: $browserState.selection,
                 font: settings.interfaceFont,
                 onDrop: { sources, destination in receive(sources, into: destination) },
@@ -184,17 +281,31 @@ struct FileBrowserView: View {
             }
             // Collapse All rebuilds the list by changing its identity (see `treeGeneration`).
             .id(treeGeneration)
+        } else if projectPath != nil {
+            // The off-main root read is still in flight; hold the pane blank rather
+            // than flashing the no-project copy for the moment a huge root takes.
+            Color.clear
         } else {
             noProject
         }
     }
 
+    /// What a pane that only reads local disk shows for an SSH session. Honest about
+    /// the gap rather than showing the Mac's own files under a remote session.
+    private func remoteUnavailable(pane: String) -> some View {
+        PaneEmptyState(
+            localized("Remote session"),
+            icon: .serverStack,
+            message: localized("\(pane) isn’t available for SSH sessions yet.")
+        )
+    }
+
     /// The empty state the Files and Search panes share when no session is selected.
     private var noProject: some View {
-        ContentUnavailableView(
-            "No Project",
-            systemImage: "folder",
-            description: Text("Select a session to browse its files.")
+        PaneEmptyState(
+            localized("No Project"),
+            icon: .folder,
+            message: localized("Select a session to browse its files.")
         )
     }
 
@@ -211,16 +322,16 @@ struct FileBrowserView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
-            TreeHeaderButton(codicon: .newFile, help: "New File") {
+            TreeHeaderButton(codicon: .newFile, help: localized("New File")) {
                 createFile(in: root.url)
             }
-            TreeHeaderButton(codicon: .newFolder, help: "New Folder") {
+            TreeHeaderButton(codicon: .newFolder, help: localized("New Folder")) {
                 createFolder(in: root.url)
             }
-            TreeHeaderButton(codicon: .refresh, help: "Refresh") {
+            TreeHeaderButton(codicon: .refresh, help: localized("Refresh")) {
                 refresh()
             }
-            TreeHeaderButton(codicon: .collapseAll, help: "Collapse All") {
+            TreeHeaderButton(codicon: .collapseAll, help: localized("Collapse All")) {
                 treeGeneration += 1
             }
         }
@@ -233,20 +344,113 @@ struct FileBrowserView: View {
     /// right before the user ever opens the Changes pane (which then keeps it fresh).
     private func seedChangeCount() {
         guard let repoRoot = projectPath else {
-            store.gitChangeCount = 0
+            if store.gitChangeCount != 0 { store.gitChangeCount = 0 }
             return
         }
-        Task { store.gitChangeCount = await GitService.changes(in: repoRoot).count }
+        Task {
+            let count = await GitService.changes(in: repoRoot).count
+            // The project may have moved while git ran; a stale repo's count must
+            // not land on the new project's badge.
+            guard projectPath == repoRoot else { return }
+            // Only publish a real change: this reruns on every settled watcher batch,
+            // and an unconditional write would invalidate every store observer (the
+            // whole window re-evaluates, and the file list's coordinator re-walks its
+            // rows) even when the badge didn't move — on a non-repo root that means
+            // re-publishing `0` several times a second, forever.
+            if store.gitChangeCount != count { store.gitChangeCount = count }
+        }
     }
 
     /// Rebuilds the tree from the current project path. Called on appear, whenever
-    /// the selected session moves to a different project, and after a drop.
+    /// the selected session moves to a different project, and after a drop. Watcher
+    /// batches accumulated so far are superseded by the full rebuild, so drop them.
+    ///
+    /// The disk reads run off the main thread and the assembled root lands back on
+    /// main pre-realized, so the swap's first render reads nothing. Realizing a huge
+    /// root (a home directory) synchronously was ~100 ms of main-thread I/O, re-paid
+    /// on every full rescan — which a high-churn root produces constantly — and it
+    /// landed as the inspector's tab-switch stutter (#207). The outgoing tree keeps
+    /// showing until the new root is ready; on an ordinary project the gap is a few
+    /// milliseconds.
     private func refresh() {
+        _ = watcher.drainTreeBatch()
+        pendingReloads.removeAll()
+        refreshGeneration &+= 1
         guard let projectPath else {
             root = nil
             return
         }
-        root = FileNode(url: URL(fileURLWithPath: projectPath), isDirectory: true)
+        let generation = refreshGeneration
+        let rootURL = URL(fileURLWithPath: projectPath)
+        // What the outgoing tree had realized — re-listed off main so the swap
+        // keeps the outline's expanded subtree without a main-thread read.
+        let realized = root?.url == rootURL ? (root?.realizedDirectoryURLs() ?? []) : []
+        Task {
+            let listings = await Task.detached(priority: .userInitiated) {
+                FileNode.listingsForRefresh(of: rootURL, realized: realized)
+            }.value
+            // The project moved, or a newer refresh superseded this one, while we read.
+            guard generation == refreshGeneration else { return }
+            root = FileNode.preloaded(url: rootURL, isDirectory: true, listings: listings)
+        }
+    }
+
+    /// Reloads just the realized directories a settled watcher batch touched — the
+    /// Zed/VS Code shape, instead of rebuilding the whole tree per change. Events in
+    /// directories nobody ever expanded are dropped outright (nothing on screen can
+    /// be stale), which is what makes a high-churn root — a home directory, an
+    /// `npm install` — cost nothing beyond this walk. The disk reads run off the
+    /// main thread; the merge lands back on main, keeps surviving nodes (and so the
+    /// outline's expansion state), and nudges `treeRevision` so the list re-diffs.
+    private func applyTreeChanges() {
+        let batch = watcher.drainTreeBatch()
+        // FSEvents overflowed (or the root moved): the paths no longer enumerate
+        // what changed, so incremental updating would go silently stale.
+        if batch.needsFullRescan {
+            refresh()
+            return
+        }
+        guard let root else { return }
+        var found = false
+        for path in batch.paths {
+            guard let node = root.loadedNode(for: path),
+                  node.isDirectory, node.isLoaded else { continue }
+            pendingReloads[node.url] = node
+            found = true
+        }
+        guard found, !reloadInFlight else { return }
+        runPendingReloads()
+    }
+
+    /// Drains `pendingReloads` serially: one disk pass in flight at a time, so
+    /// merges can never land out of order, and batches arriving mid-read simply
+    /// extend the queue and become the next lap.
+    private func runPendingReloads() {
+        reloadInFlight = true
+        Task {
+            while !pendingReloads.isEmpty {
+                guard let rootNow = root else { break }
+                let laps = pendingReloads
+                pendingReloads = [:]
+                let urls = Array(laps.keys)
+                let listings = await Task.detached(priority: .utility) {
+                    urls.map { FileNode.listContents(of: $0) }
+                }.value
+                // The project moved while we read: these nodes are orphans now.
+                // `refresh` already cleared the queue; the fresh root re-reads
+                // its directories as the outline realizes them.
+                guard root === rootNow else { break }
+                var changedAny = false
+                for (url, listing) in zip(urls, listings) where laps[url]?.applyReloaded(listing) == true {
+                    changedAny = true
+                }
+                // Only a changed row set is worth an outline update pass — churn
+                // inside files (the common case on a busy root) adopts every node
+                // and would re-walk the whole realized tree for nothing.
+                if changedAny { treeRevision &+= 1 }
+            }
+            reloadInFlight = false
+        }
     }
 
     /// Places each dropped file into `destination` (a folder inside the tree, or the
@@ -309,14 +513,16 @@ struct FileBrowserView: View {
             newFile: { createFile(in: $0) },
             newFolder: { createFolder(in: $0) },
             rename: { rename($0) },
-            delete: { delete($0) }
+            delete: { delete($0) },
+            addToChat: { _ = store.addPathToSelectedSessionPrompt($0) },
+            canAddToChat: { store.selectedSessionRunsAgent }
         )
     }
 
     /// Prompts for a name, creates an empty file in `directory`, then selects and
     /// opens it — VS Code's "New File". A name clash gets a numbered suffix.
     private func createFile(in directory: URL) {
-        guard let name = promptForName(title: "New File", defaultName: "untitled.txt") else { return }
+        guard let name = promptForName(title: localized("New File"), defaultName: "untitled.txt") else { return }
         let target = uniqueDestination(for: name, in: directory, manager: .default)
         guard FileManager.default.createFile(atPath: target.path, contents: nil) else {
             Log.files.error("failed to create file at \(target.path, privacy: .public)")
@@ -329,7 +535,7 @@ struct FileBrowserView: View {
 
     /// Prompts for a name and creates a folder in `directory`, then selects it.
     private func createFolder(in directory: URL) {
-        guard let name = promptForName(title: "New Folder", defaultName: "untitled folder") else { return }
+        guard let name = promptForName(title: localized("New Folder"), defaultName: "untitled folder") else { return }
         let target = uniqueDestination(for: name, in: directory, manager: .default)
         do {
             try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
@@ -345,14 +551,14 @@ struct FileBrowserView: View {
     /// selection moves to the new URL and it is re-activated, so the editor follows
     /// the rename instead of holding (and auto-saving back) the old path.
     private func rename(_ url: URL) {
-        guard let name = promptForName(title: "Rename “\(url.lastPathComponent)”", defaultName: url.lastPathComponent, buttonTitle: "Rename"),
+        guard let name = promptForName(title: localized("Rename “\(url.lastPathComponent)”"), defaultName: url.lastPathComponent, buttonTitle: localized("Rename")),
               name != url.lastPathComponent
         else { return }
         let target = url.deletingLastPathComponent().appendingPathComponent(name)
         guard !FileManager.default.fileExists(atPath: target.path) else {
             let alert = NSAlert()
-            alert.messageText = "“\(name)” already exists."
-            alert.informativeText = "Choose a different name."
+            alert.messageText = localized("“\(name)” already exists.")
+            alert.informativeText = localized("Choose a different name.")
             alert.runModal()
             return
         }
@@ -373,10 +579,10 @@ struct FileBrowserView: View {
     /// it from the selection, and refreshes.
     private func delete(_ url: URL) {
         let alert = NSAlert()
-        alert.messageText = "Move “\(url.lastPathComponent)” to the Trash?"
-        alert.informativeText = "You can restore it from the Trash."
-        alert.addButton(withTitle: "Move to Trash")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("Move “\(url.lastPathComponent)” to the Trash?")
+        alert.informativeText = localized("You can restore it from the Trash.")
+        alert.addButton(withTitle: localized("Move to Trash"))
+        alert.addButton(withTitle: localized("Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)
@@ -389,11 +595,11 @@ struct FileBrowserView: View {
 
     /// A modal name prompt — one text field in an `NSAlert`, pre-filled with
     /// `defaultName`. Returns the trimmed entry, or `nil` if cancelled or emptied.
-    private func promptForName(title: String, defaultName: String, buttonTitle: String = "Create") -> String? {
+    private func promptForName(title: String, defaultName: String, buttonTitle: String = localized("Create")) -> String? {
         let alert = NSAlert()
         alert.messageText = title
         alert.addButton(withTitle: buttonTitle)
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Cancel"))
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
         field.stringValue = defaultName
         alert.accessoryView = field

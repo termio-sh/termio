@@ -15,6 +15,21 @@ struct StateFile {
         /// The split groups (see `TermioStore.splitGroups`). Optional so state
         /// files written before groups existed still decode.
         var splitGroups: [SplitNode]?
+        /// Each session's inspector layout, keyed by session `id.uuidString`. Only the
+        /// durable subset is written — the tab and the open *file* — since a diff / PR /
+        /// trace is a snapshot of data that gets re-fetched (see `TermioStore.InspectorState`).
+        /// Optional so older state files still decode.
+        var inspectorLayouts: [String: InspectorLayout]?
+    }
+
+    /// The persisted slice of a session's inspector layout: which tab, and the file it
+    /// had open (validated for existence on restore, since the file may have been deleted
+    /// or its worktree removed while the app was closed).
+    struct InspectorLayout: Codable {
+        var tab: InspectorTab
+        var filePath: String?
+        var fileLine: Int?
+        var fileReadOnly: Bool?
     }
 
     let url = AppChannel.supportDirectory

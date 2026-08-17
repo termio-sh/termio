@@ -96,14 +96,9 @@ struct TraceView: View {
     @State private var loadError: String?
 
     var body: some View {
-        Group {
-            if let html {
-                TraceWebView(html: html, background: settings.terminalBackgroundColor)
-            } else if let loadError {
-                ContentUnavailableView("Couldn't build the trace", systemImage: "sparkles", description: Text(loadError))
-            } else {
-                ProgressView()
-            }
+        VStack(spacing: 0) {
+            header
+            content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Match the editor/diff overlays: opaque terminal background bleeding under the titlebar.
@@ -114,10 +109,69 @@ struct TraceView: View {
         .onChange(of: colorScheme) { Task { await build() } }
     }
 
+    /// The session title on the left, content-area window controls on the right — the
+    /// same native header layout as `IssueDetailView` (12pt medium title truncating at
+    /// the tail, 8pt horizontal padding, the shared top-bar height and bottom hairline),
+    /// so the trace and issue overlays read as one family. The HTML document drops its
+    /// own `<header>` on Mac (see `build()`); the phone keeps it.
+    private var header: some View {
+        HStack(spacing: 6) {
+            Text(request.title)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 6)
+            InspectorDetailChromeButtons()
+        }
+        .padding(.horizontal, 8)
+        .frame(height: GitChangesView.topBarHeight)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+        }
+    }
+
+    /// The web view is mounted immediately, empty, rather than after the document is
+    /// ready: WebKit spends most of a second launching its content process the first time
+    /// this session opens one, and mounting late made the user wait for that *after* the
+    /// render instead of during it. The spinner sits on top until the page lands.
+    @ViewBuilder private var content: some View {
+        Group {
+            if let loadError {
+                PaneEmptyState("Couldn’t build the trajectory", icon: .bot, message: loadError)
+            } else {
+                TraceWebView(html: html ?? "")
+                    .overlay { if html == nil { ProgressView() } }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private func build() async {
         let theme = TraceTheme.resolve(settings: settings, colorScheme: colorScheme)
+        let request = request
         do {
-            html = try SessionTraceRenderer.html(jsonlPath: request.jsonlPath, title: request.title, theme: theme)
+            // Rendering a long session is close to a second of pure string work — reading
+            // the transcript, folding it into rows, and running every message through the
+            // Markdown pipeline. On the main actor that is a full second of frozen app, so
+            // it runs off it; the theme is resolved above because only that part needs
+            // `AppSettings`. `MarkdownScripting`'s one shared JavaScript context is already
+            // built for this — the companion server renders on its own queue.
+            //
+            // The Mac overlay draws its own native header (see `header`), so the HTML
+            // document omits its `<header>`; the phone (companion) keeps the default.
+            let document = try await Task.detached(priority: .userInitiated) {
+                try SessionTraceRenderer.html(
+                    jsonlPath: request.jsonlPath, title: request.title, theme: theme,
+                    includeHeader: false)
+            }.value
+            // An agent that drew a diagram gets it drawn: the fences are swapped for SVG
+            // before the page is handed to the web view, so nothing runs mermaid here.
+            let sources = MermaidRenderer.sources(in: document)
+            let drawn = sources.isEmpty
+                ? [:]
+                : await MermaidRenderer.shared.diagrams(
+                    for: sources, theme: MermaidRenderer.Theme(theme))
+            html = MermaidRenderer.applying(drawn, to: document)
             loadError = nil
         } catch {
             loadError = error.localizedDescription
@@ -130,10 +184,12 @@ struct TraceView: View {
 /// during load, avoiding a white flash before the themed page paints.
 private struct TraceWebView: NSViewRepresentable {
     let html: String
-    let background: NSColor
 
     func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView()
+        // PreviewWebView: right-click stripped to Copy — the rendered trace is
+        // read-only, so WebKit's Reload / Look Up / Services grab-bag has nothing
+        // to act on.
+        let view = PreviewWebView()
         view.setValue(false, forKey: "drawsBackground")
         view.navigationDelegate = context.coordinator
         view.loadHTMLString(html, baseURL: nil)
@@ -150,7 +206,9 @@ private struct TraceWebView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(lastHTML: html) }
 
     /// Markdown in agent messages can contain links; open them in the browser
-    /// instead of letting them navigate the trace page away.
+    /// instead of letting them navigate the trace page away. A fragment link is the
+    /// document's own — the timeline jumping to its row — and resolves against the
+    /// `about:blank` base `loadHTMLString` gives the page, so it stays here.
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String
         init(lastHTML: String) { self.lastHTML = lastHTML }
@@ -158,7 +216,7 @@ private struct TraceWebView: NSViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if navigationAction.navigationType == .linkActivated,
-               let url = navigationAction.request.url {
+               let url = navigationAction.request.url, url.scheme != "about" {
                 NSWorkspace.shared.open(url)
                 decisionHandler(.cancel)
             } else {

@@ -12,10 +12,10 @@
     {
       "identity" : "libghostty-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/jiweiyuan/libghostty-swift",
+      "location" : "https://github.com/termio-sh/libghostty-swift",
       "state" : {
-        "revision" : "85ff0b7198b32e3c5050dd03d08f739052a85076",
-        "version" : "1.0.11"
+        "revision" : "f2d4cbdf7a16bc5d917034f813f47c2a1c5dde97",
+        "version" : "1.0.16"
       }
     },
     {
@@ -23,8 +23,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Lakr233/MSDisplayLink.git",
       "state" : {
-        "revision" : "1ba3e769b734e456317fa7e45321fa7f53eefb67",
-        "version" : "2.1.0"
+        "revision" : "87eb0af130744c8cbe2e31b6e1a5bcd659f1c220",
+        "version" : "2.2.0"
       }
     }
   ],

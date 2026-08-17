@@ -31,9 +31,9 @@ extension UIButton {
     }
 
     /// The Hugeicons twin of `applyGlassSymbol`, for floating buttons whose glyph
-    /// should read from the same stroke family as the tab pill and sidebar rows
-    /// (the ＋ compose buttons sit right beside the pill). `boxSize` is the
-    /// glyph's drawn size in points; the stroke is the shared 1.5px-on-24 recipe.
+    /// should read from the same stroke family as the native tab bar and sidebar
+    /// rows. `boxSize` is the glyph's drawn size in points; the stroke is the
+    /// shared 1.5px-on-24 recipe.
     func applyGlassIcon(_ icon: HugeIcon, boxSize: CGFloat) {
         let image = icon.strokeImage(boxSize: boxSize)
         if #available(iOS 26.0, *) {
@@ -47,233 +47,14 @@ extension UIButton {
     }
 }
 
-/// A Liquid Glass surface for custom floating chrome. On iOS 26 it's a real
-/// interactive `UIGlassEffect`; older systems fall back to a chrome-material
-/// blur, which reads as translucent glass too.
-enum GlassChrome {
-    static func makeView(interactive: Bool) -> UIVisualEffectView {
-        if #available(iOS 26.0, *) {
-            let glass = UIGlassEffect(style: .regular)
-            glass.isInteractive = interactive
-            return UIVisualEffectView(effect: glass)
-        }
-        return UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
-    }
-}
-
-/// The home's compact tab switcher: a small glass capsule floating in the
-/// bottom-LEFT corner, paired with whatever action button a tab floats
-/// bottom-right. Hand-rolled on purpose: the iOS 26 system tab bar auto-sizes
-/// but always owns the bottom center — the only native way to left-align the
-/// group is a `.search`-role tab's detached circle, whose semantics ("select
-/// the search tab") can't host a ＋ menu.
-///
-/// Recipe follows Telegram's TabBarComponent at its exact metrics: a 64pt bar
-/// (56pt items + 4pt inner inset), icon over a semibold-10 label (icon area
-/// 8pt from the top, label 8pt from the bottom), equal-width items padded
-/// ~10pt, capsule radius = height/2, and — the detail that makes it read
-/// finished — a sliding selection capsule behind the active item
-/// (Telegram's selectionFrame, the full 56pt item).
-final class HomeTabPill: UIView {
-    var onSelect: ((Int) -> Void)?
-
-    private var buttons: [UIButton] = []
-    /// The tab glyphs, kept to pick each tab's own selection animation.
-    private let icons: [HugeIcon]
-    /// The sliding selected-item capsule. Telegram's is the system liquid
-    /// lens (private API, warps the content below); the public equivalent is
-    /// an interactive `UIGlassEffect` — real refraction, not a flat fill —
-    /// resting on a faint tint like their lens's restingBackgroundColor.
-    /// Pre-26 falls back to the flat current-chat-pill fill.
-    private let selection: UIView = {
-        if #available(iOS 26.0, *) {
-            let glass = UIGlassEffect(style: .regular)
-            glass.isInteractive = true
-            glass.tintColor = UIColor.label.withAlphaComponent(0.08)
-            let view = UIVisualEffectView(effect: glass)
-            view.layer.cornerRadius = 28
-            view.clipsToBounds = true
-            return view
-        }
-        let view = UIView()
-        view.backgroundColor = UIColor.label.withAlphaComponent(0.08)
-        view.layer.cornerRadius = 28
-        return view
-    }()
-    private var selectedIndex = 0
-
-    init(items: [(title: String, icon: HugeIcon)]) {
-        icons = items.map(\.icon)
-        super.init(frame: .zero)
-        let glass = GlassChrome.makeView(interactive: true)
-        glass.translatesAutoresizingMaskIntoConstraints = false
-        glass.layer.cornerRadius = 32
-        glass.clipsToBounds = true
-        addSubview(glass)
-
-        glass.contentView.addSubview(selection)
-
-        buttons = items.enumerated().map { index, item in
-            var config = UIButton.Configuration.plain()
-            // The same Hugeicons stroke marks the Mac sidebar (and the project
-            // rows one screen up) draw, instead of SF Symbols — one icon
-            // family across both apps. A 21pt box inks ~18pt wide, matching
-            // the drawn area of Telegram's ~28px tab icons.
-            config.image = item.icon.strokeImage(boxSize: 21)
-            config.imagePlacement = .top
-            config.imagePadding = 3
-            config.attributedTitle = AttributedString(
-                item.title,
-                attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 10, weight: .semibold)])
-            )
-            config.contentInsets = NSDirectionalEdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12)
-            let button = UIButton(configuration: config)
-            button.addAction(UIAction { [weak self] _ in
-                self?.select(index, animated: true)
-                self?.onSelect?(index)
-            }, for: .touchUpInside)
-            return button
-        }
-
-        let stack = UIStackView(arrangedSubviews: buttons)
-        stack.axis = .horizontal
-        stack.alignment = .fill
-        stack.distribution = .fillEqually
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        glass.contentView.addSubview(stack)
-        NSLayoutConstraint.activate([
-            glass.topAnchor.constraint(equalTo: topAnchor),
-            glass.leadingAnchor.constraint(equalTo: leadingAnchor),
-            glass.trailingAnchor.constraint(equalTo: trailingAnchor),
-            glass.bottomAnchor.constraint(equalTo: bottomAnchor),
-            stack.topAnchor.constraint(equalTo: glass.contentView.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor, constant: 4),
-            stack.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor, constant: -4),
-            stack.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor),
-            heightAnchor.constraint(equalToConstant: 64),
-        ])
-        select(0, animated: false)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        selection.frame = selectionFrame()
-    }
-
-    private func selectionFrame() -> CGRect {
-        guard buttons.indices.contains(selectedIndex) else { return .zero }
-        return buttons[selectedIndex].convert(buttons[selectedIndex].bounds, to: selection.superview)
-            .insetBy(dx: 0, dy: 4)
-    }
-
-    func select(_ index: Int, animated: Bool) {
-        let changed = selectedIndex != index
-        selectedIndex = index
-        for (i, button) in buttons.enumerated() {
-            // The active tab gets the accent, like Telegram's
-            // selectedTextColor — crossfaded, never snapped.
-            let target: UIColor = i == index ? tintColor : .secondaryLabel
-            if animated, button.tintColor != target {
-                UIView.transition(
-                    with: button, duration: 0.22,
-                    options: [.transitionCrossDissolve, .allowUserInteraction]
-                ) { button.tintColor = target }
-            } else {
-                button.tintColor = target
-            }
-        }
-        // Telegram rests each tab icon on the last frame of a hand-animated
-        // 48pt Lottie and replays it once on every select. Same idea, hand-
-        // keyed in Core Animation per icon — in-place character moves with
-        // overshoot, never a size pop.
-        if animated, changed, buttons.indices.contains(index) {
-            playSelectionAnimation(on: buttons[index], icon: icons[index])
-        }
-        layoutIfNeeded()
-        let settle = { self.selection.frame = self.selectionFrame() }
-        if animated {
-            UIView.animate(withDuration: 0.35, delay: 0,
-                           usingSpringWithDamping: 0.8, initialSpringVelocity: 0.2,
-                           options: .curveEaseOut, animations: settle)
-        } else {
-            settle()
-        }
-    }
-
-    /// The character set: the gear engages with a springy turn, the chat
-    /// bubble rocks as if mid-conversation, the folder does a small
-    /// hop-and-tip as if opening. All one-shot and size-stable.
-    private func playSelectionAnimation(on button: UIButton, icon: HugeIcon) {
-        guard let layer = button.imageView?.layer else { return }
-        layer.removeAnimation(forKey: "tabSelect")
-        let animation: CAAnimation
-        switch icon {
-        case .settings:
-            // A third turn lands on the Hugeicons cog's 6-tooth symmetry, so
-            // the snap back to the model value after the spring is invisible.
-            let spin = CASpringAnimation(keyPath: "transform.rotation.z")
-            spin.fromValue = 0
-            spin.toValue = CGFloat.pi * 2 / 3
-            spin.mass = 1
-            spin.stiffness = 170
-            spin.damping = 13
-            spin.initialVelocity = 4
-            spin.duration = spin.settlingDuration
-            animation = spin
-        case .bubbleChat:
-            animation = Self.characterMove(
-                rotationDegrees: [0, 8, -6, 3, 0],
-                x: [0, 1.2, -1.2, 0.4, 0],
-                y: [0, 0, 0, 0, 0],
-                duration: 0.55
-            )
-        default: // the folder, and any future tab without its own move
-            animation = Self.characterMove(
-                rotationDegrees: [0, -7, 3, -1, 0],
-                x: [0, 0, 0, 0, 0],
-                y: [0, -2.5, 0.3, -0.6, 0],
-                duration: 0.5
-            )
-        }
-        layer.add(animation, forKey: "tabSelect")
-    }
-
-    /// A grouped in-place keyframe move (tilt + nudge), eased per segment —
-    /// the hand-keyed stand-in for Telegram's per-icon Lottie files.
-    private static func characterMove(
-        rotationDegrees: [CGFloat], x: [CGFloat], y: [CGFloat], duration: CFTimeInterval
-    ) -> CAAnimation {
-        func keyframes(_ keyPath: String, _ values: [CGFloat]) -> CAKeyframeAnimation {
-            let anim = CAKeyframeAnimation(keyPath: keyPath)
-            anim.values = values
-            anim.timingFunctions = Array(
-                repeating: CAMediaTimingFunction(name: .easeInEaseOut),
-                count: max(values.count - 1, 1)
-            )
-            return anim
-        }
-        let group = CAAnimationGroup()
-        group.animations = [
-            keyframes("transform.rotation.z", rotationDegrees.map { $0 * .pi / 180 }),
-            keyframes("transform.translation.x", x),
-            keyframes("transform.translation.y", y),
-        ]
-        group.duration = duration
-        return group
-    }
-}
-
 extension HugeIcon {
     /// The glyph as a tintable template `UIImage` — a bitmap for UIKit chrome
-    /// like the tab pill, where SwiftUI's `HugeIconView` can't be used
+    /// like the native tab bar, where SwiftUI's `HugeIconView` can't be used
     /// directly. Same stroke recipe (1.5px-on-24 with the hairline floor,
     /// round caps); the path is inset by the stroke's half-width so round
     /// caps at the glyph's edge don't clip against the bitmap bounds.
-    func strokeImage(boxSize: CGFloat) -> UIImage {
-        let lineWidth = max(1.1, boxSize * 1.5 / viewBox)
+    func strokeImage(boxSize: CGFloat, strokeWeight: CGFloat = 1.5) -> UIImage {
+        let lineWidth = max(1.1, boxSize * strokeWeight / viewBox)
         let bounds = CGRect(x: 0, y: 0, width: boxSize, height: boxSize)
         let path = HugeIconShape(icon: self)
             .path(in: bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2))
@@ -288,5 +69,89 @@ extension HugeIcon {
             cg.addPath(path)
             cg.strokePath()
         }.withRenderingMode(.alwaysTemplate)
+    }
+
+    /// The glyph's filled twin, for a selected tab — nil for marks that have no
+    /// solid reading (see `solidSubpaths`). Drawn from the same path at the same
+    /// placement as `strokeImage`, minus the half-stroke inset, so the fill's
+    /// outer edge lands exactly where the outline's did and the mark neither
+    /// shifts nor changes size when the tab is selected. The remaining subpaths
+    /// are punched back out in `.clear`, which is what keeps the bubble's dots,
+    /// the terminal's prompt, and the gear's bore legible against the fill: a
+    /// closed one becomes a hole, an open one a cleared stroke of the same
+    /// round-capped line the outline drew.
+    func solidImage(boxSize: CGFloat) -> UIImage? {
+        guard let solidSubpaths else { return nil }
+        let bounds = CGRect(x: 0, y: 0, width: boxSize, height: boxSize)
+        let subpaths = HugeIconShape(icon: self).path(in: bounds).cgPath.subpaths
+        // A shade heavier than the outline's own line: a cleared mark on a solid
+        // body reads thinner than the same line drawn on its own.
+        let detailWidth = max(1.4, boxSize * 2.0 / viewBox)
+        let renderer = UIGraphicsImageRenderer(bounds: bounds)
+        return renderer.image { context in
+            let cg = context.cgContext
+            cg.setFillColor(UIColor.white.cgColor)
+            for (index, subpath) in subpaths.enumerated() where solidSubpaths.contains(index) {
+                cg.addPath(subpath.path)
+            }
+            cg.fillPath(using: .evenOdd)
+
+            let detail = subpaths.enumerated()
+                .filter { !solidSubpaths.contains($0.offset) }
+                .map(\.element)
+            cg.setBlendMode(.clear)
+            for hole in detail where hole.isClosed {
+                cg.addPath(hole.path)
+            }
+            cg.fillPath(using: .evenOdd)
+
+            cg.setLineWidth(detailWidth)
+            cg.setLineCap(.round)
+            cg.setLineJoin(.round)
+            for mark in detail where !mark.isClosed {
+                cg.addPath(mark.path)
+            }
+            cg.strokePath()
+        }.withRenderingMode(.alwaysTemplate)
+    }
+}
+
+/// One `M`-delimited run of a glyph, and whether it closed — a closed run
+/// bounds an area (the gear's bore), an open one is a line (the terminal's
+/// prompt), and the solid renderer punches each out accordingly.
+private struct Subpath {
+    let path: CGPath
+    let isClosed: Bool
+}
+
+private extension CGPath {
+    /// The path split at each `moveTo`, so a glyph's body can be filled while
+    /// its interior detail is drawn separately. Walking the built path rather
+    /// than splitting the source string keeps relative `m` subpaths correct.
+    var subpaths: [Subpath] {
+        var paths: [CGMutablePath] = []
+        var closed: [Bool] = []
+        applyWithBlock { element in
+            let points = element.pointee.points
+            switch element.pointee.type {
+            case .moveToPoint:
+                let subpath = CGMutablePath()
+                subpath.move(to: points[0])
+                paths.append(subpath)
+                closed.append(false)
+            case .addLineToPoint:
+                paths.last?.addLine(to: points[0])
+            case .addQuadCurveToPoint:
+                paths.last?.addQuadCurve(to: points[1], control: points[0])
+            case .addCurveToPoint:
+                paths.last?.addCurve(to: points[2], control1: points[0], control2: points[1])
+            case .closeSubpath:
+                paths.last?.closeSubpath()
+                if !closed.isEmpty { closed[closed.count - 1] = true }
+            @unknown default:
+                break
+            }
+        }
+        return zip(paths, closed).map { Subpath(path: $0, isClosed: $1) }
     }
 }

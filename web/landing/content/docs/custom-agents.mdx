@@ -37,6 +37,13 @@ Termio reads the folder **once at launch**, so restart the app after adding or
 editing a manifest. The agent then shows up wherever you start a session; enable,
 reorder, or tweak its command from **Settings ▸ Agents** like any other.
 
+<DocsImage
+  src="/screenshots/docs/26-custom-agent.png"
+  alt="Termio Agent settings with a custom Review Agent selected and its manifest-backed command, status patterns, and delete action visible"
+  width={1664}
+  height={1288}
+/>
+
 <Callout type="tip">
   Use a built-in's `id` (for example `claudeCode`) as your filename to **override**
   it — handy for launching Claude Code through a wrapper script while keeping its
@@ -83,10 +90,10 @@ matching regular expressions against the terminal screen. List patterns that mea
 }
 ```
 
-A line matching `attention` flips the session to the **attention** state (it wins
-over `working`, since a prompt can sit under a still-spinning header); a line
-matching `working` marks it **working**. See the [sidebar status
-reference](/docs/sidebar#status) for what each state means.
+A line matching `attention` flips the session to **needs you** (the key keeps the
+protocol's name; it wins over `working`, since a prompt can sit under a
+still-spinning header); a line matching `working` marks it **working**. See the
+[sidebar status reference](/docs/sidebar#status) for what each state means.
 
 <Callout type="note">
   Agents that ship their own hook system (like the built-ins) get more precise

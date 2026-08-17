@@ -13,10 +13,16 @@ import Foundation
 ///   to the caller's own project. `callerSession` is the `TERMIO_SESSION` the PTY
 ///   carries; `callerCwd` (`$PWD`) is the fallback for a shell that isn't a termio
 ///   session but sits inside an open project's directory.
-/// - `target` — the session to act on: a `<agent>@<id>` handle from `list`, or a
-///   bare id / id prefix / title. Empty for `send` means "start a fresh session".
+/// - `target` — the session to act on: a `termio://session/<uuid>` link from
+///   `list`, or a bare id / id prefix / title. Empty for `send` means "start a
+///   fresh session".
 /// - `text` — the prompt (`send`) or menu answer (`answer`).
 /// - `agent` — the agent for a fresh session (`send` with no target).
+/// - `snapshot` — `watch` only: `false` skips the initial per-session status
+///   snapshot (absent means snapshot on).
+/// - `wait` / `timeoutMs` — `send`/`spawn` only: block until the turn the prompt
+///   kicked off settles (or the timeout elapses) and report the outcome, instead
+///   of replying the instant the keystrokes are delivered.
 struct ControlRequest: Decodable {
     let op: String
     let format: String?
@@ -26,14 +32,103 @@ struct ControlRequest: Decodable {
     let text: String?
     let lines: Int?
     let agent: String?
+    let snapshot: Bool?
+    let wait: Bool?
+    /// The `--wait` cap in milliseconds; clamped server-side. Nil uses the default.
+    let timeoutMs: Int?
+    /// Optional banner title for the `notify` op; defaults to the calling agent's
+    /// name when absent.
+    let title: String?
+    /// `send`/`answer`: whether to submit the text with a Return. `--no-enter`
+    /// sends false — the payload is itself the keypress a prompt is waiting on
+    /// (a bare `t` at a trust gate), not a line to submit. Absent means submit.
+    let enter: Bool?
+    /// `send`: named keys to press after the text, in order — `--key escape`,
+    /// `--key ctrl-c`. A key is not text: its bytes depend on the mode the program
+    /// negotiated (`ESC [ A` vs `ESC O A` for Up), so only Ghostty's key encoder can
+    /// produce them, and hand-writing them into `text` is right by luck at best.
+    /// See `SessionKeyPress`.
+    let keys: [String]?
 
     private enum CodingKeys: String, CodingKey {
-        case op, format, target, text, lines, agent
+        case op, format, target, text, lines, agent, snapshot, wait, title, enter, keys
         case callerSession = "caller_session"
         case callerCwd = "caller_cwd"
+        case timeoutMs = "timeout_ms"
     }
 
     var wantsJSON: Bool { format == "json" }
+    var wantsWait: Bool { wait == true }
+    /// Naming a key suppresses the implicit Return as surely as `--no-enter` does:
+    /// the caller is being explicit about which keys to press, and appending one
+    /// they did not ask for would submit a menu they meant to escape.
+    var wantsEnter: Bool { enter != false && namedKeys.isEmpty }
+    var namedKeys: [String] { keys ?? [] }
+}
+
+/// Deadline-bounded reads and writes for the control connections.
+///
+/// Every one of these descriptors is non-blocking: on Darwin `accept(2)` hands
+/// back a copy of the listening socket's `O_NONBLOCK`, which `bindAndListen` sets.
+/// So `read` and `write` here answer -1/`EAGAIN` the moment the kernel has nothing
+/// to give or nowhere left to put it — and a Unix stream socket's send buffer is
+/// only 8 KiB. Both are *retry* answers, as is `EINTR`; only EOF, a hard errno, or
+/// a blown deadline actually ends a transfer. Mistaking a retry for a failure is
+/// what truncated every reply past 8192 bytes mid-token and what answered
+/// "malformed request" to a well-formed request whose bytes had not landed yet.
+///
+/// Internal rather than file-private so the tests can drive it over a `socketpair`
+/// with a deliberately small send buffer: the listener itself can only be exercised
+/// by binding this channel's real control socket.
+enum SocketIO {
+    /// Writes all of `data`, waiting out a reader that has not drained the send
+    /// buffer yet. False means the peer is gone, the socket errored, or `timeout`
+    /// elapsed — never "the kernel was momentarily full".
+    static func writeAll(_ descriptor: Int32, _ data: Data, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        return data.withUnsafeBytes { raw -> Bool in
+            guard let base = raw.baseAddress else { return true }
+            var offset = 0
+            while offset < data.count {
+                let written = write(descriptor, base + offset, data.count - offset)
+                if written > 0 {
+                    offset += written
+                    continue
+                }
+                if written == 0 { return false }
+                switch errno {
+                case EINTR: continue
+                case EAGAIN, EWOULDBLOCK:
+                    guard wait(descriptor, for: Int16(POLLOUT), until: deadline) else { return false }
+                default: return false
+                }
+            }
+            return true
+        }
+    }
+
+    /// Blocks until the socket has something to read (or hangs up, which the next
+    /// `read` reports as EOF). False means the deadline passed or the socket
+    /// errored — the cases that really do end the exchange.
+    static func waitReadable(_ descriptor: Int32, until deadline: Date) -> Bool {
+        wait(descriptor, for: Int16(POLLIN), until: deadline)
+    }
+
+    /// One `poll` against `deadline`, retried across `EINTR`. A ready descriptor
+    /// returns true even when the readiness is an error condition: the following
+    /// `read`/`write` reports the real errno, so there is exactly one place that
+    /// decides what an errno means.
+    private static func wait(_ descriptor: Int32, for events: Int16, until deadline: Date) -> Bool {
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { return false }
+            var descriptors = pollfd(fd: descriptor, events: events, revents: 0)
+            let ready = poll(&descriptors, 1, Int32((remaining * 1000).rounded(.up)))
+            if ready > 0 { return true }
+            if ready == 0 { return false }
+            guard errno == EINTR else { return false }
+        }
+    }
 }
 
 /// A local Unix-domain socket the `termio sessions` CLI connects to. Unlike
@@ -43,7 +138,10 @@ struct ControlRequest: Decodable {
 ///
 /// This type owns only the transport. Resolving the caller's project, enforcing
 /// project scope, and acting on sessions all live in `TermioStore` (the handler).
-final class SessionControlListener {
+// @unchecked: the handler closures are immutable @MainActor values, and every
+// mutable property is confined to `queue`; the queue is the synchronization the
+// compiler cannot see.
+final class SessionControlListener: @unchecked Sendable {
     /// The control socket, alongside the status socket and session tree under
     /// termio's Application Support directory. Deliberately a *different* file from
     /// `HookListener.socketURL`: this one accepts drive commands, not status pings.
@@ -53,16 +151,20 @@ final class SessionControlListener {
 
     private let onRequest: @MainActor (ControlRequest) async -> Data
     /// Resolves a `watch` subscription: returns the caller's project id to scope the
-    /// stream to, or an error payload to write back and hang up. Split from
-    /// `onRequest` because a watch is not one-shot — the connection stays open and is
-    /// handed to `SessionWatchHub` instead of being answered and closed.
-    private let onWatch: @MainActor (ControlRequest) -> (UUID?, Data?)
+    /// stream to (plus the initial status snapshot to emit on attach), or an error
+    /// payload to write back and hang up. Split from `onRequest` because a watch is
+    /// not one-shot — the connection stays open and is handed to `SessionWatchHub`
+    /// instead of being answered and closed.
+    private let onWatch: @MainActor (ControlRequest) -> (UUID?, Data?, [SessionWatchEvent])
     private let queue = DispatchQueue(label: "com.termio.session-control")
     private var source: DispatchSourceRead?
     private var listenDescriptor: Int32 = -1
+    /// Watches the socket *file* we bound, so an instance that loses the path to
+    /// someone else's `unlink` finds out (see `watchForReplacement`).
+    private var pathWatch: DispatchSourceFileSystemObject?
 
     init(onRequest: @escaping @MainActor (ControlRequest) async -> Data,
-         onWatch: @escaping @MainActor (ControlRequest) -> (UUID?, Data?)) {
+         onWatch: @escaping @MainActor (ControlRequest) -> (UUID?, Data?, [SessionWatchEvent])) {
         self.onRequest = onRequest
         self.onWatch = onWatch
     }
@@ -76,26 +178,34 @@ final class SessionControlListener {
         try? FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let path = url.path
-        // A stale socket from a previous run makes bind() fail with EADDRINUSE.
+        // A socket file left behind by a previous run makes bind() fail with
+        // EADDRINUSE, so it has to go — but only once we know nobody is behind it.
+        // An unconditional unlink lets a second instance steal the path from a
+        // *healthy* app, which then keeps listening on an inode no client can
+        // reach and never learns it went deaf: every `termio sessions` call dies
+        // with ECONNREFUSED while the app looks perfectly fine. The usual thief is
+        // a bare SwiftPM binary — no bundle id means `AppChannel.suffix` is empty,
+        // so `swift run` during development lands on the *release* channel.
+        if Self.isLive(path) {
+            // Name `dev`, not `<name>`: a placeholder reads as "any name works",
+            // and the reader's next move is usually TERMIO_CHANNEL=<name>
+            // ./scripts/build-app.sh — which builds no such channel.
+            Self.log("""
+                another termio already answers at \(path) — leaving session control \
+                to it (relaunch this process with TERMIO_CHANNEL=dev for a channel of \
+                its own; that steers this run, not how a bundle was built)
+                """)
+            return
+        }
         unlink(path)
 
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { Self.log("socket() failed: \(errno)"); return }
 
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        let capacity = MemoryLayout.size(ofValue: address.sun_path)
-        let bytes = Array(path.utf8)
-        guard bytes.count < capacity else {
-            Self.log("socket path too long (\(bytes.count) ≥ \(capacity)): \(path)")
+        guard var address = Self.address(for: path) else {
+            Self.log("socket path too long: \(path)")
             close(descriptor)
             return
-        }
-        withUnsafeMutablePointer(to: &address.sun_path) {
-            $0.withMemoryRebound(to: UInt8.self, capacity: capacity) { destination in
-                for (index, byte) in bytes.enumerated() { destination[index] = byte }
-                destination[bytes.count] = 0
-            }
         }
         let size = socklen_t(MemoryLayout<sockaddr_un>.size)
         let bound = withUnsafePointer(to: &address) {
@@ -106,6 +216,7 @@ final class SessionControlListener {
             Self.log("listen() failed: \(errno)"); close(descriptor); return
         }
         _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL, 0) | O_NONBLOCK)
+        _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC)
 
         let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: queue)
         source.setEventHandler { [weak self] in self?.acceptPending() }
@@ -113,32 +224,158 @@ final class SessionControlListener {
         listenDescriptor = descriptor
         self.source = source
         source.resume()
+        watchForReplacement(path)
+    }
+
+    /// Fills a `sockaddr_un` for `path`, or nil when the path doesn't fit
+    /// `sun_path`. Shared by the listener and the liveness probe so both agree on
+    /// exactly which address they mean.
+    private static func address(for path: String) -> sockaddr_un? {
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let capacity = MemoryLayout.size(ofValue: address.sun_path)
+        let bytes = Array(path.utf8)
+        guard bytes.count < capacity else { return nil }
+        withUnsafeMutablePointer(to: &address.sun_path) {
+            $0.withMemoryRebound(to: UInt8.self, capacity: capacity) { destination in
+                for (index, byte) in bytes.enumerated() { destination[index] = byte }
+                destination[bytes.count] = 0
+            }
+        }
+        return address
+    }
+
+    /// True when something is already accepting connections at `path`. A refused
+    /// connection — or no file at all — means the socket is stale and safe to
+    /// replace; a connect that lands means a live owner we must not evict.
+    private static func isLive(_ path: String) -> Bool {
+        guard FileManager.default.fileExists(atPath: path),
+              var address = address(for: path)
+        else { return false }
+        let probe = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard probe >= 0 else { return false }
+        defer { close(probe) }
+        let size = socklen_t(MemoryLayout<sockaddr_un>.size)
+        return withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(probe, $0, size) }
+        } == 0
+    }
+
+    /// Watches for another instance's `unlink` taking our socket file away.
+    /// Without this, losing the path is permanent and silent: the listener stays
+    /// bound to an inode with no name, every client gets ECONNREFUSED, and only a
+    /// relaunch recovers. On a change we re-run `bindAndListen`, which probes
+    /// again — so a live replacement makes us stand down, a bare `rm` gets the
+    /// path back.
+    ///
+    /// The socket file itself can't be the watch target: `open(2)` on an AF_UNIX
+    /// socket fails with ENXIO, so a file-level vnode source never arms. We watch
+    /// the enclosing directory and re-check our own entry when it changes.
+    private func watchForReplacement(_ path: String) {
+        let directory = (path as NSString).deletingLastPathComponent
+        let descriptor = open(directory, O_EVTONLY)
+        guard descriptor >= 0, let bound = Self.inode(of: path) else {
+            if descriptor >= 0 { close(descriptor) }
+            return
+        }
+        let watch = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor, eventMask: [.write, .delete, .rename], queue: queue)
+        watch.setEventHandler { [weak self] in
+            guard let self else { return }
+            // Every write anywhere in the support directory lands here (state.json
+            // above all), so the cheap identity check comes first: only a vanished
+            // entry or a different inode means our socket was replaced.
+            guard Self.inode(of: path) != bound else { return }
+            Self.log("session control socket was replaced — rebinding")
+            self.pathWatch?.cancel()
+            self.pathWatch = nil
+            self.source?.cancel()
+            self.source = nil
+            self.listenDescriptor = -1
+            self.bindAndListen()
+        }
+        watch.setCancelHandler { close(descriptor) }
+        pathWatch = watch
+        watch.resume()
+    }
+
+    /// The inode behind `path`, or nil when nothing is there — the identity check
+    /// that tells "still our socket" from "someone rebound this name".
+    private static func inode(of path: String) -> UInt64? {
+        var status = stat()
+        guard lstat(path, &status) == 0 else { return nil }
+        return UInt64(status.st_ino)
     }
 
     private func acceptPending() {
         while true {
             let client = accept(listenDescriptor, nil, nil)
-            if client < 0 { break }
+            if client < 0 {
+                // EINTR is a signal, not an empty queue: retry rather than leaving a
+                // pending connection unaccepted until the next source event.
+                if errno == EINTR { continue }
+                break
+            }
+            // A client connection must not leak into spawned PTY children: forkpty
+            // duplicates every open descriptor, and an inherited copy keeps the
+            // socket alive after our close — the CLI then never sees EOF and hangs
+            // until its own timeout. CLOEXEC closes the copies at the child's exec.
+            // (Measured: a spawn burst held every in-flight reply open for the
+            // CLI's full 15s timeout; see sessions-cli-v2.md §4.2 verification.)
+            _ = fcntl(client, F_SETFD, FD_CLOEXEC)
+            // A reply written to a client that hung up must not signal the whole app:
+            // the write now retries past a full send buffer, so it can outlive a CLI
+            // that Ctrl-C'd mid-transfer and would otherwise raise SIGPIPE.
+            var on: Int32 = 1
+            setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
             handle(client)
         }
     }
 
+    /// How long a client has to finish sending its request. Enforced with `poll`,
+    /// not `SO_RCVTIMEO`: these descriptors are non-blocking (see `SocketIO`), so a
+    /// receive timeout would never arm — `read` answers EAGAIN long before it.
+    private static let requestTimeout: TimeInterval = 3
+    /// How long a reply may take to drain into a client that is reading slowly.
+    /// Comfortably under the CLI's own 15s bound, so a wedged transfer surfaces as
+    /// this side hanging up rather than as the client timing out.
+    private static let replyTimeout: TimeInterval = 10
+
     private func handle(_ descriptor: Int32) {
-        var timeout = timeval(tv_sec: 3, tv_usec: 0)
-        setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
-                   socklen_t(MemoryLayout<timeval>.size))
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
         var request: ControlRequest?
-        while data.count < 256 * 1024 {
+        let deadline = Date().addingTimeInterval(Self.requestTimeout)
+        readLoop: while data.count < 256 * 1024 {
             let count = read(descriptor, &buffer, buffer.count)
-            guard count > 0 else { break }
-            data.append(contentsOf: buffer[0..<count])
-            if let decoded = Self.decode(data) { request = decoded; break }
+            if count > 0 {
+                data.append(contentsOf: buffer[0..<count])
+                if let decoded = Self.decode(data) { request = decoded; break }
+                continue
+            }
+            // Zero is the one answer that really means "no more is coming": the peer
+            // closed its write side. Everything else needs the errno to tell a
+            // finished request from an unfinished one.
+            if count == 0 { break }
+            switch errno {
+            case EINTR: continue
+            case EAGAIN, EWOULDBLOCK:
+                // Nothing has arrived *yet*. `accept` returns the instant the connect
+                // lands — routinely before the client's write does — so this is the
+                // normal state of the very first read, not an empty request. Treating
+                // it as EOF is what answered "malformed request" to perfectly good
+                // requests whenever the app was busy enough to win that race.
+                guard SocketIO.waitReadable(descriptor, until: deadline) else { break readLoop }
+            default: break readLoop
+            }
         }
         let decoded = request ?? Self.decode(data)
         guard let decoded else {
-            Self.writeAll(descriptor, Data("error: malformed request\n".utf8))
+            // The request never decoded, so its `format` is unknowable — reply in the
+            // documented JSON error shape, which the text-mode CLI also recognizes
+            // (it matches on `"ok":false`). Only hand-rolled clients ever hit this.
+            Self.writeAll(descriptor, Data(
+                "{\"ok\":false,\"error\":\"bad_request\",\"message\":\"malformed request\",\"schema_version\":1}\n".utf8))
             close(descriptor)
             return
         }
@@ -148,7 +385,7 @@ final class SessionControlListener {
         if decoded.op == "watch" {
             let resolve = onWatch
             Task { @MainActor in
-                let (projectID, errorData) = resolve(decoded)
+                let (projectID, errorData, snapshot) = resolve(decoded)
                 self.queue.async {
                     if let errorData {
                         Self.writeAll(descriptor, errorData)
@@ -158,7 +395,8 @@ final class SessionControlListener {
                     guard let projectID else { close(descriptor); return }
                     SessionWatchHub.shared.subscribe(
                         descriptor: descriptor, projectID: projectID,
-                        states: Self.watchStates(decoded.text), wantsJSON: decoded.wantsJSON)
+                        states: Self.watchStates(decoded.text), wantsJSON: decoded.wantsJSON,
+                        snapshot: snapshot)
                 }
             }
             return
@@ -187,16 +425,9 @@ final class SessionControlListener {
             .filter { !$0.isEmpty })
     }
 
-    private static func writeAll(_ descriptor: Int32, _ data: Data) {
-        data.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            var offset = 0
-            while offset < data.count {
-                let written = write(descriptor, base + offset, data.count - offset)
-                if written <= 0 { break }
-                offset += written
-            }
-        }
+    @discardableResult
+    private static func writeAll(_ descriptor: Int32, _ data: Data) -> Bool {
+        SocketIO.writeAll(descriptor, data, timeout: replyTimeout)
     }
 
     private static func decode(_ data: Data) -> ControlRequest? {
@@ -214,11 +445,30 @@ final class SessionControlListener {
 /// writes off the main thread.
 struct SessionWatchEvent {
     let projectID: UUID
-    let handle: String
-    /// Wire status token (`working` / `idle` / `done` / `needs-you`).
+    /// Canonical deep link (`termio://session/<uuid>`) — the address that
+    /// survives promotion (docs/design/20260801-session-deep-link.md).
+    let link: String
+    /// Wire status token (`working` / `idle` / `done` / `needs-you`), or the
+    /// watch-plane `stalled` — a supervision judgment broadcast without ever
+    /// becoming the session's real status.
     let status: String
     let title: String
     let cwd: String
+    /// Marks the initial current-status lines emitted on subscribe, so a JSON
+    /// consumer can tell "already was" from a live transition.
+    var snapshot = false
+    /// `needs-you` only: the on-screen question excerpt, so a supervisor can act
+    /// without a round-trip to scrape the viewport (design doc §4.3).
+    var prompt: String? = nil
+    /// `done` only: the transcript address plus its line count now, so the reply
+    /// is readable without another `list --json` round-trip.
+    var transcript: String? = nil
+    var cursorEnd: Int? = nil
+    /// `stalled` only: the stall detector's reasoning ("working 42m, no repo
+    /// change, transcript +3 lines"). `stalled` is a watch-plane signal, never a
+    /// session's real status — see the loop-level stall detection in
+    /// `TermioStore+AgentStatus` (design doc §4.7).
+    var evidence: String? = nil
 }
 
 /// Holds the open `watch` connections and fans status transitions out to them. A
@@ -232,27 +482,48 @@ struct SessionWatchEvent {
 /// client (`… | nc -U`) half-closes its write side as soon as it has sent the
 /// request, which would look like a disconnect while the client is very much still
 /// reading. `SO_NOSIGPIPE` keeps that failing write from signalling the whole app.
-final class SessionWatchHub {
+// @unchecked: every mutable property is confined to `queue`, per the isolation
+// story above; the queue is the synchronization the compiler cannot see.
+final class SessionWatchHub: @unchecked Sendable {
     static let shared = SessionWatchHub()
 
     private struct Subscriber {
         let projectID: UUID
         let states: Set<String>
         let wantsJSON: Bool
+        /// When the hub last successfully wrote to this client — the silence the
+        /// 30s heartbeat measures.
+        var lastWrite: Date
     }
 
     private let queue = DispatchQueue(label: "com.termio.session-watch")
     private var subscribers: [Int32: Subscriber] = [:]
+    private var heartbeatTimer: DispatchSourceTimer?
+    private static let heartbeatInterval: TimeInterval = 30
 
     /// Adopt a client descriptor as a watcher. Ownership of the fd transfers here —
-    /// the hub closes it when the client disconnects.
-    func subscribe(descriptor: Int32, projectID: UUID, states: Set<String>, wantsJSON: Bool) {
+    /// the hub closes it when the client disconnects. `snapshot` is written first:
+    /// one line per scoped session with its *current* status, so a supervisor
+    /// attaching late still learns a session is already `needs-you` (no
+    /// `list`-then-`watch` race). The snapshot ignores the state filter — it is a
+    /// roster, not a transition.
+    func subscribe(
+        descriptor: Int32, projectID: UUID, states: Set<String>, wantsJSON: Bool,
+        snapshot: [SessionWatchEvent]
+    ) {
         queue.async {
             var on: Int32 = 1
             setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on,
                        socklen_t(MemoryLayout<Int32>.size))
+            for event in snapshot {
+                guard Self.write(descriptor, wantsJSON ? event.jsonLine : event.wireLine) else {
+                    close(descriptor)
+                    return
+                }
+            }
             self.subscribers[descriptor] = Subscriber(
-                projectID: projectID, states: states, wantsJSON: wantsJSON)
+                projectID: projectID, states: states, wantsJSON: wantsJSON, lastWrite: Date())
+            self.startHeartbeatIfNeeded()
         }
     }
 
@@ -266,7 +537,9 @@ final class SessionWatchHub {
             for (fd, sub) in self.subscribers {
                 guard sub.projectID == event.projectID, sub.states.contains(event.status)
                 else { continue }
-                if !Self.write(fd, sub.wantsJSON ? jsonLine : line) {
+                if Self.write(fd, sub.wantsJSON ? jsonLine : line) {
+                    self.subscribers[fd]?.lastWrite = Date()
+                } else {
                     self.subscribers.removeValue(forKey: fd)
                     close(fd)
                 }
@@ -274,138 +547,214 @@ final class SessionWatchHub {
         }
     }
 
-    /// Best-effort full write; returns false when the reader is gone (so the caller
-    /// reaps the subscriber).
-    private static func write(_ fd: Int32, _ data: Data) -> Bool {
-        data.withUnsafeBytes { raw -> Bool in
-            guard let base = raw.baseAddress else { return true }
-            var offset = 0
-            while offset < data.count {
-                let n = Darwin.write(fd, base + offset, data.count - offset)
-                if n <= 0 { return false }
-                offset += n
-            }
-            return true
+    /// A `{"heartbeat":true}` line after 30s of silence, JSON subscribers only —
+    /// heartbeats are for programs; a human watching text mode just sees quiet.
+    /// Doubles as proactive dead-reader reaping: a failed heartbeat write reaps the
+    /// subscriber now instead of on the next (possibly far-off) transition.
+    private func startHeartbeatIfNeeded() {
+        guard heartbeatTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now() + Self.heartbeatInterval, repeating: Self.heartbeatInterval,
+            leeway: .seconds(1))
+        timer.setEventHandler { [weak self] in self?.sendHeartbeats() }
+        heartbeatTimer = timer
+        timer.resume()
+    }
+
+    private func sendHeartbeats() {
+        if subscribers.isEmpty {
+            heartbeatTimer?.cancel()
+            heartbeatTimer = nil
+            return
         }
+        let line = Data("{\"heartbeat\":true}\n".utf8)
+        let now = Date()
+        for (fd, sub) in subscribers {
+            guard sub.wantsJSON,
+                  now.timeIntervalSince(sub.lastWrite) >= Self.heartbeatInterval else { continue }
+            if Self.write(fd, line) {
+                subscribers[fd]?.lastWrite = now
+            } else {
+                subscribers.removeValue(forKey: fd)
+                close(fd)
+            }
+        }
+    }
+
+    /// How long a watcher may leave a pushed line undrained before the hub gives up
+    /// on it. Shorter than the request/response bound: a live `watch` client reads
+    /// continuously, so silence this long is a client that stopped consuming.
+    private static let writeTimeout: TimeInterval = 5
+
+    /// Full write; returns false when the reader is gone or has stopped draining
+    /// for `writeTimeout` (so the caller reaps the subscriber). A momentarily full
+    /// send buffer is neither: the snapshot a large project emits on attach runs
+    /// past 8 KiB, and treating that as a dead reader dropped the subscriber
+    /// mid-roster.
+    private static func write(_ fd: Int32, _ data: Data) -> Bool {
+        SocketIO.writeAll(fd, data, timeout: writeTimeout)
     }
 }
 
 private extension SessionWatchEvent {
     var wireLine: Data {
         let suffix = title.isEmpty ? "" : "  \(title)"
-        return Data("\(handle)  [\(status)]\(suffix)\n".utf8)
+        let detail = evidence.map { "  — \($0)" } ?? ""
+        return Data("\(link)  [\(status)]\(suffix)\(detail)\n".utf8)
     }
     var jsonLine: Data {
-        let object: [String: Any] = [
-            "schema_version": 1, "handle": handle, "status": status,
-            "title": title, "cwd": cwd,
+        var object: [String: Any] = [
+            "schema_version": 1, "link": link, "status": status, "title": title,
         ]
+        // Omitted, not "": the runtime simply hasn't seen an OSC 7 yet, and an
+        // empty string reads like a real (broken) path to a JSON consumer.
+        if !cwd.isEmpty { object["cwd"] = cwd }
+        if snapshot { object["snapshot"] = true }
+        if let prompt { object["prompt"] = prompt }
+        if let transcript { object["transcript"] = transcript }
+        if let cursorEnd { object["cursor_end"] = cursorEnd }
+        if let evidence { object["evidence"] = evidence }
         let data = (try? JSONSerialization.data(
             withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data()
         return data + Data("\n".utf8)
     }
 }
 
-/// Tells a coding agent that the `termio sessions` CLI exists and is scoped to its
-/// own project, by writing a small marker-wrapped block into the user-level
-/// instruction files agents read on startup (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`).
+/// Tells a coding agent that the `termio sessions` CLI exists by installing an
+/// Agent Skill — a `SKILL.md` in each agent's user-level skills directory, as
+/// declared by that agent's manifest `skills.dir` (`~/.claude/skills`,
+/// `~/.config/opencode/skills`, …) — instead of editing the agent's always-loaded
+/// instruction file. The agent sees only the skill's one-line description up front
+/// and pulls the full guidance in when a task actually involves driving sibling
+/// sessions, so every unrelated session stays clean.
 ///
-/// Deliberately writes to the *user-level* files, not a project's own `CLAUDE.md`
-/// / `AGENTS.md`: those belong to the user's repository and editing them would
-/// dirty their git tree. Conservative like `AgentStatusHooks` — it only ever
-/// touches text between its own markers, leaving everything else untouched, and
-/// removes exactly that block on uninstall.
+/// Earlier versions injected a marker-wrapped block into `~/.claude/CLAUDE.md`
+/// and `~/.codex/AGENTS.md`; every sync still strips that block wherever it
+/// remains, so an upgrade never leaves the guidance installed twice.
+///
+/// The target set is catalog-driven (`AgentCatalog`), so a user-dropped custom
+/// agent that declares `skills.dir` in its manifest gets the skill installed too,
+/// with no code change — the same data path `AgentStatusHooks` uses for hooks.
 enum SessionSkillInstaller {
     private static let beginMarker = "<!-- termio:sessions BEGIN -->"
     private static let endMarker = "<!-- termio:sessions END -->"
 
-    private static var targets: [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return [
+    private static var home: URL { FileManager.default.homeDirectoryForCurrentUser }
+
+    /// The skill file an agent's declared skills directory will carry, per agent in
+    /// the catalog. Installation follows `AgentCatalog.all` so a user override's
+    /// `skills` declaration wins; duplicate directories (an override of a bundled
+    /// id) install once. Only agents whose CLI is actually installed get the skill,
+    /// so a machine without, say, Cursor never grows a `~/.cursor/skills` directory
+    /// it cannot use — `sync` re-checks on every launch, so an agent installed later
+    /// is picked up automatically. The `installed` predicate is injectable for
+    /// tests; the default resolves the agent's command like a session launch would.
+    static func skillTargets(
+        installed: (AgentDefinition) -> Bool = { agent in
+            guard let command = agent.command else { return true }
+            return AgentAvailability.isCommandInstalled(command)
+        }
+    ) -> [(name: String, url: URL)] {
+        let catalog = AgentCatalog.shared
+        var seen = Set<String>()
+        return catalog.all.compactMap { agent in
+            guard let directory = agent.skillDir, installed(agent) else { return nil }
+            let url = skillFileURL(directory: directory)
+            guard seen.insert(url.path).inserted else { return nil }
+            return (agent.displayName, url)
+        }
+    }
+
+    /// Every skills directory termio has ever installed into — bundled declarations
+    /// plus the live catalog — so uninstalling also sweeps a shipped dir that a user
+    /// override removed or redirected. Mirrors `AgentStatusHooks.allKnownInstallers`.
+    static var allKnownSkillTargets: [(name: String, url: URL)] {
+        let catalog = AgentCatalog.shared
+        var seen = Set<String>()
+        return (catalog.bundled + catalog.all).compactMap { agent in
+            guard let directory = agent.skillDir else { return nil }
+            let url = skillFileURL(directory: directory)
+            guard seen.insert(url.path).inserted else { return nil }
+            return (agent.displayName, url)
+        }
+    }
+
+    /// Where an agent's declared skills directory carries termio's skill
+    /// (`<dir>/termio/SKILL.md`), with `~` expanded. The pure path logic, so tests
+    /// can pin it without touching the real home directory.
+    static func skillFileURL(directory: String) -> URL {
+        URL(fileURLWithPath: (directory as NSString).expandingTildeInPath)
+            .appendingPathComponent("termio/SKILL.md")
+    }
+
+    /// The instruction files earlier versions wrote the guidance into.
+    private static var legacyTargets: [URL] {
+        [
             home.appendingPathComponent(".claude/CLAUDE.md"),
             home.appendingPathComponent(".codex/AGENTS.md"),
         ]
     }
 
-    /// The injected guidance — a compact "skill" teaching the agent the `termio
-    /// sessions` CLI: the commands, and the key idea that a sibling's *response* is
-    /// read from its own transcript (the address `send` returns), not by scraping the
-    /// terminal. Scoped to the current project automatically.
-    private static var block: String {
-        """
-        \(beginMarker)
-        ## Driving sibling sessions (termio)
-
-        You are running inside termio alongside other agent sessions in this same
-        project. Coordinate with them through the `termio sessions` CLI. Every command
-        is scoped to this project automatically; add `--json` for machine-readable
-        output. Sessions are addressed by the handle `list` prints: `<agent>@<id>`
-        (e.g. `claude@ab12cd34`).
-
-        - `termio sessions list` — siblings in this project, with status (working /
-          idle / needs-you / done)
-        - `termio sessions watch` — block and stream one line per sibling status
-          change (`done` / `needs-you` by default) until you interrupt it — the push
-          alternative to polling `list`. `--state working,idle,done,needs-you` widens it.
-        - `termio sessions spawn "<prompt>"` — start a NEW agent session on the
-          prompt (`--agent codex` picks the agent; default: your own kind). The
-          reply contains the new session's handle — use it for every follow-up.
-        - `termio sessions send <agent>@<id> "<text>"` — type text into that existing
-          sibling and submit it with a real Return keypress. Send a prompt to drive
-          it, or a menu choice (`"1"`, `"yes"`) to answer a permission prompt.
-        - `termio sessions close <agent>@<id> …` — close session tabs;
-          `termio sessions focus <agent>@<id>` — bring one to the front in the app
-
-        ### Targeting discipline
-
-        - Copy handles verbatim from `list` or a `send` reply; never guess or
-          construct one.
-        - One request, one target. Never send the same prompt to several siblings,
-          and never run multiple `send` commands in parallel — delegate to ONE
-          session.
-        - Unsure which sibling the user means? Ask them, or start a fresh session
-          with `spawn` — don't broadcast.
-
-        ### Reading a sibling's response
-
-        Don't scrape the terminal. `spawn`/`send` returns the sibling's **transcript**
-        — the agent's own structured Q&A log (Claude Code: a JSONL file) — plus a
-        **cursor** (its line count at send time). To read the reply:
-
-        1. `spawn`/`send` and note `transcript` + `cursor` from the output. (A just-
-           started session has no transcript yet; it appears in `list --json` once the
-           agent reports it — read that file from the start.)
-        2. Poll `termio sessions list` until that session's status is `done` (or
-           `needs-you` if it's blocked waiting on input — then `send` its answer).
-        3. Read the transcript file from line `cursor` onward; the `assistant` entries
-           after it are the reply. (Each line is a JSON object with a `type`/`role`.)
-
-        Workflow: send → wait for `done` via `list` → read the transcript tail. Prefer
-        this over assuming a sibling is finished. Supervising several at once? Block on
-        `termio sessions watch` instead of polling — it prints the handle the moment any
-        sibling turns `done` or `needs-you`, so you act on the transition, not a spin loop.
-        \(endMarker)
-        """
+    /// The skill content, shipped as a real markdown file in the app's resource
+    /// bundle (`Resources/skills/termio/SKILL.md`) rather than a string in
+    /// code, and installed verbatim. `nil` only when the resource bundle is missing
+    /// or unreadable — sync reports that as a per-target failure instead of
+    /// installing an empty skill. Mirrored at the repo-root `skills/termio/`
+    /// (installable from GitHub via `npx skills add` / `gh skill`) and at
+    /// https://termio.sh/skill.md (`web/landing/public/skill.md`); a test keeps
+    /// all copies identical.
+    static var skill: String? {
+        Bundle.termioResources
+            .url(forResource: "SKILL", withExtension: "md", subdirectory: "skills/termio")
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
     }
 
-    static func sync(enabled: Bool) {
-        for url in targets {
-            if enabled { install(into: url) } else { uninstall(from: url) }
+    /// Returns which skills directories ended up carrying the skill, so the
+    /// Settings row can confirm the install; the uninstall path reports nothing,
+    /// since no UI asks about it. Every sync also strips the legacy instruction-
+    /// file block, so re-enabling after an upgrade migrates in place.
+    @discardableResult
+    static func sync(enabled: Bool) -> InstallOutcome {
+        var outcome = InstallOutcome()
+        for url in legacyTargets { removeLegacyBlock(from: url) }
+        if enabled {
+            guard let skill else {
+                FileHandle.standardError.write(
+                    Data("termio: session skill resource missing from the app bundle\n".utf8))
+                for (name, _) in skillTargets() { outcome.record(name, installed: false) }
+                return outcome
+            }
+            for (name, url) in skillTargets() {
+                outcome.record(name, installed: write(skill, to: url))
+            }
+        } else {
+            for (_, url) in allKnownSkillTargets { removeSkill(at: url) }
         }
+        return outcome
     }
 
-    private static func install(into url: URL) {
-        let stripped = strippedExisting(at: url)
-        let separator = stripped.isEmpty ? "" : "\n\n"
-        write(stripped + separator + block + "\n", to: url)
+    /// Removes the installed skill folder wholesale — termio owns the folder, so
+    /// there is no user content inside it to preserve.
+    private static func removeSkill(at url: URL) {
+        let folder = url.deletingLastPathComponent()
+        guard FileManager.default.fileExists(atPath: folder.path) else { return }
+        try? FileManager.default.removeItem(at: folder)
     }
 
-    private static func uninstall(from url: URL) {
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        let stripped = strippedExisting(at: url)
-        // If removing our block leaves nothing, the file held only our note (we
-        // created it), so delete it rather than leaving an empty file behind. A
-        // file with the user's own content is rewritten preserving it.
+    /// Strips the marker-wrapped block earlier versions injected into the
+    /// user-level instruction file, leaving the user's own text untouched. A file
+    /// left empty by the strip held only our note (we created it), so it is
+    /// deleted rather than kept as an empty file. Files without the markers are
+    /// never rewritten.
+    private static func removeLegacyBlock(from url: URL) {
+        guard let contents = try? String(contentsOf: url, encoding: .utf8),
+              let begin = contents.range(of: beginMarker),
+              let end = contents.range(of: endMarker, range: begin.upperBound..<contents.endIndex)
+        else { return }
+        var result = contents
+        result.removeSubrange(begin.lowerBound..<end.upperBound)
+        let stripped = result.trimmingCharacters(in: .newlines)
         if stripped.isEmpty {
             try? FileManager.default.removeItem(at: url)
         } else {
@@ -413,31 +762,23 @@ enum SessionSkillInstaller {
         }
     }
 
-    /// The file's current contents with any existing termio block (and the
-    /// whitespace around it) removed, so install/uninstall never touch the user's
-    /// own text. Returns "" when the file is absent or unreadable.
-    private static func strippedExisting(at url: URL) -> String {
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return "" }
-        guard let begin = contents.range(of: beginMarker),
-              let end = contents.range(of: endMarker, range: begin.upperBound..<contents.endIndex)
-        else { return contents.trimmingCharacters(in: .newlines) }
-        var result = contents
-        result.removeSubrange(begin.lowerBound..<end.upperBound)
-        return result.trimmingCharacters(in: .newlines)
-    }
-
-    private static func write(_ contents: String, to url: URL) {
+    /// Returns whether the file now holds `contents` — true both for a fresh write
+    /// and for the skipped identical one, false only when the write threw.
+    @discardableResult
+    private static func write(_ contents: String, to url: URL) -> Bool {
         let data = Data(contents.utf8)
-        // Don't rewrite an unchanged note on every launch: avoids churning a
-        // user-owned instruction file and the race of clobbering a concurrent edit.
-        if (try? Data(contentsOf: url)) == data { return }
+        // Don't rewrite an unchanged file on every launch: avoids churning it
+        // and the race of clobbering a concurrent edit.
+        if (try? Data(contentsOf: url)) == data { return true }
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
+            return true
         } catch {
             FileHandle.standardError.write(
                 Data("termio: session skill could not write \(url.path): \(error)\n".utf8))
+            return false
         }
     }
 }
@@ -545,8 +886,39 @@ enum CommandLineTool {
         if case .conflict = audit() { return .conflict }
         let target = installURL.path
         if linkWithoutPrivileges(from: supportCopyURL.path, to: target) { return audit() }
-        linkWithAdminPrompt(from: supportCopyURL.path, to: target)
+        let directory = (target as NSString).deletingLastPathComponent
+        runWithAdminPrompt(
+            "mkdir -p \(shellQuote(directory)) && ln -sf \(shellQuote(supportCopyURL.path)) \(shellQuote(target))",
+            label: "install")
         return audit()
+    }
+
+    /// Removes our PATH symlink and returns the fresh audit. Only ever deletes a
+    /// link the audit attributes to termio (installed or stale); a conflicting
+    /// file someone else created is left alone.
+    @discardableResult
+    static func uninstall() -> Status {
+        let current = audit()
+        switch current {
+        case .installed, .stale:
+            let target = installURL.path
+            if removeWithoutPrivileges(at: target) { return audit() }
+            runWithAdminPrompt("rm \(shellQuote(target))", label: "uninstall")
+            return audit()
+        case .notInstalled, .conflict, .unavailable:
+            return current
+        }
+    }
+
+    private static func removeWithoutPrivileges(at target: String) -> Bool {
+        let directory = (target as NSString).deletingLastPathComponent
+        guard FileManager.default.isWritableFile(atPath: directory) else { return false }
+        do {
+            try FileManager.default.removeItem(atPath: target)
+            return true
+        } catch {
+            return false
+        }
     }
 
     private static func linkWithoutPrivileges(from source: String, to target: String) -> Bool {
@@ -564,18 +936,16 @@ enum CommandLineTool {
         }
     }
 
-    /// One authorization prompt does `mkdir -p` + `ln -sf` as admin, for the case
-    /// where `/usr/local/bin` is root-owned. The user can cancel, in which case the
-    /// follow-up audit simply reports it still isn't installed.
-    private static func linkWithAdminPrompt(from source: String, to target: String) {
-        let directory = (target as NSString).deletingLastPathComponent
-        let command = "mkdir -p \(shellQuote(directory)) && ln -sf \(shellQuote(source)) \(shellQuote(target))"
+    /// One authorization prompt runs the command as admin, for the case where
+    /// `/usr/local/bin` is root-owned. The user can cancel, in which case the
+    /// follow-up audit simply reports the state unchanged.
+    private static func runWithAdminPrompt(_ command: String, label: String) {
         let script = "do shell script \"\(command)\" with administrator privileges"
         var error: NSDictionary?
         NSAppleScript(source: script)?.executeAndReturnError(&error)
         if let error {
             FileHandle.standardError.write(
-                Data("termio: command-line tool install declined or failed: \(error)\n".utf8))
+                Data("termio: command-line tool \(label) declined or failed: \(error)\n".utf8))
         }
     }
 

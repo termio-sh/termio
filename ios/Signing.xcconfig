@@ -1,0 +1,22 @@
+// Code-signing identity for device builds. Simulator builds need none.
+//
+// The default is the team that ships termio on the App Store. To build on your
+// own device, override it without checking anything into git: put your team in
+// a DeveloperSettings.xcconfig inside a SharedXcodeSettings folder next to your
+// clone. For a clone at ~/code/termio that path is
+//
+//   ~/code/SharedXcodeSettings/DeveloperSettings.xcconfig
+//
+// holding one line:
+//
+//   DEVELOPMENT_TEAM = <your team id>
+//
+// Xcode ▸ Settings ▸ Accounts shows the id. The file sits outside the repo, so
+// one copy serves every clone and every git worktree.
+
+DEVELOPMENT_TEAM = 5Y27G7B6D8
+
+// A clone resolves the first path; a worktree under termio-worktrees/<slug>
+// sits one level deeper and resolves the second. A missing include is skipped.
+#include? "../../SharedXcodeSettings/DeveloperSettings.xcconfig"
+#include? "../../../SharedXcodeSettings/DeveloperSettings.xcconfig"

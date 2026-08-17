@@ -1,0 +1,49 @@
+---
+title: Git worktree
+description: Termio 直接从 git 读取仓库的 worktree，并把它们显示为项目下嵌套的一层，让并行的 Agent 工作彼此隔离。
+x-i18n:
+  source_path: worktrees.mdx
+  source_hash: 4dca84ce78e77f875b51272c4f7ce825896228d74ea66514cb6a8bfb763b5ddc
+  generated_at: 2026-08-16
+---
+
+当好几个 Agent 同时在一个仓库里干活时，你不希望它们互相踩文件。git worktree 给每条工作线
+一份自己的检出、自己的分支——而 Termio 原生把它们呈现出来。
+
+## Termio 怎么看 worktree
+
+Termio 直接从 git 推导 worktree（`git worktree list`），所以你创建的任何 worktree——用
+命令行还是别的方式——都会自动出现在侧栏里。每个 worktree 显示为它所属项目下嵌套的文件夹，
+以分支名标注，形成三级树：项目 → worktree → 会话。
+
+这个列表会保持同步：项目加载时、应用重新获得焦点时，以及 git 目录发生变化时，Termio 都会
+重新对账。
+
+## 在 worktree 里工作
+
+在某个 worktree 里打开会话，它就从那个 worktree 的目录、那个 worktree 的分支开始。让一个
+Agent 对着你的 `main` 检出，另一个对着 `feat/…` worktree，它们的修改永不冲突——各有自己的
+工作树、自己的索引、自己的分支。
+
+空的 worktree 仍会留在树中。打开它的上下文菜单，选择 **新建终端** 或 **新建 Agent 会话**，
+即可从那里开始。
+
+<DocsImage
+  src="/screenshots/docs/12-worktree-hierarchy.png"
+  alt="Termio 项目展开 main 和 feature worktree，空 worktree 的上下文菜单提供「新建终端」与「新建 Agent 会话」"
+  width={2424}
+  height={1664}
+/>
+
+## 审阅成果
+
+检查器的 git 面板按设计是只读的：三个标签 **更改**、**对比** 和 **历史**，让你逐个 worktree
+读差异、看这个分支会合入什么、浏览提交。提交、推送和开 PR 都发生在终端里，因为你（或
+Agent）本来就在那里——参见[检查器指南](/zh-CN/docs/inspector)。
+
+<DocsImage
+  src="/screenshots/docs/13-review-worktree.png"
+  alt="Termio 侧栏选中一个 feature worktree，检查器显示其独立文件更改和统一差异"
+  width={2424}
+  height={1664}
+/>

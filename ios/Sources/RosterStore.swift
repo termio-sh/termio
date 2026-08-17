@@ -21,6 +21,12 @@ final class RosterStore {
     /// roster. New-session menus mirror this so the phone never offers an
     /// agent the desktop has turned off.
     private(set) var enabledAgents: [RosterAgent] = []
+    /// The Mac's `~/.ssh/config` host aliases, requested on connect. The
+    /// Terminals ＋ → New SSH menu is a read-only pick from these — the phone
+    /// never types a host, it only chooses one the Mac already knows (the SSH
+    /// twin of Projects ＋ reopening a known folder). Empty until the Mac
+    /// answers, or when the config has no hosts.
+    private(set) var sshHosts: [WireSSHHost] = []
     private(set) var companionURL: URL?
     /// `MockSession.key` of the session filling the screen — its row gets the
     /// current-chat pill wherever session rows render.
@@ -33,6 +39,10 @@ final class RosterStore {
     var onStartError: ((String) -> Void)?
 
     private var client: CompanionClient?
+    /// True when the current connection came from the paired-Mac list (not a
+    /// `-roster-url` dev launch arg) — only then may a roster's identity be
+    /// adopted into that list.
+    private var connectionIsPersisted = false
     /// The project+agent of an in-flight `start`, so the `.started` reply
     /// knows what to open. `agent` is nil for a bare New Chat — the Mac picks
     /// one and echoes it back in `.started`.
@@ -77,7 +87,7 @@ final class RosterStore {
 
     func start() {
         connectIfConfigured()
-        // The Connectivity settings page edits the pairing; the socket's
+        // The Devices settings page edits the pairing; the socket's
         // owner follows it.
         pairingObserver = NotificationCenter.default.addObserver(
             forName: CompanionLink.pairingDidChange, object: nil, queue: .main
@@ -87,6 +97,12 @@ final class RosterStore {
                 if let url = CompanionLink.savedURL {
                     self.client?.stop()
                     self.client = nil
+                    // Switching Macs must not leave the old Mac's projects on
+                    // screen while the new socket dials.
+                    self.projects = []
+                    self.enabledAgents = []
+                    self.sshHosts = []
+                    NotificationCenter.default.post(name: Self.didChange, object: nil)
                     self.connect(to: url)
                 } else {
                     self.disconnect()
@@ -132,26 +148,27 @@ final class RosterStore {
         client?.send(.start(projectID: projectID, agent: agent.id))
     }
 
-    /// The Chats tab's one-tap ＋: start a chat with no agent named, so the
-    /// Mac resolves its default (pinned → last used → first enabled — the
-    /// exact ⌘N policy, which also keeps updating "last used"). The phone
-    /// deliberately owns none of that policy; the per-agent menu behind
-    /// long-press stays the escape hatch for picking a specific one.
-    func startDefaultChat() {
-        guard let project = chatsProject, let projectID = project.rosterID else { return }
-        pendingStart = (project, nil)
-        client?.send(.start(projectID: projectID, agent: nil))
-    }
-
     /// The Terminals tab's ＋: open a plain login shell at `~` in the loose
     /// `.terminals` funnel. The wire agent token `"terminal"` maps to the Mac's
-    /// `.terminal` preset (an unknown token also falls back to it), so the Mac
-    /// starts a shell — not the default chat agent an agent-less start would.
-    /// Needs an existing terminals container to land in; the ＋ hides until then.
-    func startDefaultTerminal() {
-        guard let project = terminalsProject, let projectID = project.rosterID else { return }
-        pendingStart = (project, nil)
-        client?.send(.start(projectID: projectID, agent: "terminal"))
+    /// The Terminals tab's ＋ → "New Terminal": a plain login shell in the Mac's
+    /// loose `.terminals` funnel. Project-less on the wire (`.startTerminal`), so
+    /// — unlike the old `.start` path — it can seed the very first terminal too,
+    /// no container need pre-exist. Opens attached on the `.started` echo, so a
+    /// placeholder stands in until the roster push carries the real container.
+    func startNewTerminal() {
+        pendingStart = (terminalsProject ?? .terminalsPlaceholder, nil)
+        client?.send(.startTerminal)
+    }
+
+    /// The Terminals tab's ＋ → "New SSH": an `ssh <host>` terminal in that same
+    /// funnel. `host` is always a `~/.ssh/config` alias the Mac handed us (see
+    /// `sshHosts`) — the phone only picks a host the Mac already knows, it never
+    /// authors one. Lands project-less like New Terminal.
+    func startSSH(host: String) {
+        let host = host.trimmingCharacters(in: .whitespaces)
+        guard !host.isEmpty else { return }
+        pendingStart = (terminalsProject ?? .terminalsPlaceholder, nil)
+        client?.send(.startSSH(host: host))
     }
 
     /// Close on the Mac; the next roster push drops the row everywhere.
@@ -179,21 +196,38 @@ final class RosterStore {
                 return ProcessInfo.processInfo.arguments.indices.contains(next)
                     ? ProcessInfo.processInfo.arguments[next] : nil
             }
-        let saved = CompanionLink.savedURL?.absoluteString
-        guard let urlString = arg ?? saved, let url = URL(string: urlString) else { return }
+        if let arg, let url = URL(string: arg) {
+            connect(to: url, persisted: false)
+            return
+        }
+        guard let url = CompanionLink.savedURL else { return }
         connect(to: url)
     }
 
-    /// Open (or replace) the app's single Mac link: one socket, whole roster.
-    private func connect(to url: URL) {
+    /// Open (or replace) the link to the active Mac: one socket, whole roster.
+    private func connect(to url: URL, persisted: Bool = true) {
+        connectionIsPersisted = persisted
         companionURL = url
         CompanionLink.state = .connecting
         let client = CompanionClient(url: url)
-        client.onConnected = { connected in
+        client.onConnected = { [weak self] connected in
             CompanionLink.state = connected ? .connected : .connecting
+            // Refresh the SSH host list on every (re)connect so New SSH reflects
+            // the Mac's current ~/.ssh/config without a manual pull.
+            if connected { self?.client?.send(.sshConfigHosts) }
+        }
+        client.onSSHConfig = { [weak self] hosts in
+            guard let self else { return }
+            sshHosts = hosts
+            NotificationCenter.default.post(name: Self.didChange, object: nil)
         }
         client.onRoster = { [weak self] roster in
             guard let self else { return }
+            // The roster names its Mac; key the pairing list by that identity
+            // (first roster after a fresh pairing, or a rename on the Mac).
+            if connectionIsPersisted, let macID = roster.macID {
+                CompanionLink.adoptIdentity(macID: macID, name: roster.macName)
+            }
             enabledAgents = roster.agents
             let agentsByID = Dictionary(
                 roster.agents.map { ($0.id, $0) },
@@ -223,6 +257,17 @@ final class RosterStore {
             pendingStart = nil
             onStartError?(reason)
         }
+        client.onConnectionFailure = { [weak self] reason in
+            guard let self else { return }
+            // A refusal closes the socket immediately; stop the reconnect loop
+            // so its next optimistic open cannot erase the reason from the UI.
+            self.client?.stop()
+            projects = []
+            enabledAgents = []
+            sshHosts = []
+            CompanionLink.state = .failed(reason)
+            NotificationCenter.default.post(name: Self.didChange, object: nil)
+        }
         client.start()
         self.client = client
     }
@@ -235,6 +280,7 @@ final class RosterStore {
         CompanionLink.state = .unpaired
         projects = []
         enabledAgents = []
+        sshHosts = []
         NotificationCenter.default.post(name: Self.didChange, object: nil)
     }
 

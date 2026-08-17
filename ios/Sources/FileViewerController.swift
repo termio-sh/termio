@@ -238,7 +238,7 @@ final class FileViewerController: UIViewController {
 
     private func render() {
         guard let data = file.data, let text = String(data: data, encoding: .utf8) else {
-            textView.text = "Couldn't decode this file as text."
+            textView.text = localized("Couldn't decode this file as text.")
             footerLabel.text = Self.format(bytes: file.size)
             editButton.isHidden = true
             return
@@ -255,10 +255,10 @@ final class FileViewerController: UIViewController {
 
     private func updateFooter(state: String? = nil) {
         var parts = [
-            CodeHighlighter.language(forFileNamed: fileName) ?? "plain text",
+            CodeHighlighter.language(forFileNamed: fileName) ?? localized("plain text"),
             Self.format(bytes: file.size),
         ]
-        if file.truncated { parts.append("truncated preview") }
+        if file.truncated { parts.append(localized("truncated preview")) }
         if let state { parts.append(state) }
         footerLabel.text = parts.joined(separator: " · ")
     }
@@ -303,7 +303,7 @@ final class FileViewerController: UIViewController {
         let text = textView.text ?? ""
         guard force || (text != savedText && pendingSaveText == nil) else { return }
         pendingSaveText = text
-        updateFooter(state: "saving…")
+        updateFooter(state: localized("saving…"))
         onSave(Data(text.utf8), force ? 0 : baseMtime)
     }
 
@@ -312,7 +312,7 @@ final class FileViewerController: UIViewController {
         baseMtime = mtime
         if let pending = pendingSaveText { savedText = pending }
         pendingSaveText = nil
-        updateFooter(state: "saved")
+        updateFooter(state: localized("saved"))
         // Keystrokes landed while the write was in flight — save them too.
         if textView.text != savedText { scheduleSave() }
     }
@@ -322,27 +322,27 @@ final class FileViewerController: UIViewController {
     func saveFailed(_ message: String) {
         pendingSaveText = nil
         guard message.hasPrefix("conflict") else {
-            updateFooter(state: "save failed")
-            let alert = UIAlertController(title: "Couldn't save", message: message, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            updateFooter(state: localized("save failed"))
+            let alert = UIAlertController(title: localized("Couldn't save"), message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: localized("OK"), style: .default))
             present(alert, animated: true)
             return
         }
-        updateFooter(state: "conflict")
+        updateFooter(state: localized("conflict"))
         let alert = UIAlertController(
-            title: "File changed on the Mac",
-            message: "\(fileName) was modified since you opened it — likely by the agent.",
+            title: localized("File changed on the Mac"),
+            message: localized("\(fileName) was modified since you opened it — likely by the agent."),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "Reload", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: localized("Reload"), style: .default) { [weak self] _ in
             guard let self else { return }
             let onReload = onReload
             dismiss(animated: true) { onReload?() }
         })
-        alert.addAction(UIAlertAction(title: "Overwrite", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: localized("Overwrite"), style: .destructive) { [weak self] _ in
             self?.flushSave(force: true)
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: localized("Cancel"), style: .cancel))
         present(alert, animated: true)
     }
 

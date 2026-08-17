@@ -50,7 +50,7 @@ export function Hero() {
           <AgentMarquee agents={supportedAgents} />
         </Reveal>
         <Reveal delayMs={240}>
-          <div className="mt-10 flex flex-col items-center justify-center gap-x-8 gap-y-3 sm:flex-row">
+          <div className="mt-10 flex flex-col items-center justify-center gap-3">
             <a
               href={downloadUrl}
               className={cn(
@@ -62,6 +62,11 @@ export function Hero() {
               <AppleMark />
               Download for Mac
             </a>
+            {/* Below 14 the app will not launch, and macOS reports only a generic
+                Finder error — so the floor is stated where the download happens. */}
+            <p className="text-sm text-muted-foreground">
+              Requires macOS 14 or later
+            </p>
           </div>
         </Reveal>
       </div>

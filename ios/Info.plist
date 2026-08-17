@@ -19,7 +19,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Termio uses the camera to scan the pairing QR code on your Mac and to attach photos you capture to your prompt.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Termio records your voice while you hold the mic button so it can transcribe your prompt.</string>
+	<string>Termio records your voice when you use dictation so it can transcribe your prompt.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Termio can transcribe your recording on this device when cloud transcription is unavailable.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Termio shows your recent photos in the attachment sheet so you can pick them quickly.</string>
 	<key>NSAppTransportSecurity</key>

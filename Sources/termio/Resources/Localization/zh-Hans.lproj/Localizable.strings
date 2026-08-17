@@ -1,0 +1,1160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>
+…and %lld more</key>
+	<string>
+…还有 %lld 个</string>
+	<key> Cost is estimated at API rates.</key>
+	<string>费用按 API 价格估算。</string>
+	<key>%@ and %@</key>
+	<string>%1$@ 和 %2$@</string>
+	<key>%@ is a dark theme in the %@ slot.</key>
+	<string>“%@”是深色主题，与“%@”插槽不匹配。</string>
+	<key>%@ is a light theme in the %@ slot.</key>
+	<string>“%@”是浅色主题，与“%@”插槽不匹配。</string>
+	<key>%@ isn’t a UTF-8 text file.</key>
+	<string>%@ 不是 UTF-8 文本文件。</string>
+	<key>%@ isn’t available for SSH sessions yet.</key>
+	<string>%@ 暂不支持 SSH 会话。</string>
+	<key>%@ isn’t on your PATH</key>
+	<string>%@ 不在 PATH 中</string>
+	<key>%@ opened %@</key>
+	<string>%1$@ 创建于 %2$@</string>
+	<key>%@ tokens</key>
+	<string>%@ token</string>
+	<key>%@ · %@ tokens</key>
+	<string>%@ · %@ token</string>
+	<key>%@ — %@.</key>
+	<string>%@ — %@。</string>
+	<key>%@ — %@. Couldn’t update %@.</key>
+	<string>%@ — %@。无法更新 %@。</string>
+	<key>%@ — click to re-test</key>
+	<string>%@ — 点按以重新测试</string>
+	<key>%@, %@ and %@</key>
+	<string>%1$@、%2$@ 和 %3$@</string>
+	<key>%lld %@</key>
+	<string>%lld %@</string>
+	<key>%lld file</key>
+	<string>%lld 个文件</string>
+	<key>%lld files</key>
+	<string>%lld 个文件</string>
+	<key>%lld installed</key>
+	<string>已安装 %lld 个</string>
+	<key>%lld of %lld</key>
+	<string>第 %lld 项（共 %lld 项）</string>
+	<key>%lld pt</key>
+	<string>%lld 点</string>
+	<key>%lld results</key>
+	<string>%lld 个结果</string>
+	<key>%lld%@ matches in %lld files</key>
+	<string>在 %3$lld 个文件中找到 %1$lld%2$@ 个匹配项</string>
+	<key>%lldd</key>
+	<string>%lld 天</string>
+	<key>%lldh</key>
+	<string>%lld 小时</string>
+	<key>%lldm</key>
+	<string>%lld 分钟</string>
+	<key>%lldw</key>
+	<string>%lld 周</string>
+	<key>1 result</key>
+	<string>1 个结果</string>
+	<key>A different `%@` already exists at %@. Remove it first — Termio won’t overwrite a file it didn’t create.</key>
+	<string>另一个 `%@` 已存在于 %@。请先移除，Termio 不会覆盖并非自己创建的文件。</string>
+	<key>A file at %@ already uses that name. Replacing it discards what is in it.</key>
+	<string>%@ 已经用了这个名称。替换会丢弃这个文件里的内容。</string>
+	<key>Activity</key>
+	<string>活动</string>
+	<key>Add</key>
+	<string>添加</string>
+	<key>Add &amp; Connect</key>
+	<string>添加并连接</string>
+	<key>Add Agent</key>
+	<string>添加 Agent</string>
+	<key>Add Host</key>
+	<string>添加主机</string>
+	<key>Add Host…</key>
+	<string>添加主机…</string>
+	<key>Add SSH Host</key>
+	<string>添加 SSH 主机</string>
+	<key>Add to Chat</key>
+	<string>添加到聊天</string>
+	<key>Address</key>
+	<string>地址</string>
+	<key>Agent</key>
+	<string>Agent</string>
+	<key>Agent skill</key>
+	<string>Agent 技能</string>
+	<key>Agents</key>
+	<string>Agent</string>
+	<key>Agents won’t show as working.</key>
+	<string>Agent 将不会显示为工作中。</string>
+	<key>Alias</key>
+	<string>别名</string>
+	<key>Alias → %@</key>
+	<string>替身 → %@</string>
+	<key>All</key>
+	<string>全部</string>
+	<key>All caught up</key>
+	<string>全部处理完毕</string>
+	<key>All changes to these %lld files will be lost. This cannot be undone.
+
+%@%@</key>
+	<string>对这 %lld 个文件的所有更改都将丢失。此操作无法撤销。
+
+%@%@</string>
+	<key>All changes to “%@” will be lost. This cannot be undone.</key>
+	<string>对“%@”的所有更改都将丢失。此操作无法撤销。</string>
+	<key>Allow Keychain Access…</key>
+	<string>允许访问钥匙串…</string>
+	<key>Allow Usage Access</key>
+	<string>允许访问用量</string>
+	<key>Also Running</key>
+	<string>其他运行中</string>
+	<key>An older install points at %@. Update it to this version of Termio.</key>
+	<string>旧的安装指向 %@。请将其更新到此版本的 Termio。</string>
+	<key>Anyone</key>
+	<string>任何人</string>
+	<key>App language</key>
+	<string>应用语言</string>
+	<key>Appearance</key>
+	<string>外观</string>
+	<key>Appends a Host block to ~/.ssh/config, so the alias works in plain `ssh %@` too.</key>
+	<string>将 Host 块追加到 ~/.ssh/config，该别名也可直接用于 `ssh %@`。</string>
+	<key>Apply</key>
+	<string>应用</string>
+	<key>Assigned to Me</key>
+	<string>指派给我</string>
+	<key>Assignee</key>
+	<string>指派人</string>
+	<key>Auth failed</key>
+	<string>认证失败</string>
+	<key>Available when Termio runs from the built app bundle.</key>
+	<string>仅当 Termio 从构建的应用包运行时可用。</string>
+	<key>Bar</key>
+	<string>竖线</string>
+	<key>Base Branch Missing</key>
+	<string>找不到基础分支</string>
+	<key>Behind</key>
+	<string>落后</string>
+	<key>Binary File</key>
+	<string>二进制文件</string>
+	<key>Binary file — open it on GitHub to view.</key>
+	<string>二进制文件，请在 GitHub 上打开查看。</string>
+	<key>Blink</key>
+	<string>闪烁</string>
+	<key>Block</key>
+	<string>方块</string>
+	<key>Blur: %lld</key>
+	<string>模糊：%lld</string>
+	<key>Branch</key>
+	<string>分支</string>
+	<key>Bring All to Front</key>
+	<string>前置全部窗口</string>
+	<key>Browse Themes…</key>
+	<string>浏览主题…</string>
+	<key>Cancel</key>
+	<string>取消</string>
+	<key>Can’t browse %@</key>
+	<string>无法浏览 %@</string>
+	<key>Can’t open as text</key>
+	<string>无法以文本打开</string>
+	<key>Can’t preview</key>
+	<string>无法预览</string>
+	<key>Change Theme…</key>
+	<string>更改主题…</string>
+	<key>Changes</key>
+	<string>更改</string>
+	<key>Channels</key>
+	<string>渠道</string>
+	<key>Chat with the developer and other users.</key>
+	<string>与开发者和其他用户交流。</string>
+	<key>Chats</key>
+	<string>聊天</string>
+	<key>Check for Updates…</key>
+	<string>检查更新…</string>
+	<key>Choose a different name.</key>
+	<string>请选取其他名称。</string>
+	<key>Choose a project folder to open in Termio.</key>
+	<string>选取要在 Termio 中打开的项目文件夹。</string>
+	<key>Choose another branch to compare with.</key>
+	<string>请另选一个用于对比的分支。</string>
+	<key>Choose how projects are ordered</key>
+	<string>选取项目的排序方式</string>
+	<key>Choose which device the sidebar shows</key>
+	<string>选择侧栏显示哪台设备</string>
+	<key>Choose…</key>
+	<string>选取…</string>
+	<key>Clear</key>
+	<string>清除</string>
+	<key>Clone to</key>
+	<string>克隆到</string>
+	<key>Close</key>
+	<string>关闭</string>
+	<key>Close (Esc)</key>
+	<string>关闭（Esc）</string>
+	<key>Close All Chats</key>
+	<string>关闭所有聊天</string>
+	<key>Close All Terminals</key>
+	<string>关闭所有终端</string>
+	<key>Close Session</key>
+	<string>关闭会话</string>
+	<key>Close Window</key>
+	<string>关闭窗口</string>
+	<key>Close session</key>
+	<string>关闭会话</string>
+	<key>Closed</key>
+	<string>已关闭</string>
+	<key>Collapse All</key>
+	<string>全部折叠</string>
+	<key>Collapse Results</key>
+	<string>折叠结果</string>
+	<key>Command</key>
+	<string>命令</string>
+	<key>Command Palette…</key>
+	<string>命令面板…</string>
+	<key>Command line</key>
+	<string>命令行</string>
+	<key>Command-line tool</key>
+	<string>命令行工具</string>
+	<key>Commit or discard the changes in “%@” before removing it.</key>
+	<string>移除前请先提交或放弃“%@”中的更改。</string>
+	<key>Commits</key>
+	<string>提交</string>
+	<key>Community</key>
+	<string>社区</string>
+	<key>Compare</key>
+	<string>对比</string>
+	<key>Compare this branch with the branch it would merge into.</key>
+	<string>把当前分支与它将要合入的分支做对比。</string>
+	<key>Compare to branch</key>
+	<string>对比分支</string>
+	<key>Config file</key>
+	<string>配置文件</string>
+	<key>Connect</key>
+	<string>连接</string>
+	<key>Connect GitHub</key>
+	<string>连接 GitHub</string>
+	<key>Connect iPhone</key>
+	<string>连接 iPhone</string>
+	<key>Connect to…</key>
+	<string>连接到…</string>
+	<key>Connect your GitHub account to read this project’s issues and pull requests here.</key>
+	<string>连接你的 GitHub 账户，即可在此查看该项目的 issues 和 PR。</string>
+	<key>Connected</key>
+	<string>已连接</string>
+	<key>Connected and authenticated</key>
+	<string>已连接并通过认证</string>
+	<key>Connection failed</key>
+	<string>连接失败</string>
+	<key>Connection refused</key>
+	<string>连接被拒绝</string>
+	<key>Conversation</key>
+	<string>对话</string>
+	<key>Copied</key>
+	<string>已拷贝</string>
+	<key>Copy</key>
+	<string>拷贝</string>
+	<key>Copy Diff</key>
+	<string>拷贝差异</string>
+	<key>Copy Image</key>
+	<string>拷贝图像</string>
+	<key>Copy Link</key>
+	<string>拷贝链接</string>
+	<key>Copy Path</key>
+	<string>拷贝路径</string>
+	<key>Copy Paths</key>
+	<string>拷贝路径</string>
+	<key>Copy Relative Path</key>
+	<string>拷贝相对路径</string>
+	<key>Copy Relative Paths</key>
+	<string>拷贝相对路径</string>
+	<key>Copy Session Link</key>
+	<string>拷贝会话链接</string>
+	<key>Copy on select</key>
+	<string>选中即拷贝</string>
+	<key>Copy ssh Command</key>
+	<string>拷贝 ssh 命令</string>
+	<key>Couldn’t change the Themes folder</key>
+	<string>无法修改主题文件夹</string>
+	<key>Couldn’t create the worktrees folder: %@</key>
+	<string>无法创建 worktrees 文件夹：%@</string>
+	<key>Couldn’t create worktree session</key>
+	<string>无法创建 worktree 会话</string>
+	<key>Couldn’t inspect worktree</key>
+	<string>无法检查 worktree</string>
+	<key>Couldn’t link `%@` into %@.</key>
+	<string>无法将 `%@` 链接到 %@。</string>
+	<key>Couldn’t load</key>
+	<string>无法载入</string>
+	<key>Couldn’t open a pull request page</key>
+	<string>无法打开 Pull Request 页面</string>
+	<key>Couldn’t open the Themes folder</key>
+	<string>无法打开主题文件夹</string>
+	<key>Couldn’t remove %@.</key>
+	<string>无法移除 %@。</string>
+	<key>Couldn’t remove worktree</key>
+	<string>无法移除 worktree</string>
+	<key>Couldn’t update %@.</key>
+	<string>无法更新 %@。</string>
+	<key>Couldn’t update .gitignore</key>
+	<string>无法更新 .gitignore</string>
+	<key>Couldn’t write ~/.ssh/config: %@</key>
+	<string>无法写入 ~/.ssh/config：%@</string>
+	<key>Create</key>
+	<string>创建</string>
+	<key>Cursor</key>
+	<string>光标</string>
+	<key>Custom</key>
+	<string>自定义</string>
+	<key>Custom Agent…</key>
+	<string>自定义 Agent…</string>
+	<key>Custom…</key>
+	<string>自定…</string>
+	<key>Cut</key>
+	<string>剪切</string>
+	<key>Dark</key>
+	<string>深色</string>
+	<key>Decrease Font Size</key>
+	<string>减小字体</string>
+	<key>Default Dark Theme</key>
+	<string>默认深色主题</string>
+	<key>Default Light Theme</key>
+	<string>默认浅色主题</string>
+	<key>Default agent</key>
+	<string>默认 Agent</string>
+	<key>Delete</key>
+	<string>删除</string>
+	<key>Delete %@?</key>
+	<string>删除“%@”？</string>
+	<key>Delete Agent</key>
+	<string>删除 Agent</string>
+	<key>Deletes the custom agent’s manifest from this Mac.</key>
+	<string>从这台 Mac 上删除该自定义 Agent 的 manifest。</string>
+	<key>Delete…</key>
+	<string>删除…</string>
+	<key>Detached at %@</key>
+	<string>已分离于 %@</string>
+	<key>Device</key>
+	<string>设备</string>
+	<key>Discard %lld Files…</key>
+	<string>放弃 %lld 个文件的更改…</string>
+	<key>Discard Changes</key>
+	<string>放弃更改</string>
+	<key>Discard Changes?</key>
+	<string>要放弃更改吗？</string>
+	<key>Discard Changes…</key>
+	<string>放弃更改…</string>
+	<key>Disconnect GitHub</key>
+	<string>断开 GitHub 连接</string>
+	<key>Discord</key>
+	<string>Discord</string>
+	<key>Discord, GitHub, and the WeChat group</key>
+	<string>Discord、GitHub 与微信群</string>
+	<key>Done</key>
+	<string>完成</string>
+	<key>Don’t Compare</key>
+	<string>不对比</string>
+	<key>Draft</key>
+	<string>草稿</string>
+	<key>Drag the list to change the order agents appear in.</key>
+	<string>拖动列表可以调整 Agent 出现的顺序。</string>
+	<key>Edit</key>
+	<string>编辑</string>
+	<key>Edit Manifest</key>
+	<string>编辑清单</string>
+	<key>Edit in Config</key>
+	<string>在配置中编辑</string>
+	<key>Edit source</key>
+	<string>编辑源代码</string>
+	<key>Edit…</key>
+	<string>编辑…</string>
+	<key>Enable</key>
+	<string>启用</string>
+	<key>Enable Claude Code, Codex, Kimi, or Grok in the Agents tab to see their usage here.</key>
+	<string>在 Agents 标签页中启用 Claude Code、Codex、Kimi 或 Grok，即可在此查看其用量。</string>
+	<key>Ended</key>
+	<string>已结束</string>
+	<key>Enter Code on GitHub</key>
+	<string>在 GitHub 上输入代码</string>
+	<key>Enter a host from your ~/.ssh/config, or a user@host to connect to.</key>
+	<string>输入 ~/.ssh/config 中的主机，或要连接的 user@host。</string>
+	<key>Every paired iPhone is signed out and must re-scan the new QR to reconnect.</key>
+	<string>所有已配对的 iPhone 都会退出登录，需重新扫描新的二维码才能重新连接。</string>
+	<key>Expand Results</key>
+	<string>展开结果</string>
+	<key>Family</key>
+	<string>系列</string>
+	<key>File</key>
+	<string>文件</string>
+	<key>Files</key>
+	<string>文件</string>
+	<key>Files changed</key>
+	<string>变更文件</string>
+	<key>Filter</key>
+	<string>过滤</string>
+	<key>Find</key>
+	<string>查找</string>
+	<key>Find…</key>
+	<string>查找…</string>
+	<key>Focus Pane Down</key>
+	<string>聚焦下方窗格</string>
+	<key>Focus Pane Left</key>
+	<string>聚焦左侧窗格</string>
+	<key>Focus Pane Right</key>
+	<string>聚焦右侧窗格</string>
+	<key>Focus Pane Up</key>
+	<string>聚焦上方窗格</string>
+	<key>Font</key>
+	<string>字体</string>
+	<key>Font name</key>
+	<string>字体名称</string>
+	<key>General</key>
+	<string>通用</string>
+	<key>Git ignore patterns cannot represent a filename containing a line break.</key>
+	<string>Git 忽略模式无法表示包含换行符的文件名。</string>
+	<key>Git worktree</key>
+	<string>Git worktree</string>
+	<key>GitHub</key>
+	<string>GitHub</string>
+	<key>GitHub Issues</key>
+	<string>GitHub Issues</string>
+	<key>Grant Org Access…</key>
+	<string>授予组织访问权限…</string>
+	<key>Group with</key>
+	<string>编组到</string>
+	<key>Hide or show the inspector</key>
+	<string>隐藏或显示检查器</string>
+	<key>Hide or show the navigator</key>
+	<string>隐藏或显示导航器</string>
+	<key>History</key>
+	<string>历史</string>
+	<key>Hooks reinstalled</key>
+	<string>Hooks 已重新安装</string>
+	<key>Host</key>
+	<string>主机</string>
+	<key>Host not found</key>
+	<string>找不到主机</string>
+	<key>Hosts</key>
+	<string>主机</string>
+	<key>How much output each session keeps for scrolling back. Agents are verbose, so the default is generous.</key>
+	<string>每个会话保留多少输出供回滚查看。Agent 输出较多，默认值因此较为宽裕。</string>
+	<key>Icon</key>
+	<string>图标</string>
+	<key>Ignore %lld Selected Files (Add to .gitignore)</key>
+	<string>忽略 %lld 个所选文件（添加到 .gitignore）</string>
+	<key>Ignore All .%@ Files (Add to .gitignore)</key>
+	<string>忽略所有 .%@ 文件（添加到 .gitignore）</string>
+	<key>Ignore File (Add to .gitignore)</key>
+	<string>忽略文件（添加到 .gitignore）</string>
+	<key>Increase Font Size</key>
+	<string>增大字体</string>
+	<key>Info</key>
+	<string>信息</string>
+	<key>Inspector</key>
+	<string>检查器</string>
+	<key>Inspector Pane</key>
+	<string>检查器窗格</string>
+	<key>Install</key>
+	<string>安装</string>
+	<key>Install %@</key>
+	<string>安装 %@</string>
+	<key>Installed</key>
+	<string>已安装</string>
+	<key>Installed.</key>
+	<string>已安装。</string>
+	<key>Installing %@…</key>
+	<string>正在安装 %@…</string>
+	<key>Integrations</key>
+	<string>集成</string>
+	<key>Interface</key>
+	<string>界面</string>
+	<key>Issues</key>
+	<string>Issues</string>
+	<key>Issues a new token and revokes every paired iPhone.</key>
+	<string>签发新的 Token 并撤销所有已配对的 iPhone。</string>
+	<key>Join</key>
+	<string>加入</string>
+	<key>Jump to session, project, or file…</key>
+	<string>跳转到会话、项目或文件…</string>
+	<key>Key file</key>
+	<string>密钥文件</string>
+	<key>Keyboard</key>
+	<string>键盘</string>
+	<key>Keyboard shortcuts for every command</key>
+	<string>所有命令的快捷键</string>
+	<key>Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.</key>
+	<string>钥匙串访问已被拒绝，套餐限额保持隐藏。再次允许会重新显示 macOS 提示。</string>
+	<key>Labels</key>
+	<string>标签</string>
+	<key>Language</key>
+	<string>语言</string>
+	<key>Last 30 days</key>
+	<string>过去 30 天</string>
+	<key>Last 7 days</key>
+	<string>过去 7 天</string>
+	<key>Last used</key>
+	<string>上次使用</string>
+	<key>Later</key>
+	<string>稍后</string>
+	<key>Launch</key>
+	<string>启动</string>
+	<key>Let your agents coordinate?</key>
+	<string>让你的 Agent 相互协作？</string>
+	<key>Lets an agent see and drive its sibling sessions in this project via the `termio sessions` command. Installs the termio skill into each agent's skills folder.</key>
+	<string>允许 Agent 通过 `termio sessions` 命令查看并驱动本项目中的其他会话。会将 termio 技能安装到各 Agent 的技能文件夹中。</string>
+	<key>Light</key>
+	<string>浅色</string>
+	<key>Line height applies to the file editor and diffs; the terminal keeps the font’s own.</key>
+	<string>行高应用于文件编辑器和差异对比；终端保持字体自身的行高。</string>
+	<key>Line height applies to the file editor and diffs; the terminal keeps the font’s own. Font and theme values you haven’t set here follow your Ghostty config.</key>
+	<string>行高应用于文件编辑器和差异对比；终端保持字体自身的行高。此处未设置的字体与主题项将沿用你的 Ghostty 配置。</string>
+	<key>Line height: %@×</key>
+	<string>行高：%@×</string>
+	<key>Links `%@` into /usr/local/bin so you (and agents) can run `%@ sessions …` from any shell.</key>
+	<string>将 `%@` 链接到 /usr/local/bin，让你（和 Agent）可在任意 shell 中运行 `%@ sessions …`。</string>
+	<key>Live agent status</key>
+	<string>Agent 实时状态</string>
+	<key>Live agent status is off</key>
+	<string>Agent 实时状态已关闭</string>
+	<key>Local</key>
+	<string>本地</string>
+	<key>Login shell</key>
+	<string>登录 shell</string>
+	<key>Match Case</key>
+	<string>区分大小写</string>
+	<key>Match Whole Word</key>
+	<string>全字匹配</string>
+	<key>Merged</key>
+	<string>已合并</string>
+	<key>Minimize</key>
+	<string>最小化</string>
+	<key>Mobile</key>
+	<string>移动设备</string>
+	<key>Mobile Access</key>
+	<string>移动访问</string>
+	<key>Move to Trash</key>
+	<string>移到废纸篓</string>
+	<key>Move “%@” to the Trash?</key>
+	<string>要将“%@”移到废纸篓吗？</string>
+	<key>My Agent</key>
+	<string>我的 Agent</string>
+	<key>Name</key>
+	<string>名称</string>
+	<key>Name the worktree. A new branch of this name is created from HEAD and nested under this project.</key>
+	<string>为 worktree 命名。将从 HEAD 创建一个同名新分支，并嵌套在此项目下。</string>
+	<key>Navigation</key>
+	<string>导航</string>
+	<key>Navigator</key>
+	<string>导航器</string>
+	<key>New</key>
+	<string>新建</string>
+	<key>New %@ Session</key>
+	<string>新建 %@ 会话</string>
+	<key>New %@ session</key>
+	<string>新建 %@ 会话</string>
+	<key>New Agent</key>
+	<string>新建 Agent</string>
+	<key>New Agent Session</key>
+	<string>新建 Agent 会话</string>
+	<key>New Chat</key>
+	<string>新建聊天</string>
+	<key>New File</key>
+	<string>新建文件</string>
+	<key>New Folder</key>
+	<string>新建文件夹</string>
+	<key>New Pull Request</key>
+	<string>新建 Pull Request</string>
+	<key>New SSH Connection</key>
+	<string>新建 SSH 连接</string>
+	<key>New SSH Connection…</key>
+	<string>新建 SSH 连接…</string>
+	<key>New Session</key>
+	<string>新建会话</string>
+	<key>New Terminal</key>
+	<string>新建终端</string>
+	<key>New Terminal at Home</key>
+	<string>在个人文件夹新建终端</string>
+	<key>New Worktree</key>
+	<string>新建 Worktree</string>
+	<key>New Worktree…</key>
+	<string>新建 Worktree…</string>
+	<key>New chat</key>
+	<string>新建聊天</string>
+	<key>New terminal or project</key>
+	<string>新建终端或项目</string>
+	<key>Next Match</key>
+	<string>下一个匹配项</string>
+	<key>Next Session</key>
+	<string>下一个会话</string>
+	<key>No Agents Enabled</key>
+	<string>未启用任何 Agent</string>
+	<key>No Base Branch</key>
+	<string>未选择基础分支</string>
+	<key>No Changes</key>
+	<string>没有更改</string>
+	<key>No Common History</key>
+	<string>没有共同历史</string>
+	<key>No Diff</key>
+	<string>没有差异</string>
+	<key>No File Selected</key>
+	<string>未选择文件</string>
+	<key>No Files</key>
+	<string>没有文件</string>
+	<key>No GitHub Repository</key>
+	<string>没有 GitHub 仓库</string>
+	<key>No History</key>
+	<string>没有历史记录</string>
+	<key>No Issues</key>
+	<string>没有 Issues</string>
+	<key>No Matches</key>
+	<string>无匹配项</string>
+	<key>No Project</key>
+	<string>无项目</string>
+	<key>No Pull Requests</key>
+	<string>没有 PR</string>
+	<key>No Session</key>
+	<string>没有会话</string>
+	<key>No bundled tool to install from.</key>
+	<string>应用包中没有可安装的工具。</string>
+	<key>No description provided.</key>
+	<string>未提供描述。</string>
+	<key>No file changes</key>
+	<string>没有文件更改</string>
+	<key>No hosts yet — add one, or write a Host block in ~/.ssh/config.</key>
+	<string>暂无主机——添加一个，或在 ~/.ssh/config 中写入 Host 块。</string>
+	<key>No installed theme matches “%@”</key>
+	<string>没有已安装的主题与“%@”匹配</string>
+	<key>No issues found.</key>
+	<string>未找到 issues。</string>
+	<key>No local usage yet — run `%@` once, then Refresh.</key>
+	<string>暂无本地用量——运行一次 `%@`，然后点按“刷新”。</string>
+	<key>No matches</key>
+	<string>无匹配结果</string>
+	<key>No network address found. Join a network, then reopen this tab.</key>
+	<string>未找到网络地址。请加入网络后重新打开此标签页。</string>
+	<key>No open issues right now.</key>
+	<string>目前没有开放的 issues。</string>
+	<key>No open pull requests right now.</key>
+	<string>目前没有开放的 PR。</string>
+	<key>No pull requests found.</key>
+	<string>未找到 PR。</string>
+	<key>No results</key>
+	<string>没有结果</string>
+	<key>No route to host</key>
+	<string>无法到达主机</string>
+	<key>No textual changes to show.</key>
+	<string>没有可显示的文本更改。</string>
+	<key>No themes match “%@”</key>
+	<string>没有与“%@”匹配的主题</string>
+	<key>Not Now</key>
+	<string>以后再说</string>
+	<key>Not a valid regular expression</key>
+	<string>不是有效的正则表达式</string>
+	<key>Not connected</key>
+	<string>未连接</string>
+	<key>Not pushed to upstream</key>
+	<string>尚未推送到上游</string>
+	<key>Nothing to Compare</key>
+	<string>没有可对比的分支</string>
+	<key>Nothing to install.</key>
+	<string>没有可安装的内容。</string>
+	<key>Notifications</key>
+	<string>通知</string>
+	<key>Notifications for Termio are turned off in System Settings.</key>
+	<string>Termio 的通知已在“系统设置”中关闭。</string>
+	<key>OK</key>
+	<string>好</string>
+	<key>Off — LAN only</key>
+	<string>关闭 — 仅局域网</string>
+	<key>On iPhone, tap the Mac pill ▸ Scan QR Code. Both devices must share a LAN.</key>
+	<string>在 iPhone 上轻点 Mac 胶囊按钮 ▸ 扫描二维码。两台设备须处于同一局域网。</string>
+	<key>On iPhone, tap the Mac pill ▸ Scan QR Code. The tunnel address works from any network, and terminates on the provider's servers. Pick Custom to run your own relay instead.</key>
+	<string>在 iPhone 上轻点 Mac 胶囊按钮 ▸ 扫描二维码。隧道地址可在任意网络使用，并终结于服务商的服务器。若要改用自己的中继，请选择“自定义”。</string>
+	<key>On iPhone, tap the Mac pill ▸ Scan QR Code. Traffic crosses the relay you run yourself — no third party in the path.</key>
+	<string>在 iPhone 上轻点 Mac 胶囊按钮 ▸ 扫描二维码。流量经由你自己运行的中继，路径中没有第三方。</string>
+	<key>Opacity</key>
+	<string>不透明度</string>
+	<key>Opacity below 100% lets the desktop show through; blur softens it. The window stays solid at full opacity.</key>
+	<string>不透明度低于 100% 时会透出桌面，模糊可使其更柔和；完全不透明时窗口保持实色。</string>
+	<key>Open</key>
+	<string>打开</string>
+	<key>Open Link</key>
+	<string>打开链接</string>
+	<key>Open Project…</key>
+	<string>打开项目…</string>
+	<key>Open Quickly…</key>
+	<string>快速打开…</string>
+	<key>Open System Settings</key>
+	<string>打开“系统设置”</string>
+	<key>Open Themes Folder…</key>
+	<string>打开主题文件夹…</string>
+	<key>Open in %@</key>
+	<string>在 %@ 中打开</string>
+	<key>Open in Browser</key>
+	<string>在浏览器中打开</string>
+	<key>Open in Editor</key>
+	<string>在编辑器中打开</string>
+	<key>Open on GitHub</key>
+	<string>在 GitHub 上打开</string>
+	<key>Opened outside Termio on this device</key>
+	<string>在这台设备上由 Termio 之外打开</string>
+	<key>Padding: %lld pt</key>
+	<string>边距：%lld 点</string>
+	<key>Pair your iPhone and remote access</key>
+	<string>配对 iPhone 与远程访问</string>
+	<key>Panes</key>
+	<string>窗格</string>
+	<key>Paste</key>
+	<string>粘贴</string>
+	<key>Permissions</key>
+	<string>权限</string>
+	<key>Pick a file on the left to see its changes.</key>
+	<string>在左侧选择一个文件以查看其更改。</string>
+	<key>Pick the branch this one would merge into.</key>
+	<string>选择这个分支将要合入的分支。</string>
+	<key>Pin</key>
+	<string>固定</string>
+	<key>Pin Termio to a light or dark look, or follow the system. The light and dark terminal themes below apply to the matching appearance.</key>
+	<string>将 Termio 固定为浅色或深色外观，或跟随系统。下方的浅色与深色终端主题会应用到对应的外观。</string>
+	<key>Pin to Top</key>
+	<string>固定到顶部</string>
+	<key>Pinned</key>
+	<string>已固定</string>
+	<key>Plan limits</key>
+	<string>套餐限额</string>
+	<key>Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.</key>
+	<string>套餐限额来自 %@ 的 OAuth 登录；不会存储任何密码。撤销后将停止读取 %@ 的所有数据。</string>
+	<key>Play sound</key>
+	<string>播放声音</string>
+	<key>Port</key>
+	<string>端口</string>
+	<key>Posts a notification when an agent finishes or needs you while Termio is in the background.</key>
+	<string>当 Termio 在后台时，Agent 完成任务或需要你时发送通知。</string>
+	<key>Press Shortcut…</key>
+	<string>按下快捷键…</string>
+	<key>Preview</key>
+	<string>预览</string>
+	<key>Previous Match</key>
+	<string>上一个匹配项</string>
+	<key>Previous Session</key>
+	<string>上一个会话</string>
+	<key>Project Files</key>
+	<string>项目文件</string>
+	<key>Projects</key>
+	<string>项目</string>
+	<key>Public keys</key>
+	<string>公钥</string>
+	<key>Pull Requests</key>
+	<string>PR</string>
+	<key>Push the current branch to the repository’s remote first, then try again. (The remote also needs to be a forge Termio recognizes: GitHub, GitLab, Bitbucket, or Gitea.)</key>
+	<string>请先将当前分支推送到仓库的远程，然后重试。（远程还需是 Termio 能识别的代码托管平台：GitHub、GitLab、Bitbucket 或 Gitea。）</string>
+	<key>Quit Termio</key>
+	<string>退出 Termio</string>
+	<key>Range</key>
+	<string>范围</string>
+	<key>Reachable</key>
+	<string>可连接</string>
+	<key>Reads ~/.ssh/config directly — Termio keeps no separate host list.</key>
+	<string>直接读取 ~/.ssh/config——Termio 不保留单独的主机列表。</string>
+	<key>Recent</key>
+	<string>最近</string>
+	<key>Recent Activity</key>
+	<string>最近活动</string>
+	<key>Reconnect</key>
+	<string>重新连接</string>
+	<key>Reconnect to sign in with a different account, or grant Termio access to the organization that owns this repository.</key>
+	<string>重新连接以使用其他账户登录，或授予 Termio 访问拥有该仓库的组织的权限。</string>
+	<key>Record Shortcut</key>
+	<string>录制快捷键</string>
+	<key>Refresh</key>
+	<string>刷新</string>
+	<key>Reinstall</key>
+	<string>重新安装</string>
+	<key>Reinstall hooks</key>
+	<string>重新安装 hooks</string>
+	<key>Reinstall skill</key>
+	<string>重新安装技能</string>
+	<key>Relaunch Now</key>
+	<string>立即重新启动</string>
+	<key>Relaunch Termio to switch language?</key>
+	<string>重新启动 Termio 以切换语言？</string>
+	<key>Reload</key>
+	<string>重新载入</string>
+	<key>Remote</key>
+	<string>远程</string>
+	<key>Remote session</key>
+	<string>远程会话</string>
+	<key>Remove</key>
+	<string>移除</string>
+	<key>Remove Project</key>
+	<string>移除项目</string>
+	<key>Remove Worktree</key>
+	<string>移除 Worktree</string>
+	<key>Remove from List</key>
+	<string>从列表中移除</string>
+	<key>Remove “%@”?</key>
+	<string>移除“%@”？</string>
+	<key>Removed from PATH.</key>
+	<string>已从 PATH 中移除。</string>
+	<key>Removes this custom agent and its configuration file. Existing sessions keep running.</key>
+	<string>移除此自定义 Agent 及其配置文件。现有会话会继续运行。</string>
+	<key>Rename</key>
+	<string>重命名</string>
+	<key>Rename Session</key>
+	<string>重命名会话</string>
+	<key>Rename “%@”</key>
+	<string>重命名“%@”</string>
+	<key>Rename…</key>
+	<string>重命名…</string>
+	<key>Replace</key>
+	<string>替换</string>
+	<key>Replace the theme file for “%@”?</key>
+	<string>替换“%@”的主题文件？</string>
+	<key>Request Permission</key>
+	<string>请求权限</string>
+	<key>Reset Font Size</key>
+	<string>重设字体大小</string>
+	<key>Restore Defaults</key>
+	<string>恢复默认</string>
+	<key>Reveal in Finder</key>
+	<string>在“访达”中显示</string>
+	<key>Revoke Access</key>
+	<string>撤销访问</string>
+	<key>Rotate Pairing Token…</key>
+	<string>更换配对 Token…</string>
+	<key>Rotate Token</key>
+	<string>更换 Token</string>
+	<key>Rotate the pairing token?</key>
+	<string>要更换配对 Token 吗？</string>
+	<key>Row padding</key>
+	<string>行边距</string>
+	<key>Run a command…</key>
+	<string>运行命令…</string>
+	<key>Running terminal sessions will end. You can relaunch later instead.</key>
+	<string>正在运行的终端会话将会结束。你也可以稍后再重新启动。</string>
+	<key>Runs on this Mac with your privileges when Custom is selected — no shell, arguments split on spaces. Use {port} for the companion port; the URL pattern is a regex matching the public https URL your relay prints.</key>
+	<string>选择“自定义”后，该命令会以你的权限在这台 Mac 上运行——不经过 shell，参数按空格拆分。用 {port} 表示配套端口；URL 模式是用于匹配中继输出的公开 https URL 的正则表达式。</string>
+	<key>Runs with `%@`. The agent won’t ask before editing files or running commands.</key>
+	<string>以 `%@` 运行。Agent 在编辑文件或运行命令前将不再询问。</string>
+	<key>SF Symbol name</key>
+	<string>SF Symbol 名称</string>
+	<key>SSH</key>
+	<string>SSH</string>
+	<key>Save</key>
+	<string>存储</string>
+	<key>Save failed: %@</key>
+	<string>存储失败：%@</string>
+	<key>Scan the QR code with WeChat to join the Chinese community group.</key>
+	<string>用微信扫描二维码加入中文社区群。</string>
+	<key>Scrollback history and text selection</key>
+	<string>回滚历史与文本选择</string>
+	<key>Scrollback: %lld MB</key>
+	<string>回滚：%lld MB</string>
+	<key>Search</key>
+	<string>搜索</string>
+	<key>Search Files</key>
+	<string>搜索文件</string>
+	<key>Search Project</key>
+	<string>搜索项目</string>
+	<key>Search commands</key>
+	<string>搜索命令</string>
+	<key>Search themes</key>
+	<string>搜索主题</string>
+	<key>Search themes…</key>
+	<string>搜索主题…</string>
+	<key>Searching…</key>
+	<string>正在搜索…</string>
+	<key>Select All</key>
+	<string>全选</string>
+	<key>Select a session to browse its files.</key>
+	<string>选择一个会话以浏览其文件。</string>
+	<key>Select a session to see its info.</key>
+	<string>选择一个会话以查看其信息。</string>
+	<key>Selection</key>
+	<string>选择</string>
+	<key>Session</key>
+	<string>会话</string>
+	<key>Session control</key>
+	<string>会话控制</string>
+	<key>Sessions</key>
+	<string>会话</string>
+	<key>Settings</key>
+	<string>设置</string>
+	<key>Settings…</key>
+	<string>设置…</string>
+	<key>Shortcuts must include ⌘ so they can’t shadow a key an agent or the shell needs. While recording, press ⌫ to remove a shortcut, or esc to cancel.</key>
+	<string>快捷键必须包含 ⌘，以免遮蔽 Agent 或 shell 所需的按键。录制时按 ⌫ 可移除快捷键，按 esc 取消。</string>
+	<key>Show Original</key>
+	<string>显示原身</string>
+	<key>Show Project Files</key>
+	<string>显示项目文件</string>
+	<key>Shows the Issues pane in the inspector for projects whose remote is on GitHub.</key>
+	<string>为远程仓库位于 GitHub 的项目在检查器中显示 Issues 窗格。</string>
+	<key>Shows when an agent is working or waiting on you — the sidebar spinner and menu-bar pulse. Installs Termio’s hooks into each agent’s config.</key>
+	<string>显示 Agent 正在工作还是在等待你：侧栏的转圈指示和菜单栏的脉冲。会将 Termio 的 hooks 安装到各 Agent 的配置中。</string>
+	<key>Sidebar</key>
+	<string>侧栏</string>
+	<key>Size: %lld pt</key>
+	<string>大小：%lld 磅</string>
+	<key>Skill reinstalled</key>
+	<string>技能已重新安装</string>
+	<key>Skip permission prompts</key>
+	<string>跳过权限确认</string>
+	<key>Something else already owns %@.</key>
+	<string>%@ 已被其他程序占用。</string>
+	<key>Something went wrong loading this repository. Try again in a moment.</key>
+	<string>载入该仓库时出错。请稍后重试。</string>
+	<key>Sort</key>
+	<string>排序</string>
+	<key>Split Down</key>
+	<string>向下拆分</string>
+	<key>Split Left</key>
+	<string>向左拆分</string>
+	<key>Split Right</key>
+	<string>向右拆分</string>
+	<key>Split Up</key>
+	<string>向上拆分</string>
+	<key>Staged — the next git commit takes this file</key>
+	<string>已暂存：下一次 git 提交将包含此文件</string>
+	<key>Start an agent in a project.</key>
+	<string>在项目中启动一个 Agent。</string>
+	<key>Starting tunnel…</key>
+	<string>正在启动隧道…</string>
+	<key>Starting…</key>
+	<string>正在启动…</string>
+	<key>State</key>
+	<string>状态</string>
+	<key>Status</key>
+	<string>状态</string>
+	<key>Style</key>
+	<string>样式</string>
+	<key>Switch between project files, search, changes, and info</key>
+	<string>在项目文件、搜索、更改和信息之间切换</string>
+	<key>System</key>
+	<string>系统</string>
+	<key>System (%@)</key>
+	<string>跟随系统（%@）</string>
+	<key>System monospace</key>
+	<string>系统等宽字体</string>
+	<key>Takes %@ out of the new-session menu. Its settings are kept.</key>
+	<string>将 %@ 从新建会话菜单中移除，其设置会保留。</string>
+	<key>Takes effect after Termio relaunches.</key>
+	<string>重新启动 Termio 后生效。</string>
+	<key>Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@</key>
+	<string>根据 %@ 在这台 Mac 上所有终端和编辑器的本地会话日志统计——即你的实际用量，与套餐计费方式无关。%@</string>
+	<key>Task completion</key>
+	<string>任务完成</string>
+	<key>Terminal</key>
+	<string>终端</string>
+	<key>Terminal default</key>
+	<string>终端默认</string>
+	<key>Terminal font</key>
+	<string>终端字体</string>
+	<key>Terminals</key>
+	<string>终端</string>
+	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it.</key>
+	<string>Termio 可通过读取 %@ 的本地会话日志及其 `auth.json` 登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容。</string>
+	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its `credentials/kimi-code.json` sign-in. Nothing is read until you allow it.</key>
+	<string>Termio 可通过读取 %@ 的本地会话日志及其 `credentials/kimi-code.json` 登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容。</string>
+	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain.</key>
+	<string>Termio 可通过读取 %@ 的本地会话日志及登录钥匙串中的登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容；macOS 会就钥匙串询问一次。</string>
+	<key>Termio could not append to the repository’s .gitignore. Check its permissions and try again.</key>
+	<string>Termio 无法将内容追加到该仓库的 .gitignore。请检查其权限后重试。</string>
+	<key>Termio is open source — star the repo, report bugs, and request features.</key>
+	<string>Termio 是开源软件：欢迎给仓库加星标、报告 bug 和提出功能请求。</string>
+	<key>Termio isn’t running sessions through termiod.</key>
+	<string>Termio 目前没有通过 termiod 运行会话。</string>
+	<key>Termio switches between these as macOS changes appearance; leave a slot on the default for Termio’s own canvas. Browse Themes installs one of 50 curated schemes, and any Ghostty-format file you drop into the Themes folder shows up here too.</key>
+	<string>Termio 会随 macOS 外观变化在两者间切换；将槽位留在默认值即可使用 Termio 自带的画布。“浏览主题”可以从 50 个精选配色中安装一个，你放进主题文件夹的 Ghostty 格式文件也会出现在这里。</string>
+	<key>Test</key>
+	<string>测试</string>
+	<key>Test Connection</key>
+	<string>测试连接</string>
+	<key>The SSH connection is closed. Reconnect in the terminal, then refresh.</key>
+	<string>SSH 连接已关闭。请在终端中重新连接，然后刷新。</string>
+	<key>The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with.</key>
+	<string>新建聊天（⌘N）启动的 Agent。“上次使用”跟随你最近一次聊天所用的 Agent。</string>
+	<key>The base branch has commits this branch doesn’t have, as of the last fetch.</key>
+	<string>截至上次 fetch，基础分支上有当前分支还没有的提交。</string>
+	<key>The coding agents offered when you start a session</key>
+	<string>新建会话时可以选用的编程 Agent</string>
+	<key>The file at %@ has been edited since it was installed. Removing it deletes those edits.</key>
+	<string>%@ 在安装之后被改过。移除会连同这些改动一起删除。</string>
+	<key>The folder was removed, but git couldn’t prune its stale worktree metadata.</key>
+	<string>文件夹已移除，但 git 无法清理其残留的 worktree 元数据。</string>
+	<key>The ignore rule couldn’t be added.</key>
+	<string>无法添加忽略规则。</string>
+	<key>The project and session list. Kept separate from the terminal font, and need not be monospaced.</key>
+	<string>项目与会话列表。与终端字体分开设置，无需等宽字体。</string>
+	<key>The public keys in ~/.ssh. Copy one to paste into a server’s authorized_keys — private keys are never read.</key>
+	<string>~/.ssh 中的公钥。可拷贝一个粘贴到服务器的 authorized_keys——私钥永远不会被读取。</string>
+	<key>The session host went away</key>
+	<string>承载会话的进程消失了</string>
+	<key>The sidebar shows this device’s sessions</key>
+	<string>侧栏显示的是这台设备的会话</string>
+	<key>The termio command-line tool, agent skill, and notifications</key>
+	<string>termio 命令行工具、Agent 技能与通知</string>
+	<key>The working tree is clean.</key>
+	<string>工作树中没有任何更改。</string>
+	<key>Theme</key>
+	<string>主题</string>
+	<key>Theme, fonts, cursor, and window</key>
+	<string>主题、字体、光标与窗口</string>
+	<key>Themes</key>
+	<string>主题</string>
+	<key>Thicken glyphs</key>
+	<string>加粗字形</string>
+	<key>This Mac</key>
+	<string>本机</string>
+	<key>This branch and the base branch share no commits.</key>
+	<string>这个分支和基础分支没有共同的提交。</string>
+	<key>This branch has no commits yet.</key>
+	<string>此分支还没有提交。</string>
+	<key>This branch has nothing the base branch doesn’t already have.</key>
+	<string>这个分支没有基础分支尚未包含的内容。</string>
+	<key>This checkout has no other branch to compare with.</key>
+	<string>这个检出没有其他分支可以对比。</string>
+	<key>This diff is too large to show here — open the file on GitHub.</key>
+	<string>此差异太大，无法在此显示，请在 GitHub 上打开该文件。</string>
+	<key>This file is binary — open it on GitHub to view.</key>
+	<string>此文件为二进制文件，请在 GitHub 上打开查看。</string>
+	<key>This folder has no git “origin” remote to clone.</key>
+	<string>这个文件夹没有 git “origin” 远程，无法克隆。</string>
+	<key>This host sent a name the file tree can’t show.</key>
+	<string>该主机返回了文件树无法显示的名称。</string>
+	<key>This month</key>
+	<string>本月</string>
+	<key>This project’s origin remote doesn’t point at github.com, so there is no issue tracker to show.</key>
+	<string>该项目的 origin 远程仓库未指向 github.com，因此没有可显示的 issue 跟踪器。</string>
+	<key>This pull request changes no files.</key>
+	<string>此 PR 未更改任何文件。</string>
+	<key>This week</key>
+	<string>本周</string>
+	<key>Timed out</key>
+	<string>连接超时</string>
+	<key>Today</key>
+	<string>今天</string>
+	<key>Toggle Full Screen</key>
+	<string>切换全屏幕</string>
+	<key>Toggle Project Files</key>
+	<string>切换项目文件</string>
+	<key>Toggle Sidebar</key>
+	<string>切换侧栏</string>
+	<key>Token usage</key>
+	<string>Token 用量</string>
+	<key>Token usage for your connected agents</key>
+	<string>已连接 Agent 的 token 用量</string>
+	<key>Try Again</key>
+	<string>重试</string>
+	<key>Try another search term.</key>
+	<string>请尝试其他搜索词。</string>
+	<key>Tunnel</key>
+	<string>隧道</string>
+	<key>Turn off to disconnect your iPhone; pairing is kept.</key>
+	<string>关闭后 iPhone 将断开连接；配对会保留。</string>
+	<key>Type this code at github.com/login/device to approve Termio. Waiting for approval…</key>
+	<string>在 github.com/login/device 输入此代码以授权 Termio。正在等待批准…</string>
+	<key>URL Pattern</key>
+	<string>URL 模式</string>
+	<key>Underline</key>
+	<string>下划线</string>
+	<key>Ungroup</key>
+	<string>取消编组</string>
+	<key>Unpin</key>
+	<string>取消固定</string>
+	<key>Unsaved changes — saving…</key>
+	<string>未存储的更改 — 正在存储…</string>
+	<key>Update</key>
+	<string>更新</string>
+	<key>Updated.</key>
+	<string>已更新。</string>
+	<key>Usage</key>
+	<string>用量</string>
+	<key>Use Regular Expression</key>
+	<string>使用正则表达式</string>
+	<key>User</key>
+	<string>用户</string>
+	<key>Uses %@</key>
+	<string>使用 %@</string>
+	<key>View</key>
+	<string>显示</string>
+	<key>View Trajectory</key>
+	<string>查看轨迹</string>
+	<key>View on %@</key>
+	<string>在 %@ 上查看</string>
+	<key>Waiting for the agent’s first status report.</key>
+	<string>正在等待 Agent 的首次状态报告。</string>
+	<key>WeChat</key>
+	<string>微信</string>
+	<key>WeChat group</key>
+	<string>微信群</string>
+	<key>When on, selecting text copies it straight to the clipboard.</key>
+	<string>开启后，选中文本会直接拷贝到剪贴板。</string>
+	<key>Window</key>
+	<string>窗口</string>
+	<key>Working Directory</key>
+	<string>工作目录</string>
+	<key>Worktree has changes</key>
+	<string>Worktree 存在更改</string>
+	<key>Worktree removed</key>
+	<string>Worktree 已移除</string>
+	<key>Yesterday</key>
+	<string>昨天</string>
+	<key>You can restore it from the Trash.</key>
+	<string>可以从废纸篓恢复它。</string>
+	<key>Your Host entries from ~/.ssh/config — the same aliases `ssh` resolves. Right-click a host to connect.</key>
+	<string>来自 ~/.ssh/config 的 Host 条目，与 `ssh` 解析的别名一致。右键点按主机即可连接。</string>
+	<key>Your ~/.ssh/config hosts, one click away</key>
+	<string>一键连接 ~/.ssh/config 中的主机</string>
+	<key>Zoom</key>
+	<string>缩放</string>
+	<key>Zoom Split</key>
+	<string>缩放拆分</string>
+	<key>`%@` is on your PATH. Run `%@ sessions …` to drive sibling sessions, or `%@ .` to open a folder.</key>
+	<string>`%@` 已在 PATH 中。运行 `%@ sessions …` 可驱动其他会话，运行 `%@ .` 可打开文件夹。</string>
+	<key>agents</key>
+	<string>个 Agent</string>
+	<key>binary</key>
+	<string>二进制</string>
+	<key>current</key>
+	<string>当前</string>
+	<key>e.g. JetBrains Mono</key>
+	<string>例如 JetBrains Mono</string>
+	<key>git couldn’t check “%@” for changes, so it was not removed.</key>
+	<string>git 无法检查“%@”是否有更改，因此未将其移除。</string>
+	<key>git couldn’t create a worktree for “%@”. Is it a git repository with at least one commit?</key>
+	<string>git 无法为“%@”创建 worktree。请确认它是包含至少一个提交的 git 仓库。</string>
+	<key>git couldn’t remove “%@”.</key>
+	<string>git 无法移除“%@”。</string>
+	<key>issue.state.open</key>
+	<string>开放</string>
+	<key>macOS hasn’t been asked to allow Termio’s notifications yet.</key>
+	<string>macOS 尚未请求允许 Termio 发送通知。</string>
+	<key>nothing</key>
+	<string>无</string>
+	<key>optional</key>
+	<string>可选</string>
+	<key>optional — ~/.ssh/id_ed25519</key>
+	<string>可选 — ~/.ssh/id_ed25519</string>
+	<key>ssh unavailable</key>
+	<string>ssh 不可用</string>
+	<key>termio can teach the agents you run (Claude Code, Codex, …) a `termio sessions` command so they can see, drive, and read each other's sessions in a project.
+
+Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks. You can turn it off anytime in Settings ▸ Agents.</key>
+	<string>termio 可以教你运行的 Agent（Claude Code、Codex 等）使用 `termio sessions` 命令，让它们在项目中查看、驱动并读取彼此的会话。
+
+启用后会在你的 ~/.claude/CLAUDE.md 中添加一段简短说明并安装状态 hooks。你可以随时在“设置 ▸ Agents”中将其关闭。</string>
+	<key>· resets %@</key>
+	<string>· 重置于 %@</string>
+	<key>“%@” already exists.</key>
+	<string>“%@”已存在。</string>
+	<key>“%@” is already in your config.</key>
+	<string>“%@”已存在于你的配置中。</string>
+	<key>“%@” isn’t a supported image.</key>
+	<string>“%@”不是受支持的图片。</string>
+	<key>“%@” isn’t installed — showing the system default.</key>
+	<string>“%@”未安装，正在显示系统默认字体。</string>
+</dict>
+</plist>

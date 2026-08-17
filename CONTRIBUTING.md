@@ -1,6 +1,6 @@
-# Contributing to termio
+# Contributing to Termio
 
-termio is a native macOS terminal app for AI coding agents: Swift +
+Termio is a native macOS terminal app for AI coding agents: Swift +
 AppKit/SwiftUI on top of **libghostty** (Ghostty's terminal core). It is a
 deliberately small, focused tool — prefer clarity over cleverness, keep the
 surface area minimal, and don't add features nobody asked for. When in doubt,
@@ -12,7 +12,7 @@ open an issue and discuss before writing code.
 - Swift 6 (Xcode 26).
 - No `zig` toolchain needed: libghostty ships as a prebuilt
   `GhosttyKit.xcframework` via the
-  [jiweiyuan/libghostty-swift](https://github.com/jiweiyuan/libghostty-swift)
+  [termio-sh/libghostty-swift](https://github.com/termio-sh/libghostty-swift)
   package. Do not try to build Ghostty from source in this repo.
 
 ## Building and running
@@ -24,7 +24,7 @@ swift build      # resolves dependencies + compiles
 swift run        # launches the app
 ```
 
-Run from a macOS GUI session — termio is a real foreground AppKit app
+Run from a macOS GUI session — Termio is a real foreground AppKit app
 (bootstrapped by an explicit `NSApplication` in `Sources/termio/App.swift`, not
 the SwiftUI `App` lifecycle).
 
@@ -40,7 +40,7 @@ open ./termio.app
 
 ### Dev channel (run beside an installed release)
 
-If you have a released termio installed, build the side-by-side dev app so you
+If you have a released Termio installed, build the side-by-side dev app so you
 don't clobber it:
 
 ```sh
@@ -58,9 +58,15 @@ The iOS app lives in `ios/` (`TermioMobile.xcodeproj`, scheme `TermioMobile`).
 `ios/dev-run.sh` builds and installs it pointed at this Mac's companion server.
 Shared wire-protocol code lives in `Shared/` and is used by both platforms.
 
+Simulator builds need no signing. For a device build, put your Apple
+Development team in a `SharedXcodeSettings/DeveloperSettings.xcconfig` next to
+your clone — `ios/Signing.xcconfig` gives the exact path and format. Keeping it
+outside the repo means nothing local ever lands in git, and one copy covers
+every clone and worktree.
+
 ## Code conventions
 
-From `docs/CLAUDE.md` (the authoritative copy):
+From `AGENTS.md` (the authoritative copy, also what AI coding agents read):
 
 - Prioritize correctness and clarity over micro-optimization.
 - No force-unwraps (`!`) or anything that traps — use `guard let` / `if let`
@@ -73,8 +79,8 @@ From `docs/CLAUDE.md` (the authoritative copy):
 
 ### libghostty specifics
 
-- termio uses the host-managed `.inMemory` backend: the app owns the PTY via
-  `Sources/termio/PTYProcess.swift`, spawned with `forkpty`. Do **not** switch
+- Termio uses the host-managed `.inMemory` backend: the app owns the PTY via
+  `Sources/termio/Terminal/Ghostty/PTYProcess.swift`, spawned with `forkpty`. Do **not** switch
   the spawn to `posix_spawn` — that PTY shape breaks agents' resize repaint
   (see `docs/bug/terminal-resize-no-reflow-HANDOFF.md`).
 - One `TerminalViewState` owns one surface; `TermioStore`'s SurfaceCache keeps
@@ -93,8 +99,8 @@ the upstream license in a vendor `README.md`, route resource lookups through
 header.
 
 Changes to libghostty itself go to the
-[jiweiyuan/libghostty-swift](https://github.com/jiweiyuan/libghostty-swift)
-fork (as rebased patch files there), not this repo; termio then bumps the
+[termio-sh/libghostty-swift](https://github.com/termio-sh/libghostty-swift)
+fork (as rebased patch files there), not this repo; Termio then bumps the
 package version in `Package.swift`.
 
 ## Patch conventions

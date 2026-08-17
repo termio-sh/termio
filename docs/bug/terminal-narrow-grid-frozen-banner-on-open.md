@@ -31,7 +31,7 @@ Candidate changes are in `Sources/termio/App.swift`,
 `Sources/termio/TermioStore/TermioStore+TerminalSurface.swift`, and
 `Sources/termio/TermioStore/TermioStore+ProjectActions.swift`.
 
-Root cause addressed: termio mounted the SwiftUI split/terminal content while the manually
+Root cause addressed: Termio mounted the SwiftUI split/terminal content while the manually
 created `NSWindow` and its `NSSplitView` were still restoring stale geometry. The window
 frame is only one part of that. The stronger, reproduced local clue is the persisted
 `"NSSplitView Subview Frames TermioContentSplit"` default: it can restore the terminal
@@ -58,7 +58,7 @@ The current candidate has three parts:
    from the current backing size. Termio's raw split-frame autosave was restoring stale
    detail widths into a wide-window launch.
 3. Mirror Muxy's materialization rule: only real view-derived geometry is allowed to
-   arm an on-screen PTY birth. In termio that now means using
+   arm an on-screen PTY birth. In Termio that now means using
    `TerminalViewState.surfaceSize`, which is published only from
    `TerminalSurfaceCoordinator.synchronizeMetrics()` after reading the AppKit view's
    actual bounds. The in-memory backend's generic resize callback is no longer used
@@ -101,7 +101,7 @@ whatever width the agent was born at is frozen forever.
 
 ## Root cause (this part is solid)
 
-termio owns the PTY (host-managed `.inMemory` backend via `PTYProcess`, **not**
+Termio owns the PTY (host-managed `.inMemory` backend via `PTYProcess`, **not**
 libghostty's `.exec` — `docs/CLAUDE.md` is stale on this). The agent child reads its
 winsize via `TIOCGWINSZ` at startup and prints its box at that width. **If the child
 is spawned/sized before the terminal view reaches its final width, the box freezes
@@ -115,7 +115,7 @@ distinct early-wrong sizes were found feeding the resize path:
 1. **ghostty's placeholder default surface size** — a `48×17` grid (`768×578` px) that
    ghostty fires through `receive_resize` (the `receiveResizeCallback`) *before*
    `synchronizeMetrics` delivers the real, view-derived grid. Both land through the
-   same `InMemoryTerminalSession` resize closure, so termio can't tell them apart by
+   same `InMemoryTerminalSession` resize closure, so Termio can't tell them apart by
    value.
 2. **the window's own not-yet-final size at launch.** Before the final fix, `App.swift`
    created the window at
@@ -208,7 +208,7 @@ Two families of fix to evaluate (see the prompt):
 - **Make the window reach its final frame *before* the terminal ever lays out** — mirror
   Muxy, which is a SwiftUI `WindowGroup` (`MuxyApp.swift`) whose scene restores the
   frame before content layout, so the terminal's *first* `setFrameSize` is already
-  final. In termio: call `setFrameAutosaveName` / restore the saved frame *before*
+  final. In Termio: call `setFrameAutosaveName` / restore the saved frame *before*
   `window.contentViewController = …`, and don't spawn until the window is on screen.
 - **Stop trusting a timer** — birth only when the grid has been stable across a couple
   of layout passes *and* the window has finished presenting (e.g. after
@@ -220,9 +220,9 @@ Two families of fix to evaluate (see the prompt):
 `createSurface()` until `backingPixelSize()` is valid and (re)tries it from
 `setFrameSize` (`GhosttyTerminalNSView.swift:349`, gate `pendingSurfaceCreation`). Its
 terminal view observes only `didChangeScreen` + occlusion — resize sensing is the same
-`setFrameSize`/`layout` as termio. **The decisive difference is the window lifecycle:**
+`setFrameSize`/`layout` as Termio. **The decisive difference is the window lifecycle:**
 Muxy is a SwiftUI-scene app (`MuxyApp.swift` / `Views/MainWindow.swift`) so the window
-is at its restored size before the terminal lays out; termio hand-builds the `NSWindow`
+is at its restored size before the terminal lays out; Termio hand-builds the `NSWindow`
 and restores the frame after installing content.
 
 ## Key files
@@ -259,7 +259,7 @@ and restores the frame after installing content.
 
 ## Debugging prompt for a fresh agent
 
-> You are debugging a **spawn-timing / window-lifecycle** bug in termio (native macOS
+> You are debugging a **spawn-timing / window-lifecycle** bug in Termio (native macOS
 > Swift + libghostty terminal for AI agents). A full-screen agent (Claude Code) opens
 > with its box-drawing welcome banner **frozen at ~52 columns on the left of a wide
 > pane**, with dead space filling the rest. Box-drawing content never reflows, so the

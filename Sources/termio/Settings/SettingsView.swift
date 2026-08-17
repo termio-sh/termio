@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The preferences window, opened from the app menu (⌘,). The groups mirror the
-/// settings model: terminal appearance, the app's own interface chrome, terminal
-/// behaviour, the agent presets, usage, and mobile pairing. Controls bind straight
+/// settings model: appearance, terminal behaviour, the agent presets, usage, and
+/// mobile pairing. Controls bind straight
 /// to `AppSettings`, which persists on change, so there is no separate save step.
 ///
 /// The layout follows macOS System Settings: a left sidebar of groups and a detail
@@ -12,23 +12,39 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var usage: UsageMonitor
+    /// Opens an SSH terminal to a `~/.ssh/config` alias in the main window — the
+    /// SSH tab's Connect action, injected by the app delegate so the settings
+    /// window doesn't hold the store.
+    let onSSHConnect: (String) -> Void
     @State private var selection: SettingsTab
+    /// Whether the Appearance tab's theme store is up. Held here so a deep link
+    /// (the palette's **Browse Themes…**) can open Settings straight onto the
+    /// sheet, and so dismissing it stays dismissed as the user moves between tabs.
+    @State private var isBrowsingThemeStore: Bool
 
     init(
         settings: AppSettings,
         usage: UsageMonitor,
-        initialTab: SettingsTab = .appearance
+        initialTab: SettingsTab = .general,
+        opensThemeStore: Bool = false,
+        onSSHConnect: @escaping (String) -> Void
     ) {
         self.settings = settings
         self.usage = usage
+        self.onSSHConnect = onSSHConnect
         _selection = State(initialValue: initialTab)
+        _isBrowsingThemeStore = State(initialValue: opensThemeStore)
     }
 
     var body: some View {
         NavigationSplitView {
             List(SettingsTab.allCases, selection: $selection) { tab in
-                Label(tab.title, systemImage: tab.symbol)
-                    .tag(tab)
+                Label {
+                    Text(tab.title)
+                } icon: {
+                    HugeIconView(icon: tab.icon, size: 15, color: .primary)
+                }
+                .tag(tab)
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 184, ideal: 204, max: 240)
@@ -50,19 +66,26 @@ struct SettingsView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .labeledContentStyle(.settingsCentered)
+        // Remember where the user is, so the next ⌘, reopens the same tab
+        // (see `AppDelegate.showSettings`). Written on every switch — cheap,
+        // and it must also capture the initial deep-linked tab a user stays on.
+        .onChange(of: selection, initial: true) { _, tab in
+            UserDefaults.standard.set(tab.rawValue, forKey: SettingsTab.lastOpenKey)
+        }
     }
 
     @ViewBuilder
     private var detail: some View {
         switch selection {
         case .general: GeneralSettingsTab(settings: settings)
-        case .appearance: AppearanceSettingsTab(settings: settings)
-        case .interface: InterfaceSettingsTab(settings: settings)
+        case .appearance: AppearanceSettingsTab(settings: settings, isBrowsingStore: $isBrowsingThemeStore)
         case .terminal: TerminalSettingsTab(settings: settings)
+        case .ssh: SSHSettingsTab(settings: settings, onConnect: onSSHConnect)
         case .keyboard: KeybindingsSettingsTab()
         case .agents: AgentSettingsTab(settings: settings)
         case .usage: UsageSettingsTab(settings: settings, usage: usage)
         case .mobile: MobileSettingsTab()
+        case .community: CommunitySettingsTab()
         }
     }
 }

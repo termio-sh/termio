@@ -8,7 +8,7 @@ updated: 2026-07-02
 
 # cmux (manaflow-ai)
 
-> **termio's single most direct competitor**: also native Swift + libghostty +
+> **Termio's single most direct competitor**: also native Swift + libghostty +
 > local-first + status visualization + no diff. But open-source, YC-backed,
 > ~23,000★ — it has already validated the entire category.
 
@@ -112,20 +112,20 @@ an emphasis on **programmability** and **multitasking**.
 - Product identity drift (cloud container manager → native terminal) muddies
   its positioning.
 
-## vs. termio / takeaways
+## vs. Termio / takeaways
 
 - **Points of convergence**: both native macOS, local-first, status-indicating
-  sidebar, **no diff**, worktree-oriented. termio's status dots ≈ cmux's
-  notification rings/badges; termio's project → session sidebar ≈ cmux's
-  vertical tabs. **What termio is building is exactly the category cmux has
+  sidebar, **no diff**, worktree-oriented. Termio's status dots ≈ cmux's
+  notification rings/badges; Termio's project → session sidebar ≈ cmux's
+  vertical tabs. **What Termio is building is exactly the category cmux has
   validated.**
-- **termio is deliberately narrower and cleaner**: **project → session
+- **Termio is deliberately narrower and cleaner**: **project → session
   hierarchy + menu-bar tray** + **first-class, app-automated local worktrees**
   — a small, opinionated surface. cmux is more "kitchen sink": embedded
   browser, SSH, socket automation, Claude Teams, multi-model orchestration,
   iOS, plus its cloud/Docker sandbox heritage — optimized for "programmable +
   multi-pane".
-- **The defensible angle**: termio = **opinionated minimalism + first-class
+- **The defensible angle**: Termio = **opinionated minimalism + first-class
   worktree automation + always-on menu-bar ambience**; these are precisely
   cmux's two gaps (no deep worktree lifecycle, no menu-bar tray, diff
   relegated to the de-emphasized cloud product).

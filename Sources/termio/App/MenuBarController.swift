@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import TermioShared
 
 /// The menu-bar (tray) presence, modelled on Tailscale's status item: termio's
 /// own 3×3 grid brand mark stays constant as a flat monochrome glyph that sits
@@ -196,71 +197,30 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 // sidebar does, and the timer spins it while the menu is open; other
                 // rows lead with the agent's real brand mark and trail a status dot.
                 if status == .working {
-                    item.image = cometImage(phase: cometPhase)
+                    item.image = sessionCometImage(phase: cometPhase)
                     workingItems.append(item)
                 } else {
-                    item.image = agentImage(for: session.agent)
+                    item.image = agentMenuImage(for: session.agent)
                 }
-                item.attributedTitle = rowTitle(store.displayTitle(for: session), status: status)
+                item.attributedTitle = sessionMenuRowTitle(store.displayTitle(for: session), status: status)
                 item.indentationLevel = 1
                 menu.addItem(item)
             }
         }
 
         if menu.items.isEmpty {
-            let empty = NSMenuItem(title: "All caught up", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: localized("All caught up"), action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         }
 
         menu.addItem(.separator())
         menu.addItem(
-            withTitle: "Quit Termio",
+            withTitle: localized("Quit Termio"),
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
         return menu
-    }
-
-    /// Renders an agent's brand mark for a roster row by reusing the sidebar's
-    /// `AgentIconView`, so the menu shows the exact same glyphs. Rasterized lazily
-    /// in a drawing-handler image: AppKit re-invokes the handler under the menu's
-    /// own appearance at display time, so the monochrome marks (Codex, Grok)
-    /// resolve to the right ink. Resolving eagerly against the status button's
-    /// appearance is wrong — the menu bar tints from the wallpaper and can be
-    /// dark while the dropdown menu (system theme) is light, which baked those
-    /// marks in as invisible white-on-white.
-    private func agentImage(for agent: AgentPreset) -> NSImage? {
-        let side: CGFloat = 15
-        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            let appearance = NSAppearance.currentDrawing()
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            let renderer = ImageRenderer(
-                content: AgentIconView(agent: agent, size: 13)
-                    .frame(width: side, height: side)
-                    .environment(\.colorScheme, isDark ? .dark : .light)
-            )
-            renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
-            guard let rendered = renderer.nsImage else { return false }
-            rendered.draw(in: rect)
-            return true
-        }
-    }
-
-    /// The row title with a trailing status dot for a session that just finished
-    /// (green) or is blocked on you (amber). Working rows carry the comet mark and
-    /// idle rows a plain title, so neither trails a dot.
-    private func rowTitle(_ title: String, status: SessionStatus) -> NSAttributedString {
-        let result = NSMutableAttributedString(
-            string: title,
-            attributes: [.font: NSFont.menuFont(ofSize: 0)]
-        )
-        guard let color = statusColor(for: status) else { return result }
-        result.append(NSAttributedString(
-            string: "  ●",
-            attributes: [.foregroundColor: color, .font: NSFont.systemFont(ofSize: 8)]
-        ))
-        return result
     }
 
     /// Whether a session belongs on the roster: anything not at rest. Working
@@ -283,39 +243,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    /// The trailing dot colour for a resting "your turn" state — green when the
-    /// agent just finished, amber when it's blocked on you. Working shows the comet
-    /// in place of a dot and idle shows nothing, so both get no colour. This is the
-    /// sidebar's exact dot vocabulary (see `StatusDot`).
-    private func statusColor(for status: SessionStatus) -> NSColor? {
-        switch status {
-        case .idle, .working: return nil
-        case .done: return .systemGreen
-        case .needsAttention: return .systemOrange
-        }
-    }
-
-    /// The sidebar's orbiting-comet working mark, rasterised at a fixed phase so the
-    /// menu timer can advance it frame by frame. Mirrors `agentImage`'s deferred
-    /// drawing-handler trick so the ink resolves under the dropdown's appearance
-    /// (menu bar tint and menu theme can differ), passing the resolved black/white
-    /// as the comet tint rather than relying on its adaptive-ink default.
-    private func cometImage(phase: Double) -> NSImage {
-        let side: CGFloat = 15
-        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            let appearance = NSAppearance.currentDrawing()
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            let renderer = ImageRenderer(
-                content: WorkingIndicator(tint: isDark ? .white : .black, phase: phase)
-                    .frame(width: side, height: side)
-            )
-            renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
-            guard let rendered = renderer.nsImage else { return false }
-            rendered.draw(in: rect)
-            return true
-        }
-    }
-
     /// While the menu is open its modal event-tracking loop stops SwiftUI's
     /// `TimelineView` clock, so we spin the comet ourselves: a timer added in
     /// `.common` mode (which fires during tracking) advances the phase and re-renders
@@ -324,6 +251,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         isMenuOpen = true
         guard !workingItems.isEmpty else { return }
         cometTimer?.invalidate()
+        // This timer bypasses the SwiftUI environment, so Reduce Motion has to be
+        // honored by hand (the sidebar's indicator handles it via `@Environment`):
+        // hold the frame the rows already carry instead of spinning.
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         let interval = 1.0 / 15.0
         let period = 1.1  // matches the sidebar's WorkingIndicator
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
@@ -331,7 +262,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 guard let self else { return }
                 self.cometPhase += interval / period
                 if self.cometPhase >= 1 { self.cometPhase -= 1 }
-                let frame = self.cometImage(phase: self.cometPhase)
+                let frame = sessionCometImage(phase: self.cometPhase)
                 for item in self.workingItems { item.image = frame }
             }
         }

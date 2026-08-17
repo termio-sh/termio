@@ -1,3 +1,4 @@
+import { i18n } from "@/lib/i18n";
 import { source } from "@/lib/source";
 
 export const siteUrl = "https://www.termio.sh";
@@ -6,9 +7,10 @@ type DocPage = NonNullable<ReturnType<typeof source.getPage>>;
 
 // Doc pages in sidebar (meta.json) order, resolved to full page objects so
 // callers get frontmatter and raw Markdown, not just tree nodes. Shared by the
-// llms.txt / llms-full.txt routes.
-export function orderedDocPages(): DocPage[] {
-  const byUrl = new Map(source.getPages().map((page) => [page.url, page]));
+// llms.txt / llms-full.txt routes, which index the English docs — the source of
+// truth every translation is generated from.
+export function orderedDocPages(lang: string = i18n.defaultLanguage): DocPage[] {
+  const byUrl = new Map(source.getPages(lang).map((page) => [page.url, page]));
   const out: DocPage[] = [];
   const walk = (nodes: ReturnType<typeof source.getPageTree>["children"]) => {
     for (const node of nodes) {
@@ -24,7 +26,7 @@ export function orderedDocPages(): DocPage[] {
       }
     }
   };
-  walk(source.getPageTree().children);
+  walk(source.getPageTree(lang).children);
   return out;
 }
 

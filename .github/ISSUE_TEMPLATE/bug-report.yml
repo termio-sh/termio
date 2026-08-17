@@ -1,0 +1,45 @@
+name: Bug report
+description: Something broke or behaves wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+      placeholder: Opened a split pane, dragged the divider, the terminal stopped repainting.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a project with two sessions
+        2. Group them with ⌘D
+        3. Drag the divider fast
+    validations:
+      required: false
+  - type: input
+    id: termio-version
+    attributes:
+      label: termio version
+      description: termio ▸ About termio.
+      placeholder: 0.21.0
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: macOS 26.1
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent involved, if any
+      description: Which coding agent was running in the session (Claude Code, Codex, …) and its version.
+      placeholder: Claude Code 2.1.220
+    validations:
+      required: false

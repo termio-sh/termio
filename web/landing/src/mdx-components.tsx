@@ -1,6 +1,8 @@
+import Image from "next/image";
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 import type { MDXComponents } from "mdx/types";
+import { Keybindings } from "@/components/docs/keybindings";
 import { cn } from "@/lib/utils";
 
 // Typed callouts — a quiet note by default, with tip/warning accents. Modeled on
@@ -41,7 +43,7 @@ function Callout({
   return (
     <div
       className={cn(
-        "my-6 rounded-lg border border-border border-l-2 bg-secondary/50 px-5 py-4",
+        "my-6 rounded-xl border border-border border-l-2 bg-secondary/40 px-4 py-3.5",
         style.edge,
         className,
       )}
@@ -92,8 +94,11 @@ function Card({
       )}
     </>
   );
+  // Unfilled until you point at it: the card is a link, and a permanent tinted
+  // panel per card turns a "Next steps" grid into four competing blocks. Base UI
+  // treats its own affordances the same way — the surface arrives on hover.
   const cls =
-    "group block rounded-2xl border border-border bg-secondary/30 p-4 no-underline transition-colors hover:border-foreground/20 hover:bg-secondary/60";
+    "group block rounded-xl border border-border p-4 no-underline transition-colors hover:border-foreground/20 hover:bg-secondary/50";
   return isInternal ? (
     <Link href={href} className={cls}>
       {content}
@@ -102,6 +107,80 @@ function Card({
     <a href={href} target="_blank" rel="noreferrer" className={cls}>
       {content}
     </a>
+  );
+}
+
+type DocsImageVariant = "window" | "phone";
+
+function DocsImage({
+  src,
+  alt,
+  width,
+  height,
+  variant = "window",
+}: {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  variant?: DocsImageVariant;
+}) {
+  return (
+    <figure className="not-prose my-8">
+      <div
+        className={cn(
+          "mx-auto overflow-visible",
+          variant === "phone" ? "max-w-[380px]" : "w-full",
+        )}
+      >
+        <Image
+          src={src}
+          alt={alt}
+          width={width}
+          height={height}
+          sizes={
+            variant === "phone"
+              ? "(max-width: 640px) 88vw, 380px"
+              : "(max-width: 768px) 100vw, 768px"
+          }
+          className="h-auto w-full select-none"
+        />
+      </div>
+    </figure>
+  );
+}
+
+function DocsMediaGrid({ children }: { children: ReactNode }) {
+  return (
+    <div className="not-prose my-8 grid items-start gap-5 sm:grid-cols-2 [&>figure]:my-0">
+      {children}
+    </div>
+  );
+}
+
+function DocsVideo({
+  src,
+  poster,
+  label,
+}: {
+  src: string;
+  poster: string;
+  label: string;
+}) {
+  return (
+    <figure className="not-prose my-8">
+      <video
+        controls
+        muted
+        playsInline
+        preload="metadata"
+        poster={poster}
+        aria-label={label}
+        className="h-auto w-full rounded-xl"
+      >
+        <source src={src} type="video/mp4" />
+      </video>
+    </figure>
   );
 }
 
@@ -116,7 +195,7 @@ function DocsLink({ href = "", ...props }: ComponentProps<"a">) {
 }
 
 // The component map handed to every compiled MDX page. Typography is carried by
-// the `.prose-docs` wrapper (globals.css); here we swap in behavior — smart
+// fumadocs-ui's `DocsBody`; here we swap in behavior — smart
 // links — and register the custom components authors can use in MDX.
 export function getMDXComponents(extra?: MDXComponents): MDXComponents {
   return {
@@ -124,6 +203,10 @@ export function getMDXComponents(extra?: MDXComponents): MDXComponents {
     Callout,
     Cards,
     Card,
+    DocsImage,
+    DocsMediaGrid,
+    DocsVideo,
+    Keybindings,
     ...extra,
   };
 }

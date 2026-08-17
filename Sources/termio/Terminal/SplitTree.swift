@@ -15,6 +15,81 @@ enum PaneFocusDirection {
     case left, right, up, down
 }
 
+/// Which side of a new divider an added pane takes. `.second` is the trailing
+/// slot — what "Split Right"/"Split Down" mean — and `.first` the leading one,
+/// which is how a drag-drop onto a pane's left/top half lands the dropped pane
+/// *before* its target.
+enum SplitSlot {
+    case first, second
+}
+
+/// Where a modifier-dragged pane is about to land on the pane under the
+/// pointer (issue #183): an edge half → the target splits and the dragged pane
+/// takes that side; the center → the two panes trade places (the existing
+/// `swapping` behaviour). Pure math on pane-local geometry, so the hit regions
+/// are testable without a view in sight. Points are in top-left-origin space.
+enum PaneDropZone: Equatable {
+    case left, right, top, bottom
+    case center
+
+    /// The middle box (as a fraction of each axis) that reads as "swap" rather
+    /// than an edge: 0.4 keeps the swap target hittable without aiming while
+    /// leaving each edge a generous 30% band.
+    private static let centerFraction: CGFloat = 0.4
+
+    /// The zone for a pointer at `point` in a pane of `size`. Outside the
+    /// center box the nearest edge wins — the corner-to-corner diagonals
+    /// ghostty's split drag uses, which give each edge a natural triangular
+    /// region.
+    static func zone(at point: CGPoint, in size: CGSize) -> PaneDropZone {
+        guard size.width > 0, size.height > 0 else { return .center }
+        let relX = point.x / size.width
+        let relY = point.y / size.height
+        let half = centerFraction / 2
+        if abs(relX - 0.5) <= half, abs(relY - 0.5) <= half { return .center }
+        let edges: [(PaneDropZone, CGFloat)] = [
+            (.left, relX), (.right, 1 - relX), (.top, relY), (.bottom, 1 - relY),
+        ]
+        return edges.min { $0.1 < $1.1 }!.0
+    }
+
+    /// The part of the target pane to highlight while this zone is hovered:
+    /// the half the dropped pane would occupy, or the whole pane for a swap —
+    /// the preview that makes the drop unambiguous before the mouse releases.
+    func highlightRect(in frame: CGRect) -> CGRect {
+        switch self {
+        case .left:
+            CGRect(x: frame.minX, y: frame.minY, width: frame.width / 2, height: frame.height)
+        case .right:
+            CGRect(x: frame.midX, y: frame.minY, width: frame.width / 2, height: frame.height)
+        case .top:
+            CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height / 2)
+        case .bottom:
+            CGRect(x: frame.minX, y: frame.midY, width: frame.width, height: frame.height / 2)
+        case .center:
+            frame
+        }
+    }
+
+    /// The split axis a drop here produces, or `nil` for the center swap.
+    var splitDirection: SplitDirection? {
+        switch self {
+        case .left, .right: .horizontal
+        case .top, .bottom: .vertical
+        case .center: nil
+        }
+    }
+
+    /// The slot the dragged pane takes in the new branch: leading for the
+    /// left/top halves, trailing for right/bottom.
+    var slot: SplitSlot {
+        switch self {
+        case .left, .top: .first
+        case .right, .bottom, .center: .second
+        }
+    }
+}
+
 /// A branch of the split tree: two subtrees separated by a draggable divider.
 /// `ratio` is the fraction of the branch's span given to `first`; it is clamped
 /// so neither side can be dragged into an unusable sliver.
@@ -76,20 +151,73 @@ indirect enum SplitNode: Codable, Hashable {
         }
     }
 
-    /// Replaces the `target` leaf with a split of it and `newLeaf` (the new pane
-    /// takes the second/trailing slot, matching "Split Right"/"Split Down").
+    /// Replaces the `target` leaf with a split of it and `newLeaf`. The default
+    /// slot puts the new pane second/trailing, matching "Split Right"/"Split
+    /// Down"; a drag-drop passes `.first` to land it on the leading side.
     /// A miss returns the tree unchanged.
     func splitting(leaf target: Session.ID, direction: SplitDirection,
-                   adding newLeaf: Session.ID) -> SplitNode {
+                   adding newLeaf: Session.ID, slot: SplitSlot = .second) -> SplitNode {
         switch self {
         case .leaf(let id) where id == target:
             return .split(SplitBranch(direction: direction, ratio: 0.5,
-                                      first: .leaf(id), second: .leaf(newLeaf)))
+                                      first: slot == .first ? .leaf(newLeaf) : .leaf(id),
+                                      second: slot == .first ? .leaf(id) : .leaf(newLeaf)))
         case .leaf:
             return self
         case .split(var branch):
-            branch.first = branch.first.splitting(leaf: target, direction: direction, adding: newLeaf)
-            branch.second = branch.second.splitting(leaf: target, direction: direction, adding: newLeaf)
+            branch.first = branch.first.splitting(leaf: target, direction: direction,
+                                                  adding: newLeaf, slot: slot)
+            branch.second = branch.second.splitting(leaf: target, direction: direction,
+                                                    adding: newLeaf, slot: slot)
+            return .split(branch)
+        }
+    }
+
+    /// Adds `newLeaf` on the far side of `target`'s divider: finds the branch
+    /// that has `target` as a direct child and splits the *sibling* subtree on
+    /// the cross axis, so `target`'s own pane keeps its full extent. This is the
+    /// spawn placement rule — an agent that keeps spawning companions stays
+    /// full-height while the companions stack up opposite it. A miss returns
+    /// the tree unchanged.
+    func splitting(oppositeLeaf target: Session.ID, adding newLeaf: Session.ID) -> SplitNode {
+        switch self {
+        case .leaf:
+            return self
+        case .split(var branch):
+            let cross: SplitDirection = branch.direction == .horizontal ? .vertical : .horizontal
+            if branch.first == .leaf(target) {
+                branch.second = .split(SplitBranch(direction: cross, ratio: 0.5,
+                                                   first: branch.second, second: .leaf(newLeaf)))
+            } else if branch.second == .leaf(target) {
+                branch.first = .split(SplitBranch(direction: cross, ratio: 0.5,
+                                                  first: branch.first, second: .leaf(newLeaf)))
+            } else {
+                branch.first = branch.first.splitting(oppositeLeaf: target, adding: newLeaf)
+                branch.second = branch.second.splitting(oppositeLeaf: target, adding: newLeaf)
+            }
+            return .split(branch)
+        }
+    }
+
+    /// Trades the positions of two leaves, leaving the tree's shape and every
+    /// divider ratio untouched — the "Move Pane" primitive (tmux's swap-pane).
+    /// Swapping is what keeps moving a one-click menu action: the layout offers
+    /// no ambiguous drop targets to negotiate, panes only change places.
+    func swapping(_ a: Session.ID, and b: Session.ID) -> SplitNode {
+        // Both leaves must be present, or the rewrite below would *replace* the
+        // present one with the absent one — a dangling pane, not a swap.
+        guard contains(a), contains(b) else { return self }
+        return swapped(a, b)
+    }
+
+    private func swapped(_ a: Session.ID, _ b: Session.ID) -> SplitNode {
+        switch self {
+        case .leaf(a): return .leaf(b)
+        case .leaf(b): return .leaf(a)
+        case .leaf: return self
+        case .split(var branch):
+            branch.first = branch.first.swapped(a, b)
+            branch.second = branch.second.swapped(a, b)
             return .split(branch)
         }
     }
@@ -163,6 +291,22 @@ indirect enum SplitNode: Codable, Hashable {
         var result = PaneLayout()
         accumulateLayout(in: rect, dividerThickness: dividerThickness, into: &result)
         return result
+    }
+
+    /// Every grouped pane's frame across *all* the groups, laid out in the same
+    /// rect — the geometry a pane has whether or not its group is the one on
+    /// screen. `TerminalPane` sizes mounted surfaces from this rather than from
+    /// the selected group's layout alone: a group's panes then keep their frames
+    /// while hidden, so switching sessions never resizes a surface it is merely
+    /// hiding or revealing (issue #245). A session in no group is absent — the
+    /// pane lays those out at its full bounds, the size they have when selected.
+    static func paneFrames(of groups: [SplitNode], in rect: CGRect) -> [Session.ID: CGRect] {
+        var frames: [Session.ID: CGRect] = [:]
+        for group in groups {
+            // A session belongs to at most one group, so no key can collide.
+            frames.merge(group.layout(in: rect).frames) { current, _ in current }
+        }
+        return frames
     }
 
     private func accumulateLayout(in rect: CGRect, dividerThickness: CGFloat,

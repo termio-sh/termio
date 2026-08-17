@@ -6,6 +6,7 @@
   "command": "cursor-agent",
   "icon": { "asset": "cursor-favicon" },
   "install": "https://cursor.com/docs/cli",
+  "skills": { "dir": "~/.cursor/skills" },
   "hooks": {
     "type": "json",
     "file": "~/.cursor/hooks.json",

@@ -5,5 +5,6 @@
   "wire": "hermes",
   "command": "hermes",
   "icon": { "asset": "hermes-favicon" },
-  "install": "https://hermes-agent.nousresearch.com/#downloads"
+  "install": "https://hermes-agent.nousresearch.com/#downloads",
+  "skills": { "dir": "~/.hermes/skills" }
 }

@@ -59,6 +59,7 @@ enum WorktreeService {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["-C", dir] + args
+        process.environment = GitEnvironment.optionalLocksDisabled
         let out = Pipe()
         process.standardOutput = out
         process.standardError = FileHandle.nullDevice

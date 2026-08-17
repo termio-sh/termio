@@ -27,7 +27,6 @@ final class ProjectListViewController: UIViewController {
     private var sortByName = UserDefaults.standard.string(forKey: "sessions.sortOrder") == "name"
 
     private let filterButton = UIButton(type: .system)
-    private let newSessionButton = UIButton(type: .system)
     private let tableView = UITableView(frame: .zero, style: .grouped)
     /// The Telegram/iMessage-style zero state shown when there are no projects
     /// to list — never fake rows. Its copy tracks `CompanionLink.state`.
@@ -38,6 +37,7 @@ final class ProjectListViewController: UIViewController {
     private var connectingGraceTimer: Timer?
     private var rosterObserver: NSObjectProtocol?
     private var linkStateObserver: NSObjectProtocol?
+    private var themeObserver: NSObjectProtocol?
 
     init(store: RosterStore) {
         self.store = store
@@ -48,14 +48,12 @@ final class ProjectListViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // A full page, not a drawer: plain system background, like the
-        // Messages inbox.
-        view.backgroundColor = .systemBackground
+        // A full page, not a drawer. Tinted to the terminal theme so the whole
+        // app reads as one canvas (the rows/table draw clear over it).
+        themeObserver = installThemeBackdrop()
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
-        // Added last so it floats over the list, opposite the home tab pill.
-        configureNewSessionButton()
         refilter()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -78,6 +76,9 @@ final class ProjectListViewController: UIViewController {
         if let linkStateObserver {
             NotificationCenter.default.removeObserver(linkStateObserver)
         }
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
         connectingGraceTimer?.invalidate()
     }
 
@@ -89,7 +90,7 @@ final class ProjectListViewController: UIViewController {
 
     private func configureTopBar() -> UIView {
         let pageTitle = UILabel()
-        pageTitle.text = "Projects"
+        pageTitle.text = localized("Projects")
         pageTitle.font = .systemFont(ofSize: 34, weight: .bold)
         pageTitle.textColor = .label
 
@@ -97,7 +98,7 @@ final class ProjectListViewController: UIViewController {
         // a glass circle riding the large title, menu as primary action.
         filterButton.applyGlassSymbol("line.3.horizontal.decrease")
         filterButton.tintColor = .label
-        filterButton.accessibilityLabel = "Sort"
+        filterButton.accessibilityLabel = localized("Sort")
         filterButton.showsMenuAsPrimaryAction = true
         filterButton.menu = UIMenu(children: [
             UIDeferredMenuElement.uncached { [weak self] completion in
@@ -126,10 +127,10 @@ final class ProjectListViewController: UIViewController {
     /// The same two orders as the Mac's sort menu, checkmarked like it too.
     private func sortMenuItems() -> [UIMenuElement] {
         [
-            UIAction(title: "Recent Activity", state: sortByName ? .off : .on) { [weak self] _ in
+            UIAction(title: localized("Recent Activity"), state: sortByName ? .off : .on) { [weak self] _ in
                 self?.setSortByName(false)
             },
-            UIAction(title: "Name", state: sortByName ? .on : .off) { [weak self] _ in
+            UIAction(title: localized("Name"), state: sortByName ? .on : .off) { [weak self] _ in
                 self?.setSortByName(true)
             },
         ]
@@ -141,46 +142,16 @@ final class ProjectListViewController: UIViewController {
         refilter()
     }
 
-    // MARK: - New-session button (the floating ＋)
-
-    /// ＋ floats bottom-right like Slack's compose button — the same corner as
-    /// the Chats tab's ＋, so "start something new" always lives in one place.
-    /// A project must be picked first, so the menu is one submenu per project
-    /// with the agents inside (the long-press menu, made discoverable);
-    /// deferred so it always reflects the live roster, hidden while unpaired.
-    private func configureNewSessionButton() {
-        newSessionButton.applyGlassIcon(.add, boxSize: 26)
-        newSessionButton.tintColor = .label
-        newSessionButton.accessibilityLabel = "New Session"
-        newSessionButton.showsMenuAsPrimaryAction = true
-        newSessionButton.menu = UIMenu(children: [
-            UIDeferredMenuElement.uncached { [weak self] completion in
-                guard let self else { return completion([]) }
-                completion(visible.filter { $0.rosterID != nil }.map { project in
-                    UIMenu(
-                        title: project.name,
-                        image: UIImage(systemName: "folder"),
-                        children: self.store.newSessionActions(in: project)
-                    )
-                })
-            },
-        ])
-        newSessionButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(newSessionButton)
-        NSLayoutConstraint.activate([
-            newSessionButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            // The tab pill's own scale (64pt, 8pt above the safe area), so the
-            // two ends of the bottom edge read as one balanced bar.
-            newSessionButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            newSessionButton.widthAnchor.constraint(equalToConstant: 64),
-            newSessionButton.heightAnchor.constraint(equalToConstant: 64),
-        ])
-    }
-
-    private func presentSettings() {
+    private func presentSettings(deepLinkToDevices: Bool = false) {
         // The sheet inherits the window's app-wide Appearance override, same
         // as every other screen.
-        present(UINavigationController(rootViewController: SettingsViewController()), animated: true)
+        let nav = UINavigationController(rootViewController: SettingsViewController())
+        if deepLinkToDevices {
+            // "Connect a Mac" promises pairing, so land on the Devices page
+            // itself; back reveals full Settings, swipe-down dismisses.
+            nav.pushViewController(DevicesSettingsViewController(), animated: false)
+        }
+        present(nav, animated: true)
     }
 
     // MARK: - Table
@@ -206,10 +177,8 @@ final class ProjectListViewController: UIViewController {
             forHeaderFooterViewReuseIdentifier: SectionCapView.reuseID
         )
         tableView.translatesAutoresizingMaskIntoConstraints = false
-        // The floating tab pill sits over the list; reserve room so the last
-        // rows scroll clear of it (64pt pill + margins).
-        tableView.contentInset.bottom = 80
-        tableView.verticalScrollIndicatorInsets.bottom = 80
+        // The native tab controller contributes the correct safe-area and
+        // adjusted scroll insets for both the classic and Liquid Glass bars.
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 16),
@@ -231,8 +200,6 @@ final class ProjectListViewController: UIViewController {
             : store.projects
         visible = ordered.filter { $0.kind != "chats" && $0.kind != "terminals" }
         sections = (attention.isEmpty ? [] : [.needsYou]) + [.projects]
-        newSessionButton.isHidden = store.companionURL == nil
-            || !visible.contains { $0.rosterID != nil }
         tableView.reloadData()
         updateEmptyState()
     }
@@ -269,10 +236,10 @@ final class ProjectListViewController: UIViewController {
             stopConnectingGraceTimer()
             reconnectStalled = false
             emptyState.configure(
-                symbol: "macbook.and.iphone",
-                title: "No Mac connected",
-                message: "Open termio on your Mac, then pair this phone to see and drive your projects from here.",
-                actionTitle: "Connect a Mac",
+                icon: .devicePair,
+                title: localized("No Mac connected"),
+                message: localized("Open Termio on your Mac, then pair this phone to see and drive your projects from here."),
+                actionTitle: localized("Connect a Mac"),
                 busy: false
             )
         case .connecting where reconnectStalled:
@@ -280,18 +247,18 @@ final class ProjectListViewController: UIViewController {
             // asleep or off-network. Say so, and let the user force a retry —
             // the link keeps trying on its slow heartbeat regardless.
             emptyState.configure(
-                symbol: "wifi.exclamationmark",
-                title: "Can't reach your Mac",
-                message: "It may be asleep or off your network. termio keeps trying — reopen the lid, or tap to retry now.",
-                actionTitle: "Try Again",
+                icon: .wifiError,
+                title: localized("Can't reach your Mac"),
+                message: localized("It may be asleep or off your network. Termio keeps trying — reopen the lid, or tap to retry now."),
+                actionTitle: localized("Try Again"),
                 busy: false
             )
         case .connecting:
             startConnectingGraceTimer()
             emptyState.configure(
-                symbol: nil,
-                title: "Connecting…",
-                message: "Reaching your Mac over the companion link.",
+                icon: nil,
+                title: localized("Connecting…"),
+                message: localized("Reaching your Mac over the companion link."),
                 actionTitle: nil,
                 busy: true
             )
@@ -299,10 +266,20 @@ final class ProjectListViewController: UIViewController {
             stopConnectingGraceTimer()
             reconnectStalled = false
             emptyState.configure(
-                symbol: "folder",
-                title: "No projects open",
-                message: "Open a project in termio on your Mac and it'll show up here.",
+                icon: .folder,
+                title: localized("No projects open"),
+                message: localized("Open a project in Termio on your Mac and it'll show up here."),
                 actionTitle: nil,
+                busy: false
+            )
+        case .failed(let reason):
+            stopConnectingGraceTimer()
+            reconnectStalled = false
+            emptyState.configure(
+                icon: .wifiError,
+                title: localized("Connection failed"),
+                message: reason,
+                actionTitle: localized("Open Settings"),
                 busy: false
             )
         }
@@ -332,7 +309,11 @@ final class ProjectListViewController: UIViewController {
     /// immediate reconnect and drop back to the "Connecting…" copy.
     private func emptyStateAction() {
         if case .unpaired = CompanionLink.state {
-            presentSettings()
+            presentSettings(deepLinkToDevices: true)
+            return
+        }
+        if case .failed = CompanionLink.state {
+            presentSettings(deepLinkToDevices: true)
             return
         }
         reconnectStalled = false
@@ -359,10 +340,10 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
         // Headers only when the strip splits the page in two; a plain project
         // list under the "Projects" page title needs no second label.
         guard sections.count > 1 else { return nil }
-        let header = tableView.dequeueReusableHeaderFooterView(
+        guard let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: SectionCapView.reuseID
-        ) as! SectionCapView
-        header.configure(title: sections[section] == .needsYou ? "Needs You" : "Projects")
+        ) as? SectionCapView else { return nil }
+        header.configure(title: sections[section] == .needsYou ? localized("Needs You") : localized("Projects"))
         return header
     }
 
@@ -434,7 +415,7 @@ extension ProjectListViewController: UITableViewDataSource, UITableViewDelegate 
               store.companionURL != nil,
               let sessionID = attention[indexPath.row].rosterID
         else { return nil }
-        let close = UIContextualAction(style: .destructive, title: "Close") { [weak self] _, _, done in
+        let close = UIContextualAction(style: .destructive, title: localized("Close")) { [weak self] _, _, done in
             self?.store.stopSession(sessionID)
             done(true)
         }

@@ -23,6 +23,11 @@ final class CompanionClient: NSObject {
     private var pathMonitor: NWPathMonitor?
     private var lastPathStatus: NWPath.Status?
     private var pingTimer: Timer?
+    /// `refuse()` sends one final `.error` and immediately cancels the socket,
+    /// while request errors leave it open. Keep the last reason briefly so the
+    /// close path can distinguish those two cases without expanding the wire.
+    private var lastServerError: (message: String, uptime: TimeInterval)?
+    private static let refusalCloseWindow: TimeInterval = 1
 
     /// Latest roster, delivered on the main queue.
     var onRoster: ((CompanionRoster) -> Void)?
@@ -43,8 +48,18 @@ final class CompanionClient: NSObject {
     /// Filename-search matches (reply to `.searchFiles`): the echoed query,
     /// repo-relative paths, and whether the batch was capped.
     var onSearchResults: ((String, [String], Bool) -> Void)?
+    /// The project's working-tree changes (reply to `.listChanges`).
+    var onChanges: (([WireChange]) -> Void)?
+    /// One file's unified diff (reply to `.readDiff`).
+    var onDiff: ((WireDiff) -> Void)?
     /// The server rejected a request (e.g. a failed `start`).
     var onError: ((String) -> Void)?
+    /// The server sent an error and immediately dropped the connection.
+    var onConnectionFailure: ((String) -> Void)?
+    /// The Mac's parsed `~/.ssh/config` host blocks, answering a
+    /// `.sshConfigHosts` request — the read-only menu the Terminals ＋ → New SSH
+    /// picks from (the phone never authors a host, only chooses a known alias).
+    var onSSHConfig: (([WireSSHHost]) -> Void)?
 
     /// Controls sent before the socket is open wait here — auth must ride
     /// the wire first on every connect, so a `.upload` fired right after
@@ -99,6 +114,7 @@ final class CompanionClient: NSObject {
         pathMonitor?.cancel()
         pathMonitor = nil
         lastPathStatus = nil
+        lastServerError = nil
         pingTimer?.invalidate()
         pingTimer = nil
         if let observer = foregroundObserver {
@@ -109,6 +125,7 @@ final class CompanionClient: NSObject {
 
     private func connect() {
         guard !stopped else { return }
+        lastServerError = nil
         task?.cancel(with: .goingAway, reason: nil)
         let task = session.webSocketTask(with: url)
         // A `file` reply for a 1 MB source is ~1.4 MB of base64 JSON — past
@@ -136,6 +153,14 @@ final class CompanionClient: NSObject {
             guard let self, !stopped, !isConnected else { return }
             connect()
         }
+    }
+
+    private func takeErrorForImmediateDrop() -> String? {
+        defer { lastServerError = nil }
+        guard let lastServerError,
+              ProcessInfo.processInfo.systemUptime - lastServerError.uptime
+                <= Self.refusalCloseWindow else { return nil }
+        return lastServerError.message
     }
 
     /// Reconnect the instant the network path comes back (Wi-Fi rejoin, VPN
@@ -183,8 +208,15 @@ final class CompanionClient: NSObject {
             case .success(let message):
                 if case .string(let text) = message {
                     if let roster = CompanionRoster.decode(text) {
-                        onRoster?(roster)
+                        lastServerError = nil
+                        if roster.wire < Wire.minimumServer {
+                            onConnectionFailure?(localized("Update Termio on your Mac to connect this phone."))
+                            stop()
+                        } else {
+                            onRoster?(roster)
+                        }
                     } else {
+                        lastServerError = nil
                         switch CompanionControl.decode(text) {
                         case .started(let sessionID, let agent): onStarted?(sessionID, agent)
                         case .fileList(let path, let entries): onFileList?(path, entries)
@@ -193,7 +225,15 @@ final class CompanionClient: NSObject {
                         case .uploaded(let path): onUploaded?(path)
                         case .searchResults(let query, let paths, let truncated):
                             onSearchResults?(query, paths, truncated)
-                        case .error(let reason): onError?(reason)
+                        case .changes(let files): onChanges?(files)
+                        case .diff(let diff): onDiff?(diff)
+                        case .error(let reason):
+                            lastServerError = (
+                                message: reason,
+                                uptime: ProcessInfo.processInfo.systemUptime
+                            )
+                            onError?(reason)
+                        case .sshConfigList(let hosts): onSSHConfig?(hosts)
                         default: break
                         }
                     }
@@ -203,8 +243,10 @@ final class CompanionClient: NSObject {
                 // A superseded task's death is not a drop of the current link.
                 guard task === self.task else { return }
                 Log.companion.notice("roster link dropped: \(error.localizedDescription, privacy: .public)")
+                let connectionFailure = takeErrorForImmediateDrop()
                 isConnected = false
                 onConnected?(false)
+                if let connectionFailure { onConnectionFailure?(connectionFailure) }
                 scheduleReconnect()
             }
         }
@@ -217,7 +259,9 @@ extension CompanionClient: URLSessionWebSocketDelegate {
         Log.companion.notice("roster link connected to \(self.url.host ?? "?", privacy: .public)")
         // Auth rides first on every connect; the roster is the server's reply.
         if let token = CompanionLink.token(of: url) {
-            task.send(.string(CompanionControl.auth(token: token).encoded())) { _ in }
+            task.send(
+                .string(CompanionControl.auth(token: token, wire: Wire.current).encoded())
+            ) { _ in }
         } else {
             // No `?t=` on the paired URL: the socket opens, but the Mac refuses
             // it after its ~10s auth grace window, so the link loops
@@ -238,7 +282,9 @@ extension CompanionClient: URLSessionWebSocketDelegate {
     func urlSession(_: URLSession, webSocketTask task: URLSessionWebSocketTask,
                     didCloseWith _: URLSessionWebSocketTask.CloseCode, reason _: Data?) {
         guard task === self.task else { return }
+        let connectionFailure = takeErrorForImmediateDrop()
         isConnected = false
         onConnected?(false)
+        if let connectionFailure { onConnectionFailure?(connectionFailure) }
     }
 }

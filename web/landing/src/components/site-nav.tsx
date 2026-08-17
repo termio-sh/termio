@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/logo";
-import { AppleMark } from "@/components/section-label";
-import { navLinks, downloadUrl, discordUrl } from "@/lib/site";
+import { AppleMark, GitHubMark } from "@/components/section-label";
+import { navLinks, downloadUrl, discordUrl, githubUrl } from "@/lib/site";
 
 // Discord's mascot glyph, sized to sit inline with the nav links.
 function DiscordMark({ className }: { className?: string }) {
@@ -36,11 +36,14 @@ export function SiteNav() {
           aria-label="Primary"
           className="liquid-glass flex items-center gap-1 rounded-full p-1.5"
         >
+          {/* Phone widths tighten the link padding and drop the Discord label
+              (icon stays) so the pill fits a 390pt viewport; sm restores the
+              full treatment. */}
           {navLinks.map((link) => (
             <a
               key={link.href}
               href={link.href}
-              className="rounded-full px-4 py-1.5 text-sm font-medium text-white transition-all duration-200 ease-[var(--ease-apple)] hover:bg-white/[0.08] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
+              className="rounded-full px-3 py-1.5 text-sm font-medium text-foreground transition-all duration-200 ease-[var(--ease-apple)] hover:bg-foreground/[0.08] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] sm:px-4"
             >
               {link.label}
             </a>
@@ -50,15 +53,25 @@ export function SiteNav() {
             target="_blank"
             rel="noreferrer"
             aria-label="Join the Termio Discord"
-            className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium text-white transition-all duration-200 ease-[var(--ease-apple)] hover:bg-white/[0.08] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-foreground transition-all duration-200 ease-[var(--ease-apple)] hover:bg-foreground/[0.08] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] sm:px-4"
           >
             <DiscordMark className="h-4 w-4" />
-            Discord
+            <span className="hidden sm:inline">Discord</span>
+          </a>
+          <a
+            href={githubUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Termio on GitHub"
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-foreground transition-all duration-200 ease-[var(--ease-apple)] hover:bg-foreground/[0.08] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] sm:px-4"
+          >
+            <GitHubMark className="h-4 w-4" />
+            <span className="hidden sm:inline">GitHub</span>
           </a>
           <a
             href={downloadUrl}
             className={cn(
-              "ml-1 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground transition-all duration-200 ease-[var(--ease-apple)] hover:brightness-110 active:scale-[0.98]",
+              "ml-1 inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-sm font-semibold text-primary-foreground transition-all duration-200 ease-[var(--ease-apple)] hover:brightness-110 active:scale-[0.98] sm:px-4",
             )}
           >
             <AppleMark className="h-3.5 w-3.5" />

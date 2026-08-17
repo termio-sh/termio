@@ -1,3 +1,4 @@
+import TermioShared
 import AppKit
 import SwiftUI
 
@@ -7,23 +8,48 @@ import SwiftUI
 /// editor) holding the whole `DiffDocument`. Line semantics are painted, not stacked —
 /// `DiffWashLayoutManager` fills the add/delete washes and band fills behind the text,
 /// the gutter ruler draws line numbers and the `+`/`−` signs *outside* the selectable
-/// text — so selection runs continuously across lines, copies pure code, and ⌘F is
-/// the system find bar.
+/// text — so selection runs continuously across lines, copies pure code, and ⌘F opens the
+/// same `FileFindBar` the code editor uses (driven by the shared `TextFindEngine`), not
+/// AppKit's un-styleable system find bar.
 struct DiffTextPane: NSViewRepresentable {
     let document: DiffDocument
     /// Syntax-colored lines by row id (the `DiffHighlighter` pass), applied in place
     /// once they land; the document renders plain until then.
     let styled: [Int: NSAttributedString]
     let font: NSFont
+    /// The terminal's `Thicken glyphs`, so a diff and the terminal beside it are smoothed
+    /// the same way (see `DiffWashLayoutManager.thickenGlyphs`).
+    let thickenGlyphs: Bool
     let backgroundColor: NSColor
     /// Line-number ink, from the shared `gutterInk(for:)` so the diff's gutter and the
     /// file editor's read as one family.
     let numberColor: NSColor
-    /// Splices a clicked band's hidden lines back in (rebuilds the document upstream).
-    let onExpand: (Int) -> Void
+    /// Splices a band's hidden lines back in, from the end the reader asked for
+    /// (rebuilds the document upstream).
+    let onExpand: (Int, DiffBandDirection) -> Void
     /// ← / → sibling walk; returns false at either end so the press dies quietly.
     let onWalk: (Int) -> Bool
     let onClose: () -> Void
+    /// Find state driven by the overlay's `FileFindBar` — empty query paints nothing.
+    var findQuery: String = ""
+    var findOptions: FindOptions = FindOptions()
+    /// 0-based match to focus; ignored on empty query or empty result.
+    var findFocusedIndex: Int = 0
+    /// Fires with the total match count after any recompute.
+    var onMatchesChanged: ((Int) -> Void)? = nil
+    /// Bumped when the find bar closes, so the text view reclaims first responder and its
+    /// ← / → walk and Esc work again.
+    var reclaimFocus: Int = 0
+    /// Embedded mode: the pane is stacked inside an outer scroll (the multi-file card list), so it
+    /// must not scroll or grab focus itself — it grows to its content and reports that height back so
+    /// the SwiftUI card can size to it, letting the outer list own the scroll.
+    var embedded: Bool = false
+    var onContentHeight: ((CGFloat) -> Void)? = nil
+    /// "Add to Chat" in the right-click menu: the argument is the selected diff text,
+    /// `nil` when nothing is selected (the owner inserts the diffed file's path instead).
+    /// Left `nil` where the pane has no chat to feed (the embedded PR file cards).
+    var addToChat: ((String?) -> Void)? = nil
+    var canAddToChat: (() -> Bool)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -43,11 +69,11 @@ struct DiffTextPane: NSViewRepresentable {
         textView.onExpand = onExpand
         textView.onWalk = onWalk
         textView.onClose = onClose
+        textView.addToChat = addToChat
+        textView.canAddToChat = canAddToChat
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = false
-        textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = true
         textView.textContainerInset = NSSize(width: 0, height: 8)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -59,6 +85,13 @@ struct DiffTextPane: NSViewRepresentable {
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
+        // Embedded panes are sized to their content by the SwiftUI card, so they never actually scroll
+        // — but keep the scroll view otherwise standard (only auto-hide the overlay scroller) so its
+        // ruler still lays out to the full height. Disabling the scroller knocks the gutter short.
+        if embedded {
+            scrollView.autohidesScrollers = true
+            scrollView.scrollerStyle = .overlay
+        }
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
         scrollView.backgroundColor = backgroundColor
@@ -80,6 +113,10 @@ struct DiffTextPane: NSViewRepresentable {
         // exposed strip, so without a full invalidation the gutter's absolutely
         // positioned numbers desync into a garbled smear (the editor's ruler learned
         // this the hard way).
+        context.coordinator.scrollView = scrollView
+        context.coordinator.embedded = embedded
+        context.coordinator.onContentHeight = onContentHeight
+
         textView.postsFrameChangedNotifications = true
         context.coordinator.observeFrame(of: textView)
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -87,13 +124,16 @@ struct DiffTextPane: NSViewRepresentable {
 
         apply(to: textView, layoutManager: layoutManager, ruler: ruler,
               coordinator: context.coordinator)
+        context.coordinator.reportHeightIfNeeded()
 
-        // Keys (← → walk, Esc, ⌘F) should work the moment the overlay lands, without
-        // a click first. Deferred one turn — at make time the view has no window yet.
-        DispatchQueue.main.async { [weak textView] in
-            guard let textView, let window = textView.window else { return }
-            if window.firstResponder === window || window.firstResponder is NSTextView == false {
-                window.makeFirstResponder(textView)
+        // Keys (← → walk, Esc) should work the moment the overlay lands, without a click first —
+        // but an embedded pane must not steal focus (many stacked panes would fight over it).
+        if !embedded {
+            DispatchQueue.main.async { [weak textView] in
+                guard let textView, let window = textView.window else { return }
+                if window.firstResponder === window || window.firstResponder is NSTextView == false {
+                    window.makeFirstResponder(textView)
+                }
             }
         }
         return scrollView
@@ -106,11 +146,27 @@ struct DiffTextPane: NSViewRepresentable {
         textView.onExpand = onExpand
         textView.onWalk = onWalk
         textView.onClose = onClose
+        // Re-assign per update: the closures capture the CURRENT request (← / → walks
+        // swap the diffed file in place), so a stale capture would insert the previous
+        // file's path.
+        textView.addToChat = addToChat
+        textView.canAddToChat = canAddToChat
         scrollView.backgroundColor = backgroundColor
         scrollView.contentView.backgroundColor = backgroundColor
         textView.backgroundColor = backgroundColor
+        let documentChanged = context.coordinator.appliedDocument !== document
         apply(to: textView, layoutManager: layoutManager, ruler: ruler,
               coordinator: context.coordinator)
+        if documentChanged { context.coordinator.invalidateFind() }
+
+        context.coordinator.onMatchesChanged = onMatchesChanged
+        context.coordinator.updateFind(query: findQuery, options: findOptions,
+                                       focusedIndex: findFocusedIndex, in: textView)
+        context.coordinator.reclaimFocusIfNeeded(reclaimFocus, in: textView)
+
+        context.coordinator.onContentHeight = onContentHeight
+        // A band-expand or a syntax pass changes the content height; re-measure so the card resizes.
+        context.coordinator.reportHeightIfNeeded()
     }
 
     /// Swaps the document in when it changed (initial load, band expand) and lays the
@@ -118,6 +174,7 @@ struct DiffTextPane: NSViewRepresentable {
     private func apply(to textView: DiffTextView, layoutManager: DiffWashLayoutManager,
                        ruler: DiffGutterRulerView, coordinator: Coordinator) {
         textView.backgroundColor = backgroundColor
+        layoutManager.thickenGlyphs = thickenGlyphs
         if coordinator.appliedDocument !== document {
             coordinator.appliedDocument = document
             coordinator.appliedStyled = nil
@@ -127,6 +184,7 @@ struct DiffTextPane: NSViewRepresentable {
         }
         // Outside the document-identity check so a theme change re-inks the gutter of an
         // already-open diff, matching the editor's every-update restyle.
+        ruler.onExpand = onExpand
         ruler.configure(document: document, codeFont: font, gutterColor: backgroundColor,
                         numberColor: numberColor)
         // A dictionary identity check, not equality: the highlight pass lands at most
@@ -163,12 +221,84 @@ struct DiffTextPane: NSViewRepresentable {
         var appliedDocument: DiffDocument?
         var appliedStyled: Int?
         weak var ruler: DiffGutterRulerView?
+        var onMatchesChanged: ((Int) -> Void)?
+        // Embedded (card-stacked) sizing: measure the laid-out content and hand its height to SwiftUI.
+        weak var scrollView: NSScrollView?
+        var embedded = false
+        var onContentHeight: ((CGFloat) -> Void)?
+        private var reportedHeight: CGFloat = -1
+
+        /// Measure the text's laid-out height and report it (once, on change) so the SwiftUI card sizes
+        /// to fit and the outer list scrolls. No-op unless embedded.
+        func reportHeightIfNeeded() {
+            guard embedded, let scrollView,
+                  let textView = scrollView.documentView as? DiffTextView,
+                  let layoutManager = textView.layoutManager,
+                  let container = textView.textContainer else { return }
+            layoutManager.ensureLayout(for: container)
+            let height = layoutManager.usedRect(for: container).height
+                + textView.textContainerInset.height * 2
+            guard abs(height - reportedHeight) > 0.5 else { return }
+            reportedHeight = height
+            let callback = onContentHeight
+            DispatchQueue.main.async { callback?(height) }
+        }
+        /// The same incremental-find engine the code editor uses — highlights and semantics
+        /// stay identical across the two ⌘F surfaces.
+        private let find = TextFindEngine()
+        private var appliedFindQuery: String = ""
+        private var appliedFindOptions: FindOptions = FindOptions()
+        private var appliedFocusedIndex: Int = -1
+        private var appliedReclaim: Int = 0
+
+        /// Recompute + repaint after a new query, option change, or focus move (the diff is
+        /// read-only, so there's no edit path to keep matches in sync with — unlike the editor).
+        func updateFind(query: String, options: FindOptions, focusedIndex: Int, in textView: NSTextView) {
+            let queryChanged = query != appliedFindQuery || options != appliedFindOptions
+            if queryChanged {
+                appliedFindQuery = query
+                appliedFindOptions = options
+                find.recompute(query: query, options: options, in: textView)
+                notifyMatchCount()
+                appliedFocusedIndex = -1
+            }
+            // Unrelated re-renders (a sibling walk, a theme change) flow through here too — only
+            // repaint when the query, options, or focused match actually moved.
+            guard queryChanged || focusedIndex != appliedFocusedIndex else { return }
+            find.paint(focused: focusedIndex, reveal: true, in: textView)
+            appliedFocusedIndex = focusedIndex
+        }
+
+        /// A band-expand rebuilds the document, wiping the highlights and shifting offsets, so
+        /// force the next `updateFind` to recompute against the fresh text.
+        func invalidateFind() {
+            appliedFindQuery = ""
+            appliedFindOptions = FindOptions()
+            appliedFocusedIndex = -1
+        }
+
+        /// Closing the find bar hands the keyboard back to the text view so ← / → and Esc work.
+        func reclaimFocusIfNeeded(_ token: Int, in textView: NSTextView) {
+            guard token != appliedReclaim else { return }
+            appliedReclaim = token
+            textView.window?.makeFirstResponder(textView)
+        }
+
+        private func notifyMatchCount() {
+            let count = find.matches.count
+            let callback = onMatchesChanged
+            DispatchQueue.main.async { callback?(count) }
+        }
 
         func observeFrame(of textView: NSTextView) {
             NotificationCenter.default.addObserver(
                 forName: NSView.frameDidChangeNotification, object: textView, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.ruler?.needsDisplay = true }
+                MainActor.assumeIsolated {
+                    self?.ruler?.needsDisplay = true
+                    // A width change re-wraps the text, so the content height moves — re-measure.
+                    self?.reportHeightIfNeeded()
+                }
             }
         }
 
@@ -189,9 +319,13 @@ struct DiffTextPane: NSViewRepresentable {
 /// caret to move), and a click on an expandable band splices its lines back in.
 final class DiffTextView: NSTextView {
     var document: DiffDocument?
-    var onExpand: ((Int) -> Void)?
+    var onExpand: ((Int, DiffBandDirection) -> Void)?
     var onWalk: ((Int) -> Bool)?
     var onClose: (() -> Void)?
+    /// "Add to Chat": the argument is the selected diff text (`nil` = no selection,
+    /// the owner inserts the diffed file's path). Gate read at menu-open time.
+    var addToChat: ((String?) -> Void)?
+    var canAddToChat: (() -> Bool)?
 
     override func keyDown(with event: NSEvent) {
         let hasModifiers = !event.modifierFlags
@@ -213,9 +347,53 @@ final class DiffTextView: NSTextView {
         onClose?()
     }
 
+    /// A minimal right-click menu: Copy, plus Close. NSTextView's default would inject
+    /// the read-only text grab-bag (Look Up / Translate / Speech / Share / Services) a
+    /// diff has no use for; returning our own menu — without calling `super` — drops all
+    /// of it, matching the editor's and reader's stripped menus.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        menu.allowsContextMenuPlugIns = false
+        // Not `copy:`: macOS 26 decorates the standard editing selectors with a system symbol
+        // that `image = nil` cannot clear, and the rest of this menu is plain text.
+        menu.addItem(withTitle: localized("Copy"), action: #selector(copySelection), keyEquivalent: "")
+        if canAddToChat?() == true {
+            menu.addItem(.separator())
+            // One name everywhere (Cursor's): a selection goes over as the pasted
+            // snippet, none means the diffed file's path — context says which.
+            let add = NSMenuItem(title: localized("Add to Chat"), action: #selector(addToChatAction), keyEquivalent: "")
+            add.target = self
+            menu.addItem(add)
+        }
+        if onClose != nil {
+            menu.addItem(.separator())
+            let close = NSMenuItem(title: localized("Close"), action: #selector(closeFromMenu), keyEquivalent: "")
+            close.target = self
+            menu.addItem(close)
+        }
+        return menu
+    }
+
+    @objc private func addToChatAction() {
+        let range = selectedRange()
+        let selection = range.length > 0 ? (string as NSString).substring(with: range) : nil
+        addToChat?(selection)
+    }
+
+    @objc private func closeFromMenu() { onClose?() }
+
+    @objc private func copySelection(_ sender: Any?) { copy(sender) }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(copySelection) { return selectedRange().length > 0 }
+        return super.validateUserInterfaceItem(item)
+    }
+
     override func mouseDown(with event: NSEvent) {
+        // The row itself is the "show me the whole gap" target; the gutter's chevrons
+        // reveal it a screenful at a time.
         if let anchor = expandableBand(at: event) {
-            onExpand?(anchor)
+            onExpand?(anchor, .all)
             return
         }
         super.mouseDown(with: event)
@@ -232,8 +410,7 @@ final class DiffTextView: NSTextView {
         let padding = DiffDocument.bandPadding
         guard local.y >= fragment.minY - padding, local.y <= fragment.maxY + padding else { return nil }
         let character = layoutManager.characterIndexForGlyph(at: glyph)
-        guard let line = document.line(at: character),
-              case .band(_, expandable: true) = line.role else { return nil }
+        guard let line = document.line(at: character), line.isRevealable else { return nil }
         return line.rowId
     }
 
@@ -285,6 +462,18 @@ final class DiffTextView: NSTextView {
 /// composites on top.
 final class DiffWashLayoutManager: NSLayoutManager {
     var document: DiffDocument?
+    /// Follows the terminal's `Thicken glyphs`. Ghostty rasterizes its own glyphs and only
+    /// dilates them when that switch is on, while AppKit smooths every glyph it draws — so
+    /// the same face at the same size reads heavier in a diff than in the terminal one pane
+    /// over. Turning smoothing off with the switch keeps one setting over both surfaces.
+    var thickenGlyphs = false
+
+    override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        if !thickenGlyphs {
+            NSGraphicsContext.current?.cgContext.setShouldSmoothFonts(false)
+        }
+        super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
+    }
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         if let document, let container = textContainers.first {
@@ -297,7 +486,7 @@ final class DiffWashLayoutManager: NSLayoutManager {
                 let line = document.lines[index]
                 index += 1
                 if line.range.location >= NSMaxRange(charRange) { break }
-                guard let fill = Self.fill(for: line.role) else { continue }
+                guard let fill = document.palette.wash(for: line.role) else { continue }
                 let glyphs = glyphRange(forCharacterRange: line.range, actualCharacterRange: nil)
                 var rect = boundingRect(forGlyphRange: glyphs, in: container)
                 rect.origin.x = 0
@@ -309,14 +498,5 @@ final class DiffWashLayoutManager: NSLayoutManager {
             }
         }
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
-    }
-
-    static func fill(for role: DiffDocument.Line.Role) -> NSColor? {
-        switch role {
-        case .code(.addition): return NSColor.systemGreen.withAlphaComponent(0.13)
-        case .code(.deletion): return NSColor.systemRed.withAlphaComponent(0.13)
-        case .band: return NSColor.labelColor.withAlphaComponent(0.045)
-        case .code: return nil
-        }
     }
 }

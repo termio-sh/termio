@@ -9,7 +9,7 @@ updated: 2026-07-02
 # container-use (dagger)
 
 > Strongest isolation (container-level) + a "branch = environment" model; **too
-> heavy** for termio's "small, focused, no sandbox" positioning.
+> heavy** for Termio's "small, focused, no sandbox" positioning.
 
 ## One-line positioning
 
@@ -37,16 +37,16 @@ filesystem, container = runtime**", exposed to agents via MCP.
 
 ## Weaknesses
 
-- Brings in **Docker** — heavy; conflicts with termio's "no sandbox, real
+- Brings in **Docker** — heavy; conflicts with Termio's "no sandbox, real
   `.exec` PTY, lightweight" positioning.
 
-## vs. termio / takeaways
+## vs. Termio / takeaways
 
 - The only thing truly worth absorbing is **one invariant**: **never check out
-  the same branch in two worktrees simultaneously** — termio's worktree logic
+  the same branch in two worktrees simultaneously** — Termio's worktree logic
   must uphold this (create a new branch per session, never attach to a branch
   in use elsewhere).
-- Container isolation itself is **over-engineering** for termio and should not
+- Container isolation itself is **over-engineering** for Termio and should not
   be adopted.
 
 ## References

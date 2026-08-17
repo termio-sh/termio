@@ -17,6 +17,7 @@
 		AA10000000000000000000A7 /* TermioMobileUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TermioMobileUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C4B834BC028171A141441B55 /* TermioMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TermioMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F8F08AD2A884AB27376B01C2 /* Shared */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Shared; path = ../Shared; sourceTree = SOURCE_ROOT; };
+		AB10000000000000000000B1 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -93,6 +94,7 @@
 		600AAD319D9C4100B4D7E969 = {
 			isa = PBXGroup;
 			children = (
+				AB10000000000000000000B1 /* Signing.xcconfig */,
 				2D5422DC9B807C0631867802 /* Packages */,
 				566C062F615479EC27FA2BB4 /* Sources */,
 				AA10000000000000000000A6 /* UITests */,
@@ -170,6 +172,7 @@
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
 			);
 			mainGroup = 600AAD319D9C4100B4D7E969;
 			minimizedProjectReferenceProxies = 1;
@@ -222,8 +225,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 5Y27G7B6D8;
-				CURRENT_PROJECT_VERSION = 284;
+				CURRENT_PROJECT_VERSION = 285;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -233,7 +235,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.5.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = sh.termio.mobile;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
@@ -243,6 +245,7 @@
 		};
 		37947DEAB20302949BAD1E74 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AB10000000000000000000B1 /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -306,6 +309,7 @@
 		};
 		3FC2334EF47C653AE64E0B2E /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = AB10000000000000000000B1 /* Signing.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -366,8 +370,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 5Y27G7B6D8;
-				CURRENT_PROJECT_VERSION = 284;
+				CURRENT_PROJECT_VERSION = 285;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -377,7 +380,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.5.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = sh.termio.mobile;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
@@ -391,11 +394,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 5Y27G7B6D8;
-				CURRENT_PROJECT_VERSION = 284;
+				CURRENT_PROJECT_VERSION = 285;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.5.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = sh.termio.mobile.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -409,11 +411,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 5Y27G7B6D8;
-				CURRENT_PROJECT_VERSION = 284;
+				CURRENT_PROJECT_VERSION = 285;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.5.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = sh.termio.mobile.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -464,10 +465,10 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		E76CADD6045BA4FE33901492 /* XCRemoteSwiftPackageReference "libghostty-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/jiweiyuan/libghostty-swift";
+			repositoryURL = "https://github.com/termio-sh/libghostty-swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.11;
+				minimumVersion = 1.0.16;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

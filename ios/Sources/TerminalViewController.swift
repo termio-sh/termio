@@ -30,7 +30,21 @@ final class TerminalViewController: UIViewController {
     /// freed the surface and raced libghostty's render threads.
     var onRequestBack: (() -> Void)?
 
+    /// Interactive back-swipe hooks (set by RootContainerViewController). The
+    /// rightward drag is finger-tracked instead of a discrete pop: `Began`
+    /// starts the interactive transition, `Changed` reports the horizontal
+    /// finger offset (>= 0, measured in a stable space so moving the screen
+    /// doesn't feed back), `Ended` reports the release velocity and whether the
+    /// drag crossed the commit threshold.
+    var onBackBegan: (() -> Void)?
+    var onBackChanged: ((CGFloat) -> Void)?
+    var onBackEnded: ((_ velocityX: CGFloat, _ commit: Bool) -> Void)?
+
     private lazy var terminalView = DisplayTerminalView(frame: .zero)
+    /// Whether the terminal held the keyboard when an interactive back began, so a
+    /// cancelled (non-committed) swipe can hand focus back instead of leaving the
+    /// keyboard dismissed (the drag resigns it up front, matching `goBack()`).
+    private var terminalWasFirstResponderAtBackBegin = false
     /// Last size actually sent to the engine + the pending coalesced refit —
     /// see viewDidLayoutSubviews for why resizes are rationed.
     private var lastFittedSize: CGSize = .zero
@@ -59,6 +73,9 @@ final class TerminalViewController: UIViewController {
         return v
     }()
     private var settingsObserver: NSObjectProtocol?
+    /// System edit menu over the live selection (Copy/Paste), presented at
+    /// the touch-selection release point.
+    private lazy var editMenuInteraction = UIEditMenuInteraction(delegate: self)
     /// Bottom pin of the surface — its constant tracks the keyboard overlap
     /// (0 when the keyboard is away), see keyboardFrameWillChange.
     private var terminalBottomConstraint: NSLayoutConstraint?
@@ -76,14 +93,19 @@ final class TerminalViewController: UIViewController {
     )
 
     // Drawer
-    private lazy var inspectorNav = UINavigationController(
-        rootViewController: InspectorViewController(
+    private lazy var inspector: InspectorViewController = {
+        let inspector = InspectorViewController(
             session: session,
             companionURL: {
                 if case .companion(let url) = backend { url } else { nil }
             }()
         )
-    )
+        inspector.onSendToAgent = { [weak self] text in
+            self?.sendSnippetToPrompt(text)
+        }
+        return inspector
+    }()
+    private lazy var inspectorNav = UINavigationController(rootViewController: inspector)
     private let dimView = UIControl()
     private var drawerOpen = false
     /// Direction the surface pan locked at its start: rightward = back to
@@ -228,7 +250,7 @@ final class TerminalViewController: UIViewController {
         statusLabel.textColor = .secondaryLabel
         statusLabel.text = switch backend {
         case .demoShell: "\(session.agent.name) · \(session.time)"
-        case .companion: "Connecting…"
+        case .companion: localized("Connecting…")
         }
         contextLabel.isHidden = contextLabel.text?.isEmpty ?? true
         switch backend {
@@ -236,10 +258,17 @@ final class TerminalViewController: UIViewController {
         case .demoShell: break
         }
 
+        // Each line spans the whole width between the two buttons and centers its
+        // text inside it. Sizing the labels to their text instead makes every
+        // title change a layout pass that re-centers the stack, so a title the
+        // agent rewrites as it works visibly jitters left and right.
         let titles = UIStackView(arrangedSubviews: [contextLabel, titleLabel, statusLabel])
         titles.axis = .vertical
-        titles.alignment = .center
+        titles.alignment = .fill
         titles.spacing = 0
+        for label in [contextLabel, titleLabel, statusLabel] {
+            label.textAlignment = .center
+        }
 
         headerBar.axis = .horizontal
         headerBar.alignment = .center
@@ -258,7 +287,7 @@ final class TerminalViewController: UIViewController {
             self?.goBack()
         }, for: .touchUpInside)
         // The right slot balances the back chevron (keeping the title centered)
-        // and holds an overflow menu of per-session actions — View Trace and
+        // and holds an overflow menu of per-session actions — View Trajectory and
         // Copy Path for a companion session. With nothing to offer (the demo
         // shell has no Mac transcript or path) it stays an invisible spacer.
         let overflow = UIButton(type: .system)
@@ -288,7 +317,7 @@ final class TerminalViewController: UIViewController {
         ])
     }
 
-    /// The header overflow menu. View Trace and Copy Path appear only for a
+    /// The header overflow menu. View Trajectory and Copy Path appear only for a
     /// companion session, where there is a Mac transcript and project path to
     /// reach; the demo shell has neither, so the menu comes back empty and the
     /// button hides itself.
@@ -296,19 +325,19 @@ final class TerminalViewController: UIViewController {
         var items: [UIMenuElement] = []
         if case .companion = backend {
             items.append(UIAction(
-                title: "View Trace", image: UIImage(systemName: "list.bullet.rectangle")
+                title: localized("View Trajectory"), image: UIImage(systemName: "list.bullet.rectangle")
             ) { [weak self] _ in self?.showTrace() })
         }
         if let path = session.projectPath, !path.isEmpty {
             items.append(UIAction(
-                title: "Copy Path", image: UIImage(systemName: "doc.on.doc")
+                title: localized("Copy Path"), image: UIImage(systemName: "doc.on.doc")
             ) { _ in UIPasteboard.general.string = path })
         }
         return UIMenu(children: items)
     }
 
     /// Present the session's agent transcript as an in-app HTML trace — the
-    /// phone counterpart of the desktop Info pane's "View Trace". The Mac
+    /// phone counterpart of the desktop Info pane's "View Trajectory". The Mac
     /// renders it (reusing `SessionTraceRenderer`) and returns the document
     /// over the companion socket; the sheet shows a spinner until it lands.
     private func showTrace() {
@@ -373,6 +402,8 @@ final class TerminalViewController: UIViewController {
 
     private func configureTerminal() {
         terminalView.delegate = self
+        // Long-press → floating Paste menu (see wirePasteMenu).
+        wirePasteMenu()
         // Scrolling the terminal is reading; give the rows back to content.
         // Dropping first responder only hides the keyboard — tapping the
         // surface refocuses (the wrapper's touch path takes it back).
@@ -428,6 +459,11 @@ final class TerminalViewController: UIViewController {
             case .photos: self?.presentPhotoPicker()
             case .files: self?.presentDocumentPicker()
             }
+        }
+        // The transcript types straight into the prompt — no newline, so a
+        // dictation never sends a half-formed prompt on its own.
+        keyBar.onVoiceTranscript = { [weak self] text in
+            self?.terminalView.send(Data(text.utf8))
         }
         terminalView.setStickyModifierChangeHandler { [weak self] in
             guard let self else { return }
@@ -599,7 +635,7 @@ final class TerminalViewController: UIViewController {
                 self.uploadTotal = 0
                 self.uploadDone = 0
                 self.terminalView.keyBar.setAttachBusy(false)
-                self.presentAlert("Upload failed", message)
+                self.presentAlert(localized("Upload failed"), message)
             }
             client.start()
             uploadClient = client
@@ -609,29 +645,42 @@ final class TerminalViewController: UIViewController {
         )
     }
 
+    /// Pastes a diff selection into the TUI's input line — the drawer's "Send to Agent",
+    /// and the phone twin of the desktop's "Add to Chat". Bracketed paste keeps the
+    /// whole block one literal insert instead of a line-by-line submit, and the drawer
+    /// steps aside so the prompt it landed in is visible.
+    private func sendSnippetToPrompt(_ text: String) {
+        pasteIntoPrompt(text)
+        setDrawer(open: false, animated: true)
+    }
+
+    /// Bracketed paste: the whole block lands as one literal insert instead of a
+    /// line-by-line submit, and the TUI's own Return still sends it.
+    private func pasteIntoPrompt(_ text: String) {
+        terminalView.send(Data(("\u{1B}[200~" + text + "\u{1B}[201~").utf8))
+    }
+
     /// Types the uploaded file's Mac path into the TUI's input line, where it
-    /// stays editable and submits with the TUI's own Return. Bracketed paste
-    /// keeps a name with spaces one literal insert; the trailing space
-    /// separates it from whatever gets typed next.
+    /// stays editable. The trailing space separates it from whatever gets typed next.
     private func typeUploadedPath(_ path: String) {
-        terminalView.send(Data(("\u{1B}[200~" + path + " \u{1B}[201~").utf8))
+        pasteIntoPrompt(path + " ")
     }
 
     private func reportSkipped(oversized: [String], unreadable: [String] = []) {
         var lines: [String] = []
         if !oversized.isEmpty {
-            lines.append("Over the 8 MB cap: \(oversized.joined(separator: ", "))")
+            lines.append(localized("Over the 8 MB cap: \(oversized.joined(separator: ", "))"))
         }
         if !unreadable.isEmpty {
-            lines.append("Couldn't read: \(unreadable.joined(separator: ", "))")
+            lines.append(localized("Couldn't read: \(unreadable.joined(separator: ", "))"))
         }
         guard !lines.isEmpty else { return }
-        presentAlert("Some files were skipped", lines.joined(separator: "\n"))
+        presentAlert(localized("Some files were skipped"), lines.joined(separator: "\n"))
     }
 
     private func presentAlert(_ title: String, _ message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: localized("OK"), style: .default))
         present(alert, animated: true)
     }
 
@@ -702,9 +751,9 @@ final class TerminalViewController: UIViewController {
         contextLabel.isHidden = true
         switch state {
         case .connecting:
-            statusLabel.text = "Connecting…"
+            statusLabel.text = localized("Connecting…")
         case .reconnecting:
-            statusLabel.text = "Reconnecting…"
+            statusLabel.text = localized("Reconnecting…")
         case .connected:
             statusLabel.isHidden = true
             contextLabel.isHidden = contextLabel.text?.isEmpty ?? true
@@ -724,14 +773,14 @@ final class TerminalViewController: UIViewController {
                 companion?.reassertGrid()
             }
         case .failed(let reason):
-            statusLabel.text = "Connection failed"
-            let alert = UIAlertController(title: "Companion connection failed", message: reason, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+            statusLabel.text = localized("Connection failed")
+            let alert = UIAlertController(title: localized("Companion connection failed"), message: reason, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: localized("OK"), style: .default) { [weak self] _ in
                 self?.close()
             })
             present(alert, animated: true)
         case .closed:
-            statusLabel.text = "Disconnected"
+            statusLabel.text = localized("Disconnected")
             companionSession?.finish(exitCode: 0, runtimeMilliseconds: 0)
         }
     }
@@ -747,19 +796,11 @@ final class TerminalViewController: UIViewController {
         return TerminalTheme(light: light, dark: dark)
     }
 
-    /// A dynamic color mirroring the active theme slot's background, so the
-    /// canvas behind the transparent surface always matches — including the
-    /// unpainted band under the keyboard guide and the safe areas.
-    private static func backdropColor() -> UIColor {
-        UIColor { traits in
-            let settings = MobileSettings.shared
-            let dark = traits.userInterfaceStyle == .dark
-            let name = dark ? settings.darkThemeName : settings.lightThemeName
-            return GhosttyThemeCatalog.theme(named: name)
-                .flatMap { UIColor(ghosttyHex: $0.background) }
-                ?? (dark ? .black : .white)
-        }
-    }
+    /// The canvas behind the transparent surface — the theme background, shared
+    /// with the app chrome so the terminal and its surrounding pages read as one
+    /// continuous color (covers the unpainted band under the keyboard guide and
+    /// the safe areas too). See `ThemeBackdrop`.
+    private static func backdropColor() -> UIColor { ThemeBackdrop.color }
 
     /// The settings-driven half of the surface config — the single place the
     /// appearance keys are named, so creation and the live re-style path
@@ -769,6 +810,12 @@ final class TerminalViewController: UIViewController {
             builder.withBackgroundOpacity(0)
             builder.withFontSize(Float(MobileSettings.shared.fontSize))
             builder.withWindowPaddingX(8)
+            // Without a font-family the phone rendered CJK unlike the Mac —
+            // libghostty dropped in proportional PingFang whose metrics fight the
+            // Latin face. Set the chain to match the desktop (see `terminalFontChain`).
+            for family in terminalFontChain() {
+                builder.withFontFamily(family)
+            }
             // The phone is a viewer, not the scrollback of record — the Mac keeps
             // the full history. libghostty's renderer paints its "non-functional"
             // panel when it exhausts a GPU/allocator resource reflowing scrollback
@@ -780,6 +827,29 @@ final class TerminalViewController: UIViewController {
             // still ~thousands of lines — plenty for a phone viewer.
             builder.withCustom("scrollback-limit", "256000")
         }
+    }
+
+    /// Ghostty reads repeated `font-family` as a fallback chain — first loadable
+    /// face is the primary and sets cell metrics; later faces only cover glyphs
+    /// it lacks, and unresolvable names are skipped. `SF Mono` matches the Mac's
+    /// default (`Menlo` behind it as the always-present floor); the CJK candidates
+    /// mirror the Mac's, ending on `PingFang SC` so hanzi never fall to an
+    /// arbitrary system face.
+    private static func terminalFontChain() -> [String] {
+        var chain = ["SF Mono", "Menlo"]
+        let cjkCandidates = [
+            "Sarasa Term SC", "Sarasa Mono SC", "Sarasa Fixed SC",
+            "Maple Mono NF CN", "Maple Mono CN",
+            "LXGW WenKai Mono",
+            "Noto Sans Mono CJK SC",
+        ]
+        if let installed = cjkCandidates.first(where: { UIFont(name: $0, size: 12) != nil }) {
+            chain.append(installed)
+        }
+        if UIFont(name: "PingFang SC", size: 12) != nil {
+            chain.append("PingFang SC")
+        }
+        return chain
     }
 
     /// Restyles the live surface in place after a settings change, then
@@ -848,14 +918,14 @@ final class TerminalViewController: UIViewController {
         dimView.alpha = 0.15 * openness
     }
 
-    func setDrawer(open: Bool, animated: Bool) {
+    func setDrawer(open: Bool, animated: Bool, initialVelocity: CGFloat = 0) {
         drawerOpen = open
         dimView.isUserInteractionEnabled = open
         if open { setTerminalFocused(false) }
         let animations = { self.layoutDrawer() }
         if animated {
             UIView.animate(withDuration: 0.35, delay: 0,
-                           usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
+                           usingSpringWithDamping: 0.9, initialSpringVelocity: initialVelocity,
                            animations: animations)
         } else {
             animations()
@@ -872,10 +942,46 @@ final class TerminalViewController: UIViewController {
             openPanGoesBack = pan.velocity(in: view).x > 0
         }
         if openPanGoesBack {
-            guard pan.state == .ended else { return }
-            let fling = pan.velocity(in: view).x > 300
-            if fling || pan.translation(in: view).x > view.bounds.width * 0.3 {
-                goBack()
+            // Measure in the window, not `view`: the container drags `view`
+            // itself during the interactive back, so reading translation in a
+            // moving space would feed back on itself.
+            guard let ref = view.window, onBackChanged != nil else {
+                // No interactive host (e.g. a plain nav stack) — discrete pop.
+                if pan.state == .ended {
+                    let fling = pan.velocity(in: view).x > 300
+                    if fling || pan.translation(in: view).x > view.bounds.width * 0.3 {
+                        goBack()
+                    }
+                }
+                return
+            }
+            let tx = pan.translation(in: ref).x
+            switch pan.state {
+            case .began:
+                // Drop the keyboard as the drag starts, matching goBack() — but remember to hand
+                // it back if the swipe is cancelled.
+                terminalWasFirstResponderAtBackBegin = terminalView.isFirstResponder
+                terminalView.resignFirstResponder()
+                onBackBegan?()
+            case .changed:
+                onBackChanged?(max(0, tx))
+            case .ended, .cancelled:
+                let vx = pan.velocity(in: ref).x
+                // A decisive flick wins over position, in *either* direction: a hard left flick
+                // cancels even past the distance threshold. Position only decides a gentle release.
+                let commit: Bool
+                if pan.state == .ended {
+                    commit = abs(vx) > 300 ? vx > 0 : tx > view.bounds.width * 0.3
+                } else {
+                    commit = false
+                }
+                // A non-committed swipe returns to the terminal; restore the keyboard it had.
+                if !commit, terminalWasFirstResponderAtBackBegin {
+                    terminalView.becomeFirstResponder()
+                }
+                onBackEnded?(vx, commit)
+            default:
+                break
             }
             return
         }
@@ -886,8 +992,17 @@ final class TerminalViewController: UIViewController {
             layoutDrawer(progress: progress)
             dimView.isUserInteractionEnabled = true
         case .ended, .cancelled:
-            let fling = -pan.velocity(in: view).x > 300
-            setDrawer(open: fling || progress > 0.4, animated: true)
+            let vOpen = -pan.velocity(in: view).x   // + = toward open
+            // A decisive flick wins over position in either direction; position only decides a
+            // gentle release. Otherwise a hard flick back the other way still committed the old way.
+            let willOpen = abs(vOpen) > 300 ? vOpen > 0 : progress > 0.4
+            // Normalize the release speed to fractions of the remaining travel per second, toward
+            // the committed target, so a flick that direction carries through and a reversal /
+            // gentle release settles from rest.
+            let remaining = drawerWidth * (willOpen ? (1 - progress) : progress)
+            let towardTarget = willOpen ? vOpen : -vOpen
+            let v = remaining > 1 ? min(max(towardTarget / remaining, 0), 30) : 0
+            setDrawer(open: willOpen, animated: true, initialVelocity: v)
         default:
             break
         }
@@ -900,8 +1015,13 @@ final class TerminalViewController: UIViewController {
         case .changed:
             layoutDrawer(progress: progress)
         case .ended, .cancelled:
-            let fling = pan.velocity(in: view).x > 300
-            setDrawer(open: !(fling || progress < 0.6), animated: true)
+            let vClose = pan.velocity(in: view).x   // + = toward close
+            let willClose = abs(vClose) > 300 ? vClose > 0 : progress < 0.6
+            let open = !willClose
+            let remaining = drawerWidth * (open ? (1 - progress) : progress)
+            let towardTarget = willClose ? vClose : -vClose
+            let v = remaining > 1 ? min(max(towardTarget / remaining, 0), 30) : 0
+            setDrawer(open: open, animated: true, initialVelocity: v)
         default:
             break
         }
@@ -1042,14 +1162,70 @@ extension TerminalViewController: UIImagePickerControllerDelegate, UINavigationC
 extension TerminalViewController: TerminalSurfaceTitleDelegate, TerminalSurfaceCloseDelegate {
     func terminalDidChangeTitle(_ title: String) {
         // The agent's OSC title rides the byte stream (Claude Code updates it
-        // as it works), so the bar tracks what the session is doing live.
-        let trimmed = title.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        DispatchQueue.main.async { [weak self] in self?.titleLabel.text = trimmed }
+        // as it works), so the bar tracks what the session is doing live —
+        // sanitized and deduplicated, the same guards the Mac sidebar applies
+        // to this signal.
+        let cleaned = LiveTerminalTitle.sanitized(title)
+        guard !cleaned.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.titleLabel.text != cleaned else { return }
+            self.titleLabel.text = cleaned
+        }
     }
 
     func terminalDidClose(processAlive _: Bool) {
         close()
+    }
+}
+
+extension TerminalViewController: UIEditMenuInteractionDelegate {
+    /// Long-press → the system edit menu with a single Paste (Termius's
+    /// hold-to-paste shape). Cross-app paste is the feature; in-terminal
+    /// selection/copy was tried and cut as not worth its complexity — the
+    /// TUI's own copy affordances and the session trace cover reading.
+    private func presentPasteMenu(at point: CGPoint) {
+        let config = UIEditMenuConfiguration(
+            identifier: "termio.terminal.paste", sourcePoint: point
+        )
+        // Deterministically above the finger: at the raw touch point the
+        // balloon can flip below it — under the hand — and "when the menu
+        // appeared" becomes "when the hand lifted".
+        config.preferredArrowDirection = .down
+        editMenuInteraction.presentEditMenu(with: config)
+    }
+
+    fileprivate func wirePasteMenu() {
+        terminalView.addInteraction(editMenuInteraction)
+        terminalView.onPasteMenuRequested = { [weak self] point in
+            self?.presentPasteMenu(at: point)
+        }
+    }
+
+    /// An explicit item, NOT the responder-chain suggestions: the system
+    /// builds suggested actions from the first responder, and the terminal
+    /// deliberately isn't one after a bare long-press (becoming it summons
+    /// the keyboard). Relying on suggestions made the menu come up empty in
+    /// any session the user hadn't tapped into first.
+    func editMenuInteraction(
+        _: UIEditMenuInteraction,
+        menuFor _: UIEditMenuConfiguration,
+        suggestedActions _: [UIMenuElement]
+    ) -> UIMenu? {
+        guard UIPasteboard.general.hasStrings else { return nil }
+        return UIMenu(options: .displayInline, children: [
+            UIAction(title: localized("Paste")) { [weak self] _ in
+                self?.terminalView.paste(nil)
+            },
+        ])
+    }
+
+    /// Scope the terminal's resign guard to the menu's actual lifetime.
+    func editMenuInteraction(
+        _: UIEditMenuInteraction,
+        willDismissMenuFor _: UIEditMenuConfiguration,
+        animator _: any UIEditMenuInteractionAnimating
+    ) {
+        terminalView.pasteMenuDidDismiss()
     }
 }
 
@@ -1162,6 +1338,113 @@ private final class DisplayTerminalView: UITerminalView {
     let keyBar = TerminalAccessoryBar()
     override var inputAccessoryView: UIView? { keyBar }
 
+    /// Long-press anywhere → the owner floats a Paste menu at the finger.
+    /// App-owned recognizer (the wrapper's own long-press stays disarmed
+    /// without its selection delegates): cross-app paste is the one
+    /// clipboard feature the phone terminal supports — in-terminal
+    /// selection/copy was cut as not worth its complexity.
+    var onPasteMenuRequested: ((CGPoint) -> Void)?
+    /// The paste menu is on screen (set at gesture `.began`, cleared when
+    /// the menu dismisses — with a next-touch reset as belt-and-braces).
+    /// While set, the wrapper's tap-dismiss must not collapse the keyboard
+    /// under the menu.
+    private var touchSequencePresentedPasteMenu = false
+    private var pasteLongPressInstalled = false
+    private lazy var pasteLongPress: UILongPressGestureRecognizer = {
+        let gesture = UILongPressGestureRecognizer(
+            target: self, action: #selector(pasteLongPressFired(_:))
+        )
+        // 0.3s matches the system text views' long-press feel.
+        gesture.minimumPressDuration = 0.3
+        // 20pt, not the 10pt default: a thumb planted for 300ms drifts a few
+        // points routinely, and a failed press with zero feedback reads as
+        // "the gesture is unreliable". A deliberate scroll blows past 20
+        // immediately.
+        gesture.allowableMovement = 20
+        // Cancel the touch once the menu gesture wins: the wrapper's pan
+        // must not scroll the viewport under the open menu, and the release
+        // arrives as touchesCancelled so the tap-to-keyboard path never runs.
+        gesture.cancelsTouchesInView = true
+        return gesture
+    }()
+
+    /// Warmed at touch-down, fired at gesture `.began`: an unprepared
+    /// generator adds Taptic-Engine spin-up (~50-200ms) to the confirmation
+    /// cue, and time-to-first-feedback is what sets perceived gesture speed.
+    private let pasteHaptic = UIImpactFeedbackGenerator(style: .light)
+
+    /// Cached gate for the paste long-press. `hasStrings` is a synchronous
+    /// XPC round-trip to pasteboardd — too slow for
+    /// `gestureRecognizerShouldBegin`, which runs exactly when the
+    /// long-press timer fires and the user is waiting for feedback.
+    /// Pasteboard changes land while backgrounded, so the foreground
+    /// re-check is mandatory; the changeCount compare keeps it to one query.
+    private var clipboardHasStrings = UIPasteboard.general.hasStrings
+    private var clipboardChangeCount = UIPasteboard.general.changeCount
+    private var clipboardObservers: [NSObjectProtocol] = []
+
+    private func refreshClipboardGate() {
+        let count = UIPasteboard.general.changeCount
+        guard count != clipboardChangeCount else { return }
+        clipboardChangeCount = count
+        clipboardHasStrings = UIPasteboard.general.hasStrings
+    }
+
+    deinit {
+        for observer in clipboardObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    func installPasteLongPressIfNeeded() {
+        guard !pasteLongPressInstalled, window != nil else { return }
+        pasteLongPressInstalled = true
+        addGestureRecognizer(pasteLongPress)
+        clipboardObservers = [
+            NotificationCenter.default.addObserver(
+                forName: UIPasteboard.changedNotification, object: nil, queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.refreshClipboardGate() } },
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.refreshClipboardGate() } },
+        ]
+    }
+
+    /// The menu left the screen — the resign guard is scoped to exactly the
+    /// menu's lifetime, so controller-driven resigns (pane close, scroll
+    /// handoff) work again immediately.
+    func pasteMenuDidDismiss() {
+        touchSequencePresentedPasteMenu = false
+    }
+
+    @objc private func pasteLongPressFired(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        touchSequencePresentedPasteMenu = true
+        pasteHaptic.impactOccurred()
+        onPasteMenuRequested?(gesture.location(in: self))
+    }
+
+    /// The wrapper disarms every long-press unless its selection delegates
+    /// are adopted — allow ours through; and only when the clipboard has
+    /// text (cached — see clipboardHasStrings), so a menu with nothing to
+    /// offer never eats the hold.
+    override func gestureRecognizerShouldBegin(
+        _ gestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        if gestureRecognizer === pasteLongPress {
+            return clipboardHasStrings
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    /// The wrapper's tap-dismiss resigns on any unscrolled release; when
+    /// that release just presented the paste menu, keep the keyboard as it
+    /// was — collapsing it would yank the layout under the menu.
+    override func resignFirstResponder() -> Bool {
+        if touchSequencePresentedPasteMenu { return false }
+        return super.resignFirstResponder()
+    }
+
     /// The software keyboard's Return arrives as `insertText("\n")`, and the
     /// wrapper routes it through `sendText` — which rides inside bracketed
     /// paste once the TUI enabled mode 2004, so Claude Code reads a pasted
@@ -1183,6 +1466,7 @@ private final class DisplayTerminalView: UITerminalView {
     /// newline from auto-submitting. A char with a sticky ctrl/alt armed also
     /// stays on the wrapper path, which applies the modifier.
     override func insertText(_ text: String) {
+        deleteRepeat.reset()
         if text == "\n" {
             send(Data([0x0D]))
             return
@@ -1193,6 +1477,134 @@ private final class DisplayTerminalView: UITerminalView {
             return
         }
         super.insertText(text)
+    }
+
+    /// Paste — the long-press menu and hardware Cmd+V both land here. The
+    /// clipboard goes through `insertText`, whose multi-character path rides
+    /// the wrapper's sendText: bracketed once the TUI enabled mode 2004
+    /// (Claude Code's parser only ingests paste in that form), raw before
+    /// then — the same delivery a Mac paste gets. `hasStrings` gates the
+    /// menu item without tripping the system paste prompt; the `.string`
+    /// read waits for the user-initiated action.
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(UIResponderStandardEditActions.paste(_:)) {
+            return UIPasteboard.general.hasStrings
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        insertText(text)
+    }
+
+    // MARK: - Software-keyboard delete auto-repeat (phantom document)
+
+    /// Owns the phantom-document state and hold-acceleration policy that make
+    /// the on-screen keyboard's delete key auto-repeat over the terminal. The
+    /// `UITextInput` overrides below are the thin UIKit glue that feed it; the
+    /// reasoning lives in `SoftwareKeyboardDeleteRepeat`.
+    private var deleteRepeat = SoftwareKeyboardDeleteRepeat()
+
+    /// True while an IME (e.g. pinyin) is composing. In that state we defer to
+    /// the wrapper's real geometry so composition, cursor, and candidate
+    /// replacement keep working — the phantom document is only for plain typing.
+    private var isComposingIME: Bool { super.markedTextRange != nil }
+
+    override func deleteBackward() {
+        // IME composition and armed sticky modifiers own the keystroke — never
+        // accelerate those; one delete, real geometry, streak cleared.
+        guard !isComposingIME, !stickyModifierArmed else {
+            deleteRepeat.reset()
+            super.deleteBackward()
+            return
+        }
+        // Re-use the wrapper's own delete encoding (correct per backend,
+        // marked-text-safe) rather than hand-rolling the byte.
+        let count = deleteRepeat.backspaceCount(now: CACurrentMediaTime())
+        for _ in 0..<count { super.deleteBackward() }
+    }
+
+    override var beginningOfDocument: UITextPosition {
+        isComposingIME ? super.beginningOfDocument : PhantomTextPosition(0)
+    }
+
+    override var endOfDocument: UITextPosition {
+        isComposingIME
+            ? super.endOfDocument
+            : PhantomTextPosition(SoftwareKeyboardDeleteRepeat.documentLength)
+    }
+
+    override var selectedTextRange: UITextRange? {
+        get {
+            guard !isComposingIME else { return super.selectedTextRange }
+            let caret = PhantomTextPosition(deleteRepeat.caret)
+            return PhantomTextRange(start: caret, end: caret)
+        }
+        set {
+            guard !isComposingIME else { super.selectedTextRange = newValue; return }
+            if let caret = (newValue?.start as? PhantomTextPosition)?.index {
+                deleteRepeat.moveCaret(to: caret)
+            }
+        }
+    }
+
+    override func textRange(
+        from fromPosition: UITextPosition, to toPosition: UITextPosition
+    ) -> UITextRange? {
+        guard !isComposingIME,
+              let from = fromPosition as? PhantomTextPosition,
+              let to = toPosition as? PhantomTextPosition
+        else { return super.textRange(from: fromPosition, to: toPosition) }
+        return PhantomTextRange(start: from, end: to)
+    }
+
+    override func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
+        guard !isComposingIME, let pos = position as? PhantomTextPosition else {
+            return super.position(from: position, offset: offset)
+        }
+        let index = pos.index + offset
+        guard index >= 0, index <= SoftwareKeyboardDeleteRepeat.documentLength else { return nil }
+        return PhantomTextPosition(index)
+    }
+
+    override func position(
+        from position: UITextPosition, in direction: UITextLayoutDirection, offset: Int
+    ) -> UITextPosition? {
+        guard !isComposingIME, position is PhantomTextPosition else {
+            return super.position(from: position, in: direction, offset: offset)
+        }
+        return self.position(from: position, offset: offset)
+    }
+
+    override func compare(
+        _ position: UITextPosition, to other: UITextPosition
+    ) -> ComparisonResult {
+        guard !isComposingIME,
+              let lhs = position as? PhantomTextPosition,
+              let rhs = other as? PhantomTextPosition
+        else { return super.compare(position, to: other) }
+        if lhs.index < rhs.index { return .orderedAscending }
+        if lhs.index > rhs.index { return .orderedDescending }
+        return .orderedSame
+    }
+
+    override func offset(from: UITextPosition, to toPosition: UITextPosition) -> Int {
+        guard !isComposingIME,
+              let f = from as? PhantomTextPosition,
+              let t = toPosition as? PhantomTextPosition
+        else { return super.offset(from: from, to: toPosition) }
+        return t.index - f.index
+    }
+
+    override func text(in range: UITextRange) -> String? {
+        guard !isComposingIME, let range = range as? PhantomTextRange else {
+            return super.text(in: range)
+        }
+        // Any non-empty string keeps the keyboard convinced there is content
+        // to delete; the bytes never leave this class.
+        let length = max(0, range.length)
+        return String(repeating: " ", count: min(length, 64))
     }
 
     /// Whether any sticky modifier (key bar's ctrl/alt/cmd chips) is armed or
@@ -1245,7 +1657,7 @@ private final class DisplayTerminalView: UITerminalView {
     /// few it trips its renderer-health failsafe — the "This terminal is
     /// non-functional" panel painted straight into the surface. Coalescing the
     /// drag onto this link caps us at one drawable per frame, so the pool never
-    /// empties. See docs/design/ios-scroll-renderer-health.md.
+    /// empties. See docs/design/20260706-ios-scroll-renderer-health.md.
     private var scrollPump: CADisplayLink?
     /// Set by pan `.changed`; the pump consumes it once per frame during a drag.
     private var needsScrollDraw = false
@@ -1257,6 +1669,7 @@ private final class DisplayTerminalView: UITerminalView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         installScrollHookIfNeeded()
+        installPasteLongPressIfNeeded()
     }
 
     /// The wrapper's own pan-to-scroll recognizer (direct touches, single
@@ -1374,8 +1787,13 @@ private final class DisplayTerminalView: UITerminalView {
             // A finger that lands while the fling pump is alive is stopping or
             // continuing the scroll — never a keyboard tap.
             touchSequenceScrolled = scrollPump != nil
+            touchSequencePresentedPasteMenu = false
             wasFirstResponderAtTouchDown = isFirstResponder
             suppressTouchDownKeyboardRetake = true
+            // Warm the Taptic Engine while the 0.3s hold runs, so the
+            // long-press confirmation lands AT the timer, not after
+            // engine spin-up.
+            if clipboardHasStrings { pasteHaptic.prepare() }
         }
         super.touchesBegan(touches, with: event)
         suppressTouchDownKeyboardRetake = false
@@ -1397,6 +1815,9 @@ private final class DisplayTerminalView: UITerminalView {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
         guard touches.contains(where: { $0.type == .direct }) else { return }
+        // The paste long-press never reaches here: winning the gesture
+        // cancels its touch (touchesCancelled), so an ended touch that
+        // didn't scroll really is a tap.
         let wasTap = !touchSequenceScrolled
         touchSequenceScrolled = false
         if wasTap, !wasFirstResponderAtTouchDown, window != nil {

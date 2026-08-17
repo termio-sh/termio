@@ -1,4 +1,5 @@
 import Foundation
+import TermioShared
 
 /// A folder the user has opened as a project, remembered for the welcome page's
 /// "Recent" column so it survives the fully-empty state (every project closed).
@@ -11,7 +12,7 @@ struct RecentProject: Identifiable, Hashable, Codable {
 }
 
 /// What a sidebar section *is*. The kinds have differing ownership arrows
-/// (see docs/design/loose-terminal-entity.md): a `.folder` project's path is its
+/// (see docs/design/20260713-loose-terminal-entity.md): a `.folder` project's path is its
 /// identity and owns its sessions; the `.terminals` container is presentation
 /// only — each loose terminal session owns its *own* mutable path (the live cwd),
 /// and the container's `path` is just the spawn fallback (`$HOME`). The `.chats`
@@ -19,10 +20,18 @@ struct RecentProject: Identifiable, Hashable, Codable {
 /// aren't tied to a real project, gathered under one section rooted at the scoped
 /// scratch workspace (`~/.termio/chats`) — agents can't be turned loose in `$HOME`,
 /// which is exactly why they get their own funnel rather than joining `.terminals`.
+///
+/// `.host` is the fourth kind and the only one whose identity isn't a local path:
+/// it is a *machine* (a `~/.ssh/config` alias), peer to a folder rather than a
+/// variant of one. Every session that runs somewhere else — a plain `ssh` terminal
+/// or a durable termiod session — gathers under its host's container. Before it
+/// existed, remote sessions fell into `.terminals` for want of anywhere else to
+/// put them, which rendered a box you SSH into as if it were a loose local shell.
 enum ProjectKind: String, Codable {
     case folder
     case terminals
     case chats
+    case host
 }
 
 /// A linked git checkout owned by a project. Sessions remain flat on the parent
@@ -73,13 +82,56 @@ struct Project: Identifiable, Hashable, Codable {
     var pinned: Bool = false
 
     /// `.folder` for an opened directory, `.terminals` for the loose-terminals
-    /// container (at most one exists; it always sorts first in the sidebar).
+    /// container (at most one exists; it always sorts first in the sidebar),
+    /// `.host` for a remote machine's container.
     var kind: ProjectKind = .folder
+
+    /// The `~/.ssh/config` alias (or `user@host`) this container was created for,
+    /// for `.host` containers only — `nil` for every local kind. `path` on a host
+    /// container is the remote root the box's sessions work in (`~` unless a clone
+    /// supplied one) and is **never** a local path: the local PTY spawns at `$HOME`
+    /// instead (see `surface(for:in:)`), and the local-disk panes (file tree, git,
+    /// Finder actions) are switched off for `.host`.
+    ///
+    /// **This is the container's bootstrap identity, not its stable one.** A
+    /// container has to exist the moment a session is created, synchronously,
+    /// before any handshake has run — and most aliases in a `~/.ssh/config` have
+    /// never been connected to at all. So a container is *born* from the alias, and
+    /// matched by it (`hostContainer(for:)`) until a first `hello_ok` supplies the
+    /// device it actually reaches. From then on `deviceID` is the identity and the
+    /// alias is demoted to **one route among several** — merging two aliases that
+    /// resolve to one device is a later step, specified in §9.5 of
+    /// docs/design/20260805-termiod-device-architecture.md and deliberately not performed yet.
+    var sshHost: String?
+
+    /// The device (`host_id`) this container's alias was found to lead to, filled in
+    /// after the first successful handshake and `nil` until then. Two containers
+    /// sharing a `deviceID` are two names for one machine — which is what makes the
+    /// merge in §9.5 possible without re-probing every alias.
+    var deviceID: String?
+
+    /// Where this project lives on each **device** it has been cloned to, keyed
+    /// by that device's `host_id` → absolute remote path.
+    ///
+    /// This is what makes "New Terminal ▸ <device>" from a *project* row mean "this
+    /// repo, over there" rather than "a shell in that device's `$HOME`". The local
+    /// `path` is meaningless on the other box, so the correspondence has to be
+    /// recorded when `Clone to <device>…` establishes it.
+    ///
+    /// Keyed by device rather than by SSH alias because one machine commonly
+    /// answers to several aliases (`vps-lan`, `vps-wan`, a tailnet name): keyed by
+    /// alias, the day the user changes networks the same clone becomes invisible
+    /// and the repo looks un-cloned. State files written before this carry alias
+    /// keys; `remoteCheckout(device:alias:)` still answers from them, and
+    /// `TermioStore.adoptDevice` promotes each one the first time its alias
+    /// resolves to a device.
+    var remoteCheckouts: [String: String] = [:]
 }
 
 extension Project {
     private enum CodingKeys: String, CodingKey {
-        case id, name, path, branch, sessions, worktrees, pinned, kind
+        case id, name, path, branch, sessions, worktrees, pinned, kind, remoteCheckouts, sshHost,
+             deviceID
     }
 
     /// Missing collection and flag keys take their pre-feature defaults so older
@@ -96,6 +148,23 @@ extension Project {
         worktrees = try container.decodeIfPresent([Worktree].self, forKey: .worktrees) ?? []
         pinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
         kind = try container.decodeIfPresent(ProjectKind.self, forKey: .kind) ?? .folder
+        remoteCheckouts =
+            try container.decodeIfPresent([String: String].self, forKey: .remoteCheckouts) ?? [:]
+        sshHost = try container.decodeIfPresent(String.self, forKey: .sshHost)
+        deviceID = try container.decodeIfPresent(String.self, forKey: .deviceID)
+    }
+
+    /// The recorded checkout for one machine, addressed by device where the app
+    /// knows which device an alias leads to.
+    ///
+    /// `deviceID` is `nil` until something has connected — nothing can resolve a
+    /// route to a machine without a handshake — and a sidebar menu is built
+    /// synchronously, with no connection to spend. Falling back to the legacy
+    /// alias key there is better than reporting a repo as un-cloned because the
+    /// app has not yet been told which box the alias reaches.
+    func remoteCheckout(device deviceID: String?, alias: String) -> String? {
+        if let deviceID, let path = remoteCheckouts[deviceID] { return path }
+        return remoteCheckouts[alias]
     }
 }
 
@@ -110,52 +179,19 @@ enum AgentIcon: Hashable {
     case vector(BrandLogo)
     case symbol(String)
     case terminalGlyph
+    /// A Hugeicons stroke glyph, for feature rows that share the app's own icon
+    /// language rather than an agent identity.
+    case huge(HugeIcon)
 }
 
-/// A Hugeicons stroke glyph, stored as its source SVG path data on a 24×24
-/// viewBox. Unlike `BrandLogo` (filled vendor marks), these are drawn as a
-/// rounded *stroke* by `HugeIconShape`, matching Hugeicons' 1.5px line style.
-/// Multiple `<path>` elements from the source are concatenated into one data
-/// string — each starts with `M`, so the parser treats them as separate subpaths.
-enum HugeIcon: Hashable {
-    case terminal
-    case folder
-    case folderOpen
-    case chevronRight
-    case edit
-    case view
+/// The Hugeicons glyph set now lives in `TermioShared` (single source shared
+/// with iOS); these aliases keep the app's unqualified references compiling.
+typealias HugeIcon = TermioShared.HugeIcon
+typealias HugeIconView = TermioShared.HugeIconView
 
-    /// Side length of the source SVG's square viewBox (Hugeicons uses 24).
-    var viewBox: CGFloat { 24 }
-
-    var pathData: String {
-        switch self {
-        case .terminal:
-            return "M7.5 7.5L8.72654 8.55719C9.24218 9.00163 9.5 9.22386 9.5 9.5C9.5 9.77614 9.24218 9.99836 8.72654 10.4428L7.5 11.5 M11.5 12.5H15.5 M12 21C15.7497 21 17.6246 21 18.9389 20.0451C19.3634 19.7367 19.7367 19.3634 20.0451 18.9389C21 17.6246 21 15.7497 21 12C21 8.25027 21 6.3754 20.0451 5.06107C19.7367 4.6366 19.3634 4.26331 18.9389 3.95491C17.6246 3 15.7497 3 12 3C8.25027 3 6.3754 3 5.06107 3.95491C4.6366 4.26331 4.26331 4.6366 3.95491 5.06107C3 6.3754 3 8.25027 3 12C3 15.7497 3 17.6246 3.95491 18.9389C4.26331 19.3634 4.6366 19.7367 5.06107 20.0451C6.3754 21 8.25027 21 12 21Z"
-        case .folder:
-            return "M8 7H16.75C18.8567 7 19.91 7 20.6667 7.50559C20.9943 7.72447 21.2755 8.00572 21.4944 8.33329C22 9.08996 22 10.1433 22 12.25C22 15.7612 22 17.5167 21.1573 18.7779C20.7926 19.3238 20.3238 19.7926 19.7779 20.1573C18.5167 21 16.7612 21 13.25 21H12C7.28595 21 4.92893 21 3.46447 19.5355C2 18.0711 2 15.714 2 11V7.94427C2 6.1278 2 5.21956 2.38032 4.53806C2.65142 4.05227 3.05227 3.65142 3.53806 3.38032C4.21956 3 5.1278 3 6.94427 3C8.10802 3 8.6899 3 9.19926 3.19101C10.3622 3.62712 10.8418 4.68358 11.3666 5.73313L12 7"
-        case .folderOpen:
-            // Hugeicons "folder-03": a single smooth rounded tray (the open body)
-            // plus a simple tabbed back flap. Chosen over "folder-open" — whose two
-            // stacked, flared trapezoids turn muddy at the sidebar's small size —
-            // because the one rounded body reads cleanly there and still pairs with
-            // folder-01's angled tab for the closed state.
-            return "M2.36064 15.1788C1.98502 13.2956 1.79721 12.354 2.33084 11.7159C2.36642 11.6734 2.40405 11.6323 2.44361 11.5927C3.03686 11 4.08674 11 6.1865 11H17.8135C19.9133 11 20.9631 11 21.5564 11.5927C21.5959 11.6323 21.6336 11.6734 21.6692 11.7159C22.2028 12.354 22.015 13.2956 21.6394 15.1788C21.0993 17.8865 20.8292 19.2404 19.8109 20.0721C19.7414 20.1288 19.6698 20.1833 19.5961 20.2354C18.5163 21 17.0068 21 13.9876 21H10.0124C6.99323 21 5.48367 21 4.40387 20.2354C4.33022 20.1833 4.2586 20.1288 4.18914 20.0721C3.17075 19.2404 2.90072 17.8865 2.36064 15.1788Z M4 11V5.5C4 4.11929 5.11929 3 6.5 3H8.92963C9.59834 3 10.2228 3.3342 10.5937 3.8906L12 6M12 6H8.5M12 6H17.5C18.8807 6 20 7.11929 20 8.5V11"
-        case .chevronRight:
-            // A plain two-segment chevron (not the bulged Hugeicons arrow) — round
-            // linejoin softens the tip. The section disclosure arrow: points right when
-            // collapsed, rotated a quarter-turn down when open.
-            return "M10 6L16 12L10 18"
-        case .edit:
-            // Hugeicons "edit-02": a pencil over a baseline — the file editor's Edit
-            // mode. Two subpaths (nib+body, then the underline).
-            return "M14.074 3.885c.745-.807 1.117-1.21 1.513-1.446a3.1 3.1 0 0 1 3.103-.047c.403.224.787.616 1.555 1.4c.768.785 1.152 1.178 1.37 1.589a3.29 3.29 0 0 1-.045 3.17c-.23.404-.625.785-1.416 1.546l-9.403 9.057c-1.498 1.443-2.247 2.164-3.183 2.53s-1.965.338-4.023.285l-.28-.008c-.626-.016-.94-.024-1.121-.231c-.183-.207-.158-.526-.108-1.164l.027-.346c.14-1.796.21-2.694.56-3.502s.956-1.463 2.166-2.774zM13 4l7 7 M14 22h8"
-        case .view:
-            // Hugeicons "view": an eye (outline + pupil) — the Markdown Preview mode.
-            return "M21.544 11.045c.304.426.456.64.456.955c0 .316-.152.529-.456.955C20.178 14.871 16.689 19 12 19c-4.69 0-8.178-4.13-9.544-6.045C2.152 12.529 2 12.315 2 12c0-.316.152-.529.456-.955C3.822 9.129 7.311 5 12 5c4.69 0 8.178 4.13 9.544 6.045Z M15 12a3 3 0 1 0-6 0a3 3 0 0 0 6 0Z"
-        }
-    }
-}
+/// GitHub's Octicons for issue/PR state, shared with iOS from `TermioShared`.
+typealias StateOcticon = TermioShared.StateOcticon
+typealias OcticonView = TermioShared.OcticonView
 
 /// A vendor brand mark, stored as its official SVG path so it renders crisp at any
 /// size without shipping binary image assets. Rendered in the vendor's brand color
@@ -263,12 +299,82 @@ struct Session: Identifiable, Hashable, Codable {
 
     var isSSH: Bool { sshHost != nil }
 
+    /// When set, this session runs **inside a `termiod` daemon on an SSH host**
+    /// rather than locally: the Mac attaches over `ssh <host> termiod stdio` and
+    /// the shell/agent lives on the remote box (see `TermioStore.addRemoteTerminal`).
+    /// Unlike `sshHost` — which launches a plain `ssh <host>` in a *local* PTY —
+    /// this is the durable termiod path, so detach-not-kill and snapshot repaint
+    /// carry across the network. The value is a `~/.ssh/config` alias. Only
+    /// consulted on the opt-in termiod backend (`TERMIO_TERMIOD=1`); a nil value
+    /// keeps the session local. Persisted so a relaunch reattaches to the same
+    /// remote daemon session by name.
+    var termiodRemoteHost: String?
+
+    /// The **device** this session was last found to be running on — the `host_id`
+    /// its daemon reported at handshake, recorded because a session belongs to a
+    /// machine, not to the road taken to reach it. `termiodRemoteHost` says which
+    /// road was tried; this says where it arrived, and the two disagree the moment
+    /// the user reaches the same box by a different alias.
+    ///
+    /// `nil` until the session has attached at least once — a route cannot be
+    /// resolved to a device without connecting.
+    var deviceID: String?
+
+    /// The remote working directory a `termiodRemoteHost` session spawns its shell
+    /// in — set by "Clone to <device>…" to the freshly cloned directory (`~/<repo>`)
+    /// so the terminal opens straight inside it. `nil` (the common case) lets the
+    /// remote login shell start at its own `$HOME`. Ignored when `termiodRemoteHost`
+    /// is nil.
+    var termiodRemoteCwd: String?
+
+    /// The name this session answers to **inside its device's daemon**, when that
+    /// is not this session's own uuid.
+    ///
+    /// Sessions Termio opens are named with their uuid, which is what makes
+    /// reattach-after-relaunch work: `attach` resolves the name first, so the row
+    /// finds the same process. A session Termio did **not** open already had a
+    /// name before this app ever saw it — started from the `termiod` CLI, or by a
+    /// phone — and adopting it means keeping that name, because the name is how
+    /// the daemon is asked for that exact PTY. Renaming it to a fresh uuid would
+    /// spawn a second session beside the one the user was pointing at.
+    ///
+    /// `nil` for every session this app created, which is nearly all of them.
+    var termiodSessionName: String?
+
+    /// Adopt another session's machine — both halves of it.
+    ///
+    /// A device has two identities during its life (device architecture §9.5):
+    /// the SSH alias it was *authored* against, known before anything connects,
+    /// and the `deviceID` the first `hello_ok` reveals. A session derived from
+    /// another — a split, and every future "open beside this" verb — has to
+    /// carry both, or it lands on this Mac while sitting in a pane that reads
+    /// as the same machine.
+    ///
+    /// This helper exists so the copying happens in one place rather than at
+    /// each call site: **when sessions stop naming a host and take their device
+    /// from the container that owns them, this method is the only thing to
+    /// delete.** Spreading `termiodRemoteHost = …` across call sites is what
+    /// makes that migration expensive, and it is the fork the RFC removes.
+    mutating func inheritDevice(from origin: Session?) {
+        guard let origin else { return }
+        deviceID = origin.deviceID
+        termiodRemoteHost = origin.termiodRemoteHost
+        termiodRemoteCwd = origin.termiodRemoteCwd
+    }
+
     /// The last working directory the shell reported over OSC 7, persisted for
     /// sessions in the loose-terminals container only: a loose terminal's identity
     /// is the session, its path is this mutable property — so a relaunched shell
     /// respawns where the user last `cd`'d, not back at `$HOME`. Sessions of a
     /// real (`.folder`) project never set it; their anchor is the project path.
     var lastWorkingDirectory: String?
+
+    /// Where this session was opened, when that isn't its project's own anchor: ⌘T
+    /// records the directory the user was in, so the new shell starts *there* rather
+    /// than at the project root. Persisted, so a relaunch reopens it in the same
+    /// place. `lastWorkingDirectory` outranks it for a loose terminal — a shell that
+    /// reported its own cwd knows better than the seed it was given.
+    var spawnDirectory: String?
 
     /// The last meaningful terminal title (`OSC 0/2`) the session's agent reported,
     /// e.g. Claude Code's conversation topic. Persisted so the sidebar keeps the
@@ -292,7 +398,8 @@ struct Session: Identifiable, Hashable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, title, agent, createdAt, worktreePath, resumeID, launched, launchedAt,
-             liveTitle, lastWorkingDirectory, sshHost, pinned
+             liveTitle, lastWorkingDirectory, spawnDirectory, sshHost, pinned,
+             termiodRemoteHost, termiodRemoteCwd, deviceID, termiodSessionName
     }
 
     /// Custom decoding so state files written before the resume fields existed still
@@ -312,7 +419,13 @@ struct Session: Identifiable, Hashable, Codable {
         launchedAt = try container.decodeIfPresent(Date.self, forKey: .launchedAt)
         liveTitle = try container.decodeIfPresent(String.self, forKey: .liveTitle)
         lastWorkingDirectory = try container.decodeIfPresent(String.self, forKey: .lastWorkingDirectory)
+        spawnDirectory = try container.decodeIfPresent(String.self, forKey: .spawnDirectory)
         sshHost = try container.decodeIfPresent(String.self, forKey: .sshHost)
+        termiodRemoteHost = try container.decodeIfPresent(String.self, forKey: .termiodRemoteHost)
+        termiodRemoteCwd = try container.decodeIfPresent(String.self, forKey: .termiodRemoteCwd)
+        deviceID = try container.decodeIfPresent(String.self, forKey: .deviceID)
+        termiodSessionName = try container.decodeIfPresent(
+            String.self, forKey: .termiodSessionName)
     }
 }
 
@@ -321,7 +434,7 @@ extension Project {
     /// shell session, so a new user lands in a working terminal instead of
     /// dev-machine placeholders. The shell starts at `$HOME` (its `path`), but the
     /// section is presented as "Terminals", not as a home *project* — the terminal
-    /// is the entity, its cwd just a property (see docs/design/loose-terminal-entity.md).
+    /// is the entity, its cwd just a property (see docs/design/20260713-loose-terminal-entity.md).
     ///
     /// The working directory must be the home directory — never
     /// `currentDirectoryPath`, which is `/` when the app is launched from Finder

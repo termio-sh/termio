@@ -32,7 +32,7 @@ export function TermioWindow({ className }: { className?: string }) {
         </p>
         <p className="flex items-center gap-2.5">
           <span className="h-2 w-2 shrink-0 rounded-full bg-brand-blue" />
-          <span className="text-zinc-100">Understand termio terminal I/O</span>
+          <span className="text-zinc-100">Understand Termio terminal I/O</span>
         </p>
         <p className="text-zinc-500">⌊ Read TermioStore.swift (420 lines)</p>
         <p className="text-zinc-500">⌊ Edited 3 files · ran tests</p>

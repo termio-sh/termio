@@ -12,7 +12,7 @@ final class TraceViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Trace"
+        title = localized("Trajectory")
         view.backgroundColor = .systemBackground
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .done, target: self, action: #selector(dismissSelf)

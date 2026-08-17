@@ -74,6 +74,27 @@ extension Shortcut {
     }
 }
 
+// MARK: - Ghostty trigger ("super+alt+arrow_left")
+
+extension Shortcut {
+    /// The same shortcut in Ghostty's `keybind` trigger syntax, so a key the host
+    /// claims can be unbound inside the surface (see `applyAppearance`). Ghostty
+    /// spells ⌘ `super` and ⌥ `alt`, and names the arrow and return keys rather
+    /// than encoding them as characters.
+    var ghosttyTrigger: String {
+        // Ghostty's own `+list-keybinds` output orders modifiers super, ctrl,
+        // alt, shift; its parser accepts any order, but matching the upstream
+        // spelling keeps a config dump readable next to ghostty's.
+        var parts: [String] = []
+        if modifiers.contains(.command) { parts.append("super") }
+        if modifiers.contains(.control) { parts.append("ctrl") }
+        if modifiers.contains(.option) { parts.append("alt") }
+        if modifiers.contains(.shift) { parts.append("shift") }
+        parts.append(key.ghosttyToken)
+        return parts.joined(separator: "+")
+    }
+}
+
 // MARK: - Display (menu glyphs: "⌥⌘←")
 
 extension Shortcut {
@@ -142,6 +163,19 @@ private extension Shortcut.Key {
         case .up: return "up"
         case .down: return "down"
         case .return: return "return"
+        }
+    }
+
+    /// Ghostty's own key names. Single characters (including punctuation like
+    /// `,` `[` `=`) are spelled literally; everything else is a named key.
+    var ghosttyToken: String {
+        switch self {
+        case .char(let c): return c
+        case .left: return "arrow_left"
+        case .right: return "arrow_right"
+        case .up: return "arrow_up"
+        case .down: return "arrow_down"
+        case .return: return "enter"
         }
     }
 

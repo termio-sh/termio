@@ -4,6 +4,10 @@
 //
 //  Created by Illanes, J.P. on 4/19/16.
 //
+//  Local change (Swift 6): the highlight completion is boxed to cross back onto
+//  the main queue. Upstream's design already crosses queues — highlight on a
+//  global queue, mutate the storage back on main — with the discipline in the
+//  closures, which the compiler cannot see.
 //
 
 import Foundation
@@ -36,6 +40,12 @@ import Foundation
 }
 
 /// NSTextStorage subclass. Can be used to dynamically highlight code.
+/// Carries the highlight completion from the background queue back to main;
+/// the storage mutations inside run on the main queue only.
+private struct UncheckedSendableClosure: @unchecked Sendable {
+    let run: () -> ()
+}
+
 open class CodeAttributedString : NSTextStorage
 {
     /// Internal Storage
@@ -176,7 +186,7 @@ open class CodeAttributedString : NSTextStorage
         DispatchQueue.global().async
         {
             let tmpStrg = self.highlightr.highlight(line, as: self.language!)
-            DispatchQueue.main.async(execute: {
+            let finish = UncheckedSendableClosure(run: {
                 //Checks to see if this highlighting is still valid.
                 if((range.location + range.length) > self.stringStorage.length)
                 {
@@ -201,18 +211,19 @@ open class CodeAttributedString : NSTextStorage
                 self.edited(TextStorageEditActions.editedAttributes, range: range, changeInLength: 0)
                 self.highlightDelegate?.didHighlight?(range, success: true)
             })
-            
+            DispatchQueue.main.async(execute: { finish.run() })
+
         }
         
     }
     
     func setupListeners()
     {
-        highlightr.themeChanged =
-            { [weak self] _ in
-                    guard let self = self else { return }
-                    self.highlight(NSMakeRange(0, self.stringStorage.length))
-        }
+        // termio deviation: upstream re-highlighted the whole document from `themeChanged` here.
+        // The editor re-themes, re-fonts, and re-metrics as one package and then triggers a single
+        // explicit re-highlight (`HighlightedTextView.updateNSView`) — the automatic pass ran the
+        // same whole-document work a second time and could apply results computed with stale font
+        // metrics, since it fired before the new metrics were assigned.
     }
     
     

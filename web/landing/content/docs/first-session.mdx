@@ -12,6 +12,13 @@ From the welcome screen, choose **Open Project** and pick a folder. Termio adds
 it to the sidebar and remembers it under **Recent** for next time. A project is
 just a working directory — the agents you launch inside it start there.
 
+<DocsImage
+  src="/screenshots/docs/01-open-project.png"
+  alt="The Termio welcome window with Open Project as the primary action"
+  width={2424}
+  height={1664}
+/>
+
 ## Launch an agent
 
 With a project selected, start a new session and pick an agent — Claude Code,
@@ -19,25 +26,44 @@ Codex, Gemini, or any other CLI you have installed. Termio opens it in a real
 terminal at the project root. You type into it exactly as you would in any
 terminal; the agent's TUI renders natively.
 
-The sidebar shows the session's live status — **working**, **idle**,
-**attention**, or **done**. The [sidebar guide](/docs/sidebar) explains each
-state; the one to watch for is **attention**, which means the agent is blocked on
-a prompt or a permission and needs you back.
+The sidebar shows the session's live status — **working**, **idle**, **done**, or
+**needs you**. [Concepts](/docs/concepts#status) explains all four; the one to
+watch for is **needs you**, which means the agent is blocked on a prompt or a
+permission and can't continue without you.
 
 <Callout type="tip">
-  Kick off a long run in one session, switch to another, and let the sidebar's
-  **attention** state tell you the moment the first agent needs you back.
+  Kick off a long run in one session, switch to another, and let the sidebar tell
+  you the moment the first agent needs you back.
 </Callout>
+
+<DocsImage
+  src="/screenshots/docs/02-agent-working.png"
+  alt="A focused Codex session working in Termio while its sidebar row reports Working"
+  width={2424}
+  height={1664}
+/>
 
 ## Split the window
 
 Most real work wants more than one pane. Split the current pane to the right with
-`⌘D` or downward with `⌘⇧D`, then drop another session into the new pane — an
+`⌘D` or downward with `⇧⌘D`, then drop another session into the new pane — an
 agent in one, your dev server in another, a shell in a third. Panes tile as a
 tree, so you can nest splits into any layout.
 
-Move focus between panes with `⌘⌥` + an arrow key, temporarily zoom the focused
-pane to fill the window with `⌘⇧↩`, and close it with `⌘W`. Every shortcut is
+To rearrange a layout, hover a pane's header and drag the grab handle that
+appears. A highlight previews where the pane will land: drop on another pane's
+left, right, top, or bottom half to place it on that side, or on the center to
+swap the two panes.
+
+<DocsVideo
+  src="/screenshots/docs/21-rearrange-pane.mp4"
+  poster="/screenshots/docs/21-rearrange-pane-poster.png"
+  label="A Termio pane is picked up, dragged over another pane, and dropped into a new position"
+/>
+
+Move focus between panes with `⌥⌘` + an arrow key, and temporarily zoom the
+focused pane to fill the window with `⇧⌘↩`. `⌘W` **ungroups** the focused pane —
+the session keeps running on its own rather than ending. Every shortcut is
 rebindable — see [Keyboard shortcuts](/docs/keyboard).
 
 ## A note on session lifetime
@@ -46,6 +72,13 @@ Sessions are live processes, not saved transcripts. When you quit Termio, the
 shells and agents exit — reopening the app starts fresh. The read-only session
 trace (see the **Info** pane) keeps a rendered record of what happened, but the
 running process itself doesn't survive a quit.
+
+<DocsImage
+  src="/screenshots/docs/24-info-trace.png"
+  alt="The Termio Info inspector showing session metadata and a read-only trace beside the terminal"
+  width={2424}
+  height={1664}
+/>
 
 <Callout type="warning">
   Quitting Termio ends every running agent and shell. Long agent runs don't

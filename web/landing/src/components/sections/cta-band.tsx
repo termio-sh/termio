@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { Reveal } from "@/components/reveal";
 import { AppleMark } from "@/components/section-label";
 import { CtaGrain } from "@/components/cta-grain";
-import { downloadUrl } from "@/lib/site";
+import { downloadUrl, testflightUrl } from "@/lib/site";
 
 export function CtaBand() {
   return (
@@ -41,7 +41,19 @@ export function CtaBand() {
                 <AppleMark />
                 Download for Mac
               </a>
+              <a
+                href={testflightUrl}
+                className={cn(
+                  buttonVariants({ variant: "outline" }),
+                  "h-12 rounded-full px-7 text-base",
+                )}
+              >
+                Download for iOS Beta
+              </a>
             </div>
+            <p className="mt-4 text-sm text-muted-foreground">
+              Requires macOS 14 or later
+            </p>
           </div>
         </Reveal>
       </div>

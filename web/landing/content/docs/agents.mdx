@@ -26,15 +26,29 @@ Any of these that's installed on your `PATH` appears as a launch option. A plain
 shell is always available too. Running something else? Any CLI can become a
 first-class agent — see [Custom agents](/docs/custom-agents).
 
+<DocsImage
+  src="/screenshots/docs/17-agents-settings.png"
+  alt="Termio Agent settings with the built-in agent catalog visible and Claude Code selected"
+  width={1664}
+  height={1288}
+/>
+
 ## Reading status at a glance
 
-Every session row carries a live status dot — **working**, **idle**,
-**attention**, or **done**. Termio derives these from a mix of signals: the
+Every session row carries a live status dot — **working**, **idle**, **done**, or
+**needs you**. Termio derives these from a mix of signals: the
 agent's own hooks where it exposes them, and the terminal's output otherwise, so
 the sidebar stays honest even for agents that don't emit structured events. The
 [sidebar guide](/docs/sidebar#status) explains what each state means, and
 [Session control](/docs/session-control) covers the opt-in hooks that make them
 sharpest.
+
+<DocsImage
+  src="/screenshots/docs/05-session-statuses.png"
+  alt="The Termio sidebar and termio sessions list output showing idle, working, done, and needs-you sessions"
+  width={2424}
+  height={1664}
+/>
 
 ## Switching without losing your place
 
@@ -42,5 +56,5 @@ Clicking a session brings it forward instantly; the others keep running in the
 background. Because each session is a real process, an agent doesn't pause when
 it's off-screen — you can kick off a long run in one, switch to another, and come
 back when the first raises its hand. When you have more than a handful of
-sessions, `⌘⇧O` jumps straight to any of them by name — see
+sessions, `⇧⌘O` jumps straight to any of them by name — see
 [Navigation](/docs/navigation).

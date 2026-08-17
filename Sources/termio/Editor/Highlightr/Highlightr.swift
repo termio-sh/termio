@@ -13,6 +13,8 @@
 //  Local changes, kept minimal:
 //   - `Bundle.module` → `Bundle.termioResources`
 //   - startup theme "pojoaque" → "xcode" (only the two xcode themes ship)
+//   - Swift 6: `safeMainSync` boxes its closure to cross onto the main queue —
+//     the call is synchronous, so the captures never outlive the caller
 //
 
 import Foundation
@@ -186,6 +188,10 @@ open class Highlightr
     /**
      Execute the provided block in the main thread synchronously.
      */
+    private struct UncheckedSendableClosure: @unchecked Sendable {
+        let run: () -> ()
+    }
+
     private func safeMainSync(_ block: @escaping ()->())
     {
         if Thread.isMainThread
@@ -193,7 +199,8 @@ open class Highlightr
             block()
         }else
         {
-            DispatchQueue.main.sync { block() }
+            let boxed = UncheckedSendableClosure(run: block)
+            DispatchQueue.main.sync { boxed.run() }
         }
     }
     

@@ -3,7 +3,9 @@
 #
 # `sessions` talks to the running app over its local control socket, scoped to the
 # project the calling shell is in (via $TERMIO_SESSION, or the current directory).
-# Sessions are addressed by the `<agent>@<id>` handle that `sessions list` prints.
+# Sessions are addressed by id: a `termio://session/<uuid>` deep link (the `link`
+# field of `sessions list --json`, or Copy Session Link in the app), or a bare
+# id/prefix.
 # `agent report` is the public hook contract: an agent's own status hook calls it to
 # tell termio the session is working / waiting / done, replacing the raw `printf | nc`
 # termio used to bake into every hook file. `termio open` routes a folder to the app
@@ -27,30 +29,199 @@ usage:
   termio sessions list                       sessions in this project + status
   termio sessions watch [--state <s,…>]      stream status transitions until Ctrl-C (default: done,needs-you)
   termio sessions spawn "<prompt>"           start a NEW agent session on the prompt
-  termio sessions send <agent>@<id> "<text>"     type a prompt (or menu answer) into a session
-  termio sessions close <agent>@<id> [...]   close session tabs
-  termio sessions focus <agent>@<id>         select the session in the app
+  termio sessions run "<command>"            start a NEW terminal session running a shell command
+  termio sessions send <session> "<text>"        type a prompt (or menu answer) into a session
+  termio sessions read <session> [--lines N]     print a session's current screen
+  termio sessions close <session> [...]      close session tabs
+  termio sessions focus <session>            select the session in the app
+
+  termio notify [--title T] "<message>"      post a macOS notification (e.g. "I'm done")
 
   termio agent report <state>                report this agent's activity (hook contract)
 
 options:
   --json           machine-readable output (any `sessions` command)
   --agent <id>     agent for `spawn` (e.g. claudeCode, codex, grok, pi; default: caller's kind)
-  --state <s,…>    for `watch`: comma-separated states to report (working, idle, done, needs-you)
+  --wait           for `spawn`/`run`/`send`: block until the turn settles; the reply carries
+                   the final status and the transcript line range to read
+                   (exit 0 settled, 1 error — including a stalled/vanished session, 3 timed out)
+  --timeout <ms>   cap for --wait (default 300000, clamped 1000–600000); implies --wait
+  --no-enter       for `send`: deliver the text as-is, with no Return after it —
+                   the way to answer a gate that wants a bare keypress
+  --key <name>     for `send`: press a named key (escape, up, tab, ctrl-c, f2, …)
+                   after the text; repeatable, in order. Any --key suppresses the
+                   implicit Return
+  --lines <n>      for `read`: keep only the last n screen rows
+  --state <s,…>    for `watch`: comma-separated states to report (working, idle, done,
+                   needs-you, stalled; default done,needs-you)
+  --no-snapshot    for `watch`: skip the initial per-session status snapshot
   --help, --version
 
-`<agent>@<id>` handles come from `termio sessions list` or a `spawn` reply.
-`answer` is a deprecated alias of `send`; `send` with no handle aliases `spawn`.
+`termio sessions <verb> --help` prints focused help for one verb.
+<session> = a termio://session/<uuid> link or a bare id/prefix — printed by
+`termio sessions list` / a `spawn` reply.
+`answer` is a deprecated, agent-only alias of `send`; `send` with no target aliases `spawn`.
+Every one-shot command times out after ${TERMIO_CLI_TIMEOUT:-15}s (TERMIO_CLI_TIMEOUT overrides).
 EOF
+}
+
+# Focused help for one `sessions` verb, printed before the socket is touched —
+# `--help` must work with the app closed.
+verb_usage() {
+    case "$1" in
+        list) cat <<'EOF'
+usage: termio sessions list [--json]
+
+List the sessions in this project with their live status (working / idle /
+done / needs-you). `--json` adds each session's transcript path once its
+agent has reported one.
+EOF
+            ;;
+        watch) cat <<'EOF'
+usage: termio sessions watch [--state <s,…>] [--no-snapshot] [--json]
+
+Block and stream one line per session status transition until interrupted.
+On attach it first prints a snapshot line per session with its current
+status (tagged "snapshot":true in --json); --no-snapshot skips that.
+--state takes a comma-separated filter (working, idle, done, needs-you,
+stalled); the default reports the two states a supervisor acts on: done,
+needs-you.
+In --json mode the app writes {"heartbeat":true} after 30s of silence so a
+dead stream is distinguishable from a quiet one.
+
+`stalled` is a watch-plane signal, not a real status: the session is still
+working, but for 20+ minutes has made no repo change and next-to-no
+transcript growth — the unattended-runaway pattern. Sustained output (a
+long build streaming logs) suppresses it. The event carries the reasoning
+in `evidence` ("working 42m, no repo change, transcript +3 lines"), fires
+once per quiet stretch, and re-arms when progress resumes. Opt in with
+--state stalled; it is not in the default filter.
+
+exit codes: 0 after Ctrl-C (normal end of supervision), 2 when the stream
+closes from the app side (termio quit or died).
+EOF
+            ;;
+        spawn) cat <<'EOF'
+usage: termio sessions spawn "<prompt>" [--agent <id>] [--wait [--timeout <ms>]] [--json]
+
+Start a NEW agent session on the prompt. Replies immediately with the new
+session's termio://session link; the prompt is
+typed in once the agent finishes booting. --agent picks the agent (e.g. claudeCode, codex, grok,
+pi); the default is the calling agent's own kind.
+
+--wait holds the reply until the spawned agent's first turn settles (or
+--timeout ms elapse; default 300000, clamped 1000–600000). The reply then
+carries the final status, the transcript path, and the cursor..cursor_end
+line range holding the response. A session that stops to ask you something
+returns immediately as needs-you, with the on-screen question in `prompt`.
+
+A prompt that shows no effect within 5s fails fast as prompt_stalled (the
+input was eaten) rather than burning the timeout; a session that closes or
+whose agent exits mid-wait fails as session_closed / agent_gone.
+
+exit codes: 0 settled, 1 error (including stalled/vanished), 3 timed out.
+EOF
+            ;;
+        run) cat <<'EOF'
+usage: termio sessions run "<command>" [--wait [--timeout <ms>]] [--json]
+
+Start a NEW plain terminal session and type the shell command into it — a
+dev server, a test run, a build — visible in a split pane, no LLM involved.
+Replies immediately with the session's address; drive it further with
+`send`, read its output with `read` (a plain command has no
+transcript; its screen is the result), close it with `close`.
+
+--wait settles when the screen goes still after the command's output (or
+returns needs-you / times out, exactly as with send).
+
+exit codes: 0 settled, 1 error (including stalled/vanished), 3 timed out.
+EOF
+            ;;
+        read) cat <<'EOF'
+usage: termio sessions read <session> [--lines N] [--json]
+
+Print the session's current screen (its viewport, right-trimmed, trailing
+blank rows dropped) without focusing it. The result channel for `run`
+sessions, and a quick peek at any agent's live TUI. --lines keeps only
+the last N rows. Scrollback is not included.
+EOF
+            ;;
+        send|answer) cat <<'EOF'
+usage: termio sessions send <session> "<text>" [--key <name>]... [--no-enter]
+                            [--wait [--timeout <ms>]] [--json]
+
+Type text into an existing session and submit it with a real Return
+keypress — a prompt to drive it, or a menu choice ("1", "yes") to answer a
+permission prompt. Addresses come from `termio sessions list` or a `spawn`
+reply — a termio://session link or bare id, copied verbatim.
+
+The text reaches the terminal verbatim, so --no-enter (no Return after it)
+delivers a bare keypress: the lone `t` a trust gate waits for.
+
+--key presses a NAMED key, repeatable and in order, after the text:
+`send <session> --key escape` to back out of a menu, `--key up --key enter`
+to rerun the last entry. Use it instead of writing escape bytes yourself —
+a key's bytes depend on the mode the program negotiated (Up is ESC[A in
+normal mode, ESC O A in application mode), so only the terminal's own key
+encoder can get them right. Any --key suppresses the implicit Return; name
+`--key enter` when you want one. An unknown name is an error, never text.
+
+Key names follow kitty and tmux, both spellings accepted: enter, escape,
+tab, space, backspace, delete, insert, up, down, left, right, home, end,
+pageup, pagedown, f1–f12, and single characters — prefixed with ctrl-/c-
+or shift-/s- for chords (ctrl-c, c-c, shift-tab). Ctrl and Shift are the
+modifiers a program sees: macOS spends Option composing text (option-b is
+∫, not meta-b) and Command drives the app, so those chords are refused
+rather than silently dropped. A meta chord is ESC then the key:
+`--key escape --key b`.
+
+--wait holds the reply until the turn the text kicked off settles (or
+--timeout ms elapse; default 300000, clamped 1000–600000). The reply then
+carries the final status, the transcript path, and the cursor..cursor_end
+line range holding the response. A session that stops to ask you something
+returns immediately as needs-you, with the on-screen question in `prompt`.
+
+A prompt that shows no effect within 5s fails fast as prompt_stalled (the
+input was eaten) rather than burning the timeout; a session that closes or
+whose agent exits mid-wait fails as session_closed / agent_gone.
+
+exit codes: 0 settled, 1 error (including stalled/vanished), 3 timed out.
+
+`answer` is a deprecated, agent-only alias; `send` without a target aliases `spawn`.
+EOF
+            ;;
+        close) cat <<'EOF'
+usage: termio sessions close <session> [...] [--json]
+
+Close one or more session tabs. Each target gets its own attempt and reply
+line; any failure fails the whole command.
+EOF
+            ;;
+        focus) cat <<'EOF'
+usage: termio sessions focus <session> [--json]
+
+Select the session in the app and bring termio to the front.
+EOF
+            ;;
+        *) usage ;;
+    esac
 }
 
 SOCKET="$HOME/Library/Application Support/$SUPPORT_DIR_NAME/session-control.sock"
 
-# JSON-escape a string for embedding in a request: backslashes, double quotes, and
-# newlines (which would otherwise break the single-line JSON object).
+# JSON-escape a string for embedding in a request: backslashes, double quotes,
+# tabs, and newlines (which would otherwise break the single-line JSON object).
+# ESC survives, as a JSON \u001b escape: an escape sequence is exactly the kind of
+# keypress `send --no-enter` exists to deliver (esc to back out of a menu, an arrow
+# key), and it reaches the PTY verbatim on the far side. Every other C0 byte is
+# stripped outright: they are never intentional in a prompt, and one raw byte
+# would make the whole request undecodable.
 json_escape() {
+    tab=$(printf '\t')
+    esc=$(printf '\033')
     printf '%s' "$1" \
-        | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
+        | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$tab/\\\\t/g" -e "s/$esc/\\\\u001b/g" \
+        | tr -d '\000-\010\013-\037' \
         | awk 'BEGIN { ORS = "" } { if (NR > 1) printf "\\n"; printf "%s", $0 }'
 }
 
@@ -64,49 +235,90 @@ mine_field() {
         | sed 's/^"[^"]*"[[:space:]]*:[[:space:]]*"//;s/"$//'
 }
 
-# Whether a token is a `<agent>@<id>` session handle (as printed by `list`) rather
-# than prompt text. The strict shape is what lets `send` take an optional target
-# with no flag: a mistyped handle falls through to `not_found` on the server, never
-# silently becomes the start of a prompt to a freshly spawned agent.
-is_handle() {
-    printf '%s' "$1" | grep -qE '^[A-Za-z][A-Za-z0-9._-]*@[0-9a-fA-F]{4,32}$'
+# Whether a token addresses a session rather than prompt text: a termio://
+# deep link, or a bare id (full UUID or an 8+ char hex prefix). Deliberately
+# permissive: an unknown address fails loudly as `not_found` on the server,
+# whereas an unrecognized one would silently become the first words of a
+# prompt to a freshly spawned agent.
+is_address() {
+    printf '%s' "$1" | grep -qE \
+        '^(termio[a-z-]*://[^ ]+|[0-9a-fA-F]{8}[0-9a-fA-F-]{0,28})$'
 }
 
 # The one-line JSON control request shared by the one-shot and streaming paths.
+# An optional 6th argument is raw JSON (`"key":value`) appended verbatim, for the
+# rare per-verb field that doesn't earn a slot in every request.
 build_request() {
-    printf '{"op":"%s","format":"%s","caller_session":"%s","caller_cwd":"%s","target":"%s","agent":"%s","text":"%s"}' \
+    extra=""
+    if [ $# -ge 6 ] && [ -n "$6" ]; then extra=",$6"; fi
+    printf '{"op":"%s","format":"%s","caller_session":"%s","caller_cwd":"%s","target":"%s","agent":"%s","text":"%s"%s}' \
         "$1" "$2" \
         "$(json_escape "${TERMIO_SESSION:-}")" \
         "$(json_escape "$PWD")" \
         "$(json_escape "$3")" \
         "$(json_escape "$4")" \
-        "$(json_escape "$5")"
+        "$(json_escape "$5")" \
+        "$extra"
 }
 
 # One request/response round-trip. Prints the app's reply and returns nonzero when
 # it reports failure, so callers (and `set -e`) surface errors through the exit
-# code — agents check `$?`, not prose.
+# code — agents check `$?`, not prose. `nc -w` bounds the wait when the app is
+# wedged, and an empty reply is a hard error, never a silent success: a control
+# CLI must fail loud. An optional 6th argument is raw JSON appended to the request
+# (the --wait fields); CLIENT_TIMEOUT is the read bound, widened by `sessions`
+# when a --wait reply is legitimately slow.
+CLIENT_TIMEOUT="${TERMIO_CLI_TIMEOUT:-15}"
 request_once() {
-    request=$(build_request "$1" "$2" "$3" "$4" "$5")
-    response=$(printf '%s' "$request" | nc -U "$SOCKET")
+    request=$(build_request "$1" "$2" "$3" "$4" "$5" "${6:-}")
+    if response=$(printf '%s' "$request" | nc -w "$CLIENT_TIMEOUT" -U "$SOCKET" 2>/dev/null); then
+        reach=0
+    else
+        reach=$?
+    fi
+    if [ -z "$response" ]; then
+        # A refused connect and a live-but-silent app are different failures with
+        # different fixes, and nc's exit code is the only thing that tells them
+        # apart. Reporting a refusal as a timeout sends the reader off to diagnose
+        # a wedged app that is in fact running fine behind a socket file whose
+        # owner is gone — raising TERMIO_CLI_TIMEOUT can never help.
+        if [ "$reach" -ne 0 ]; then
+            echo "termio: nothing is listening at $SOCKET (connection refused) — the socket file outlived the app that made it; restart termio" >&2
+        else
+            echo "termio: no reply from the app within ${CLIENT_TIMEOUT}s — it may be busy or wedged; check the app, or raise TERMIO_CLI_TIMEOUT" >&2
+        fi
+        return 1
+    fi
     printf '%s\n' "$response"
     case "$response" in
         error:*|*'"ok":false'*) return 1 ;;
     esac
+    # A --wait that expired is its own outcome, on its own exit code (3): the
+    # session is still running and the caller decides whether to re-arm — distinct
+    # from success (0) and from hard errors (1), so scripts can branch without
+    # parsing. JSON mode keys off the contract field, text mode off the headline;
+    # both checks are scoped to wait requests (never `read`, whose payload is an
+    # arbitrary screen) so no other reply can trip them.
+    case "${6:-}" in *'"wait":true'*)
+        if [ "$2" = json ]; then
+            case "$response" in
+                *'"timed_out":true'*) return 3 ;;
+            esac
+        else
+            case "$(printf '%s\n' "$response" | head -1)" in
+                *'— timed out'*) return 3 ;;
+            esac
+        fi
+    ;; esac
     return 0
 }
 
 sessions() {
-    if [ ! -S "$SOCKET" ]; then
-        echo "termio: app is not running (no control socket at $SOCKET)" >&2
-        exit 1
-    fi
-
     op="${1:-list}"
     [ $# -gt 0 ] && shift || true
 
     case "$op" in
-        list|watch|spawn|send|answer|close|focus) ;;
+        list|watch|spawn|run|send|answer|read|close|focus) ;;
         -h|--help|help) usage; exit 0 ;;
         *)
             echo "termio: unknown sessions command '$op'" >&2
@@ -115,35 +327,75 @@ sessions() {
             ;;
     esac
 
+    # Per-verb help never needs the app: dispatch it before the socket check.
+    for argument in "$@"; do
+        case "$argument" in
+            -h|--help) verb_usage "$op"; exit 0 ;;
+        esac
+    done
+
+    if [ ! -S "$SOCKET" ]; then
+        echo "termio: app is not running (no control socket at $SOCKET)" >&2
+        exit 1
+    fi
+
     format=text
     agent=""
     targets=""
     text=""
     states=""
+    no_snapshot=0
+    no_enter=0
+    keys_json=""
+    wait=false
+    timeout_ms=""
+    lines=""
     seen_positional=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --json) format=json ;;
+            --no-snapshot) no_snapshot=1 ;;
+            --no-enter) no_enter=1 ;;
+            --key)
+                [ $# -ge 2 ] || { echo "termio: --key needs a key name (e.g. escape, ctrl-c)" >&2; exit 1; }
+                # Order matters — the app presses them in the order named — so they
+                # accumulate into a JSON array rather than a set. The name itself is
+                # validated by the app, the one place that knows the vocabulary.
+                keys_json="${keys_json:+$keys_json,}\"$(json_escape "$2")\""
+                shift ;;
+            --wait) wait=true ;;
+            --timeout)
+                [ $# -ge 2 ] || { echo "termio: --timeout needs a value in ms" >&2; exit 1; }
+                case "$2" in
+                    ''|*[!0-9]*) echo "termio: --timeout needs whole milliseconds" >&2; exit 1 ;;
+                esac
+                timeout_ms="$2"; wait=true; shift ;;
             --agent)
                 [ $# -ge 2 ] || { echo "termio: --agent needs a value" >&2; exit 1; }
                 agent="$2"; shift ;;
             --state)
                 [ $# -ge 2 ] || { echo "termio: --state needs a value" >&2; exit 1; }
                 states="$2"; shift ;;
+            --lines)
+                [ $# -ge 2 ] || { echo "termio: --lines needs a value" >&2; exit 1; }
+                case "$2" in
+                    ''|*[!0-9]*) echo "termio: --lines needs a whole number" >&2; exit 1 ;;
+                esac
+                lines="$2"; shift ;;
             *)
                 if [ "$op" = close ]; then
                     # Every positional is a tab to close.
                     targets="${targets:+$targets }$1"
-                elif [ "$op" = spawn ]; then
-                    # `spawn` takes no handle — every positional is the prompt.
+                elif [ "$op" = spawn ] || [ "$op" = run ]; then
+                    # `spawn`/`run` take no target — every positional is the payload.
                     text="${text:+$text }$1"
-                elif [ "$seen_positional" -eq 0 ] && { [ "$op" = answer ] || [ "$op" = focus ]; }; then
+                elif [ "$seen_positional" -eq 0 ] && { [ "$op" = answer ] || [ "$op" = focus ] || [ "$op" = read ]; }; then
                     targets="$1"
-                elif [ "$seen_positional" -eq 0 ] && [ "$op" = send ] && is_handle "$1"; then
-                    # A leading handle targets an existing session. Without one, `send`
+                elif [ "$seen_positional" -eq 0 ] && [ "$op" = send ] && is_address "$1"; then
+                    # A leading address targets an existing session. Without one, `send`
                     # is a back-compat alias for `spawn` (see dispatch below); the strict
-                    # is_handle shape keeps a prompt that merely opens with a word from
-                    # being mistaken for a handle.
+                    # is_address's shape check keeps a prompt that merely opens
+                    # with a word from being mistaken for an address.
                     targets="$1"
                 else
                     text="${text:+$text }$1"
@@ -155,15 +407,15 @@ sessions() {
     done
 
     case "$op" in
-        answer|focus)
+        answer|focus|read)
             if [ -z "$targets" ]; then
-                echo "termio: $op needs a session handle (see \`termio sessions list\`)" >&2
+                echo "termio: $op needs a session link or id (see \`termio sessions list\`)" >&2
                 exit 1
             fi
             ;;
         close)
             if [ -z "$targets" ]; then
-                echo "termio: close needs at least one session handle" >&2
+                echo "termio: close needs at least one session link or id" >&2
                 exit 1
             fi
             ;;
@@ -172,48 +424,127 @@ sessions() {
                 echo "termio: spawn needs a prompt (e.g. \`termio sessions spawn \"fix the build\" --agent codex\`)" >&2
                 exit 1
             fi
+            # One job, one entry point: spawn creates agents, run creates terminals.
+            # The wire cannot tell `spawn --agent terminal` from `run` (both arrive
+            # as an empty-target send with the shell pinned), so the split is
+            # enforced here, where the user's intent is still visible.
+            case "$agent" in
+                [Tt]erminal|[Ss]hell)
+                    echo "termio: spawn starts agents — for a plain terminal running a command, use \`termio sessions run \"<command>\"\`" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+        run)
+            if [ -z "$text" ]; then
+                echo "termio: run needs a command (e.g. \`termio sessions run \"pnpm dev\"\`)" >&2
+                exit 1
+            fi
             ;;
     esac
+
+    # One sync vocabulary: --wait/--timeout mean the same thing on every verb that
+    # accepts them (spawn/run + send), and nothing else silently ignores them.
+    extra_json=""
+    if [ "$wait" = true ]; then
+        case "$op" in
+            spawn|run|send|answer) ;;
+            *) echo "termio: --wait applies to spawn, run, and send only" >&2; exit 1 ;;
+        esac
+        extra_json='"wait":true'
+        [ -n "$timeout_ms" ] && extra_json="$extra_json,\"timeout_ms\":$timeout_ms"
+        # The client read bound must outlive the server-side wait (which the app
+        # clamps to 1s–600s), or nc would hang up mid-wait and report a false
+        # timeout. An explicit TERMIO_CLI_TIMEOUT still wins — the escape hatch.
+        if [ -z "${TERMIO_CLI_TIMEOUT:-}" ]; then
+            CLIENT_TIMEOUT=$(( ${timeout_ms:-300000} / 1000 + 30 ))
+        fi
+    fi
+
+    # --no-enter only reads on a send to an existing session: a spawn's prompt has
+    # to be submitted or the fresh agent just sits on a filled composer.
+    if [ "$no_enter" -eq 1 ]; then
+        case "$op" in
+            send|answer) [ -n "$targets" ] || { echo "termio: --no-enter needs a session to send to" >&2; exit 1; } ;;
+            *) echo "termio: --no-enter applies to send only" >&2; exit 1 ;;
+        esac
+        extra_json="${extra_json:+$extra_json,}\"enter\":false"
+    fi
+
+    # --key, like --no-enter, only reads on a send to an existing session: a key is
+    # pressed against a TUI that is already drawn, and a booting agent has none.
+    if [ -n "$keys_json" ]; then
+        case "$op" in
+            send|answer) [ -n "$targets" ] || { echo "termio: --key needs a session to press it in" >&2; exit 1; } ;;
+            *) echo "termio: --key applies to send only" >&2; exit 1 ;;
+        esac
+        extra_json="${extra_json:+$extra_json,}\"keys\":[$keys_json]"
+    fi
 
     if [ "$op" = watch ]; then
         # Streaming: the app holds the connection open and pushes one line per scoped
         # status transition until interrupted (Ctrl-C). `--state` (comma-separated)
         # filters; empty means the two states a supervisor acts on — done, needs-you.
+        # No `nc -w` here: watch is *supposed* to sit open, and its liveness signal is
+        # the app's 30s `{"heartbeat":true}` line (--json mode).
         #
         # Build the request into a variable *first*, then pipe an instant `printf` to
         # `nc`. Piping `build_request` directly (`build_request … | nc`) runs nc
         # concurrently with build_request's json_escape subprocesses, so nc connects
         # and the app's read races the not-yet-written payload — the app then times
         # out on an empty read and reports a malformed request.
-        watch_request=$(build_request watch "$format" "" "" "$states")
-        printf '%s' "$watch_request" | nc -U "$SOCKET"
-        exit 0
+        extra=""
+        [ "$no_snapshot" -eq 1 ] && extra='"snapshot":false'
+        watch_request=$(build_request watch "$format" "" "" "$states" "$extra")
+        # Exit codes tell a supervising agent how the watch ended: Ctrl-C is the
+        # normal end of supervision (0, via the trap); an immediate error reply
+        # (control disabled, no scope) is 1; the stream reaching EOF means the
+        # *app* closed it — 2, "termio died", the case to escalate.
+        trap 'exit 0' INT
+        watch_status=0
+        printf '%s' "$watch_request" | nc -U "$SOCKET" | {
+            if IFS= read -r first_line; then
+                printf '%s\n' "$first_line"
+                case "$first_line" in
+                    error:*|*'"ok":false'*) exit 1 ;;
+                esac
+                cat
+            fi
+            exit 2
+        } || watch_status=$?
+        if [ "$watch_status" -eq 2 ]; then
+            echo "termio: watch stream closed by the app (termio quit or died)" >&2
+        fi
+        exit "$watch_status"
     fi
 
     if [ "$op" = close ]; then
         # One request per tab; any failure fails the whole command, but every
-        # handle still gets its attempt and its own reply line.
+        # target still gets its attempt and its own reply line.
         failed=0
-        for handle in $targets; do
-            request_once close "$format" "$handle" "" "" || failed=1
+        for target in $targets; do
+            request_once close "$format" "$target" "" "" || failed=1
         done
         exit "$failed"
     fi
 
-    # `spawn` and the no-handle `send` alias both start a fresh session: the app
-    # spawns whenever a `send` request carries an empty target. `answer` is a thin
-    # alias for sending to an existing session. So both fold onto the wire `send`;
-    # every other verb maps straight through.
+    # `spawn` and the no-target `send` alias both start a fresh session: the app
+    # spawns whenever a `send` request carries an empty target. `run` is the same
+    # spawn with the agent pinned to the plain shell — the payload is a command
+    # line, not a prompt. `answer` is a thin alias for sending to an existing
+    # session. All fold onto the wire `send`; every other verb maps straight through.
     wire_op="$op"
     case "$op" in
         spawn|answer) wire_op=send ;;
+        run) wire_op=send; agent="terminal" ;;
+        read) [ -n "$lines" ] && extra_json="\"lines\":$lines" ;;
     esac
-    request_once "$wire_op" "$format" "$targets" "$agent" "$text"
+    request_once "$wire_op" "$format" "$targets" "$agent" "$text" "$extra_json"
 }
 
 # The public hook contract:
 #   `termio agent report <state> [--transcript] [--conversation <id>]
-#                                [--conversation-from <field>] [--reply]`
+#                                [--conversation-from <field>] [--tool-from <field>] [--reply]`
 # An agent's status hook runs this instead of a hand-rolled `printf | nc`; termio
 # stamps the absolute path to this script into the hook file at install time. It reads
 # the session id from $TERMIO_SESSION (which the PTY carries) and the cwd from $PWD,
@@ -229,6 +560,10 @@ sessions() {
 #   --conversation-from   mine the conversation id out of the named string field of
 #                         the JSON on stdin (agents disagree on the field name:
 #                         Codex `session_id`, Grok `sessionId`).
+#   --tool-from           mine the running tool's name out of the named string field
+#                         of the JSON on stdin (Claude `tool_name`); events without
+#                         the field simply omit it. Feeds the sidebar tooltip and
+#                         the task-completion notification's work-vs-chat gate.
 #   --reply               stay silent on stdout and print `{}` at the end, for agents
 #                         (Cursor) that read the hook's stdout as its JSON reply.
 agent() {
@@ -236,7 +571,7 @@ agent() {
     [ $# -gt 0 ] && shift || true
     if [ "$op" != "report" ]; then
         echo "termio: unknown agent command '${op:-}'" >&2
-        echo "usage: termio agent report <working|attention|done|idle> [--transcript] [--conversation <id>] [--conversation-from <field>] [--reply]" >&2
+        echo "usage: termio agent report <working|attention|done|idle> [--transcript] [--conversation <id>] [--conversation-from <field>] [--tool-from <field>] [--reply]" >&2
         exit 1
     fi
 
@@ -245,6 +580,7 @@ agent() {
     reply=0
     conversation=""
     conversation_from=""
+    tool_from=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --transcript) with_transcript=1 ;;
@@ -255,6 +591,9 @@ agent() {
             --conversation-from)
                 [ $# -ge 2 ] || { echo "termio: --conversation-from needs a field name" >&2; exit 1; }
                 conversation_from="$2"; shift ;;
+            --tool-from)
+                [ $# -ge 2 ] || { echo "termio: --tool-from needs a field name" >&2; exit 1; }
+                tool_from="$2"; shift ;;
             working|attention|done|idle) state="$1" ;;
             *) echo "termio: unknown agent report argument '$1'" >&2; exit 1 ;;
         esac
@@ -272,11 +611,15 @@ agent() {
     # ran the hook without piping its payload would leave `cat` waiting on the
     # terminal forever, while a closed/absent stdin still reads instantly as empty.
     input=""
-    if [ "$with_transcript" -eq 1 ] || [ -n "$conversation_from" ]; then
+    if [ "$with_transcript" -eq 1 ] || [ -n "$conversation_from" ] || [ -n "$tool_from" ]; then
         if [ ! -t 0 ]; then input=$(cat); fi
     fi
     if [ -z "$conversation" ] && [ -n "$conversation_from" ]; then
         conversation=$(mine_field "$conversation_from" "$input")
+    fi
+    tool=""
+    if [ -n "$tool_from" ]; then
+        tool=$(mine_field "$tool_from" "$input")
     fi
 
     payload=$(printf '{"termio_session":"%s","state":"%s","cwd":"%s"' \
@@ -287,6 +630,9 @@ agent() {
     fi
     if [ -n "$conversation" ]; then
         payload=$(printf '%s,"conversation_id":"%s"' "$payload" "$(json_escape "$conversation")")
+    fi
+    if [ -n "$tool" ]; then
+        payload=$(printf '%s,"tool":"%s"' "$payload" "$(json_escape "$tool")")
     fi
     payload="$payload}"
 
@@ -299,6 +645,50 @@ agent() {
         printf '%s' "$payload" | nc -w 1 -U "$status_socket" >/dev/null 2>&1 || true
     done
     if [ "$reply" -eq 1 ]; then printf '{}'; fi
+}
+
+# `termio notify [--title T] "<message>"` — post a macOS notification on demand.
+# An agent calls this to ping the user ("tests passed", "I need input") without
+# waiting for the automatic task-completion banner, which only fires while termio
+# is backgrounded. The message is required; --title overrides the default (the
+# calling agent's name). Routed through the running app over the control socket so
+# the banner wears termio's identity and a click focuses the calling session.
+notify() {
+    format=text
+    title=""
+    body=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json) format=json ;;
+            --title)
+                [ $# -ge 2 ] || { echo "termio: --title needs a value" >&2; exit 1; }
+                title="$2"; shift ;;
+            -h|--help)
+                cat <<'EOF'
+usage: termio notify [--title T] "<message>" [--json]
+
+Post a macOS notification from the running app. The agent uses this to ping you
+directly — "build finished", "need a decision" — regardless of whether termio is
+frontmost (unlike the automatic completion banner). --title overrides the default
+(the calling agent's name); the banner's subtitle is the project, and clicking it
+focuses the session that posted it.
+EOF
+                exit 0 ;;
+            *) body="${body:+$body }$1" ;;
+        esac
+        shift
+    done
+    if [ -z "$body" ]; then
+        echo "termio: notify needs a message (e.g. \`termio notify \"tests passed\"\`)" >&2
+        exit 1
+    fi
+    if [ ! -S "$SOCKET" ]; then
+        echo "termio: app is not running (no control socket at $SOCKET)" >&2
+        exit 1
+    fi
+    extra=""
+    [ -n "$title" ] && extra="\"title\":\"$(json_escape "$title")\""
+    request_once notify "$format" "" "" "$body" "$extra"
 }
 
 open_project() {
@@ -332,6 +722,11 @@ case "${1:-}" in
     agent)
         shift
         agent "$@"
+        exit 0
+        ;;
+    notify)
+        shift
+        notify "$@"
         exit 0
         ;;
     open)

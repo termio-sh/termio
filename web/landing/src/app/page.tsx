@@ -1,7 +1,11 @@
 import { SiteNav } from "@/components/site-nav";
 import { Hero } from "@/components/sections/hero";
 import { AgentShowcase } from "@/components/sections/agent-showcase";
+import { Orchestration } from "@/components/sections/orchestration";
+import { FeatureGrid } from "@/components/sections/feature-grid";
+import { Companion } from "@/components/sections/companion";
 import { Faq } from "@/components/sections/faq";
+import { GitHubBand } from "@/components/sections/github-band";
 import { CtaBand } from "@/components/sections/cta-band";
 import { SiteFooter } from "@/components/site-footer";
 import { HeroGradient } from "@/components/hero-gradient";
@@ -20,7 +24,7 @@ const appJsonLd = {
   downloadUrl,
   image: "https://www.termio.sh/og.webp",
   description:
-    "Termio is a native Mac workspace for your AI coding agents — Claude Code, Codex, OpenCode, Pi Agent and more. Run them side by side, each in a real terminal, and nothing ever leaves your machine.",
+    "Termio is the Terminal-first Agentic Development Environment — a native Mac app for your AI coding agents: Claude Code, Codex, OpenCode, Pi Agent and more. Run them side by side, each in a real terminal, and nothing ever leaves your machine.",
 };
 
 export default function Home() {
@@ -34,7 +38,11 @@ export default function Home() {
       <main className="flex-1">
         <Hero />
         <AgentShowcase />
+        <Orchestration />
+        <FeatureGrid />
+        <Companion />
         <Faq />
+        <GitHubBand />
       </main>
       {/* Shaded outro — mirrors the hero. The CTA band and footer share one slow
           aurora (same MeshGradient), and the footer floats over it as glass,

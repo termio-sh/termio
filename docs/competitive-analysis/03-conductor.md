@@ -8,7 +8,7 @@ updated: 2026-07-02
 
 # Conductor
 
-> The representative of the **opposite philosophy** to termio: Mac-native,
+> The representative of the **opposite philosophy** to Termio: Mac-native,
 > worktree parallelism, but **diff-heavy / in-app review**.
 
 ## One-line positioning
@@ -39,13 +39,13 @@ worktrees and **reviews diffs and merges inside the app**.
 
 ## Weaknesses
 
-- Opposite philosophy to termio — **heavy diff/review panels**, large surface
+- Opposite philosophy to Termio — **heavy diff/review panels**, large surface
   area.
 - Closed-source, details opaque.
 
-## vs. termio / takeaways
+## vs. Termio / takeaways
 
-- This is the watershed on "**should we build diff?**". termio should stick to
+- This is the watershed on "**should we build diff?**". Termio should stick to
   **no code panels** (betting on "the agent lives in the code + humans review
   with git/IDE") and use clear copy to redirect users who want in-app review,
   rather than bolting on a panel mid-course and breaking the positioning.

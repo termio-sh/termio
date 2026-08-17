@@ -61,12 +61,24 @@ struct AgentDefinition: Identifiable {
     /// script, no socket), so it corrects a missed or late hook the instant the
     /// title flips. See `TermioStore.applyTitleActivity` for the arbitration.
     let titleRules: AgentStatusRules?
+    /// Whether this agent reports its busy/idle state as ConEmu-style `OSC 9;4`
+    /// progress in the PTY byte stream (Grok natively; Claude Code once
+    /// `terminalProgressBarEnabled` is set). When true, termio scans the raw stream
+    /// for it and drives status the same way the title does — a correction channel
+    /// that coexists with hooks, never a competing authority. See `OSCProgressScanner`
+    /// and `TermioStore.applyProgressActivity`. Off for agents (and the plain shell)
+    /// that don't, so an unrelated tool's progress bar can't move an agent's dot.
+    let emitsProgressStatus: Bool
     /// A manifest's declarative hook integration: the destination owned by the agent,
     /// a closed installer/dialect, and its event→state mapping.
     /// When present it is installed by `AgentStatusHooks` and becomes the session's
     /// status authority — so `statusRules` is left `nil` and screen-scrape is skipped,
     /// keeping one source of truth per pane. See `AgentHookSpec`.
     let hookSpec: AgentHookSpec?
+    /// The agent's user-level skills directory as declared in the manifest
+    /// (`~/.claude/skills`), or `nil` when the agent has no skills ecosystem.
+    /// `SessionSkillInstaller` installs the termio skill into `<dir>/termio/`.
+    let skillDir: String?
 
     /// All fields after `wireName` are optional so the built-in roster and the
     /// fallback don't each have to spell them out.
@@ -76,7 +88,8 @@ struct AgentDefinition: Identifiable {
         resumeSpec: ResumeSpec, icon: AgentIcon,
         iconRef: TermioShared.IconRef, tint: Color, tintHex: String?, installURL: URL?, wireName: String,
         statusRules: AgentStatusRules? = nil, titleRules: AgentStatusRules? = nil,
-        hookSpec: AgentHookSpec? = nil
+        emitsProgressStatus: Bool = false,
+        hookSpec: AgentHookSpec? = nil, skillDir: String? = nil
     ) {
         self.id = id
         self.order = order
@@ -92,7 +105,9 @@ struct AgentDefinition: Identifiable {
         self.wireName = wireName
         self.statusRules = statusRules
         self.titleRules = titleRules
+        self.emitsProgressStatus = emitsProgressStatus
         self.hookSpec = hookSpec
+        self.skillDir = skillDir
     }
 
     /// The default `order` for a manifest that declares none — high, so unspecified
@@ -126,7 +141,7 @@ struct AgentDefinition: Identifiable {
     /// templates with an `{id}` placeholder plus descriptions of the agent's on-disk
     /// session store — so a new agent needs no Swift at all. Strategies describe
     /// *mechanisms* (file formats, field paths), never agent identities. See
-    /// docs/design/agent-resume-identity.md.
+    /// docs/design/20260716-agent-resume-identity.md.
     struct ResumeSpec: Hashable, Sendable {
         /// Launch template for a fresh, termio-pinned id (e.g. `--session-id {id}`). Its
         /// presence means the id is pinned up front; its absence means the id is
@@ -313,6 +328,8 @@ extension AgentDefinition {
     static var claudeCode: AgentDefinition { AgentCatalog.shared.definition(for: "claudeCode") }
     static var codex: AgentDefinition { AgentCatalog.shared.definition(for: "codex") }
     static var opencode: AgentDefinition { AgentCatalog.shared.definition(for: "opencode") }
+    static var kimi: AgentDefinition { AgentCatalog.shared.definition(for: "kimi") }
+    static var grok: AgentDefinition { AgentCatalog.shared.definition(for: "grok") }
 
     /// Resolves a free-text agent name from the CLI (`termio sessions send --agent claude`)
     /// to a definition, accepting the id, the display name, and common aliases.
@@ -446,6 +463,10 @@ struct AgentHookSpec: Hashable {
     /// key path in the event object for the OpenCode plugin, or the named
     /// `context` mechanism for the Pi plugin. `nil` for identity-blind hooks.
     let conversation: String?
+    /// The stdin JSON field naming the tool a hook event fires for (Claude
+    /// `tool_name`), so reports can distinguish real work from a prose-only turn.
+    /// `nil` when the agent's hooks expose no tool identity.
+    let tool: String?
     let events: [AgentHookEvent]
 }
 
@@ -453,9 +474,25 @@ struct AgentHookSpec: Hashable {
 
 /// Owns the merged set of agent definitions. Both sources decode through
 /// `AgentManifest`; only their directory layout differs until Cut 4 migrates the
-/// legacy user folders. Loaded once, with no hot reload.
+/// legacy user folders. Each instance is immutable; `reload()` swaps in a fresh
+/// one after Settings writes or deletes a user manifest.
 final class AgentCatalog {
-    static let shared = AgentCatalog()
+    private static let sharedLock = NSLock()
+    // Guarded by `sharedLock` on every access; the lock is the synchronization
+    // the compiler cannot see.
+    nonisolated(unsafe) private static var _shared = AgentCatalog()
+
+    static var shared: AgentCatalog {
+        sharedLock.withLock { _shared }
+    }
+
+    /// Re-reads bundled + user manifests. Readers pick up the fresh instance on
+    /// their next `shared` access; definitions already handed out keep their old
+    /// values (equality is by id, so live sessions are unaffected).
+    static func reload() {
+        let fresh = AgentCatalog()
+        sharedLock.withLock { _shared = fresh }
+    }
 
     let all: [AgentDefinition]
     /// Retained so a user override that removes or redirects a shipped hook can
@@ -492,6 +529,14 @@ final class AgentCatalog {
 
     func find(id: String) -> AgentDefinition? {
         all.first { $0.id == id }
+    }
+
+    /// Whether this id came from a user manifest rather than the bundle — i.e. the
+    /// Settings editor may rewrite or delete its file. A user *override* of a
+    /// bundled id is deliberately excluded: deleting it would resurrect the
+    /// bundled agent, which "Delete" does not promise.
+    func isUserDefined(_ id: String) -> Bool {
+        find(id: id) != nil && !bundled.contains { $0.id == id }
     }
 
     /// Language runtimes an agent's CLI may be executed through, so a `node …/cli.js`
@@ -573,7 +618,9 @@ final class AgentCatalog {
     }
 
     /// The channel-scoped flat manifest directory (`~/.termio[-dev]/config/agents`).
-    private static var userAgentsDirectory: URL {
+    /// Internal so the Settings custom-agent editor writes to the same place the
+    /// catalog reads from.
+    static var userAgentsDirectory: URL {
         AppChannel.homeConfigDirectory
             .appendingPathComponent("config", isDirectory: true)
             .appendingPathComponent("agents", isDirectory: true)
@@ -826,7 +873,21 @@ struct AgentManifest: Decodable {
     /// correction channel, not a competing authority), so it is not gated the way
     /// `status` is.
     var titleStatus: StatusSpec?
+    /// Opt-in to reading this agent's ConEmu-style `OSC 9;4` progress out of the PTY
+    /// byte stream as a busy/idle signal (`OSCProgressScanner`). Off by default so a
+    /// plain shell's `wget`/`npm` progress bar can never move an agent's status dot.
+    var progressStatus: Bool?
     var hooks: HookSpec?
+    /// Where the agent loads user-level Agent Skills from, so termio can install
+    /// the session-control skill there. Optional: agents with no skills ecosystem
+    /// (or one termio hasn't confirmed) simply omit it and get no skill install.
+    var skills: SkillsSpec?
+
+    /// The manifest's `skills` — one directory, declared the way hooks declare
+    /// theirs. `~` is expanded at install time.
+    struct SkillsSpec: Decodable {
+        var dir: String?
+    }
 
     struct IconSpec: Decodable {
         var vector: String?
@@ -896,6 +957,8 @@ struct AgentManifest: Decodable {
         /// Dialect-interpreted locator of the live conversation id (see
         /// `AgentHookSpec.conversation`).
         var conversation: String?
+        /// Stdin JSON field naming the running tool (see `AgentHookSpec.tool`).
+        var tool: String?
         var events: [Event]
         struct Event: Decodable {
             var on: String?
@@ -996,6 +1059,14 @@ struct AgentManifest: Decodable {
         }
     }
 
+    private func resolvedSkillDir() throws -> String? {
+        guard let skills else { return nil }
+        guard let dir = skills.dir?.trimmingCharacters(in: .whitespaces), !dir.isEmpty else {
+            throw ManifestError.invalid("\(id): skills require 'dir'")
+        }
+        return dir
+    }
+
     private func resolvedHookSpec() throws -> AgentHookSpec? {
         guard let hooks else { return nil }
         let typeName = hooks.type?.lowercased() ?? "json"
@@ -1029,17 +1100,18 @@ struct AgentManifest: Decodable {
             throw ManifestError.invalid("\(id): \(typeName) hooks require 'file'")
         }
 
-        // The conversation locator is embedded in generated hook commands and plugin
-        // source, so it must be a bare token: a JSON field name for shell hooks, a
-        // dot path of JS identifiers for the OpenCode plugin, or the one named
-        // mechanism (`context`) for the Pi plugin. Anything else is a manifest error,
-        // never rendered.
+        // Locators are embedded in generated hook commands and plugin source, so
+        // each must be a bare token: a JSON field name for shell hooks, a dot path
+        // of JS identifiers for the OpenCode plugin, or the one named mechanism
+        // (`context`) for the Pi plugin. Anything else is a manifest error, never
+        // rendered.
+        func isIdentifier(_ value: Substring) -> Bool {
+            guard let first = value.first, first.isLetter || first == "_" else { return false }
+            return value.dropFirst().allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+        }
+
         var conversation: String?
         if let raw = hooks.conversation?.trimmingCharacters(in: .whitespaces), !raw.isEmpty {
-            func isIdentifier(_ value: Substring) -> Bool {
-                guard let first = value.first, first.isLetter || first == "_" else { return false }
-                return value.dropFirst().allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
-            }
             switch dialect {
             case .claudeNested, .cursorFlat:
                 guard isIdentifier(raw[...]) else {
@@ -1064,6 +1136,24 @@ struct AgentManifest: Decodable {
             conversation = raw
         }
 
+        // The tool locator names the stdin JSON field carrying the running tool's
+        // name (Claude `tool_name`), so shell-hook reports can identify real work.
+        // Only meaningful for the stdin-fed shell-hook dialects.
+        var tool: String?
+        if let raw = hooks.tool?.trimmingCharacters(in: .whitespaces), !raw.isEmpty {
+            switch dialect {
+            case .claudeNested, .cursorFlat:
+                guard isIdentifier(raw[...]) else {
+                    throw ManifestError.invalid(
+                        "\(id): hook tool must name a stdin JSON field, not '\(raw)'")
+                }
+            default:
+                throw ManifestError.invalid(
+                    "\(id): hook tool is not supported for this dialect")
+            }
+            tool = raw
+        }
+
         let validStates: Set<String> = ["working", "attention", "done", "idle"]
         let events = try hooks.events.map { event -> AgentHookEvent in
             guard let name = event.on ?? event.event, !name.isEmpty else {
@@ -1081,6 +1171,7 @@ struct AgentManifest: Decodable {
             dialect: dialect,
             capturesTranscript: hooks.capturesTranscript ?? false,
             conversation: conversation,
+            tool: tool,
             events: events)
     }
 
@@ -1142,6 +1233,7 @@ struct AgentManifest: Decodable {
             resolvedTintHex = nil
         }
         let hookSpec = try resolvedHookSpec()
+        let skillDir = try resolvedSkillDir()
         let statusRules = hookSpec == nil
             ? AgentStatusRules.from(working: status?.working, attention: status?.attention, label: id)
             : nil
@@ -1158,7 +1250,8 @@ struct AgentManifest: Decodable {
             resumeSpec: resumeSpec, icon: resolvedIcon, iconRef: resolvedIconRef,
             tint: resolvedTint, tintHex: resolvedTintHex,
             installURL: (install ?? installURL).flatMap(URL.init(string:)), wireName: wire ?? id,
-            statusRules: statusRules, titleRules: titleRules, hookSpec: hookSpec)
+            statusRules: statusRules, titleRules: titleRules,
+            emitsProgressStatus: progressStatus ?? false, hookSpec: hookSpec, skillDir: skillDir)
     }
 
     private static func bundledAsset(named name: String, in bundle: Bundle) -> URL? {
@@ -1178,10 +1271,7 @@ struct AgentManifest: Decodable {
     /// cross the wire as real PNG bytes regardless of their source format. Failure
     /// degrades to the same visible question-mark fallback as a missing local icon.
     private static func inlineImageReference(at url: URL) -> TermioShared.IconRef {
-        guard let image = NSImage(contentsOf: url),
-              let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let png = bitmap.representation(using: .png, properties: [:])
+        guard let image = NSImage(contentsOf: url), let png = image.pngData()
         else { return TermioShared.IconRef(symbol: "questionmark.app") }
         return TermioShared.IconRef(png: png.base64EncodedString())
     }

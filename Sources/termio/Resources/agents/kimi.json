@@ -6,9 +6,10 @@
   "command": "kimi",
   "icon": { "asset": "kimi-favicon" },
   "install": "https://moonshotai.github.io/kimi-code",
+  "skills": { "dir": "~/.kimi-code/skills" },
   "hooks": {
     "type": "toml",
-    "file": "~/.kimi/config.toml",
+    "file": "~/.kimi-code/config.toml",
     "dialect": "kimi",
     "events": [
       { "on": "UserPromptSubmit", "state": "working" },

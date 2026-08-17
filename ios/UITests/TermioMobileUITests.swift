@@ -57,6 +57,35 @@ final class TermioMobileUITests: XCTestCase {
         app.buttons["Recent Activity"].tap()
     }
 
+    func testHomeTabSelectionSwitchesDestinations() {
+        let app = launch("list")
+        let projects = app.buttons["home.tab.projects"]
+        let chats = app.buttons["home.tab.chats"]
+        let terminals = app.buttons["home.tab.terminals"]
+        XCTAssertTrue(projects.waitForExistence(timeout: 8))
+        XCTAssertTrue(projects.isSelected)
+
+        chats.tap()
+        XCTAssertTrue(app.staticTexts["Chats"].waitForExistence(timeout: 3))
+        XCTAssertTrue(chats.isSelected)
+        XCTAssertFalse(projects.isSelected)
+
+        terminals.tap()
+        XCTAssertTrue(app.staticTexts["Terminals"].waitForExistence(timeout: 3))
+        XCTAssertTrue(terminals.isSelected)
+        XCTAssertFalse(chats.isSelected)
+    }
+
+    func testHomeUsesNativeTabBar() {
+        let app = launch("list")
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 8))
+        XCTAssertTrue(tabBar.buttons["home.tab.projects"].isSelected)
+        XCTAssertTrue(tabBar.buttons["home.tab.chats"].exists)
+        XCTAssertTrue(tabBar.buttons["home.tab.terminals"].exists)
+        XCTAssertTrue(tabBar.buttons["home.tab.settings"].exists)
+    }
+
     // MARK: - Session screen (direct terminal input)
 
     func testOpenSessionFromNeedsYouStripPushesTerminal() {

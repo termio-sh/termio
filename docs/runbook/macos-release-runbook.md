@@ -35,46 +35,50 @@ runner, which:
 7. Purges the stable DMG + appcast from Cloudflare's edge (if the purge token is
    set — otherwise skips with a notice).
 8. Records a GitHub Release for the tag + auto-generated changelog.
+9. Bumps the Homebrew cask in `termio-sh/homebrew-tap` (version + sha256 in
+   `Casks/termio.rb`), pushed with the `TAP_DEPLOY_KEY` secret — a write deploy
+   key on the tap repo. Skips with a notice if the secret is unset.
 
 Result: `https://downloads.termio.sh/termio.dmg` serves the notarized build (the
-website Download button), and existing installs auto-update via Sparkle from
-`https://downloads.termio.sh/appcast.xml` (the app's `SUFeedURL`).
+website Download button), existing installs auto-update via Sparkle from
+`https://downloads.termio.sh/appcast.xml` (the app's `SUFeedURL`), and
+`brew install --cask termio-sh/tap/termio` serves the new version.
 
 ## Fixed facts (this project)
 
 | Thing | Value |
 | --- | --- |
-| Repo | `jiweiyuan/termio` (private) |
-| Apple Team ID | `5Y27G7B6D8` (Jiwei Yuan) |
-| Developer ID Application | `Jiwei Yuan (5Y27G7B6D8)` — SHA-1 `7E3F98DC984CE82B7F58A71AC4548F6C766F2657` |
-| ASC API key (Team key "termio") | Key ID `YC4MR9DW4Q`, Issuer ID `5242c966-78e9-46ac-96f4-c90f9117c419`, role **Developer** |
-| ASC `.p8` backup | `~/.appstoreconnect/private_keys/AuthKey_YC4MR9DW4Q.p8` (also `~/credentials/`) |
+| Repo | `termio-sh/termio` (private) |
+| Apple Team ID | `<TEAM_ID>` (<YOUR_NAME>) |
+| Developer ID Application | `<YOUR_NAME> (<TEAM_ID>)` — SHA-1 `<CERT_SHA1>` |
+| ASC API key (Team key "termio") | Key ID `<ASC_KEY_ID>`, Issuer ID `<ASC_ISSUER_ID>`, role **Developer** |
+| ASC `.p8` backup | `~/.appstoreconnect/private_keys/AuthKey_<ASC_KEY_ID>.p8` (also `~/credentials/`) |
 | Sparkle public key | `SUPublicEDKey = zm3UpFrDf8tFcctK2vkEhrms6oFTp50AUb824lP9BAw=` (shared with oakreader) |
-| Cloudflare account ID | `a22b80fa365fb7cf04d194272379b669` |
+| Cloudflare account ID | `<CF_ACCOUNT_ID>` |
 | R2 bucket | `termio-downloads` (custom domain `downloads.termio.sh`) |
-| R2 S3 endpoint | `https://a22b80fa365fb7cf04d194272379b669.r2.cloudflarestorage.com` |
+| R2 S3 endpoint | `https://<CF_ACCOUNT_ID>.r2.cloudflarestorage.com` |
 
 These are identifiers, not secrets — the real secrets (the `.p8` bytes, the cert
 password, the R2 secret access key) live only in GitHub Secrets and your vault.
 
-> **termio needs no provisioning profile.** Unlike oakreader (which declares a
+> **Termio needs no provisioning profile.** Unlike oakreader (which declares a
 > restricted `keychain-access-groups` entitlement and therefore embeds a
-> Developer ID profile), termio has no restricted entitlements, so plain
+> Developer ID profile), Termio has no restricted entitlements, so plain
 > Developer-ID signing + notarization is enough. Don't copy oakreader's
 > `PROVISIONING_PROFILE` step.
 
 ## GitHub secrets inventory
 
-The workflow reads these ten secrets. **None is a GitHub token** — Actions
+The workflow reads these eleven secrets. **None is a GitHub token** — Actions
 injects `GITHUB_TOKEN` automatically. Check state with
-`gh secret list --repo jiweiyuan/termio`.
+`gh secret list --repo termio-sh/termio`.
 
 | Secret | Purpose | Required |
 | --- | --- | --- |
 | `DEVELOPER_ID_CERT_P12` | base64 of the Developer ID `.p12` (cert + key) | ✅ |
 | `DEVELOPER_ID_CERT_PASSWORD` | that `.p12`'s password | ✅ |
 | `ASC_API_KEY` | base64 of the App Store Connect `.p8` | ✅ |
-| `ASC_KEY_ID` | 10-char key ID (`YC4MR9DW4Q`) | ✅ |
+| `ASC_KEY_ID` | 10-char key ID (`<ASC_KEY_ID>`) | ✅ |
 | `ASC_ISSUER_ID` | account issuer UUID | ✅ |
 | `SPARKLE_ED_KEY` | Sparkle EdDSA private key (shared w/ oakreader) | ✅ |
 | `R2_ACCESS_KEY_ID` | R2 S3 access key ID | ✅ |
@@ -82,10 +86,13 @@ injects `GITHUB_TOKEN` automatically. Check state with
 | `R2_ENDPOINT` | `https://<accountid>.r2.cloudflarestorage.com` | ✅ |
 | `CLOUDFLARE_ZONE_ID` | termio.sh zone ID (for cache purge) | ⚪ |
 | `CLOUDFLARE_API_TOKEN` | Zone→Cache Purge token | ⚪ |
+| `TAP_DEPLOY_KEY` | write deploy key for `termio-sh/homebrew-tap` (cask bump) | ⚪ |
 
 ⚪ = optional. Without the two Cloudflare cache secrets the release still
-succeeds; the purge step just skips. The stable copies are uploaded with
-`Cache-Control: no-cache`, so they mostly aren't edge-cached anyway.
+succeeds; the purge step just skips. Without `TAP_DEPLOY_KEY` the Homebrew cask
+bump skips too (the tap still serves the previous version). The stable copies
+are uploaded with `Cache-Control: no-cache`, so they mostly aren't edge-cached
+anyway.
 
 ### Gotcha: setting secret values from the shell
 
@@ -93,17 +100,17 @@ succeeds; the purge step just skips. The stable copies are uploaded with
 reads it without echoing — use this. Do **not** paste a `!printf ... | gh ...`
 one-liner into a normal terminal: zsh treats the leading `!` as history
 expansion and dies with `zsh: event not found`. (The `!` prefix only means
-"run in the termio session"; it isn't part of the command.)
+"run in the Termio session"; it isn't part of the command.)
 
 ```sh
-gh secret set R2_SECRET_ACCESS_KEY --repo jiweiyuan/termio   # prompts, no echo
+gh secret set R2_SECRET_ACCESS_KEY --repo termio-sh/termio   # prompts, no echo
 ```
 
 ## One-time setup
 
 Do these once. Most are shared with oakreader (same Apple account, same R2
 account, same Sparkle key), but GitHub secrets are write-only, so each value must
-be set on termio's repo directly — you can't copy them across repos.
+be set on Termio's repo directly — you can't copy them across repos.
 
 ### 1. Cloudflare R2 bucket + domain (required)
 
@@ -124,9 +131,9 @@ shows an **Access Key ID** and a **Secret Access Key** (secret shown once — co
 now). Ignore the Bearer "Token value"; the workflow uses the S3 API only.
 
 ```sh
-gh secret set R2_ACCESS_KEY_ID     --repo jiweiyuan/termio
-gh secret set R2_SECRET_ACCESS_KEY --repo jiweiyuan/termio
-gh secret set R2_ENDPOINT          --repo jiweiyuan/termio   # https://<accountid>.r2.cloudflarestorage.com
+gh secret set R2_ACCESS_KEY_ID     --repo termio-sh/termio
+gh secret set R2_SECRET_ACCESS_KEY --repo termio-sh/termio
+gh secret set R2_ENDPOINT          --repo termio-sh/termio   # https://<accountid>.r2.cloudflarestorage.com
 ```
 
 **CLI derivation (alternative):** an R2 S3 credential is derived from a normal
@@ -144,8 +151,8 @@ codesigning | grep "Developer ID"`), export it non-interactively:
 ```sh
 P12="$TMPDIR/devid.p12"; PW="$(openssl rand -hex 12)"
 security export -t identities -f pkcs12 -P "$PW" -o "$P12"
-base64 -i "$P12" | gh secret set DEVELOPER_ID_CERT_P12 --repo jiweiyuan/termio
-printf '%s' "$PW" | gh secret set DEVELOPER_ID_CERT_PASSWORD --repo jiweiyuan/termio
+base64 -i "$P12" | gh secret set DEVELOPER_ID_CERT_P12 --repo termio-sh/termio
+printf '%s' "$PW" | gh secret set DEVELOPER_ID_CERT_PASSWORD --repo termio-sh/termio
 rm -f "$P12"
 ```
 
@@ -159,10 +166,10 @@ notarization). Download the `.p8` **once** (`AuthKey_<KEYID>.p8`). The **Issuer
 ID** is shown above the key list — one per account, shared across all keys.
 
 ```sh
-KEYID=YC4MR9DW4Q                                  # filename = AuthKey_<KEYID>.p8
-base64 -i ~/Downloads/AuthKey_$KEYID.p8 | gh secret set ASC_API_KEY --repo jiweiyuan/termio
-printf '%s' "$KEYID"                              | gh secret set ASC_KEY_ID    --repo jiweiyuan/termio
-gh secret set ASC_ISSUER_ID --repo jiweiyuan/termio   # prompts; paste the issuer UUID
+KEYID=<ASC_KEY_ID>                                  # filename = AuthKey_<KEYID>.p8
+base64 -i ~/Downloads/AuthKey_$KEYID.p8 | gh secret set ASC_API_KEY --repo termio-sh/termio
+printf '%s' "$KEYID"                              | gh secret set ASC_KEY_ID    --repo termio-sh/termio
+gh secret set ASC_ISSUER_ID --repo termio-sh/termio   # prompts; paste the issuer UUID
 # Back up the .p8 — it can never be re-downloaded:
 mkdir -p ~/.appstoreconnect/private_keys && cp ~/Downloads/AuthKey_$KEYID.p8 ~/.appstoreconnect/private_keys/
 chmod 700 ~/.appstoreconnect ~/.appstoreconnect/private_keys && chmod 600 ~/.appstoreconnect/private_keys/*.p8
@@ -193,8 +200,8 @@ My Profile → **API Tokens** → Create Custom Token:
 - Do **not** use the Global API Key.
 
 ```sh
-gh secret set CLOUDFLARE_API_TOKEN --repo jiweiyuan/termio   # the token value
-gh secret set CLOUDFLARE_ZONE_ID   --repo jiweiyuan/termio   # the termio.sh zone ID
+gh secret set CLOUDFLARE_API_TOKEN --repo termio-sh/termio   # the token value
+gh secret set CLOUDFLARE_ZONE_ID   --repo termio-sh/termio   # the termio.sh zone ID
 ```
 
 Once set, the purge is fully automatic on every tag — there is no per-release
@@ -202,7 +209,7 @@ cache step to run by hand.
 
 ## Per-release runbook
 
-termio is **trunk-based** (since 2026-07-19): `main` is the single default
+Termio is **trunk-based** (since 2026-07-19): `main` is the single default
 branch and the development trunk. Feature work goes on short-lived branches →
 PR → merge into `main`; there is no separate `dev`/`release` branch. A release
 is just a `vX.Y.Z` tag on `main` — the tag *is* the release marker.
@@ -225,7 +232,7 @@ is just a `vX.Y.Z` tag on `main` — the tag *is* the release marker.
 4. Watch the **Release** workflow:
 
    ```sh
-   gh run watch --repo jiweiyuan/termio $(gh run list --repo jiweiyuan/termio -w Release -L1 --json databaseId -q '.[0].databaseId')
+   gh run watch --repo termio-sh/termio $(gh run list --repo termio-sh/termio -w Release -L1 --json databaseId -q '.[0].databaseId')
    ```
 
 5. When it's green, run the verification below.

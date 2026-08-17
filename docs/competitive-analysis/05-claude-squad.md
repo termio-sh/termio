@@ -35,7 +35,7 @@ using **tmux + git worktrees**.
 
 ## Strengths
 
-- **Clean, directly reusable git plumbing** (termio's worktree command
+- **Clean, directly reusable git plumbing** (Termio's worktree command
   sequences are modeled on it).
 - Pure terminal, cross-platform, open source; tmux gives it never-die for
   free.
@@ -43,19 +43,19 @@ using **tmux + git worktrees**.
 ## Weaknesses
 
 - TUI rather than native GUI; status visualization and brand polish far behind
-  termio/cmux/Unpeel.
+  Termio/cmux/Unpeel.
 - Expressiveness limited by the terminal UI.
 
-## vs. termio / takeaways
+## vs. Termio / takeaways
 
 - **The git parts have the highest direct reference value**: the branch prefix
   + "was it pre-existing" flag in the cleanup strategy avoids deleting user
   branches by mistake; timestamped worktree directory names guarantee
   uniqueness.
 - It achieves never-die with tmux — a useful "simplest viable" counterpoint
-  for termio's never-die host design (see also zmx/dtach in
+  for Termio's never-die host design (see also zmx/dtach in
   [09](09-differentiation-and-gaps.md)).
-- termio's edge is wrapping these CLI capabilities in a **native GUI with a
+- Termio's edge is wrapping these CLI capabilities in a **native GUI with a
   status dashboard and a menu-bar tray**.
 
 ## References

@@ -1,0 +1,164 @@
+import Foundation
+import SwiftUI
+
+// MARK: - Issue tracker models
+
+/// A built-in issue tracker backend. Linear/Jira arrive as further cases +
+/// `IssueProvider` conformances (see docs/design/20260726-issue-tracker-integration.md);
+/// the UI never branches on this — it reads `IssueCapabilities` instead.
+enum IssueProviderID: String, Sendable {
+    case github
+}
+
+/// What a provider can do, so the UI shrinks to the backend's real surface
+/// instead of branching per provider: Linear has no GitHub-style emoji
+/// reactions and no pull requests, so those controls disappear for it.
+struct IssueCapabilities: Sendable {
+    /// The tracker distinguishes pull requests from issues — shows the
+    /// Issues / Pull Requests kind switch.
+    let pullRequests: Bool
+}
+
+/// Which kind of item the list is showing. On GitHub a PR *is* an issue with
+/// extra fields (one `/issues` endpoint serves both), so the kind is a filter
+/// over one model, not a second model.
+enum IssueKind: Hashable, Sendable {
+    case issue, pullRequest
+}
+
+/// An item's lifecycle state, normalized across kinds. `merged` and `draft`
+/// exist only for pull requests.
+enum IssueItemState: Hashable, Sendable {
+    case open, closed, merged, draft
+
+    /// The state color, following GitHub's own convention: open green; closed
+    /// issue and merged PR purple (done-states); a closed *unmerged* PR red —
+    /// rejected is the opposite outcome of merged, so they must not share a
+    /// color; draft grey.
+    func tint(for kind: IssueKind) -> Color {
+        switch self {
+        case .open: return .green
+        case .closed: return kind == .pullRequest ? .red : .purple
+        case .merged: return .purple
+        case .draft: return .gray
+        }
+    }
+
+    /// The state glyph: GitHub's own Octicon for this lifecycle state, so a row
+    /// shows the exact mark users read on github.com. Shape carries the state on
+    /// its own — open issue and closed PR are a red/green pair that colorblind
+    /// users can't separate by hue, but the shapes stay distinct.
+    func octicon(for kind: IssueKind) -> StateOcticon {
+        switch self {
+        case .open: return kind == .pullRequest ? .pullOpen : .issueOpened
+        case .closed: return kind == .pullRequest ? .pullClosed : .issueClosed
+        case .merged: return .pullMerged
+        case .draft: return .pullDraft
+        }
+    }
+
+    var label: String {
+        switch self {
+        // Explicit key: the English word "Open" is already the verb key (打开),
+        // and the state reads 开放 — the catalog disambiguates by key, not context.
+        case .open: return localized("issue.state.open")
+        case .closed: return localized("Closed")
+        case .merged: return localized("Merged")
+        case .draft: return localized("Draft")
+        }
+    }
+}
+
+/// A tracker label, with the server-assigned color carried as a hex string.
+struct IssueLabel: Hashable, Sendable {
+    let name: String
+    /// Six-digit hex without `#`, as GitHub's API returns it.
+    let colorHex: String
+
+    var color: Color {
+        var value: UInt64 = 0
+        guard Scanner(string: colorHex).scanHexInt64(&value), colorHex.count == 6 else {
+            return .secondary
+        }
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+}
+
+/// The remote container a project is bound to — a GitHub `owner/repo` (a
+/// Linear team later). `id` is the provider-native identifier.
+struct IssueContainer: Hashable, Sendable {
+    let provider: IssueProviderID
+    let id: String
+}
+
+/// The list request: which kind, and the light filters the top bar offers.
+/// Selected labels combine as AND, GitHub's own filter semantics.
+struct IssueQuery: Hashable, Sendable {
+    var kind: IssueKind = .issue
+    var openOnly = true
+    var assignedToMe = false
+    var labels: Set<String> = []
+}
+
+/// One row of the list. `identifier` is the provider-native short handle —
+/// GitHub's `#95`, Linear's `TER-123`.
+struct IssueSummary: Identifiable, Hashable, Sendable {
+    let number: Int
+    let identifier: String
+    let title: String
+    let kind: IssueKind
+    let state: IssueItemState
+    let labels: [IssueLabel]
+    let author: String
+    let updatedAt: Date
+    let url: URL?
+
+    var id: Int { number }
+}
+
+/// One comment in the detail thread.
+struct IssueComment: Identifiable, Equatable, Sendable {
+    let id: Int
+    let author: String
+    let avatarURL: URL?
+    let createdAt: Date
+    let bodyMarkdown: String
+}
+
+/// The full item: the summary plus its markdown body and comment thread.
+struct IssueDetail: Equatable, Sendable {
+    let summary: IssueSummary
+    let bodyMarkdown: String
+    let authorAvatarURL: URL?
+    let createdAt: Date
+    let comments: [IssueComment]
+}
+
+/// One PR file with its unified-diff `patch` straight from the GitHub API — the Files
+/// tab renders from this without a local checkout or extra fetch. `patch` is `nil` when
+/// GitHub omits it (a binary file, or a diff too large to inline).
+struct PullRequestFile: Sendable {
+    let change: GitChange
+    let patch: String?
+    /// GitHub's `contents_url` for this file, already pinned to the PR head. The patch
+    /// carries three lines of context, so expanding a hunk boundary means reading the file
+    /// itself — this is where from, without fetching the PR's refs.
+    let contentsURL: URL?
+}
+
+// MARK: - Provider protocol
+
+/// The read surface every tracker backend implements. Write operations
+/// (reactions, labels, comments — issue #100) extend this protocol when they
+/// land; keeping M1's surface read-only keeps the first conformance honest.
+protocol IssueProvider: Sendable {
+    var id: IssueProviderID { get }
+    var capabilities: IssueCapabilities { get }
+
+    func issues(in container: IssueContainer, query: IssueQuery) async throws -> [IssueSummary]
+    func detail(_ number: Int, in container: IssueContainer) async throws -> IssueDetail
+}

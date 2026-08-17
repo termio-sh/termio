@@ -15,6 +15,9 @@ import GhosttyTerminal
 @MainActor
 final class TerminalContextMenu: NSObject {
     private weak var store: TermioStore?
+    /// The ⌘V interceptor, so the menu's Paste answers the image-at-a-remote-
+    /// session case the same way the key does instead of restating the rule.
+    private weak var imagePaste: TermiodImagePaste?
     // Held for the app's lifetime; never removed.
     private var monitor: Any?
     /// The surface the open menu acts on, resolved at click time.
@@ -24,8 +27,9 @@ final class TerminalContextMenu: NSObject {
     /// when the menu opens so the actions don't chase a moved mouse.
     private var clickedLinkURL: URL?
 
-    init(store: TermioStore) {
+    init(store: TermioStore, imagePaste: TermiodImagePaste?) {
         self.store = store
+        self.imagePaste = imagePaste
         super.init()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { event in
             // Local event monitors are always called on the main thread; the
@@ -44,17 +48,18 @@ final class TerminalContextMenu: NSObject {
               let window = event.window,
               window.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName,
               let contentView = window.contentView,
-              // A file editor / diff / trace overlay covers the terminal; its
-              // right-clicks (text-view menus) are its own.
-              store.openFileURL == nil, store.openDiff == nil, store.openTrace == nil
+              // Details (editor, diff, trace, PR/issue) open in the right inspector now, so the
+              // terminal is always fully visible and owns its right-clicks — except when a detail
+              // is maximized to a full-window overlay covering everything; then it owns them.
+              !(store.isDetailPresented && store.inspectorMaximized)
         else { return false }
 
         // Resolve the pane by geometry rather than `hitTest`: every activated
-        // session stays mounted (invisible ones at full pane size, see
-        // `TerminalPane`), and raw AppKit hit-testing doesn't honor SwiftUI's
-        // `allowsHitTesting(false)` on those, so the topmost view under the
-        // cursor may be a hidden sibling. Visible panes tile without
-        // overlapping, so "contains the point and is visible" is unambiguous.
+        // session stays mounted, hidden ones included (see `TerminalPane`), and
+        // raw AppKit hit-testing doesn't honor SwiftUI's `allowsHitTesting(false)`
+        // on those, so the topmost view under the cursor may be a hidden sibling.
+        // Visible panes tile without overlapping, so "contains the point and is
+        // visible" is unambiguous.
         let point = event.locationInWindow
         let target = terminalViews(in: contentView).first { view in
             guard view.window === window,
@@ -75,7 +80,14 @@ final class TerminalContextMenu: NSObject {
         clickedLinkURL = TerminalLinkState.hoveredURL
             .flatMap(URL.init(string:))
             .flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
-        NSMenu.popUpContextMenu(makeMenu(), with: event, for: target)
+        // popUp — not popUpContextMenu(_:with:for:) — presents exactly the menu we
+        // built. Passing the surface as the `for:` view makes AppKit merge in the
+        // system's automatic text-input extras (the "AutoFill" submenu, Services)
+        // because the ghostty surface is an NSTextInputClient; those are meaningless
+        // over a terminal, so we position the menu ourselves and skip the augmentation.
+        makeMenu().popUp(positioning: nil,
+                         at: target.convert(event.locationInWindow, from: nil),
+                         in: target)
         return true
     }
 
@@ -86,25 +98,47 @@ final class TerminalContextMenu: NSObject {
         // This is also the path that always works — a TUI with mouse reporting
         // (Claude Code) swallows cmd+click, but never the right-click.
         if clickedLinkURL != nil {
-            menu.addItem(storeItem("Open Link", action: #selector(openLink), symbol: "safari"))
+            menu.addItem(storeItem(localized("Open Link"), action: #selector(openLink), symbol: "safari"))
             menu.addItem(.separator())
         }
-        // Copy/Paste target the surface's own responder actions: copy is a
-        // no-op without a selection, and paste routes through ghostty's
-        // `paste_from_clipboard` binding so bracketed paste is preserved.
-        menu.addItem(surfaceItem("Copy", action: "copy:", symbol: "doc.on.doc"))
-        menu.addItem(surfaceItem("Paste", action: "paste:", symbol: "doc.on.clipboard"))
+        // Copy targets the surface's own responder action, and is a no-op
+        // without a selection. Paste goes through `paste(_:)` below, which ends
+        // up at the same responder action for everything except the one case
+        // that cannot work there.
+        menu.addItem(surfaceItem(localized("Copy"), action: "copy:", symbol: "doc.on.doc"))
+        menu.addItem(storeItem(localized("Paste"), action: #selector(paste), symbol: "doc.on.clipboard"))
+        // The session's deep link (`termio://session/<uuid>`) — the canonical
+        // address every `termio sessions` command takes and the form that stays
+        // self-describing when pasted into an agent prompt, so wiring one agent
+        // to drive another is a right-click instead of a `list` round-trip.
+        if clickedSessionID != nil {
+            menu.addItem(storeItem(localized("Copy Session Link"), action: #selector(copyLink), symbol: "link"))
+        }
         menu.addItem(.separator())
-        menu.addItem(storeItem("Split Right", action: #selector(splitRight), symbol: "rectangle.split.2x1"))
-        menu.addItem(storeItem("Split Down", action: #selector(splitDown), symbol: "rectangle.split.1x2"))
-        // A split pane leaves the layout but keeps its session alive ("Close
-        // Pane"); a lone terminal has no pane to leave, so the only close that
-        // means anything kills the session outright — same action and label as
-        // the sidebar row's "Close Session".
+        // Ghostty's own split glyphs and order (Right, Left, Down, Up): the filled
+        // half of the rectangle is where the new pane lands, which reads at a
+        // glance in a way "rectangle.split.2x1" never did once there were four.
+        menu.addItem(storeItem(localized("Split Right"), action: #selector(splitRight),
+                               symbol: "rectangle.righthalf.inset.filled"))
+        menu.addItem(storeItem(localized("Split Left"), action: #selector(splitLeft),
+                               symbol: "rectangle.leadinghalf.inset.filled"))
+        menu.addItem(storeItem(localized("Split Down"), action: #selector(splitDown),
+                               symbol: "rectangle.bottomhalf.inset.filled"))
+        menu.addItem(storeItem(localized("Split Up"), action: #selector(splitUp),
+                               symbol: "rectangle.tophalf.inset.filled"))
+        // "Ungroup" is the layout half: the pane leaves the split group but its
+        // session stays alive in the sidebar — the same action the sidebar row
+        // names "Ungroup" (the inverse of "Group with"). Its glyph is Split
+        // Right's with a slash through it: un-split. "Close Session" is the
+        // destructive half and is always offered; closing a split session
+        // prunes its pane on the way out, so the layout needs no separate
+        // cleanup.
         if store?.splitRoot != nil {
-            menu.addItem(storeItem("Close Pane", action: #selector(closePane), symbol: "rectangle"))
-        } else if clickedSessionID != nil {
-            menu.addItem(storeItem("Close Session", action: #selector(closeSession), symbol: "xmark"))
+            menu.addItem(storeItem(localized("Ungroup"), action: #selector(ungroup),
+                                   symbol: "rectangle.split.2x1.slash"))
+        }
+        if clickedSessionID != nil {
+            menu.addItem(storeItem(localized("Close Session"), action: #selector(closeSession), symbol: "xmark"))
         }
         return menu
     }
@@ -128,12 +162,30 @@ final class TerminalContextMenu: NSObject {
         clickedView.flatMap(sessionID(for:))
     }
 
+    @objc private func copyLink() {
+        guard let store, let session = clickedSessionID.flatMap(store.session(_:))
+        else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(store.sessionLink(for: session), forType: .string)
+    }
+
     @objc private func splitRight() { store?.splitSelectedPane(.horizontal) }
+    @objc private func splitLeft() { store?.splitSelectedPane(.horizontal, slot: .first) }
     @objc private func splitDown() { store?.splitSelectedPane(.vertical) }
-    @objc private func closePane() { store?.closeSelectedPane() }
+    @objc private func splitUp() { store?.splitSelectedPane(.vertical, slot: .first) }
+    @objc private func ungroup() { store?.ungroupSelectedPane() }
     @objc private func closeSession() {
         guard let id = clickedSessionID else { return }
-        store?.closeSession(id)
+        store?.requestCloseSession(id)
+    }
+
+    /// An image aimed at a session on another device crosses the boundary and
+    /// pastes the path it landed at; everything else is the surface's own
+    /// paste, which routes through ghostty's `paste_from_clipboard` binding so
+    /// bracketed paste is preserved.
+    @objc private func paste() {
+        if imagePaste?.pasteImageFromMenu(sessionID: clickedSessionID) == true { return }
+        clickedView?.perform(NSSelectorFromString("paste:"), with: nil)
     }
 
     @objc private func openLink() {

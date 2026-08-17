@@ -14,11 +14,19 @@ extension Bundle {
     /// user's machine. Resolve from the standard app resource directory instead, and
     /// degrade to the empty main bundle (a missing icon, never a crash) if absent.
     static let termioResources: Bundle = {
-        let candidates = [Bundle.main.resourceURL, Bundle.main.bundleURL]
-            .compactMap { $0?.appendingPathComponent("termio_termio.bundle") }
+        let candidates = [
+            Bundle.main.resourceURL,
+            Bundle.main.bundleURL,
+            // Unit tests: `Bundle.main` is the xctest runner, but the bundle
+            // holding this class is the `.xctest` in the SwiftPM build directory,
+            // which sits next to the resource bundle.
+            Bundle(for: TermioResourcesAnchor.self).bundleURL.deletingLastPathComponent(),
+        ].compactMap { $0?.appendingPathComponent("termio_termio.bundle") }
         for url in candidates where FileManager.default.fileExists(atPath: url.path) {
             if let bundle = Bundle(url: url) { return bundle }
         }
         return .main
     }()
 }
+
+private final class TermioResourcesAnchor {}

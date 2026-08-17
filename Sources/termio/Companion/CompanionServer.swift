@@ -1,11 +1,12 @@
 import Foundation
 import Network
 import Security
+import SystemConfiguration
 import TermioShared
 
 /// The shared secret a phone must present before the companion server serves
 /// it anything. It rides the pairing QR as a `t` query param, so possession
-/// means "was shown the Mac's screen" — which holds up whether the socket is
+/// means "was shown the Mac’s screen" — which holds up whether the socket is
 /// reached over the LAN or through a public tunnel URL.
 ///
 /// Stored in UserDefaults rather than the Keychain on purpose: the trust
@@ -34,6 +35,34 @@ enum PairingToken {
             .replacingOccurrences(of: "=", with: "")
         UserDefaults.standard.set(token, forKey: defaultsKey)
         return token
+    }
+}
+
+/// This Mac's identity on the phone's paired-Mac list: a UUID minted once and
+/// kept for the install's lifetime, plus the user-facing computer name. The
+/// phone keys its pairings by the UUID, so re-scanning a QR after a tunnel
+/// restart updates the existing entry instead of duplicating it — the URL is
+/// the one thing about a Mac that doesn't hold still.
+enum MacIdentity {
+    static let defaultsKey = "companion.macID"
+
+    static var id: String {
+        if let existing = UserDefaults.standard.string(forKey: defaultsKey), !existing.isEmpty {
+            return existing
+        }
+        let minted = UUID().uuidString
+        UserDefaults.standard.set(minted, forKey: defaultsKey)
+        return minted
+    }
+
+    /// The computer name from Sharing settings ("Jiwei's MacBook Pro"),
+    /// falling back to the DNS hostname stripped of its ".local" suffix.
+    static var displayName: String {
+        if let name = SCDynamicStoreCopyComputerName(nil, nil) as String?, !name.isEmpty {
+            return name
+        }
+        let host = ProcessInfo.processInfo.hostName
+        return host.hasSuffix(".local") ? String(host.dropLast(".local".count)) : host
     }
 }
 
@@ -83,6 +112,13 @@ final class CompanionServer {
     /// session before the next roster push), or nil when the start failed.
     private let startSession: (String, String?) -> (sessionID: String, agentID: String)?
     private let stopSession: (String) -> Bool
+    /// Opens a plain shell in the loose terminals funnel for the phone's
+    /// Terminals ＋ (`.startTerminal`); returns the `.started` echo, or nil on
+    /// failure. Project-less: the funnel is found-or-created on the Mac.
+    private let startScratchTerminal: () -> (sessionID: String, agentID: String)?
+    /// Opens an `ssh <host>` terminal for the phone's Terminals ＋ → SSH
+    /// (`.startSSH`); returns the `.started` echo, or nil on failure.
+    private let startSSHSession: (String) -> (sessionID: String, agentID: String)?
     /// Resolves a session's transcript path and display title for a `trace`
     /// request, or nil when the session has no readable transcript yet.
     private let traceProvider: (String) -> (path: String, title: String)?
@@ -92,7 +128,7 @@ final class CompanionServer {
     /// Connections that have presented the pairing token. Everyone else gets
     /// silence and a short clock: the roster names every project on this Mac
     /// and an attach is keystroke access to a shell.
-    private var authed: Set<ObjectIdentifier> = []
+    private var authenticatedWireByConnection: [ObjectIdentifier: Int] = [:]
     private var bridges: [ObjectIdentifier: PTYBridge] = [:]
     private var lastRoster: CompanionRoster?
     private var pollTimer: Timer?
@@ -109,6 +145,8 @@ final class CompanionServer {
         ptyForSession: @escaping (String) -> PTYProcess?,
         startSession: @escaping (String, String?) -> (sessionID: String, agentID: String)?,
         stopSession: @escaping (String) -> Bool,
+        startScratchTerminal: @escaping () -> (sessionID: String, agentID: String)?,
+        startSSHSession: @escaping (String) -> (sessionID: String, agentID: String)?,
         traceProvider: @escaping (String) -> (path: String, title: String)?
     ) {
         self.port = port
@@ -116,6 +154,8 @@ final class CompanionServer {
         self.ptyForSession = ptyForSession
         self.startSession = startSession
         self.stopSession = stopSession
+        self.startScratchTerminal = startScratchTerminal
+        self.startSSHSession = startSSHSession
         self.traceProvider = traceProvider
     }
 
@@ -188,6 +228,7 @@ final class CompanionServer {
         for connection in connectionByID.values { connection.cancel() }
         connectionByID.removeAll()
         connections.removeAll()
+        authenticatedWireByConnection.removeAll()
     }
 
     private func accept(_ connection: NWConnection) {
@@ -209,7 +250,8 @@ final class CompanionServer {
         // to linger either.
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
             Task { @MainActor in
-                guard let self, self.connections.contains(id), !self.authed.contains(id) else { return }
+                guard let self, self.connections.contains(id),
+                      self.authenticatedWireByConnection[id] == nil else { return }
                 self.refuse(connection, message: "unauthorized — scan the QR code in Settings ▸ Mobile")
             }
         }
@@ -229,7 +271,7 @@ final class CompanionServer {
         connectionByID[id]?.cancel()
         connectionByID[id] = nil
         connections.remove(id)
-        authed.remove(id)
+        authenticatedWireByConnection[id] = nil
     }
 
     private func receive(on connection: NWConnection) {
@@ -243,6 +285,9 @@ final class CompanionServer {
             if let meta, let content, !content.isEmpty {
                 switch meta.opcode {
                 case .binary:
+                    // Binary frames are raw PTY bytes permanently. Compression,
+                    // encryption, or multiplexing needs a separately negotiated
+                    // mechanism and Wire gate so framing can never become keystrokes.
                     // Keystrokes from the phone into the session's PTY.
                     // Typing from the phone is active use — the size follows it.
                     Task { @MainActor in
@@ -265,16 +310,21 @@ final class CompanionServer {
 
     private func handle(_ control: CompanionControl, on connection: NWConnection) {
         let id = ObjectIdentifier(connection)
-        if case .auth(let token) = control {
+        if case .auth(let token, let wire) = control {
             guard token == PairingToken.current else {
                 refuse(connection, message: "unauthorized — re-scan the QR code on your Mac")
                 return
             }
-            authed.insert(id)
+            Log.companion.notice("phone declared wire version \(wire, privacy: .public)")
+            guard wire >= Wire.minimumClient else {
+                refuse(connection, message: "Update Termio on your phone to connect to this Mac.")
+                return
+            }
+            authenticatedWireByConnection[id] = wire
             send(rosterProvider(), to: connection)
             return
         }
-        guard authed.contains(id) else {
+        guard authenticatedWireByConnection[id] != nil else {
             refuse(connection, message: "unauthorized — scan the QR code in Settings ▸ Mobile")
             return
         }
@@ -288,7 +338,11 @@ final class CompanionServer {
             let bridge = PTYBridge(pty: pty, connection: connection)
             bridges[id] = bridge
             bridge.start()
-            pty.addExitObserver { [weak self, weak connection] code in
+            // The bridge owns the token so `stop()` retires the observer with the
+            // attach: without that, a phone that re-attaches to another session
+            // would still hear THIS pty's exit — a spurious exit banner and a
+            // dropped connection while it's viewing a session that's fine.
+            bridge.exitToken = pty.addExitObserver { [weak self, weak connection] code in
                 guard let connection else { return }
                 Task { @MainActor in
                     self?.sendControl(.exit(code: code), to: connection)
@@ -306,6 +360,27 @@ final class CompanionServer {
                 )
             } else {
                 sendControl(.error(message: "could not start a session there"), to: connection)
+            }
+        case .startTerminal:
+            // "New Terminal": a plain shell in the loose terminals funnel, seeded
+            // on the Mac even if the phone has never seen one there yet.
+            if let started = startScratchTerminal() {
+                sendControl(
+                    .started(sessionID: started.sessionID, agent: started.agentID),
+                    to: connection
+                )
+            } else {
+                sendControl(.error(message: "could not open a terminal"), to: connection)
+            }
+        case .startSSH(let host):
+            // "New SSH": a terminal running `ssh <host>` in that same funnel.
+            if let started = startSSHSession(host) {
+                sendControl(
+                    .started(sessionID: started.sessionID, agent: started.agentID),
+                    to: connection
+                )
+            } else {
+                sendControl(.error(message: "could not open an SSH session"), to: connection)
             }
         case .stop(let sessionID):
             // Close on the Mac; the roster push drops the row on every phone.
@@ -330,60 +405,51 @@ final class CompanionServer {
             handleUpload(projectID: projectID, name: name, base64: base64, on: connection)
         case .searchFiles(let projectID, let query):
             handleSearchFiles(projectID: projectID, query: query, on: connection)
+        case .listChanges(let projectID):
+            handleListChanges(projectID: projectID, on: connection)
+        case .readDiff(let projectID, let path, let status):
+            handleReadDiff(projectID: projectID, path: path, status: status, on: connection)
         case .trace(let sessionID, let dark):
             handleTrace(sessionID: sessionID, dark: dark, on: connection)
         case .sshConfigHosts:
             sendControl(.sshConfigList(hosts: Self.parseSSHConfigHosts()), to: connection)
+        case .unsupported(let type):
+            // Usually the phone speaks a newer vocabulary than this Mac, and
+            // this line is the only trace of why its button did nothing. But
+            // the tag is remote input — a paired phone chooses it — so it is
+            // sanitized before it reaches a `.public` log field, and the line
+            // states what happened rather than guessing which end is older.
+            Log.companion.notice(
+                "ignoring unsupported control \(Self.loggableTag(type), privacy: .public)"
+            )
         case .auth, .exit, .error, .started, .fileList, .file, .written, .uploaded,
-             .searchResults, .traceHTML, .sshConfigList:
+             .searchResults, .traceHTML, .sshConfigList, .changes, .diff:
             break
         }
     }
 
-    /// Read the Mac user's `~/.ssh/config` and flatten its concrete `Host`
-    /// blocks for the phone's SSH import. Wildcard patterns (`Host *`, globs)
-    /// are skipped — they're defaults, not connectable destinations. Keys
-    /// (`IdentityFile`) are deliberately not forwarded: they live on the Mac,
-    /// and a phone→server SSH authenticates with a phone-side key or password.
+    /// A wire tag reduced to something safe to write into a `.public` log field.
+    ///
+    /// The tag arrives from the phone, so it can carry newlines that forge extra
+    /// log lines, or a payload long enough to bury the surrounding entries. Only
+    /// the shape a real tag has survives — letters, digits, and the separators
+    /// the vocabulary already uses — and only the first 40 characters of it.
+    nonisolated static func loggableTag(_ tag: String) -> String {
+        let kept = tag.prefix(40).map { character -> Character in
+            character.isLetter || character.isNumber || character == "." || character == "-"
+                || character == "_" ? character : "?"
+        }
+        return kept.isEmpty ? "(empty)" : String(kept)
+    }
+
+    /// The Mac user's connectable `~/.ssh/config` hosts (see `SSHConfigFile`),
+    /// flattened for the phone's SSH import. Keys (`IdentityFile`) are
+    /// deliberately not forwarded: they live on the Mac, and a phone→server SSH
+    /// authenticates with a phone-side key or password.
     nonisolated static func parseSSHConfigHosts() -> [WireSSHHost] {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".ssh/config")
-        guard let text = try? String(contentsOf: path, encoding: .utf8) else { return [] }
-
-        var hosts: [WireSSHHost] = []
-        var aliases: [String] = []
-        var hostName = "", user = "", port = 22
-
-        func flush() {
-            for alias in aliases where !alias.contains("*") && !alias.contains("?") {
-                hosts.append(WireSSHHost(
-                    alias: alias, hostName: hostName.isEmpty ? alias : hostName,
-                    user: user, port: port
-                ))
-            }
+        SSHConfigFile.hosts().map {
+            WireSSHHost(alias: $0.alias, hostName: $0.hostName, user: $0.user, port: $0.port)
         }
-
-        for rawLine in text.split(whereSeparator: \.isNewline) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
-            // `Keyword value…` — the keyword match is case-insensitive per ssh_config(5).
-            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "=" })
-                .map(String.init).filter { !$0.isEmpty }
-            guard let keyword = parts.first?.lowercased() else { continue }
-            let values = Array(parts.dropFirst())
-            switch keyword {
-            case "host":
-                flush()
-                aliases = values
-                hostName = ""; user = ""; port = 22
-            case "hostname": hostName = values.first ?? ""
-            case "user": user = values.first ?? ""
-            case "port": port = values.first.flatMap(Int.init) ?? 22
-            default: break
-            }
-        }
-        flush()
-        return hosts
     }
 
     /// Render a session's agent transcript to the same HTML trace the desktop
@@ -474,6 +540,7 @@ final class CompanionServer {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]
+        process.environment = GitEnvironment.optionalLocksDisabled
         process.currentDirectoryURL = URL(fileURLWithPath: root)
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -666,6 +733,7 @@ final class CompanionServer {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["status", "--porcelain", "--no-renames", "-z", "--untracked-files=all"]
+        process.environment = GitEnvironment.optionalLocksDisabled
         process.currentDirectoryURL = URL(fileURLWithPath: root)
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -678,6 +746,83 @@ final class CompanionServer {
         return Set(raw.split(separator: "\0").compactMap { record in
             record.count > 3 ? String(record.dropFirst(3)) : nil
         })
+    }
+
+    // MARK: - Changes plane (git working tree)
+
+    /// The project's working-tree changes, straight from the same `GitService` the
+    /// desktop git pane reads — the phone never shells out to git itself, so the two
+    /// lists can't disagree about what "changed" means.
+    private func handleListChanges(projectID: String, on connection: NWConnection) {
+        guard let root = projectRoot(for: projectID) else {
+            sendControl(.error(message: "unknown project"), to: connection)
+            return
+        }
+        // Detached like every other handler here: `CompanionServer` is main-actor, and a
+        // repo-wide status walk has no business on the UI thread.
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let files = await GitService.changes(in: root).map {
+                WireChange(
+                    path: $0.path, status: $0.status.letter,
+                    additions: $0.additions, deletions: $0.deletions,
+                    isBinary: $0.isBinary, isStaged: $0.isStaged
+                )
+            }
+            await MainActor.run { self?.sendControl(.changes(files: files), to: connection) }
+        }
+    }
+
+    /// One changed file's diff. The request carries the status the phone read off the
+    /// listing, so this costs one git invocation rather than a second whole-repo scan
+    /// per tap — and per step of the reader's file walker.
+    ///
+    /// Rows come back with *full* file context so the phone can fold unchanged runs into
+    /// bands the reader expands; past the byte cap the reassembled text would be a
+    /// multi-megabyte frame, so that case degrades to git's default 3-line context.
+    private func handleReadDiff(
+        projectID: String, path: String, status: String, on connection: NWConnection
+    ) {
+        guard let root = projectRoot(for: projectID) else {
+            sendControl(.error(message: "unknown project"), to: connection)
+            return
+        }
+        let change = GitChange(
+            path: path,
+            status: GitFileStatus(code: status.first ?? "M"),
+            isUntracked: status == "U"
+        )
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let full = Self.unifiedText(await GitService.diffRows(for: change, in: root))
+            let text = full.utf8.count <= Self.maxDiffBytes
+                ? full : await GitService.diffText(for: change, in: root)
+            // git answers a binary file with its own one-line note rather than a diff;
+            // the reader says so instead of rendering that note as code.
+            let binary = text.contains("Binary files ")
+            let reply = CompanionControl.diff(
+                WireDiff(path: path, text: binary ? "" : text, binary: binary)
+            )
+            await MainActor.run { self?.sendControl(reply, to: connection) }
+        }
+    }
+
+    /// 2 MB of diff text — ~50k lines of source, well inside the socket's 8 MB frame
+    /// cap and past anything a phone reader can usefully scroll.
+    nonisolated private static let maxDiffBytes = 2 << 20
+
+    /// Reassembles parsed rows into unified-diff text for the wire. The phone re-parses
+    /// with the same rules (`DiffParser`), so the round trip is lossless for everything
+    /// it renders; only the file-header plumbing the parser already drops is gone.
+    /// (Once `GitService` exposes its full-context text directly — it is private today,
+    /// and that file belongs to another change in flight — this detour goes away.)
+    nonisolated static func unifiedText(_ rows: [DiffRow]) -> String {
+        rows.map { row in
+            switch row.kind {
+            case .hunk: return row.text
+            case .addition: return "+" + row.text
+            case .deletion: return "-" + row.text
+            case .context: return " " + row.text
+            }
+        }.joined(separator: "\n")
     }
 
     nonisolated private static let maxFileBytes = 1 << 20 // 1 MB — plenty for "peek at a source file"
@@ -764,7 +909,7 @@ final class CompanionServer {
         // interleave with PTY traffic for no benefit. Unauthenticated ones
         // get nothing at all.
         for (id, connection) in connectionByID
-        where bridges[id] == nil && authed.contains(id) {
+        where bridges[id] == nil && authenticatedWireByConnection[id] != nil {
             send(roster, to: connection)
         }
     }
@@ -794,6 +939,9 @@ private final class PTYBridge: @unchecked Sendable {
     private let queue = DispatchQueue(label: "termio.companion.bridge")
     private var sinkToken: UUID?
     private var resizeToken: UUID?
+    /// Set by the attach handler (the observer's body needs the server, which the
+    /// bridge doesn't know); cleared here in `stop()` like the other two tokens.
+    var exitToken: UUID?
     private let lock = NSLock()
     private var pendingBytes = 0
     private var behind = false
@@ -900,6 +1048,8 @@ private final class PTYBridge: @unchecked Sendable {
         sinkToken = nil
         if let token = resizeToken { pty.removeResizeObserver(token) }
         resizeToken = nil
+        if let token = exitToken { pty.removeExitObserver(token) }
+        exitToken = nil
     }
 
     private func send(_ data: Data) {
@@ -950,11 +1100,9 @@ extension TermioStore {
         // so a resting "needs you" / unseen "done" marker has been acknowledged.
         // Without this, permission prompts answered through the raw PTY can stay
         // orange forever because menu keystrokes don't necessarily produce a new
-        // agent hook event to overwrite the old attention state.
-        let current = status(for: session.id)
-        if current == .needsAttention || current == .done {
-            setStatus(.idle, for: session.id)
-        }
+        // agent hook event to overwrite the old attention state. Routed through
+        // `markSeen` so the Mac's delivered task banner is withdrawn too.
+        markSeen(session.id)
         // A deliberate attach from the phone, like desktop selection — float it now.
         noteProjectActivity(project.id, force: true)
         if let pty = ptyProcesses[session.id] { return pty }
@@ -997,6 +1145,29 @@ extension TermioStore {
         addSession(to: project.id, agent: preset)
         guard let sessionID = selectedSessionID?.uuidString else { return nil }
         return (sessionID, preset.wireName)
+    }
+
+    /// Open a plain login shell in the loose `.terminals` funnel for the phone's
+    /// Terminals-tab ＋ → "New Terminal" (`.startTerminal`). Unlike `.start` this
+    /// carries no project: `addScratchSession` finds-or-creates the funnel by
+    /// kind, so the phone can seed the very first terminal too. Returns the new
+    /// session's wire id and the `"terminal"` echo.
+    func companionStartScratchTerminal() -> (sessionID: String, agentID: String)? {
+        addScratchSession(agent: .terminal)
+        guard let sessionID = selectedSessionID?.uuidString else { return nil }
+        return (sessionID, AgentPreset.terminal.wireName)
+    }
+
+    /// Open an SSH terminal to `host` for the phone's Terminals-tab ＋ → "New
+    /// SSH" (`.startSSH`) — the same `addSSHSession` the desktop's SSH picker
+    /// uses. It lands in the `.terminals` funnel too, so it needs no project.
+    /// Returns the new session's wire id and the `"terminal"` echo.
+    func companionStartSSHSession(host: String) -> (sessionID: String, agentID: String)? {
+        let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else { return nil }
+        addSSHSession(host: host)
+        guard let sessionID = selectedSessionID?.uuidString else { return nil }
+        return (sessionID, AgentPreset.terminal.wireName)
     }
 
     /// Close a session for a phone `stop` request — the same `closeSession`
@@ -1075,7 +1246,10 @@ extension TermioStore {
                     tintHex: $0.tintHex,
                     icon: $0.iconRef)
             }
-        return CompanionRoster(projects: projects, agents: agents)
+        return CompanionRoster(
+            projects: projects, agents: agents,
+            macID: MacIdentity.id, macName: MacIdentity.displayName
+        )
     }
 
     private static func wireAgent(_ agent: AgentPreset) -> String {

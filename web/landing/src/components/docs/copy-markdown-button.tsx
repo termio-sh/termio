@@ -5,8 +5,14 @@ import { cn } from "@/lib/utils";
 
 // "Copy for LLM" — copies the page's raw Markdown to the clipboard, so you can
 // paste it into an agent for context. Borrowed from Warp's docs, and especially
-// fitting here: termio's readers are running coding agents all day.
-export function CopyMarkdownButton({ markdown }: { markdown: string }) {
+// fitting here: Termio's readers are running coding agents all day.
+export function CopyMarkdownButton({
+  markdown,
+  labels,
+}: {
+  markdown: string;
+  labels: { copy: string; copied: string; aria: string };
+}) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -23,10 +29,13 @@ export function CopyMarkdownButton({ markdown }: { markdown: string }) {
     <button
       type="button"
       onClick={copy}
-      aria-label="Copy this page as Markdown"
+      aria-label={labels.aria}
+      // Ghost button, Base UI style: no resting border, the surface arrives on
+      // hover. Two of these sit beside a page title and shouldn't read as a
+      // toolbar bolted to the heading.
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-secondary/50 px-2.5 py-1.5 text-[12px] font-medium transition-colors hover:border-foreground/20 hover:text-foreground",
-        copied ? "text-brand-green" : "text-muted-foreground",
+        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground",
+        copied ? "text-brand-green" : "text-fd-muted-foreground",
       )}
     >
       {copied ? (
@@ -34,7 +43,7 @@ export function CopyMarkdownButton({ markdown }: { markdown: string }) {
       ) : (
         <CopyIcon className="h-3.5 w-3.5" />
       )}
-      {copied ? "Copied" : "Copy for LLM"}
+      {copied ? labels.copied : labels.copy}
     </button>
   );
 }

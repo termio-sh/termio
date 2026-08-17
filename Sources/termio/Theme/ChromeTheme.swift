@@ -46,13 +46,48 @@ struct ChromeTheme {
             with: dark ? .white : .black,
             amount: dark ? 0.06 : 0.04
         )
-        self.secondaryForeground = foreground.opacity(0.6)
-        // The active row reads as accent-tinted (VSCode's active list item), so
-        // prefer the theme's blue (palette slot 4) over its quieter text-selection
-        // grey; fall back through both to the foreground so it always resolves.
-        let accentHex = definition.palette[4] ?? definition.selectionBackground
-        self.accent = accentHex.flatMap(Color.init(hex:)) ?? foreground
+        // One alpha for both brightnesses is too thin over a light panel: at 0.6
+        // Catppuccin Latte's project labels measure 2.69 against `panelBackground`
+        // and Rose Pine Dawn's 2.62, under the 3.0 floor muted chrome text needs.
+        // Dark themes already clear it, so only the light side is lifted.
+        self.secondaryForeground = foreground.opacity(dark ? 0.6 : 0.75)
+        // The active row reads as accent-tinted (VSCode's active list item) and the
+        // same color inks trace links, so a theme whose ANSI blue is deep enough to
+        // vanish on its own background (Melange Light 2.80, Cobalt2 2.64) must use
+        // its bright blue instead: take whichever of palette 4 and 12 contrasts the
+        // background more. Fall back through the quieter text-selection grey to the
+        // foreground so it always resolves.
+        let blues = [definition.palette[4], definition.palette[12]]
+            .compactMap { $0 }
+            .compactMap(Color.init(hex:))
+        let accentCandidate = blues.max { Self.contrastRatio($0, background) < Self.contrastRatio($1, background) }
+        self.accent = accentCandidate
+            ?? definition.selectionBackground.flatMap(Color.init(hex:))
+            ?? foreground
         self.isDark = dark
+    }
+
+    /// WCAG contrast ratio between two opaque colors (1…21). Colors that can't be
+    /// resolved into sRGB components report the neutral 1.0 rather than trapping,
+    /// which makes them lose every comparison instead of winning one by accident.
+    static func contrastRatio(_ first: Color, _ second: Color) -> Double {
+        guard let firstLuminance = relativeLuminance(first),
+              let secondLuminance = relativeLuminance(second)
+        else { return 1 }
+        let lighter = max(firstLuminance, secondLuminance)
+        let darker = min(firstLuminance, secondLuminance)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    private static func relativeLuminance(_ color: Color) -> Double? {
+        guard let srgb = NSColor(color).usingColorSpace(.sRGB) else { return nil }
+        func linear(_ component: CGFloat) -> Double {
+            let value = Double(component)
+            return value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(srgb.redComponent)
+            + 0.7152 * linear(srgb.greenComponent)
+            + 0.0722 * linear(srgb.blueComponent)
     }
 }
 
@@ -84,12 +119,20 @@ extension AppSettings {
     /// fallback: name lookup fails for system faces like the default "SF Mono"
     /// (Apple doesn't expose it by name to third-party apps), and SwiftUI's
     /// `Font.custom` would paper over that by silently substituting Helvetica.
-    func resolvedTerminalFont(minSize: Double = 11) -> NSFont {
-        let size = max(minSize, fontSize)
-        if !fontFamily.isEmpty, let font = NSFont(name: fontFamily, size: size) {
+    /// The size is the terminal's own — no floor of its own, or a code surface would
+    /// stop shrinking with the terminal it is supposed to match.
+    func resolvedTerminalFont() -> NSFont {
+        if !fontFamily.isEmpty, let font = NSFont(name: fontFamily, size: fontSize) {
             return font
         }
-        return .monospacedSystemFont(ofSize: size, weight: .regular)
+        return .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+    }
+
+    /// Extra leading (points) lifting `font`'s natural line height to the configured
+    /// `codeLineHeight` multiple of its point size; zero when the font already provides it.
+    func codeLineSpacing(for font: NSFont) -> CGFloat {
+        let natural = NSLayoutManager().defaultLineHeight(for: font)
+        return max(0, (CGFloat(codeLineHeight) * font.pointSize - natural).rounded())
     }
 
     /// Muted line-number ink shared by every code surface's gutter (file editor, diff view),
@@ -101,6 +144,21 @@ extension AppSettings {
     func gutterInk(for colorScheme: ColorScheme) -> NSColor {
         let dark = chromeTheme(for: colorScheme)?.isDark ?? (colorScheme == .dark)
         return ChromeTheme.overlayInk(onDark: dark, alpha: dark ? 0.55 : 0.42)
+    }
+
+    /// The diff's add/delete tints, resolved against the same theme `gutterInk` reads so
+    /// the washes and the numbers drawn on them can never disagree about which slot is
+    /// showing. `terminalBackgroundColor` is dynamic and would resolve against whatever
+    /// `NSAppearance.current` happened to be during the Oklab mix — the theme's own
+    /// background is the already-resolved counterpart.
+    func diffPalette(for colorScheme: ColorScheme) -> DiffPalette {
+        let theme = chromeTheme(for: colorScheme)
+        let dark = theme?.isDark ?? (colorScheme == .dark)
+        let background = theme.map { NSColor($0.background) }
+            ?? (dark
+                ? NSColor(srgbRed: 0x21 / 255.0, green: 0x21 / 255.0, blue: 0x21 / 255.0, alpha: 1)
+                : .white)
+        return DiffPalette(background: background, isDark: dark)
     }
 
     var terminalBackgroundColor: NSColor {

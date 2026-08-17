@@ -15,12 +15,12 @@ related:
 > `forkpty` in `PTYProcess`. See `docs/bug/terminal-resize-no-reflow-HANDOFF.md` §0.
 > Deferred birth is unnecessary: a narrow-born banner now recovers on the first resize.
 
-> The agent's welcome banner freezes into a narrow column because termio spawns
+> The agent's welcome banner freezes into a narrow column because Termio spawns
 > the child at a stale guessed winsize before the terminal view knows its real
 > width (see [the bug report](../bug/terminal-narrow-grid-frozen-banner-on-open.md)).
 > The fix: **spawn the PTY lazily, at the first real layout grid** — mirroring
 > Muxy's `pendingSurfaceCreation` gate — with a headless fallback so companion-only
-> sessions still spawn. This can be done **entirely on the termio side**; no fork
+> sessions still spawn. This can be done **entirely on the Termio side**; no fork
 > or xcframework change is required.
 
 ## Goal / acceptance test
@@ -39,8 +39,8 @@ The ghostty surface is **already** created lazily and correctly: `rebuildIfReady
 is gated on `hasValidViewSize`, and right after it creates the surface it calls
 `synchronizeMetrics`, which computes the true grid from the view's pixel size and
 calls `inMemorySession.updateViewport(...)`. That is the exact moment the first
-**real** grid becomes known, and it already flows into termio's InMemory `resize`
-closure. So termio can hang the PTY spawn off that first closure fire without any
+**real** grid becomes known, and it already flows into Termio's InMemory `resize`
+closure. So Termio can hang the PTY spawn off that first closure fire without any
 new signal from the fork. (A fork-side "first real layout" hook was considered and
 rejected as unnecessary — see Alternatives.)
 
@@ -79,7 +79,7 @@ three things onto the pty — the output→surface sink, the liveness/status sin
 `onExit`. All of that must move into the deferred spawn step, because it all needs
 the live `pty`.
 
-Sketch (names illustrative; keep termio's existing comments):
+Sketch (names illustrative; keep Termio's existing comments):
 
 ```swift
 func surface(for session: Session, in project: Project) -> TerminalViewState {
@@ -196,7 +196,7 @@ an unnecessary floor risks mis-sizing a genuinely narrow pane.
   InMemory session, and the fork surface is already lazy. Adding a fork signal means
   a new semver tag + a `Package.swift` bump for zero behavioral gain. Keep the fix in
   one repo. (Revisit only if option (a)/(b) plumbing turns out ugly enough that a
-  fork-side `onFirstLayout` callback would materially simplify termio.)
+  fork-side `onFirstLayout` callback would materially simplify Termio.)
 - **Roll back to `Lakr233/libghostty-spm`.** Off the table and irrelevant — both
   cores reflow the live grid; the frozen banner is a spawn-timing bug, not a core bug.
 - **Spawn eagerly but `TIOCSWINSZ` before the child prints.** Can't — `openpty` needs
@@ -214,8 +214,8 @@ an unnecessary floor risks mis-sizing a genuinely narrow pane.
 - No zig / no building Ghostty from source. If a fork change *does* prove worth it,
   ship it as a Swift-wrapper-only edit committed on the fork + a new semver tag (the
   binary target keeps pointing at the `storage.1.0.4` xcframework), then bump
-  termio's `Package.swift`. The plan above needs none of this.
-- Work on a branch / worktree; do not touch termio `main` until the acceptance test
+  Termio's `Package.swift`. The plan above needs none of this.
+- Work on a branch / worktree; do not touch Termio `main` until the acceptance test
   passes. Remove the `TERMIO_METRICS_LOG` diagnostic harness in `App.swift` when done.
 
 ## Outcome (2026-07-08) — INSUFFICIENT, see the bug doc

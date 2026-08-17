@@ -4,8 +4,8 @@ import SwiftUI
 /// The inspector's Info pane — the third tab beside Files and Changes. At-a-glance
 /// facts about the selected session plus quick actions on its working directory and,
 /// for an agent session, its conversation transcript: copy the path, reveal it in
-/// Finder, open the folder in an installed editor, or open a rendered HTML trace of
-/// the agent's conversation in the browser.
+/// Finder, open the folder in an installed editor, or open the session's rendered
+/// trajectory over the terminal.
 struct SessionInfoView: View {
     @EnvironmentObject var store: TermioStore
 
@@ -22,12 +22,26 @@ struct SessionInfoView: View {
     /// rather than the container's `$HOME` fallback.
     private var workingDirectory: String? {
         guard let project else { return nil }
+        // A session on a remote host has no *local* directory — Reveal in Finder and
+        // Open in <editor> would act on this Mac's filesystem. It reports its remote
+        // location separately (`remoteLocation`) instead.
+        if project.kind == .host { return nil }
         if project.kind == .terminals, let id = store.selectedSessionID {
             return store.workingDirectory(for: id)
                 ?? session?.lastWorkingDirectory
                 ?? project.path
         }
         return session?.worktreePath ?? project.path
+    }
+
+    /// Where a remote session runs, as `host:path` — the remote counterpart of
+    /// `workingDirectory`, shown as plain copyable text because none of the local
+    /// file actions apply to it. `nil` for every local session.
+    private var remoteLocation: String? {
+        guard let project, project.kind == .host, let alias = project.sshHost else { return nil }
+        let path = session?.termiodRemoteCwd ?? (project.path == "~" ? nil : project.path)
+        guard let path else { return alias }
+        return "\(alias):\(path)"
     }
 
     /// The agent's conversation log for this session (`TermioStore.transcriptPaths`) —
@@ -62,10 +76,14 @@ struct SessionInfoView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let session, let workingDirectory {
+        if let session, workingDirectory != nil || remoteLocation != nil {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    workingDirectorySection(workingDirectory)
+                    if let workingDirectory {
+                        workingDirectorySection(workingDirectory)
+                    } else if let remoteLocation {
+                        remoteLocationSection(remoteLocation)
+                    }
                     if session.agent != .terminal {
                         agentSection(session)
                     }
@@ -80,10 +98,10 @@ struct SessionInfoView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
-            ContentUnavailableView(
-                "No Session",
-                systemImage: "info.circle",
-                description: Text("Select a session to see its info.")
+            PaneEmptyState(
+                localized("No Session"),
+                icon: .infoCircle,
+                message: localized("Select a session to see its info.")
             )
         }
     }
@@ -92,21 +110,36 @@ struct SessionInfoView: View {
 
     private func workingDirectorySection(_ path: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Working Directory")
+            sectionLabel(localized("Working Directory"))
 
             VStack(alignment: .leading, spacing: 1) {
-                InfoRow(symbol: "doc.on.doc", title: "Copy Path") { copy(path) }
-                InfoRow(symbol: "folder", title: "Reveal in Finder") { revealInFinder(path) }
+                InfoRow(huge: .copy, title: localized("Copy Path")) { copy(path) }
+                InfoRow(huge: .folder, title: localized("Reveal in Finder")) { revealInFinder(path) }
                 if let remotePage {
-                    InfoRow(forge: remotePage.forge, title: "View on \(remotePage.forge.name)") {
+                    InfoRow(forge: remotePage.forge, title: localized("View on \(remotePage.forge.name)")) {
                         NSWorkspace.shared.open(remotePage.url)
                     }
                 }
                 ForEach(EditorTarget.installed) { editor in
-                    InfoRow(appIcon: editor.appIcon, title: "Open in \(editor.name)") {
+                    InfoRow(appIcon: editor.appIcon, title: localized("Open in \(editor.name)")) {
                         editor.open(URL(fileURLWithPath: path))
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: Remote
+
+    /// A remote session's `host:path`, with the one action that still means something
+    /// for a directory on another machine: copy it. Reveal in Finder and the editor
+    /// rows are deliberately absent — they would open this Mac's filesystem.
+    private func remoteLocationSection(_ location: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Remote Location")
+
+            VStack(alignment: .leading, spacing: 1) {
+                InfoRow(huge: .serverStack, title: location) { copy(location) }
             }
         }
     }
@@ -116,7 +149,7 @@ struct SessionInfoView: View {
     private func agentSection(_ session: Session) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text("Agent")
+                Text(localized("Agent"))
                     .font(.system(size: 11, weight: .semibold))
                     .textCase(.uppercase)
                     .tracking(0.5)
@@ -129,12 +162,12 @@ struct SessionInfoView: View {
 
             if let transcriptPath {
                 VStack(alignment: .leading, spacing: 1) {
-                    InfoRow(symbol: "list.bullet.rectangle", title: "View Trace") { viewTrace(transcriptPath, session: session) }
-                    InfoRow(symbol: "doc.on.doc", title: "Copy Path") { copy(transcriptPath) }
-                    InfoRow(symbol: "folder", title: "Reveal in Finder") { revealInFinder(transcriptPath) }
+                    InfoRow(huge: .listView, title: localized("View Trajectory")) { viewTrace(transcriptPath, session: session) }
+                    InfoRow(huge: .copy, title: localized("Copy Path")) { copy(transcriptPath) }
+                    InfoRow(huge: .folder, title: localized("Reveal in Finder")) { revealInFinder(transcriptPath) }
                 }
             } else {
-                Text("Waiting for the agent's first status report.")
+                Text(localized("Waiting for the agent’s first status report."))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
@@ -183,13 +216,13 @@ struct SessionInfoView: View {
 
 /// A single action row in the Info pane: a leading glyph, a label, and a hover
 /// highlight — the same calm, borderless look as the actions in the reference Info
-/// panel. The leading glyph is either a muted SF Symbol (for termio's own actions —
-/// Copy Path, Reveal, View Trace) or an editor's real app icon (for "Open in …"),
-/// so an editor row is unmistakably that app. `.buttonStyle(.plain)` keeps it flat;
-/// the highlight is drawn on hover.
+/// panel. The leading glyph is either a muted Hugeicons mark (for termio's own
+/// actions — Copy Path, Reveal, View Trajectory) or an editor's real app icon (for
+/// "Open in …"), so an editor row is unmistakably that app. `.buttonStyle(.plain)`
+/// keeps it flat; the highlight is drawn on hover.
 private struct InfoRow: View {
     private enum Leading {
-        case symbol(String)
+        case huge(HugeIcon)
         case appIcon(NSImage?)
         case forge(GitService.Forge)
     }
@@ -200,8 +233,8 @@ private struct InfoRow: View {
 
     @State private var hovering = false
 
-    init(symbol: String, title: String, action: @escaping () -> Void) {
-        self.leading = .symbol(symbol)
+    init(huge icon: HugeIcon, title: String, action: @escaping () -> Void) {
+        self.leading = .huge(icon)
         self.title = title
         self.action = action
     }
@@ -243,10 +276,8 @@ private struct InfoRow: View {
     @ViewBuilder
     private var leadingGlyph: some View {
         switch leading {
-        case .symbol(let name):
-            Image(systemName: name)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+        case .huge(let icon):
+            HugeIconView(icon: icon, size: 13, color: .secondary)
         case .appIcon(let image):
             if let image {
                 Image(nsImage: image)

@@ -1,0 +1,26 @@
+# The VT engine is on the sidecar's hot path, so it is built ReleaseFast even
+# for a debug termiod. `libghostty-vt-sys` otherwise mirrors the Cargo profile,
+# and a Zig Debug build is slow enough that the sidecar cannot drain a flood:
+# writes queue ahead of the attach snapshot, so `S` never lands and clients
+# fall back to ring replay. `tests/join_invariant.rs` is what catches that.
+[env]
+LIBGHOSTTY_VT_SYS_OPTIMIZE = "ReleaseFast"
+
+# Cross-link the Linux musl targets with the bundled rust-lld (via its ld.lld
+# entrypoint) so no external C cross-toolchain (musl-gcc / zig) is needed on
+# the Mac. The one non-Rust dependency, libghostty-vt's static archive, is
+# built by Zig for the same target and links fine here. If you have a
+# musl-cross toolchain, override `linker` here.
+#
+# `rust-lld` is a bare name on purpose: rustc resolves it out of the *active*
+# toolchain's sysroot, so this works on any machine and on CI. Spelling the
+# path out instead pins the build to one developer's home directory. The
+# flavor has to name lld's Unix entrypoint — `rust-lld` is the generic driver
+# and refuses to guess.
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "linker-flavor=ld.lld"]
+
+[target.x86_64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "linker-flavor=ld.lld"]

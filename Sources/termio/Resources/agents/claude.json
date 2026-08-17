@@ -13,6 +13,7 @@
   },
   "icon": { "vector": "claude" },
   "install": "https://claude.com/claude-code",
+  "skills": { "dir": "~/.claude/skills" },
   "titleStatus": {
     "working": ["^[⠀-⣿] "]
   },
@@ -21,6 +22,7 @@
     "file": "~/.claude/settings.json",
     "dialect": "claude",
     "capturesTranscript": true,
+    "tool": "tool_name",
     "events": [
       { "on": "SessionStart", "state": "idle", "matcher": "clear" },
       { "on": "UserPromptSubmit", "state": "working" },

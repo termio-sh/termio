@@ -14,13 +14,44 @@ built-in editor with syntax highlighting, soft-wrap, and a live line/column
 readout. Edits auto-save — there's no save button. Images, PDFs, and HTML open
 in a Quick Look preview instead.
 
+<DocsImage
+  src="/screenshots/docs/06-files-editor.png"
+  alt="The Termio Files inspector with a Swift file selected and open in the syntax-highlighted editor beside a terminal"
+  width={2424}
+  height={1664}
+/>
+
+<DocsImage
+  src="/screenshots/docs/23-quick-look.png"
+  alt="A file selected in the Termio Files inspector with its image open in a read-only Quick Look preview"
+  width={2424}
+  height={1664}
+/>
+
 ## Changes
 
-The git pane has two read-only tabs:
+The git pane has three read-only tabs:
 
 - **Changes** — the current diff, rendered as a clean unified view.
+- **Compare** — this branch against the branch it would merge into: the files and
+  commits a pull request from it would carry, diffed from the merge base so the
+  list matches what the forge will show.
 - **History** — recent commits with author avatars, expandable file lists, and
   per-commit diffs.
+
+<DocsImage
+  src="/screenshots/docs/07-changes-diff.png"
+  alt="The Termio Changes tab with build-app.sh selected and its red and green unified diff beside the terminal"
+  width={2424}
+  height={1664}
+/>
+
+<DocsImage
+  src="/screenshots/docs/08-commit-history.png"
+  alt="The Termio History tab with a commit, one of its files, and that file's per-commit diff visible together"
+  width={2424}
+  height={1664}
+/>
 
 It's deliberately read-only: writing to git (commit, push, PR) stays in the
 terminal, where the agent and your own commands already live.
@@ -32,11 +63,25 @@ by `git grep`) and jumps you straight to the matching line in the editor — it
 searches inside files, not just filenames. This is the "find in files" you know
 from an editor.
 
+<DocsImage
+  src="/screenshots/docs/09-project-search.png"
+  alt="The Termio Search inspector showing a DiffGapText query, grouped matches across files, and highlighted matching text"
+  width={2424}
+  height={1664}
+/>
+
 Looking for a file *by name* instead? That's [Open Quickly](/docs/navigation)
-(`⌘⇧O`), which also jumps between sessions and recent projects.
+(`⇧⌘O`), which also jumps between sessions and recent projects.
 
 ## Opening files from the terminal
 
 Cmd-click a file path in terminal output — even inside an agent's TUI — and
 Termio opens it in the editor. Cmd-click a URL to open it in your browser, or a
 `file://` link for a read-only preview overlay.
+
+<DocsImage
+  src="/screenshots/docs/22-open-terminal-path.png"
+  alt="A relative Swift file path in a Termio terminal opened into the built-in read-only editor beside it"
+  width={2424}
+  height={1664}
+/>

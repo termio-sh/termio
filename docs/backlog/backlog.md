@@ -6,7 +6,7 @@ created: 2026-07-03
 updated: 2026-07-16
 related:
   - rfcs/fork-libghostty-spm.md
-  - design/session-history-search-resume.md
+  - design/20260628-session-history-search-resume.md
 ---
 
 # Backlog
@@ -77,8 +77,8 @@ until the official packages land.
 ## Deferred designs
 
 - [ ] **Session history / search / resume** — direction approved, design
-  archived in [session-history-search-resume](../design/session-history-search-resume.md)
-  (`status: approved`). *Trigger: after the current `session-share.md` mainline
+  archived in [session-history-search-resume](../design/20260628-session-history-search-resume.md)
+  (`status: approved`). *Trigger: after the current `20260628-session-share.md` mainline
   ships.*
 
 ## Agent resume identity — non-Claude agents (Phases 2–4)
@@ -86,18 +86,18 @@ until the official packages land.
 Phase 1 shipped: Claude Code's resume pin (`Session.resumeID`) now advances to the
 live conversation when `/clear` rotates it, via `reconcileResumeID` fed by the hook
 transcript path. Design + phasing in
-[agent-resume-identity](../design/agent-resume-identity.md) (`status: approved`).
+[agent-resume-identity](../design/20260716-agent-resume-identity.md) (`status: approved`).
 The rest is gated on an audit that a first attempt couldn't complete.
 
 - [ ] **Audit Codex / OpenCode / Pi rotation (Phase 2)** — empirically confirm, per
   agent, whether its clear/`new` command rotates the on-disk session id (and thus
-  whether the resume target goes stale), and what per-session signal termio receives
+  whether the resume target goes stale), and what per-session signal Termio receives
   (hook field vs scan-only). First attempt (2026-07-16) stalled: a throwaway Codex
   session driven via `termio sessions` never accepted input (stayed `idle`, wrote no
   rollout — a login/trust/model gate on TUI launch), so no rotation data was
   captured. *Trigger: when the three agents are confirmed logged-in and drivable via
   `sessions send` — or audit each by hand (launch, run its clear, `find -newer` its
-  store dir) outside termio.*
+  store dir) outside Termio.*
 - [ ] **Generalize the pin advance to the confirmed agents (Phase 3)** — for
   filename-encoded ids (Pi, `<timestamp>_<id>.jsonl`) wire its transcript discovery
   and enable the `piStyle` case of `ResumeStyle.conversationID(fromTranscriptPath:)`.

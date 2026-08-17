@@ -1,12 +1,12 @@
 ---
-title: "termio differentiation, gaps, and risks"
+title: "Termio differentiation, gaps, and risks"
 status: done
 type: research
 created: 2026-06-27
 updated: 2026-07-02
 ---
 
-# termio differentiation, gaps, and risks
+# Termio differentiation, gaps, and risks
 
 > Cross-cutting conclusions synthesized from the per-product docs
 > ([01](01-unpeel.md)–[08](08-warp.md)).
@@ -16,10 +16,10 @@ updated: 2026-07-02
 1. **Native + libghostty + zero-config status dashboard + menu-bar tray**:
    beats Crystal (Electron) and claude-squad (TUI) on polish; beats cmux (pane
    border rings, no menu-bar tray) on "always-on ambient presence"; and beats
-   the Vibe Island-style bolt-ons because termio owns the PTY and can emit
+   the Vibe Island-style bolt-ons because Termio owns the PTY and can emit
    "needs you" with **zero configuration**.
 2. **First-class, app-automated local git worktrees**: cmux's worktrees are
-   only a "recommended pattern"; termio makes auto-create/isolate/cleanup per
+   only a "recommended pattern"; Termio makes auto-create/isolate/cleanup per
    session a first-class capability — a clear gap cmux left open.
 3. **Deliberately no diff**: a clean dividing line against Conductor / Crystal
    / Cursor — lighter and focused on the conversation.
@@ -42,14 +42,14 @@ dashboard) → then Sessions MCP (medium, a moat) → finally the never-die host
 ## 3. Risks
 
 - **cmux's overwhelming mindshare**: same foundation, open-source, YC, 23k★ —
-  the category is validated. termio **must not fight on breadth/mindshare**;
+  the category is validated. Termio **must not fight on breadth/mindshare**;
   hold only "opinionated minimalism + first-class worktrees + menu-bar
   ambience".
 - **Category absorbed by giants**: if Cursor/VS Code or Warp build a
   "multi-agent session dashboard + status" into their main products, indie
   tool space shrinks. Hedge: native and lightweight + no account + not an IDE.
 - **Single upstream dependency**: `libghostty-spm` (an individually maintained
-  prebuilt XCFramework) — if it stalls, termio is stuck; pin versions, watch
+  prebuilt XCFramework) — if it stalls, Termio is stuck; pin versions, watch
   its activity.
 - **Agent CLI protocol drift**: status detection depends on Claude Code hooks
   / OSC behavior, which agent upgrades may change. **The zero-config
@@ -62,9 +62,9 @@ dashboard) → then Sessions MCP (medium, a moat) → finally the never-die host
 
 ## 4. One-sentence conclusion
 
-The only remaining gaps between termio and **Unpeel** are Sessions MCP and
+The only remaining gaps between Termio and **Unpeel** are Sessions MCP and
 never-die; the contest with **cmux** is not about breadth but about
 **"minimal yet opinionated + first-class worktree automation + always-on
 menu-bar ambience"**. Sticking to "small and focused, no code panels,
-local-first" is the fundamental stance that distinguishes termio from every
+local-first" is the fundamental stance that distinguishes Termio from every
 competitor — and one none of them can casually copy.

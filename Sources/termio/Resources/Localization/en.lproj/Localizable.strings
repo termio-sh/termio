@@ -1,0 +1,1160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>
+…and %lld more</key>
+	<string>
+…and %lld more</string>
+	<key> Cost is estimated at API rates.</key>
+	<string> Cost is estimated at API rates.</string>
+	<key>%@ and %@</key>
+	<string>%@ and %@</string>
+	<key>%@ is a dark theme in the %@ slot.</key>
+	<string>%@ is a dark theme in the %@ slot.</string>
+	<key>%@ is a light theme in the %@ slot.</key>
+	<string>%@ is a light theme in the %@ slot.</string>
+	<key>%@ isn’t a UTF-8 text file.</key>
+	<string>%@ isn’t a UTF-8 text file.</string>
+	<key>%@ isn’t available for SSH sessions yet.</key>
+	<string>%@ isn’t available for SSH sessions yet.</string>
+	<key>%@ isn’t on your PATH</key>
+	<string>%@ isn’t on your PATH</string>
+	<key>%@ opened %@</key>
+	<string>%@ opened %@</string>
+	<key>%@ tokens</key>
+	<string>%@ tokens</string>
+	<key>%@ · %@ tokens</key>
+	<string>%@ · %@ tokens</string>
+	<key>%@ — %@.</key>
+	<string>%@ — %@.</string>
+	<key>%@ — %@. Couldn’t update %@.</key>
+	<string>%@ — %@. Couldn’t update %@.</string>
+	<key>%@ — click to re-test</key>
+	<string>%@ — click to re-test</string>
+	<key>%@, %@ and %@</key>
+	<string>%@, %@ and %@</string>
+	<key>%lld %@</key>
+	<string>%lld %@</string>
+	<key>%lld file</key>
+	<string>%lld file</string>
+	<key>%lld files</key>
+	<string>%lld files</string>
+	<key>%lld installed</key>
+	<string>%lld installed</string>
+	<key>%lld of %lld</key>
+	<string>%lld of %lld</string>
+	<key>%lld pt</key>
+	<string>%lld pt</string>
+	<key>%lld results</key>
+	<string>%lld results</string>
+	<key>%lld%@ matches in %lld files</key>
+	<string>%lld%@ matches in %lld files</string>
+	<key>%lldd</key>
+	<string>%lldd</string>
+	<key>%lldh</key>
+	<string>%lldh</string>
+	<key>%lldm</key>
+	<string>%lldm</string>
+	<key>%lldw</key>
+	<string>%lldw</string>
+	<key>1 result</key>
+	<string>1 result</string>
+	<key>A different `%@` already exists at %@. Remove it first — Termio won’t overwrite a file it didn’t create.</key>
+	<string>A different `%@` already exists at %@. Remove it first — Termio won’t overwrite a file it didn’t create.</string>
+	<key>A file at %@ already uses that name. Replacing it discards what is in it.</key>
+	<string>A file at %@ already uses that name. Replacing it discards what is in it.</string>
+	<key>Activity</key>
+	<string>Activity</string>
+	<key>Add</key>
+	<string>Add</string>
+	<key>Add &amp; Connect</key>
+	<string>Add &amp; Connect</string>
+	<key>Add Agent</key>
+	<string>Add Agent</string>
+	<key>Add Host</key>
+	<string>Add Host</string>
+	<key>Add Host…</key>
+	<string>Add Host…</string>
+	<key>Add SSH Host</key>
+	<string>Add SSH Host</string>
+	<key>Add to Chat</key>
+	<string>Add to Chat</string>
+	<key>Address</key>
+	<string>Address</string>
+	<key>Agent</key>
+	<string>Agent</string>
+	<key>Agent skill</key>
+	<string>Agent skill</string>
+	<key>Agents</key>
+	<string>Agents</string>
+	<key>Agents won’t show as working.</key>
+	<string>Agents won’t show as working.</string>
+	<key>Alias</key>
+	<string>Alias</string>
+	<key>Alias → %@</key>
+	<string>Alias → %@</string>
+	<key>All</key>
+	<string>All</string>
+	<key>All caught up</key>
+	<string>All caught up</string>
+	<key>All changes to these %lld files will be lost. This cannot be undone.
+
+%@%@</key>
+	<string>All changes to these %lld files will be lost. This cannot be undone.
+
+%@%@</string>
+	<key>All changes to “%@” will be lost. This cannot be undone.</key>
+	<string>All changes to “%@” will be lost. This cannot be undone.</string>
+	<key>Allow Keychain Access…</key>
+	<string>Allow Keychain Access…</string>
+	<key>Allow Usage Access</key>
+	<string>Allow Usage Access</string>
+	<key>Also Running</key>
+	<string>Also Running</string>
+	<key>An older install points at %@. Update it to this version of Termio.</key>
+	<string>An older install points at %@. Update it to this version of Termio.</string>
+	<key>Anyone</key>
+	<string>Anyone</string>
+	<key>App language</key>
+	<string>App language</string>
+	<key>Appearance</key>
+	<string>Appearance</string>
+	<key>Appends a Host block to ~/.ssh/config, so the alias works in plain `ssh %@` too.</key>
+	<string>Appends a Host block to ~/.ssh/config, so the alias works in plain `ssh %@` too.</string>
+	<key>Apply</key>
+	<string>Apply</string>
+	<key>Assigned to Me</key>
+	<string>Assigned to Me</string>
+	<key>Assignee</key>
+	<string>Assignee</string>
+	<key>Auth failed</key>
+	<string>Auth failed</string>
+	<key>Available when Termio runs from the built app bundle.</key>
+	<string>Available when Termio runs from the built app bundle.</string>
+	<key>Bar</key>
+	<string>Bar</string>
+	<key>Base Branch Missing</key>
+	<string>Base Branch Missing</string>
+	<key>Behind</key>
+	<string>Behind</string>
+	<key>Binary File</key>
+	<string>Binary File</string>
+	<key>Binary file — open it on GitHub to view.</key>
+	<string>Binary file — open it on GitHub to view.</string>
+	<key>Blink</key>
+	<string>Blink</string>
+	<key>Block</key>
+	<string>Block</string>
+	<key>Blur: %lld</key>
+	<string>Blur: %lld</string>
+	<key>Branch</key>
+	<string>Branch</string>
+	<key>Bring All to Front</key>
+	<string>Bring All to Front</string>
+	<key>Browse Themes…</key>
+	<string>Browse Themes…</string>
+	<key>Cancel</key>
+	<string>Cancel</string>
+	<key>Can’t browse %@</key>
+	<string>Can’t browse %@</string>
+	<key>Can’t open as text</key>
+	<string>Can’t open as text</string>
+	<key>Can’t preview</key>
+	<string>Can’t preview</string>
+	<key>Change Theme…</key>
+	<string>Change Theme…</string>
+	<key>Changes</key>
+	<string>Changes</string>
+	<key>Channels</key>
+	<string>Channels</string>
+	<key>Chat with the developer and other users.</key>
+	<string>Chat with the developer and other users.</string>
+	<key>Chats</key>
+	<string>Chats</string>
+	<key>Check for Updates…</key>
+	<string>Check for Updates…</string>
+	<key>Choose a different name.</key>
+	<string>Choose a different name.</string>
+	<key>Choose a project folder to open in Termio.</key>
+	<string>Choose a project folder to open in Termio.</string>
+	<key>Choose another branch to compare with.</key>
+	<string>Choose another branch to compare with.</string>
+	<key>Choose how projects are ordered</key>
+	<string>Choose how projects are ordered</string>
+	<key>Choose which device the sidebar shows</key>
+	<string>Choose which device the sidebar shows</string>
+	<key>Choose…</key>
+	<string>Choose…</string>
+	<key>Clear</key>
+	<string>Clear</string>
+	<key>Clone to</key>
+	<string>Clone to</string>
+	<key>Close</key>
+	<string>Close</string>
+	<key>Close (Esc)</key>
+	<string>Close (Esc)</string>
+	<key>Close All Chats</key>
+	<string>Close All Chats</string>
+	<key>Close All Terminals</key>
+	<string>Close All Terminals</string>
+	<key>Close Session</key>
+	<string>Close Session</string>
+	<key>Close Window</key>
+	<string>Close Window</string>
+	<key>Close session</key>
+	<string>Close session</string>
+	<key>Closed</key>
+	<string>Closed</string>
+	<key>Collapse All</key>
+	<string>Collapse All</string>
+	<key>Collapse Results</key>
+	<string>Collapse Results</string>
+	<key>Command</key>
+	<string>Command</string>
+	<key>Command Palette…</key>
+	<string>Command Palette…</string>
+	<key>Command line</key>
+	<string>Command line</string>
+	<key>Command-line tool</key>
+	<string>Command-line tool</string>
+	<key>Commit or discard the changes in “%@” before removing it.</key>
+	<string>Commit or discard the changes in “%@” before removing it.</string>
+	<key>Commits</key>
+	<string>Commits</string>
+	<key>Community</key>
+	<string>Community</string>
+	<key>Compare</key>
+	<string>Compare</string>
+	<key>Compare this branch with the branch it would merge into.</key>
+	<string>Compare this branch with the branch it would merge into.</string>
+	<key>Compare to branch</key>
+	<string>Compare to branch</string>
+	<key>Config file</key>
+	<string>Config file</string>
+	<key>Connect</key>
+	<string>Connect</string>
+	<key>Connect GitHub</key>
+	<string>Connect GitHub</string>
+	<key>Connect iPhone</key>
+	<string>Connect iPhone</string>
+	<key>Connect to…</key>
+	<string>Connect to…</string>
+	<key>Connect your GitHub account to read this project’s issues and pull requests here.</key>
+	<string>Connect your GitHub account to read this project’s issues and pull requests here.</string>
+	<key>Connected</key>
+	<string>Connected</string>
+	<key>Connected and authenticated</key>
+	<string>Connected and authenticated</string>
+	<key>Connection failed</key>
+	<string>Connection failed</string>
+	<key>Connection refused</key>
+	<string>Connection refused</string>
+	<key>Conversation</key>
+	<string>Conversation</string>
+	<key>Copied</key>
+	<string>Copied</string>
+	<key>Copy</key>
+	<string>Copy</string>
+	<key>Copy Diff</key>
+	<string>Copy Diff</string>
+	<key>Copy Image</key>
+	<string>Copy Image</string>
+	<key>Copy Link</key>
+	<string>Copy Link</string>
+	<key>Copy Path</key>
+	<string>Copy Path</string>
+	<key>Copy Paths</key>
+	<string>Copy Paths</string>
+	<key>Copy Relative Path</key>
+	<string>Copy Relative Path</string>
+	<key>Copy Relative Paths</key>
+	<string>Copy Relative Paths</string>
+	<key>Copy Session Link</key>
+	<string>Copy Session Link</string>
+	<key>Copy on select</key>
+	<string>Copy on select</string>
+	<key>Copy ssh Command</key>
+	<string>Copy ssh Command</string>
+	<key>Couldn’t change the Themes folder</key>
+	<string>Couldn’t change the Themes folder</string>
+	<key>Couldn’t create the worktrees folder: %@</key>
+	<string>Couldn’t create the worktrees folder: %@</string>
+	<key>Couldn’t create worktree session</key>
+	<string>Couldn’t create worktree session</string>
+	<key>Couldn’t inspect worktree</key>
+	<string>Couldn’t inspect worktree</string>
+	<key>Couldn’t link `%@` into %@.</key>
+	<string>Couldn’t link `%@` into %@.</string>
+	<key>Couldn’t load</key>
+	<string>Couldn’t load</string>
+	<key>Couldn’t open a pull request page</key>
+	<string>Couldn’t open a pull request page</string>
+	<key>Couldn’t open the Themes folder</key>
+	<string>Couldn’t open the Themes folder</string>
+	<key>Couldn’t remove %@.</key>
+	<string>Couldn’t remove %@.</string>
+	<key>Couldn’t remove worktree</key>
+	<string>Couldn’t remove worktree</string>
+	<key>Couldn’t update %@.</key>
+	<string>Couldn’t update %@.</string>
+	<key>Couldn’t update .gitignore</key>
+	<string>Couldn’t update .gitignore</string>
+	<key>Couldn’t write ~/.ssh/config: %@</key>
+	<string>Couldn’t write ~/.ssh/config: %@</string>
+	<key>Create</key>
+	<string>Create</string>
+	<key>Cursor</key>
+	<string>Cursor</string>
+	<key>Custom</key>
+	<string>Custom</string>
+	<key>Custom Agent…</key>
+	<string>Custom Agent…</string>
+	<key>Custom…</key>
+	<string>Custom…</string>
+	<key>Cut</key>
+	<string>Cut</string>
+	<key>Dark</key>
+	<string>Dark</string>
+	<key>Decrease Font Size</key>
+	<string>Decrease Font Size</string>
+	<key>Default Dark Theme</key>
+	<string>Default Dark Theme</string>
+	<key>Default Light Theme</key>
+	<string>Default Light Theme</string>
+	<key>Default agent</key>
+	<string>Default agent</string>
+	<key>Delete</key>
+	<string>Delete</string>
+	<key>Delete %@?</key>
+	<string>Delete %@?</string>
+	<key>Delete Agent</key>
+	<string>Delete Agent</string>
+	<key>Deletes the custom agent’s manifest from this Mac.</key>
+	<string>Deletes the custom agent’s manifest from this Mac.</string>
+	<key>Delete…</key>
+	<string>Delete…</string>
+	<key>Detached at %@</key>
+	<string>Detached at %@</string>
+	<key>Device</key>
+	<string>Device</string>
+	<key>Discard %lld Files…</key>
+	<string>Discard %lld Files…</string>
+	<key>Discard Changes</key>
+	<string>Discard Changes</string>
+	<key>Discard Changes?</key>
+	<string>Discard Changes?</string>
+	<key>Discard Changes…</key>
+	<string>Discard Changes…</string>
+	<key>Disconnect GitHub</key>
+	<string>Disconnect GitHub</string>
+	<key>Discord</key>
+	<string>Discord</string>
+	<key>Discord, GitHub, and the WeChat group</key>
+	<string>Discord, GitHub, and the WeChat group</string>
+	<key>Done</key>
+	<string>Done</string>
+	<key>Don’t Compare</key>
+	<string>Don’t Compare</string>
+	<key>Draft</key>
+	<string>Draft</string>
+	<key>Drag the list to change the order agents appear in.</key>
+	<string>Drag the list to change the order agents appear in.</string>
+	<key>Edit</key>
+	<string>Edit</string>
+	<key>Edit Manifest</key>
+	<string>Edit Manifest</string>
+	<key>Edit in Config</key>
+	<string>Edit in Config</string>
+	<key>Edit source</key>
+	<string>Edit source</string>
+	<key>Edit…</key>
+	<string>Edit…</string>
+	<key>Enable</key>
+	<string>Enable</string>
+	<key>Enable Claude Code, Codex, Kimi, or Grok in the Agents tab to see their usage here.</key>
+	<string>Enable Claude Code, Codex, Kimi, or Grok in the Agents tab to see their usage here.</string>
+	<key>Ended</key>
+	<string>Ended</string>
+	<key>Enter Code on GitHub</key>
+	<string>Enter Code on GitHub</string>
+	<key>Enter a host from your ~/.ssh/config, or a user@host to connect to.</key>
+	<string>Enter a host from your ~/.ssh/config, or a user@host to connect to.</string>
+	<key>Every paired iPhone is signed out and must re-scan the new QR to reconnect.</key>
+	<string>Every paired iPhone is signed out and must re-scan the new QR to reconnect.</string>
+	<key>Expand Results</key>
+	<string>Expand Results</string>
+	<key>Family</key>
+	<string>Family</string>
+	<key>File</key>
+	<string>File</string>
+	<key>Files</key>
+	<string>Files</string>
+	<key>Files changed</key>
+	<string>Files changed</string>
+	<key>Filter</key>
+	<string>Filter</string>
+	<key>Find</key>
+	<string>Find</string>
+	<key>Find…</key>
+	<string>Find…</string>
+	<key>Focus Pane Down</key>
+	<string>Focus Pane Down</string>
+	<key>Focus Pane Left</key>
+	<string>Focus Pane Left</string>
+	<key>Focus Pane Right</key>
+	<string>Focus Pane Right</string>
+	<key>Focus Pane Up</key>
+	<string>Focus Pane Up</string>
+	<key>Font</key>
+	<string>Font</string>
+	<key>Font name</key>
+	<string>Font name</string>
+	<key>General</key>
+	<string>General</string>
+	<key>Git ignore patterns cannot represent a filename containing a line break.</key>
+	<string>Git ignore patterns cannot represent a filename containing a line break.</string>
+	<key>Git worktree</key>
+	<string>Git worktree</string>
+	<key>GitHub</key>
+	<string>GitHub</string>
+	<key>GitHub Issues</key>
+	<string>GitHub Issues</string>
+	<key>Grant Org Access…</key>
+	<string>Grant Org Access…</string>
+	<key>Group with</key>
+	<string>Group with</string>
+	<key>Hide or show the inspector</key>
+	<string>Hide or show the inspector</string>
+	<key>Hide or show the navigator</key>
+	<string>Hide or show the navigator</string>
+	<key>History</key>
+	<string>History</string>
+	<key>Hooks reinstalled</key>
+	<string>Hooks reinstalled</string>
+	<key>Host</key>
+	<string>Host</string>
+	<key>Host not found</key>
+	<string>Host not found</string>
+	<key>Hosts</key>
+	<string>Hosts</string>
+	<key>How much output each session keeps for scrolling back. Agents are verbose, so the default is generous.</key>
+	<string>How much output each session keeps for scrolling back. Agents are verbose, so the default is generous.</string>
+	<key>Icon</key>
+	<string>Icon</string>
+	<key>Ignore %lld Selected Files (Add to .gitignore)</key>
+	<string>Ignore %lld Selected Files (Add to .gitignore)</string>
+	<key>Ignore All .%@ Files (Add to .gitignore)</key>
+	<string>Ignore All .%@ Files (Add to .gitignore)</string>
+	<key>Ignore File (Add to .gitignore)</key>
+	<string>Ignore File (Add to .gitignore)</string>
+	<key>Increase Font Size</key>
+	<string>Increase Font Size</string>
+	<key>Info</key>
+	<string>Info</string>
+	<key>Inspector</key>
+	<string>Inspector</string>
+	<key>Inspector Pane</key>
+	<string>Inspector Pane</string>
+	<key>Install</key>
+	<string>Install</string>
+	<key>Install %@</key>
+	<string>Install %@</string>
+	<key>Installed</key>
+	<string>Installed</string>
+	<key>Installed.</key>
+	<string>Installed.</string>
+	<key>Installing %@…</key>
+	<string>Installing %@…</string>
+	<key>Integrations</key>
+	<string>Integrations</string>
+	<key>Interface</key>
+	<string>Interface</string>
+	<key>Issues</key>
+	<string>Issues</string>
+	<key>Issues a new token and revokes every paired iPhone.</key>
+	<string>Issues a new token and revokes every paired iPhone.</string>
+	<key>Join</key>
+	<string>Join</string>
+	<key>Jump to session, project, or file…</key>
+	<string>Jump to session, project, or file…</string>
+	<key>Key file</key>
+	<string>Key file</string>
+	<key>Keyboard</key>
+	<string>Keyboard</string>
+	<key>Keyboard shortcuts for every command</key>
+	<string>Keyboard shortcuts for every command</string>
+	<key>Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.</key>
+	<string>Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.</string>
+	<key>Labels</key>
+	<string>Labels</string>
+	<key>Language</key>
+	<string>Language</string>
+	<key>Last 30 days</key>
+	<string>Last 30 days</string>
+	<key>Last 7 days</key>
+	<string>Last 7 days</string>
+	<key>Last used</key>
+	<string>Last used</string>
+	<key>Later</key>
+	<string>Later</string>
+	<key>Launch</key>
+	<string>Launch</string>
+	<key>Let your agents coordinate?</key>
+	<string>Let your agents coordinate?</string>
+	<key>Lets an agent see and drive its sibling sessions in this project via the `termio sessions` command. Installs the termio skill into each agent's skills folder.</key>
+	<string>Lets an agent see and drive its sibling sessions in this project via the `termio sessions` command. Installs the termio skill into each agent's skills folder.</string>
+	<key>Light</key>
+	<string>Light</string>
+	<key>Line height applies to the file editor and diffs; the terminal keeps the font’s own.</key>
+	<string>Line height applies to the file editor and diffs; the terminal keeps the font’s own.</string>
+	<key>Line height applies to the file editor and diffs; the terminal keeps the font’s own. Font and theme values you haven’t set here follow your Ghostty config.</key>
+	<string>Line height applies to the file editor and diffs; the terminal keeps the font’s own. Font and theme values you haven’t set here follow your Ghostty config.</string>
+	<key>Line height: %@×</key>
+	<string>Line height: %@×</string>
+	<key>Links `%@` into /usr/local/bin so you (and agents) can run `%@ sessions …` from any shell.</key>
+	<string>Links `%@` into /usr/local/bin so you (and agents) can run `%@ sessions …` from any shell.</string>
+	<key>Live agent status</key>
+	<string>Live agent status</string>
+	<key>Live agent status is off</key>
+	<string>Live agent status is off</string>
+	<key>Local</key>
+	<string>Local</string>
+	<key>Login shell</key>
+	<string>Login shell</string>
+	<key>Match Case</key>
+	<string>Match Case</string>
+	<key>Match Whole Word</key>
+	<string>Match Whole Word</string>
+	<key>Merged</key>
+	<string>Merged</string>
+	<key>Minimize</key>
+	<string>Minimize</string>
+	<key>Mobile</key>
+	<string>Mobile</string>
+	<key>Mobile Access</key>
+	<string>Mobile Access</string>
+	<key>Move to Trash</key>
+	<string>Move to Trash</string>
+	<key>Move “%@” to the Trash?</key>
+	<string>Move “%@” to the Trash?</string>
+	<key>My Agent</key>
+	<string>My Agent</string>
+	<key>Name</key>
+	<string>Name</string>
+	<key>Name the worktree. A new branch of this name is created from HEAD and nested under this project.</key>
+	<string>Name the worktree. A new branch of this name is created from HEAD and nested under this project.</string>
+	<key>Navigation</key>
+	<string>Navigation</string>
+	<key>Navigator</key>
+	<string>Navigator</string>
+	<key>New</key>
+	<string>New</string>
+	<key>New %@ Session</key>
+	<string>New %@ Session</string>
+	<key>New %@ session</key>
+	<string>New %@ session</string>
+	<key>New Agent</key>
+	<string>New Agent</string>
+	<key>New Agent Session</key>
+	<string>New Agent Session</string>
+	<key>New Chat</key>
+	<string>New Chat</string>
+	<key>New File</key>
+	<string>New File</string>
+	<key>New Folder</key>
+	<string>New Folder</string>
+	<key>New Pull Request</key>
+	<string>New Pull Request</string>
+	<key>New SSH Connection</key>
+	<string>New SSH Connection</string>
+	<key>New SSH Connection…</key>
+	<string>New SSH Connection…</string>
+	<key>New Session</key>
+	<string>New Session</string>
+	<key>New Terminal</key>
+	<string>New Terminal</string>
+	<key>New Terminal at Home</key>
+	<string>New Terminal at Home</string>
+	<key>New Worktree</key>
+	<string>New Worktree</string>
+	<key>New Worktree…</key>
+	<string>New Worktree…</string>
+	<key>New chat</key>
+	<string>New chat</string>
+	<key>New terminal or project</key>
+	<string>New terminal or project</string>
+	<key>Next Match</key>
+	<string>Next Match</string>
+	<key>Next Session</key>
+	<string>Next Session</string>
+	<key>No Agents Enabled</key>
+	<string>No Agents Enabled</string>
+	<key>No Base Branch</key>
+	<string>No Base Branch</string>
+	<key>No Changes</key>
+	<string>No Changes</string>
+	<key>No Common History</key>
+	<string>No Common History</string>
+	<key>No Diff</key>
+	<string>No Diff</string>
+	<key>No File Selected</key>
+	<string>No File Selected</string>
+	<key>No Files</key>
+	<string>No Files</string>
+	<key>No GitHub Repository</key>
+	<string>No GitHub Repository</string>
+	<key>No History</key>
+	<string>No History</string>
+	<key>No Issues</key>
+	<string>No Issues</string>
+	<key>No Matches</key>
+	<string>No Matches</string>
+	<key>No Project</key>
+	<string>No Project</string>
+	<key>No Pull Requests</key>
+	<string>No Pull Requests</string>
+	<key>No Session</key>
+	<string>No Session</string>
+	<key>No bundled tool to install from.</key>
+	<string>No bundled tool to install from.</string>
+	<key>No description provided.</key>
+	<string>No description provided.</string>
+	<key>No file changes</key>
+	<string>No file changes</string>
+	<key>No hosts yet — add one, or write a Host block in ~/.ssh/config.</key>
+	<string>No hosts yet — add one, or write a Host block in ~/.ssh/config.</string>
+	<key>No installed theme matches “%@”</key>
+	<string>No installed theme matches “%@”</string>
+	<key>No issues found.</key>
+	<string>No issues found.</string>
+	<key>No local usage yet — run `%@` once, then Refresh.</key>
+	<string>No local usage yet — run `%@` once, then Refresh.</string>
+	<key>No matches</key>
+	<string>No matches</string>
+	<key>No network address found. Join a network, then reopen this tab.</key>
+	<string>No network address found. Join a network, then reopen this tab.</string>
+	<key>No open issues right now.</key>
+	<string>No open issues right now.</string>
+	<key>No open pull requests right now.</key>
+	<string>No open pull requests right now.</string>
+	<key>No pull requests found.</key>
+	<string>No pull requests found.</string>
+	<key>No results</key>
+	<string>No results</string>
+	<key>No route to host</key>
+	<string>No route to host</string>
+	<key>No textual changes to show.</key>
+	<string>No textual changes to show.</string>
+	<key>No themes match “%@”</key>
+	<string>No themes match “%@”</string>
+	<key>Not Now</key>
+	<string>Not Now</string>
+	<key>Not a valid regular expression</key>
+	<string>Not a valid regular expression</string>
+	<key>Not connected</key>
+	<string>Not connected</string>
+	<key>Not pushed to upstream</key>
+	<string>Not pushed to upstream</string>
+	<key>Nothing to Compare</key>
+	<string>Nothing to Compare</string>
+	<key>Nothing to install.</key>
+	<string>Nothing to install.</string>
+	<key>Notifications</key>
+	<string>Notifications</string>
+	<key>Notifications for Termio are turned off in System Settings.</key>
+	<string>Notifications for Termio are turned off in System Settings.</string>
+	<key>OK</key>
+	<string>OK</string>
+	<key>Off — LAN only</key>
+	<string>Off — LAN only</string>
+	<key>On iPhone, tap the Mac pill ▸ Scan QR Code. Both devices must share a LAN.</key>
+	<string>On iPhone, tap the Mac pill ▸ Scan QR Code. Both devices must share a LAN.</string>
+	<key>On iPhone, tap the Mac pill ▸ Scan QR Code. The tunnel address works from any network, and terminates on the provider's servers. Pick Custom to run your own relay instead.</key>
+	<string>On iPhone, tap the Mac pill ▸ Scan QR Code. The tunnel address works from any network, and terminates on the provider's servers. Pick Custom to run your own relay instead.</string>
+	<key>On iPhone, tap the Mac pill ▸ Scan QR Code. Traffic crosses the relay you run yourself — no third party in the path.</key>
+	<string>On iPhone, tap the Mac pill ▸ Scan QR Code. Traffic crosses the relay you run yourself — no third party in the path.</string>
+	<key>Opacity</key>
+	<string>Opacity</string>
+	<key>Opacity below 100% lets the desktop show through; blur softens it. The window stays solid at full opacity.</key>
+	<string>Opacity below 100% lets the desktop show through; blur softens it. The window stays solid at full opacity.</string>
+	<key>Open</key>
+	<string>Open</string>
+	<key>Open Link</key>
+	<string>Open Link</string>
+	<key>Open Project…</key>
+	<string>Open Project…</string>
+	<key>Open Quickly…</key>
+	<string>Open Quickly…</string>
+	<key>Open System Settings</key>
+	<string>Open System Settings</string>
+	<key>Open Themes Folder…</key>
+	<string>Open Themes Folder…</string>
+	<key>Open in %@</key>
+	<string>Open in %@</string>
+	<key>Open in Browser</key>
+	<string>Open in Browser</string>
+	<key>Open in Editor</key>
+	<string>Open in Editor</string>
+	<key>Open on GitHub</key>
+	<string>Open on GitHub</string>
+	<key>Opened outside Termio on this device</key>
+	<string>Opened outside Termio on this device</string>
+	<key>Padding: %lld pt</key>
+	<string>Padding: %lld pt</string>
+	<key>Pair your iPhone and remote access</key>
+	<string>Pair your iPhone and remote access</string>
+	<key>Panes</key>
+	<string>Panes</string>
+	<key>Paste</key>
+	<string>Paste</string>
+	<key>Permissions</key>
+	<string>Permissions</string>
+	<key>Pick a file on the left to see its changes.</key>
+	<string>Pick a file on the left to see its changes.</string>
+	<key>Pick the branch this one would merge into.</key>
+	<string>Pick the branch this one would merge into.</string>
+	<key>Pin</key>
+	<string>Pin</string>
+	<key>Pin Termio to a light or dark look, or follow the system. The light and dark terminal themes below apply to the matching appearance.</key>
+	<string>Pin Termio to a light or dark look, or follow the system. The light and dark terminal themes below apply to the matching appearance.</string>
+	<key>Pin to Top</key>
+	<string>Pin to Top</string>
+	<key>Pinned</key>
+	<string>Pinned</string>
+	<key>Plan limits</key>
+	<string>Plan limits</string>
+	<key>Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.</key>
+	<string>Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.</string>
+	<key>Play sound</key>
+	<string>Play sound</string>
+	<key>Port</key>
+	<string>Port</string>
+	<key>Posts a notification when an agent finishes or needs you while Termio is in the background.</key>
+	<string>Posts a notification when an agent finishes or needs you while Termio is in the background.</string>
+	<key>Press Shortcut…</key>
+	<string>Press Shortcut…</string>
+	<key>Preview</key>
+	<string>Preview</string>
+	<key>Previous Match</key>
+	<string>Previous Match</string>
+	<key>Previous Session</key>
+	<string>Previous Session</string>
+	<key>Project Files</key>
+	<string>Project Files</string>
+	<key>Projects</key>
+	<string>Projects</string>
+	<key>Public keys</key>
+	<string>Public keys</string>
+	<key>Pull Requests</key>
+	<string>Pull Requests</string>
+	<key>Push the current branch to the repository’s remote first, then try again. (The remote also needs to be a forge Termio recognizes: GitHub, GitLab, Bitbucket, or Gitea.)</key>
+	<string>Push the current branch to the repository’s remote first, then try again. (The remote also needs to be a forge Termio recognizes: GitHub, GitLab, Bitbucket, or Gitea.)</string>
+	<key>Quit Termio</key>
+	<string>Quit Termio</string>
+	<key>Range</key>
+	<string>Range</string>
+	<key>Reachable</key>
+	<string>Reachable</string>
+	<key>Reads ~/.ssh/config directly — Termio keeps no separate host list.</key>
+	<string>Reads ~/.ssh/config directly — Termio keeps no separate host list.</string>
+	<key>Recent</key>
+	<string>Recent</string>
+	<key>Recent Activity</key>
+	<string>Recent Activity</string>
+	<key>Reconnect</key>
+	<string>Reconnect</string>
+	<key>Reconnect to sign in with a different account, or grant Termio access to the organization that owns this repository.</key>
+	<string>Reconnect to sign in with a different account, or grant Termio access to the organization that owns this repository.</string>
+	<key>Record Shortcut</key>
+	<string>Record Shortcut</string>
+	<key>Refresh</key>
+	<string>Refresh</string>
+	<key>Reinstall</key>
+	<string>Reinstall</string>
+	<key>Reinstall hooks</key>
+	<string>Reinstall hooks</string>
+	<key>Reinstall skill</key>
+	<string>Reinstall skill</string>
+	<key>Relaunch Now</key>
+	<string>Relaunch Now</string>
+	<key>Relaunch Termio to switch language?</key>
+	<string>Relaunch Termio to switch language?</string>
+	<key>Reload</key>
+	<string>Reload</string>
+	<key>Remote</key>
+	<string>Remote</string>
+	<key>Remote session</key>
+	<string>Remote session</string>
+	<key>Remove</key>
+	<string>Remove</string>
+	<key>Remove Project</key>
+	<string>Remove Project</string>
+	<key>Remove Worktree</key>
+	<string>Remove Worktree</string>
+	<key>Remove from List</key>
+	<string>Remove from List</string>
+	<key>Remove “%@”?</key>
+	<string>Remove “%@”?</string>
+	<key>Removed from PATH.</key>
+	<string>Removed from PATH.</string>
+	<key>Removes this custom agent and its configuration file. Existing sessions keep running.</key>
+	<string>Removes this custom agent and its configuration file. Existing sessions keep running.</string>
+	<key>Rename</key>
+	<string>Rename</string>
+	<key>Rename Session</key>
+	<string>Rename Session</string>
+	<key>Rename “%@”</key>
+	<string>Rename “%@”</string>
+	<key>Rename…</key>
+	<string>Rename…</string>
+	<key>Replace</key>
+	<string>Replace</string>
+	<key>Replace the theme file for “%@”?</key>
+	<string>Replace the theme file for “%@”?</string>
+	<key>Request Permission</key>
+	<string>Request Permission</string>
+	<key>Reset Font Size</key>
+	<string>Reset Font Size</string>
+	<key>Restore Defaults</key>
+	<string>Restore Defaults</string>
+	<key>Reveal in Finder</key>
+	<string>Reveal in Finder</string>
+	<key>Revoke Access</key>
+	<string>Revoke Access</string>
+	<key>Rotate Pairing Token…</key>
+	<string>Rotate Pairing Token…</string>
+	<key>Rotate Token</key>
+	<string>Rotate Token</string>
+	<key>Rotate the pairing token?</key>
+	<string>Rotate the pairing token?</string>
+	<key>Row padding</key>
+	<string>Row padding</string>
+	<key>Run a command…</key>
+	<string>Run a command…</string>
+	<key>Running terminal sessions will end. You can relaunch later instead.</key>
+	<string>Running terminal sessions will end. You can relaunch later instead.</string>
+	<key>Runs on this Mac with your privileges when Custom is selected — no shell, arguments split on spaces. Use {port} for the companion port; the URL pattern is a regex matching the public https URL your relay prints.</key>
+	<string>Runs on this Mac with your privileges when Custom is selected — no shell, arguments split on spaces. Use {port} for the companion port; the URL pattern is a regex matching the public https URL your relay prints.</string>
+	<key>Runs with `%@`. The agent won’t ask before editing files or running commands.</key>
+	<string>Runs with `%@`. The agent won’t ask before editing files or running commands.</string>
+	<key>SF Symbol name</key>
+	<string>SF Symbol name</string>
+	<key>SSH</key>
+	<string>SSH</string>
+	<key>Save</key>
+	<string>Save</string>
+	<key>Save failed: %@</key>
+	<string>Save failed: %@</string>
+	<key>Scan the QR code with WeChat to join the Chinese community group.</key>
+	<string>Scan the QR code with WeChat to join the Chinese community group.</string>
+	<key>Scrollback history and text selection</key>
+	<string>Scrollback history and text selection</string>
+	<key>Scrollback: %lld MB</key>
+	<string>Scrollback: %lld MB</string>
+	<key>Search</key>
+	<string>Search</string>
+	<key>Search Files</key>
+	<string>Search Files</string>
+	<key>Search Project</key>
+	<string>Search Project</string>
+	<key>Search commands</key>
+	<string>Search commands</string>
+	<key>Search themes</key>
+	<string>Search themes</string>
+	<key>Search themes…</key>
+	<string>Search themes…</string>
+	<key>Searching…</key>
+	<string>Searching…</string>
+	<key>Select All</key>
+	<string>Select All</string>
+	<key>Select a session to browse its files.</key>
+	<string>Select a session to browse its files.</string>
+	<key>Select a session to see its info.</key>
+	<string>Select a session to see its info.</string>
+	<key>Selection</key>
+	<string>Selection</string>
+	<key>Session</key>
+	<string>Session</string>
+	<key>Session control</key>
+	<string>Session control</string>
+	<key>Sessions</key>
+	<string>Sessions</string>
+	<key>Settings</key>
+	<string>Settings</string>
+	<key>Settings…</key>
+	<string>Settings…</string>
+	<key>Shortcuts must include ⌘ so they can’t shadow a key an agent or the shell needs. While recording, press ⌫ to remove a shortcut, or esc to cancel.</key>
+	<string>Shortcuts must include ⌘ so they can’t shadow a key an agent or the shell needs. While recording, press ⌫ to remove a shortcut, or esc to cancel.</string>
+	<key>Show Original</key>
+	<string>Show Original</string>
+	<key>Show Project Files</key>
+	<string>Show Project Files</string>
+	<key>Shows the Issues pane in the inspector for projects whose remote is on GitHub.</key>
+	<string>Shows the Issues pane in the inspector for projects whose remote is on GitHub.</string>
+	<key>Shows when an agent is working or waiting on you — the sidebar spinner and menu-bar pulse. Installs Termio’s hooks into each agent’s config.</key>
+	<string>Shows when an agent is working or waiting on you — the sidebar spinner and menu-bar pulse. Installs Termio’s hooks into each agent’s config.</string>
+	<key>Sidebar</key>
+	<string>Sidebar</string>
+	<key>Size: %lld pt</key>
+	<string>Size: %lld pt</string>
+	<key>Skill reinstalled</key>
+	<string>Skill reinstalled</string>
+	<key>Skip permission prompts</key>
+	<string>Skip permission prompts</string>
+	<key>Something else already owns %@.</key>
+	<string>Something else already owns %@.</string>
+	<key>Something went wrong loading this repository. Try again in a moment.</key>
+	<string>Something went wrong loading this repository. Try again in a moment.</string>
+	<key>Sort</key>
+	<string>Sort</string>
+	<key>Split Down</key>
+	<string>Split Down</string>
+	<key>Split Left</key>
+	<string>Split Left</string>
+	<key>Split Right</key>
+	<string>Split Right</string>
+	<key>Split Up</key>
+	<string>Split Up</string>
+	<key>Staged — the next git commit takes this file</key>
+	<string>Staged — the next git commit takes this file</string>
+	<key>Start an agent in a project.</key>
+	<string>Start an agent in a project.</string>
+	<key>Starting tunnel…</key>
+	<string>Starting tunnel…</string>
+	<key>Starting…</key>
+	<string>Starting…</string>
+	<key>State</key>
+	<string>State</string>
+	<key>Status</key>
+	<string>Status</string>
+	<key>Style</key>
+	<string>Style</string>
+	<key>Switch between project files, search, changes, and info</key>
+	<string>Switch between project files, search, changes, and info</string>
+	<key>System</key>
+	<string>System</string>
+	<key>System (%@)</key>
+	<string>System (%@)</string>
+	<key>System monospace</key>
+	<string>System monospace</string>
+	<key>Takes %@ out of the new-session menu. Its settings are kept.</key>
+	<string>Takes %@ out of the new-session menu. Its settings are kept.</string>
+	<key>Takes effect after Termio relaunches.</key>
+	<string>Takes effect after Termio relaunches.</string>
+	<key>Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@</key>
+	<string>Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@</string>
+	<key>Task completion</key>
+	<string>Task completion</string>
+	<key>Terminal</key>
+	<string>Terminal</string>
+	<key>Terminal default</key>
+	<string>Terminal default</string>
+	<key>Terminal font</key>
+	<string>Terminal font</string>
+	<key>Terminals</key>
+	<string>Terminals</string>
+	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it.</key>
+	<string>Termio can show %@'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it.</string>
+	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its `credentials/kimi-code.json` sign-in. Nothing is read until you allow it.</key>
+	<string>Termio can show %@'s token usage and plan limits by reading its local session logs and its `credentials/kimi-code.json` sign-in. Nothing is read until you allow it.</string>
+	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain.</key>
+	<string>Termio can show %@'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain.</string>
+	<key>Termio could not append to the repository’s .gitignore. Check its permissions and try again.</key>
+	<string>Termio could not append to the repository’s .gitignore. Check its permissions and try again.</string>
+	<key>Termio is open source — star the repo, report bugs, and request features.</key>
+	<string>Termio is open source — star the repo, report bugs, and request features.</string>
+	<key>Termio isn’t running sessions through termiod.</key>
+	<string>Termio isn’t running sessions through termiod.</string>
+	<key>Termio switches between these as macOS changes appearance; leave a slot on the default for Termio’s own canvas. Browse Themes installs one of 50 curated schemes, and any Ghostty-format file you drop into the Themes folder shows up here too.</key>
+	<string>Termio switches between these as macOS changes appearance; leave a slot on the default for Termio’s own canvas. Browse Themes installs one of 50 curated schemes, and any Ghostty-format file you drop into the Themes folder shows up here too.</string>
+	<key>Test</key>
+	<string>Test</string>
+	<key>Test Connection</key>
+	<string>Test Connection</string>
+	<key>The SSH connection is closed. Reconnect in the terminal, then refresh.</key>
+	<string>The SSH connection is closed. Reconnect in the terminal, then refresh.</string>
+	<key>The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with.</key>
+	<string>The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with.</string>
+	<key>The base branch has commits this branch doesn’t have, as of the last fetch.</key>
+	<string>The base branch has commits this branch doesn’t have, as of the last fetch.</string>
+	<key>The coding agents offered when you start a session</key>
+	<string>The coding agents offered when you start a session</string>
+	<key>The file at %@ has been edited since it was installed. Removing it deletes those edits.</key>
+	<string>The file at %@ has been edited since it was installed. Removing it deletes those edits.</string>
+	<key>The folder was removed, but git couldn’t prune its stale worktree metadata.</key>
+	<string>The folder was removed, but git couldn’t prune its stale worktree metadata.</string>
+	<key>The ignore rule couldn’t be added.</key>
+	<string>The ignore rule couldn’t be added.</string>
+	<key>The project and session list. Kept separate from the terminal font, and need not be monospaced.</key>
+	<string>The project and session list. Kept separate from the terminal font, and need not be monospaced.</string>
+	<key>The public keys in ~/.ssh. Copy one to paste into a server’s authorized_keys — private keys are never read.</key>
+	<string>The public keys in ~/.ssh. Copy one to paste into a server’s authorized_keys — private keys are never read.</string>
+	<key>The session host went away</key>
+	<string>The session host went away</string>
+	<key>The sidebar shows this device’s sessions</key>
+	<string>The sidebar shows this device’s sessions</string>
+	<key>The termio command-line tool, agent skill, and notifications</key>
+	<string>The termio command-line tool, agent skill, and notifications</string>
+	<key>The working tree is clean.</key>
+	<string>The working tree is clean.</string>
+	<key>Theme</key>
+	<string>Theme</string>
+	<key>Theme, fonts, cursor, and window</key>
+	<string>Theme, fonts, cursor, and window</string>
+	<key>Themes</key>
+	<string>Themes</string>
+	<key>Thicken glyphs</key>
+	<string>Thicken glyphs</string>
+	<key>This Mac</key>
+	<string>This Mac</string>
+	<key>This branch and the base branch share no commits.</key>
+	<string>This branch and the base branch share no commits.</string>
+	<key>This branch has no commits yet.</key>
+	<string>This branch has no commits yet.</string>
+	<key>This branch has nothing the base branch doesn’t already have.</key>
+	<string>This branch has nothing the base branch doesn’t already have.</string>
+	<key>This checkout has no other branch to compare with.</key>
+	<string>This checkout has no other branch to compare with.</string>
+	<key>This diff is too large to show here — open the file on GitHub.</key>
+	<string>This diff is too large to show here — open the file on GitHub.</string>
+	<key>This file is binary — open it on GitHub to view.</key>
+	<string>This file is binary — open it on GitHub to view.</string>
+	<key>This folder has no git “origin” remote to clone.</key>
+	<string>This folder has no git “origin” remote to clone.</string>
+	<key>This host sent a name the file tree can’t show.</key>
+	<string>This host sent a name the file tree can’t show.</string>
+	<key>This month</key>
+	<string>This month</string>
+	<key>This project’s origin remote doesn’t point at github.com, so there is no issue tracker to show.</key>
+	<string>This project’s origin remote doesn’t point at github.com, so there is no issue tracker to show.</string>
+	<key>This pull request changes no files.</key>
+	<string>This pull request changes no files.</string>
+	<key>This week</key>
+	<string>This week</string>
+	<key>Timed out</key>
+	<string>Timed out</string>
+	<key>Today</key>
+	<string>Today</string>
+	<key>Toggle Full Screen</key>
+	<string>Toggle Full Screen</string>
+	<key>Toggle Project Files</key>
+	<string>Toggle Project Files</string>
+	<key>Toggle Sidebar</key>
+	<string>Toggle Sidebar</string>
+	<key>Token usage</key>
+	<string>Token usage</string>
+	<key>Token usage for your connected agents</key>
+	<string>Token usage for your connected agents</string>
+	<key>Try Again</key>
+	<string>Try Again</string>
+	<key>Try another search term.</key>
+	<string>Try another search term.</string>
+	<key>Tunnel</key>
+	<string>Tunnel</string>
+	<key>Turn off to disconnect your iPhone; pairing is kept.</key>
+	<string>Turn off to disconnect your iPhone; pairing is kept.</string>
+	<key>Type this code at github.com/login/device to approve Termio. Waiting for approval…</key>
+	<string>Type this code at github.com/login/device to approve Termio. Waiting for approval…</string>
+	<key>URL Pattern</key>
+	<string>URL Pattern</string>
+	<key>Underline</key>
+	<string>Underline</string>
+	<key>Ungroup</key>
+	<string>Ungroup</string>
+	<key>Unpin</key>
+	<string>Unpin</string>
+	<key>Unsaved changes — saving…</key>
+	<string>Unsaved changes — saving…</string>
+	<key>Update</key>
+	<string>Update</string>
+	<key>Updated.</key>
+	<string>Updated.</string>
+	<key>Usage</key>
+	<string>Usage</string>
+	<key>Use Regular Expression</key>
+	<string>Use Regular Expression</string>
+	<key>User</key>
+	<string>User</string>
+	<key>Uses %@</key>
+	<string>Uses %@</string>
+	<key>View</key>
+	<string>View</string>
+	<key>View Trajectory</key>
+	<string>View Trajectory</string>
+	<key>View on %@</key>
+	<string>View on %@</string>
+	<key>Waiting for the agent’s first status report.</key>
+	<string>Waiting for the agent’s first status report.</string>
+	<key>WeChat</key>
+	<string>WeChat</string>
+	<key>WeChat group</key>
+	<string>WeChat group</string>
+	<key>When on, selecting text copies it straight to the clipboard.</key>
+	<string>When on, selecting text copies it straight to the clipboard.</string>
+	<key>Window</key>
+	<string>Window</string>
+	<key>Working Directory</key>
+	<string>Working Directory</string>
+	<key>Worktree has changes</key>
+	<string>Worktree has changes</string>
+	<key>Worktree removed</key>
+	<string>Worktree removed</string>
+	<key>Yesterday</key>
+	<string>Yesterday</string>
+	<key>You can restore it from the Trash.</key>
+	<string>You can restore it from the Trash.</string>
+	<key>Your Host entries from ~/.ssh/config — the same aliases `ssh` resolves. Right-click a host to connect.</key>
+	<string>Your Host entries from ~/.ssh/config — the same aliases `ssh` resolves. Right-click a host to connect.</string>
+	<key>Your ~/.ssh/config hosts, one click away</key>
+	<string>Your ~/.ssh/config hosts, one click away</string>
+	<key>Zoom</key>
+	<string>Zoom</string>
+	<key>Zoom Split</key>
+	<string>Zoom Split</string>
+	<key>`%@` is on your PATH. Run `%@ sessions …` to drive sibling sessions, or `%@ .` to open a folder.</key>
+	<string>`%@` is on your PATH. Run `%@ sessions …` to drive sibling sessions, or `%@ .` to open a folder.</string>
+	<key>agents</key>
+	<string>agents</string>
+	<key>binary</key>
+	<string>binary</string>
+	<key>current</key>
+	<string>current</string>
+	<key>e.g. JetBrains Mono</key>
+	<string>e.g. JetBrains Mono</string>
+	<key>git couldn’t check “%@” for changes, so it was not removed.</key>
+	<string>git couldn’t check “%@” for changes, so it was not removed.</string>
+	<key>git couldn’t create a worktree for “%@”. Is it a git repository with at least one commit?</key>
+	<string>git couldn’t create a worktree for “%@”. Is it a git repository with at least one commit?</string>
+	<key>git couldn’t remove “%@”.</key>
+	<string>git couldn’t remove “%@”.</string>
+	<key>issue.state.open</key>
+	<string>Open</string>
+	<key>macOS hasn’t been asked to allow Termio’s notifications yet.</key>
+	<string>macOS hasn’t been asked to allow Termio’s notifications yet.</string>
+	<key>nothing</key>
+	<string>nothing</string>
+	<key>optional</key>
+	<string>optional</string>
+	<key>optional — ~/.ssh/id_ed25519</key>
+	<string>optional — ~/.ssh/id_ed25519</string>
+	<key>ssh unavailable</key>
+	<string>ssh unavailable</string>
+	<key>termio can teach the agents you run (Claude Code, Codex, …) a `termio sessions` command so they can see, drive, and read each other's sessions in a project.
+
+Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks. You can turn it off anytime in Settings ▸ Agents.</key>
+	<string>termio can teach the agents you run (Claude Code, Codex, …) a `termio sessions` command so they can see, drive, and read each other's sessions in a project.
+
+Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks. You can turn it off anytime in Settings ▸ Agents.</string>
+	<key>· resets %@</key>
+	<string>· resets %@</string>
+	<key>“%@” already exists.</key>
+	<string>“%@” already exists.</string>
+	<key>“%@” is already in your config.</key>
+	<string>“%@” is already in your config.</string>
+	<key>“%@” isn’t a supported image.</key>
+	<string>“%@” isn’t a supported image.</string>
+	<key>“%@” isn’t installed — showing the system default.</key>
+	<string>“%@” isn’t installed — showing the system default.</string>
+</dict>
+</plist>

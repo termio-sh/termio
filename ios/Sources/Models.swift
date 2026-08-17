@@ -56,6 +56,11 @@ struct MockProject: Identifiable {
     var kind: String?
     let sessions: [MockSession]
 
+    /// A stand-in for the Mac's loose-terminals container before it has opened
+    /// one, so a phone-seeded first terminal can open attached right away; the
+    /// next roster push swaps in the real container.
+    static let terminalsPlaceholder = MockProject(name: "Terminals", path: "", sessions: [])
+
     /// Projects keep their order; within a project, attention floats up.
     static let samples: [MockProject] = {
         var order: [String] = []
@@ -183,24 +188,25 @@ extension MockProject {
 
 // MARK: - Mock file tree
 
+/// The bundled sample tree, shown when there is no Mac behind the drawer (the demo
+/// sessions and App Store screenshots). Browsed the same way a live project is —
+/// one directory per screen — so the offline path exercises the real UI.
 final class FileNode {
     let name: String
     let children: [FileNode]?
     let changed: Bool
-    var isExpanded: Bool
 
     var isDirectory: Bool { children != nil }
 
-    init(_ name: String, changed: Bool = false, expanded: Bool = false, children: [FileNode]? = nil) {
+    init(_ name: String, changed: Bool = false, children: [FileNode]? = nil) {
         self.name = name
         self.changed = changed
         self.children = children
-        isExpanded = expanded
     }
 
     static let sampleRoot: [FileNode] = [
-        FileNode("Sources", expanded: true, children: [
-            FileNode("termio", expanded: true, children: [
+        FileNode("Sources", children: [
+            FileNode("termio", children: [
                 FileNode("App.swift", changed: true),
                 FileNode("Models.swift"),
                 FileNode("SessionInfoView.swift", changed: true),
@@ -222,48 +228,100 @@ final class FileNode {
         FileNode("README.md"),
     ]
 
-    /// Flattens the tree into visible rows (respecting collapsed dirs).
-    static func visibleRows(from roots: [FileNode], depth: Int = 0) -> [(node: FileNode, depth: Int)] {
-        var rows: [(FileNode, Int)] = []
-        for node in roots {
-            rows.append((node, depth))
-            if node.isDirectory, node.isExpanded, let children = node.children {
-                rows.append(contentsOf: visibleRows(from: children, depth: depth + 1))
+    /// One directory's entries in the same shape the wire delivers, so the browser has a
+    /// single code path. "" is the root.
+    static func sampleEntries(at path: String) -> [WireFileEntry] {
+        var level = sampleRoot
+        if !path.isEmpty {
+            for component in path.split(separator: "/") {
+                guard let node = level.first(where: { $0.name == component }),
+                      let children = node.children else { return [] }
+                level = children
             }
         }
-        return rows
+        return level.map {
+            WireFileEntry(name: $0.name, isDir: $0.isDirectory, changed: $0.changed || containsChange($0))
+        }
+    }
+
+    /// Every file in the tree as a repo-relative path, for the offline filename search.
+    static func flattened(_ nodes: [FileNode] = sampleRoot, prefix: String = "") -> [String] {
+        nodes.flatMap { node -> [String] in
+            let path = prefix.isEmpty ? node.name : "\(prefix)/\(node.name)"
+            guard let children = node.children else { return [path] }
+            return flattened(children, prefix: path)
+        }
+    }
+
+    private static func containsChange(_ node: FileNode) -> Bool {
+        guard let children = node.children else { return node.changed }
+        return children.contains { $0.changed || containsChange($0) }
     }
 }
 
 // MARK: - Mock changes
 
-struct MockChange {
-    let kind: String // "M" / "A" / "D"
-    let path: String
-    let additions: Int
-    let deletions: Int
-
-    static let samples: [MockChange] = [
-        .init(kind: "M", path: "Sources/termio/App.swift", additions: 40, deletions: 12),
-        .init(kind: "M", path: "Sources/termio/SessionInfoView.swift", additions: 18, deletions: 3),
-        .init(kind: "M", path: "Sources/termio/TermioStore/TermioStore+TerminalSurface.swift", additions: 62, deletions: 41),
-        .init(kind: "A", path: "Sources/termio/SessionHost.swift", additions: 120, deletions: 0),
+/// The offline Changes pane and its diff — the same `WireChange` and unified-diff text a
+/// live Mac sends, so the demo renders through the real reader rather than a stand-in.
+enum MockChanges {
+    static let samples: [WireChange] = [
+        WireChange(path: "Sources/termio/App.swift", status: "M", additions: 40, deletions: 12),
+        WireChange(path: "Sources/termio/SessionInfoView.swift", status: "M", additions: 18, deletions: 3),
+        WireChange(
+            path: "Sources/termio/TermioStore/TermioStore+TerminalSurface.swift",
+            status: "M", additions: 62, deletions: 41
+        ),
+        WireChange(path: "Sources/termio/SessionHost.swift", status: "A", additions: 120, deletions: 0),
     ]
 
+    /// Full-context sample: one long unchanged run, so the fold band and its reveal are
+    /// visible offline exactly as they behave on a real full-context diff.
     static let sampleDiff = """
-    @@ -41,7 +41,9 @@ func makeContentSplitViewController() {
-         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarVC)
+    @@ -1,44 +1,48 @@
+     import AppKit
+     import SwiftUI
+    \u{20}
+     /// The window's content: a sidebar of sessions beside the terminal surface.
+     /// Layout is AppKit's, so the sidebar can run the full height of the window.
+     struct ContentSplit {
+         let store: TermioStore
+    \u{20}
+         var sidebarWidth: CGFloat = 220
+         var minimumSidebarWidth: CGFloat = 180
+         var maximumSidebarWidth: CGFloat = 420
+    \u{20}
+         func makeSplitViewController() -> NSSplitViewController {
+             let controller = NSSplitViewController()
+             controller.splitView.dividerStyle = .thin
+             return controller
+         }
+    \u{20}
+         func makeSidebarItem(_ viewController: NSViewController) -> NSSplitViewItem {
+             let item = NSSplitViewItem(sidebarWithViewController: viewController)
+             item.minimumThickness = minimumSidebarWidth
+             item.maximumThickness = maximumSidebarWidth
+             return item
+         }
+     }
+    \u{20}
+     func makeContentSplitViewController(store: TermioStore) -> NSSplitViewController {
+         let split = ContentSplit(store: store)
+         let splitViewController = split.makeSplitViewController()
+         let sidebar = split.makeSidebarItem(SidebarViewController(store: store))
          sidebar.minimumThickness = 220
     -    window.styleMask.insert(.fullSizeContentView)
     +    sidebar.titlebarSeparatorStyle = .automatic
     +    window.titlebarAppearsTransparent = true
     +    window.styleMask.insert(.fullSizeContentView)
          splitViewController.addSplitViewItem(sidebar)
-
-    @@ -88,6 +90,12 @@ func applyTheme(_ theme: TerminalTheme) {
+         splitViewController.addSplitViewItem(NSSplitViewItem(viewController: terminalVC))
+         return splitViewController
+     }
+    \u{20}
+     func applyTheme(_ theme: TerminalTheme, to window: NSWindow) {
          controller.setTheme(theme)
-    +    // Resolve the dynamic color statically: fullscreen windows on
-    +    // macOS 26 do not re-evaluate NSColor appearance providers.
+    +    // Resolve the dynamic color statically: fullscreen windows on macOS 26
+    +    // do not re-evaluate an NSColor's appearance provider.
     +    let resolved = theme.background.resolvedColor(for: window)
     +    window.backgroundColor = resolved
          inspector.refresh()
@@ -282,16 +340,54 @@ extension Notification.Name {
 
 // MARK: - Companion link state
 
-/// The app-wide view of the single Mac roster link. The sidebar owns the
-/// socket and keeps `state` current; other screens (the Connectivity settings
-/// page, the sidebar's presence dot) observe `stateDidChange` and read it.
+/// One Mac this phone has paired with — the Slack-workspace model: several
+/// stay paired, one is active at a time. `id` is the Mac's stable `macID`
+/// from the roster; until the first roster names it (a fresh pairing, or an
+/// older Mac that never will) it holds a locally minted placeholder that
+/// `CompanionLink.adoptIdentity` replaces in place.
+struct PairedMac: Codable, Equatable {
+    var id: String
+    var name: String
+    /// ws(s)://host:port, with the pairing token held separately in `token`.
+    var address: String
+    var token: String?
+
+    /// The URL the socket dials: the address with the token riding the `t`
+    /// query param — the shape the Mac's QR encodes and `CompanionClient`
+    /// reads the token back out of.
+    var connectURL: URL? {
+        guard var components = URLComponents(string: address) else { return nil }
+        if let token {
+            var items = components.queryItems ?? []
+            items.append(URLQueryItem(name: "t", value: token))
+            components.queryItems = items
+        }
+        return components.url
+    }
+
+    /// "studio.local:8787" — the row caption; scheme is noise and the token
+    /// is a secret.
+    var displayAddress: String {
+        guard let url = URL(string: address), let host = url.host else { return address }
+        let port = url.port.map { ":\($0)" } ?? ""
+        return host + port
+    }
+}
+
+/// The app-wide view of the Mac roster link: the paired-Mac list, which one
+/// is active, and the active link's live state. The sidebar owns the socket
+/// and keeps `state` current; other screens (the Devices settings page)
+/// observe the notifications and read back.
 enum CompanionLink {
-    enum State {
+    enum State: Equatable {
         /// No Mac address saved.
         case unpaired
         /// Paired, but the socket is down — connecting or in backoff retry.
         case connecting
         case connected
+        /// The Mac answered but refused this pairing. The reason is rendered by
+        /// the existing link-status surfaces so reconnecting cannot hide it.
+        case failed(String)
     }
 
     static var state: State = .unpaired {
@@ -302,15 +398,172 @@ enum CompanionLink {
     }
 
     static let stateDidChange = Notification.Name("CompanionLinkStateDidChange")
-    /// Posted when a screen other than the sidebar changes the pairing (the
-    /// Connectivity page's connect/forget); the sidebar reacts by reconnecting
-    /// to `savedURL` or tearing the link down.
+    /// Posted when the active pairing changes (a new pairing, a switch, a
+    /// forget); the socket's owner reacts by reconnecting to `savedURL` or
+    /// tearing the link down.
     static let pairingDidChange = Notification.Name("CompanionPairingDidChange")
+    /// Posted when the paired-Mac list or the active choice changes for any
+    /// reason (including an identity adoption that only renames an entry) —
+    /// the Devices page reloads on it.
+    static let macsDidChange = Notification.Name("CompanionMacsDidChange")
 
-    static let defaultsKey = "companion.rosterURL"
+    private static let macsKey = "companion.pairedMacs"
+    private static let activeKey = "companion.activeMacID"
+    /// The pre-multi-Mac single URL (token embedded as `?t=`); folded into
+    /// `pairedMacs` on first read so an update keeps its pairing.
+    private static let legacyURLKey = "companion.rosterURL"
 
-    static var savedURL: URL? {
-        UserDefaults.standard.string(forKey: defaultsKey).flatMap(URL.init(string:))
+    static var pairedMacs: [PairedMac] {
+        migrateIfNeeded()
+        guard let data = UserDefaults.standard.data(forKey: macsKey),
+              let macs = try? JSONDecoder().decode([PairedMac].self, from: data)
+        else { return [] }
+        return macs
+    }
+
+    static var activeMacID: String? {
+        migrateIfNeeded()
+        return UserDefaults.standard.string(forKey: activeKey)
+    }
+
+    /// The Mac the app talks to. A dangling or missing active id falls back
+    /// to the first entry so a paired phone never strands itself.
+    static var activeMac: PairedMac? {
+        let macs = pairedMacs
+        guard let id = activeMacID, let match = macs.first(where: { $0.id == id }) else {
+            return macs.first
+        }
+        return match
+    }
+
+    /// The active Mac's dial URL — nil when nothing is paired.
+    static var savedURL: URL? { activeMac?.connectURL }
+
+    /// A scanned QR or typed address. When the exact address+token is already
+    /// on the list this just switches to that entry; otherwise it adds a
+    /// placeholder entry the first roster will name — and if that roster
+    /// reveals an already-known Mac (a re-scan after a tunnel restart),
+    /// `adoptIdentity` folds the fresh address into the known entry instead
+    /// of keeping a duplicate. Returns false for an unparseable address.
+    @discardableResult
+    static func pair(rawAddress: String) -> Bool {
+        guard let url = normalize(rawAddress) else { return false }
+        let token = token(of: url)
+        let address = strippedAddress(of: url)
+        var macs = pairedMacs
+        if let existing = macs.first(where: { $0.address == address && $0.token == token }) {
+            setActive(existing.id)
+            return true
+        }
+        let mac = PairedMac(
+            id: "local-\(UUID().uuidString)",
+            name: url.host ?? "Mac",
+            address: address,
+            token: token
+        )
+        macs.append(mac)
+        save(macs)
+        setActive(mac.id)
+        return true
+    }
+
+    /// The active connection's roster named its Mac. Adopt the identity into
+    /// the active entry — or, when that `macID` is already on the list under
+    /// another entry (a re-scan of a known Mac through a placeholder), update
+    /// the known entry's address/token in place and drop the placeholder.
+    /// Never posts `pairingDidChange`: the socket is already on the right Mac.
+    static func adoptIdentity(macID: String, name: String?) {
+        var macs = pairedMacs
+        guard let activeID = activeMac?.id,
+              let activeIndex = macs.firstIndex(where: { $0.id == activeID })
+        else { return }
+        if let knownIndex = macs.firstIndex(where: { $0.id == macID }), knownIndex != activeIndex {
+            macs[knownIndex].address = macs[activeIndex].address
+            macs[knownIndex].token = macs[activeIndex].token
+            if let name { macs[knownIndex].name = name }
+            macs.remove(at: activeIndex)
+            save(macs)
+            UserDefaults.standard.set(macID, forKey: activeKey)
+            NotificationCenter.default.post(name: macsDidChange, object: nil)
+            return
+        }
+        var entry = macs[activeIndex]
+        var changed = false
+        if entry.id != macID {
+            entry.id = macID
+            changed = true
+        }
+        if let name, entry.name != name {
+            entry.name = name
+            changed = true
+        }
+        guard changed else { return }
+        macs[activeIndex] = entry
+        save(macs)
+        UserDefaults.standard.set(macID, forKey: activeKey)
+        NotificationCenter.default.post(name: macsDidChange, object: nil)
+    }
+
+    /// Switch the active Mac — the tap on a row in the Devices page. The socket's
+    /// owner tears down and redials on `pairingDidChange`.
+    static func switchTo(_ id: String) {
+        guard id != activeMac?.id, pairedMacs.contains(where: { $0.id == id }) else { return }
+        setActive(id)
+    }
+
+    /// Forget one Mac, leaving the others intact. Forgetting the active one
+    /// promotes the next entry (or lands unpaired when it was the last).
+    static func forget(_ id: String) {
+        let wasActive = activeMac?.id == id
+        var macs = pairedMacs
+        macs.removeAll { $0.id == id }
+        save(macs)
+        if wasActive {
+            if let next = macs.first?.id {
+                UserDefaults.standard.set(next, forKey: activeKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: activeKey)
+            }
+            NotificationCenter.default.post(name: pairingDidChange, object: nil)
+        }
+        NotificationCenter.default.post(name: macsDidChange, object: nil)
+    }
+
+    private static func setActive(_ id: String) {
+        UserDefaults.standard.set(id, forKey: activeKey)
+        NotificationCenter.default.post(name: macsDidChange, object: nil)
+        NotificationCenter.default.post(name: pairingDidChange, object: nil)
+    }
+
+    private static func save(_ macs: [PairedMac]) {
+        guard let data = try? JSONEncoder().encode(macs) else { return }
+        UserDefaults.standard.set(data, forKey: macsKey)
+    }
+
+    private static func migrateIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard let raw = defaults.string(forKey: legacyURLKey) else { return }
+        defaults.removeObject(forKey: legacyURLKey)
+        guard defaults.data(forKey: macsKey) == nil, let url = URL(string: raw) else { return }
+        let mac = PairedMac(
+            id: "local-\(UUID().uuidString)",
+            name: url.host ?? "Mac",
+            address: strippedAddress(of: url),
+            token: token(of: url)
+        )
+        save([mac])
+        defaults.set(mac.id, forKey: activeKey)
+    }
+
+    /// The URL minus its `t` query param — what `PairedMac.address` stores,
+    /// so the same Mac scanned twice compares equal regardless of token.
+    private static func strippedAddress(of url: URL) -> String {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url.absoluteString
+        }
+        let remaining = (components.queryItems ?? []).filter { $0.name != "t" }
+        components.queryItems = remaining.isEmpty ? nil : remaining
+        return components.url?.absoluteString ?? url.absoluteString
     }
 
     /// Bare-host shorthand: "studio.local" → ws://studio.local:8787. Tunnel

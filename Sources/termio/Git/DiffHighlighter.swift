@@ -3,6 +3,18 @@ import Foundation
 
 // MARK: - Diff syntax coloring
 
+// NSFont is documented immutable ("Font objects are immutable, so they can be
+// shared by threads"); the SDK just hasn't marked it Sendable. Blessing it lets
+// the resolved font cross into this actor and live in `static let` caches.
+extension NSFont: @retroactive @unchecked Sendable {}
+
+/// The colored lines handed off the actor, keyed by row id. @unchecked: the
+/// values are immutable `attributedSubstring` copies built for this one call;
+/// the actor keeps no reference to them once they are returned.
+struct StyledLines: @unchecked Sendable {
+    let byRow: [Int: NSAttributedString]
+}
+
 /// One reusable Highlightr behind an actor. Building its JavaScriptCore context and
 /// parsing highlight.min.js costs on the order of 100 ms — far too much to pay per
 /// file switch — and the context is not safe to share across concurrent tasks. The
@@ -22,12 +34,14 @@ actor DiffHighlighter {
     /// attributed lines by row id, used directly by the TextKit pane — the theme's
     /// background never carries over; the wash and emphasis layers own that.
     func styledLines(newSide: [DiffRow], oldSide: [DiffRow], language: String,
-                     theme: String, font: NSFont) -> [Int: NSAttributedString] {
-        guard let highlightr = prepared(theme: theme, font: font) else { return [:] }
+                     theme: String, font: NSFont) -> StyledLines {
+        guard let highlightr = prepared(theme: theme, font: font) else {
+            return StyledLines(byRow: [:])
+        }
         var result: [Int: NSAttributedString] = [:]
         apply(newSide, keeping: [.context, .addition], highlightr, language, into: &result)
         apply(oldSide, keeping: [.deletion], highlightr, language, into: &result)
-        return result
+        return StyledLines(byRow: result)
     }
 
     private func prepared(theme: String, font: NSFont) -> Highlightr? {

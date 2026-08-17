@@ -23,6 +23,8 @@ struct IconBadge: View {
                 .foregroundStyle(.secondary)
         case .terminalGlyph:
             HugeIconView(icon: .terminal, size: 14, color: .secondary)
+        case .huge(let icon):
+            HugeIconView(icon: icon, size: 14, color: .secondary)
         case .vector(let logo):
             BrandLogoShape(logo: logo)
                 .fill(logo.tint, style: FillStyle(eoFill: logo.usesEvenOddFill))
@@ -67,11 +69,6 @@ struct SettingsLabel: View {
         self.titleFont = titleFont
     }
 
-    /// Convenience for the common SF Symbol case, mirroring `IconBadge(symbol:)`.
-    init(symbol: String, title: String, subtext: String? = nil, titleFont: Font = .headline) {
-        self.init(.symbol(symbol), title: title, subtext: subtext, titleFont: titleFont)
-    }
-
     /// Icon-less row, for a nested sub-option that hangs under an icon-led row.
     init(title: String, subtext: String? = nil, titleFont: Font = .body) {
         self.icon = nil
@@ -96,6 +93,118 @@ struct SettingsLabel: View {
                 }
             }
         }
+    }
+}
+
+/// The result of an install button, shown beside it as one caption line.
+///
+/// Installing writes outside the app — a PATH symlink, an agent's config file, a
+/// user-level instruction file — and none of that shows up in the window, so a
+/// click that worked and one that quietly failed look identical. A success fades
+/// on its own once it has been read; a failure stays put, because it names
+/// something the user has to deal with.
+struct InstallFeedback: Equatable {
+    enum Kind { case success, failure }
+    let kind: Kind
+    let message: String
+
+    static func success(_ message: String) -> InstallFeedback {
+        InstallFeedback(kind: .success, message: message)
+    }
+
+    static func failure(_ message: String) -> InstallFeedback {
+        InstallFeedback(kind: .failure, message: message)
+    }
+
+    /// Turns an installer's per-target result into that one line. The targets are
+    /// the point: "Reinstall hooks" writes into several agents' config files the
+    /// settings pane never otherwise names, so naming them is what makes the
+    /// confirmation worth reading. A partial install reports as a failure even
+    /// though something landed — the part that didn't is the part to act on.
+    static func summarizing(
+        _ outcome: InstallOutcome, headline: String, unit: String
+    ) -> InstallFeedback {
+        let installed = InstallOutcome.list(outcome.succeeded, unit: unit)
+        let missed = InstallOutcome.list(outcome.failed, unit: unit)
+        if outcome.isEmpty { return .failure(localized("Nothing to install.")) }
+        if outcome.failed.isEmpty { return .success(localized("\(headline) — \(installed).")) }
+        if outcome.succeeded.isEmpty { return .failure(localized("Couldn’t update \(missed).")) }
+        return .failure(localized("\(headline) — \(installed). Couldn’t update \(missed)."))
+    }
+}
+
+/// The current message plus the click that produced it. The counter is what makes
+/// a *repeat* click honest: keyed on the message alone, pressing the button again
+/// inside the dismissal window would inherit the first click's timer and could
+/// clear the line a moment later — the button reading as if it did nothing, which
+/// is the exact problem this feedback exists to fix.
+struct InstallFeedbackState: Equatable {
+    private(set) var attempt = 0
+    private(set) var feedback: InstallFeedback?
+
+    mutating func show(_ feedback: InstallFeedback) {
+        attempt += 1
+        self.feedback = feedback
+    }
+
+    mutating func clear() {
+        feedback = nil
+    }
+}
+
+/// The message itself: a status glyph and one caption line, sized to sit under or
+/// beside a settings control without competing with it.
+struct InstallFeedbackLabel: View {
+    let feedback: InstallFeedback
+
+    var body: some View {
+        HStack(spacing: 5) {
+            HugeIconView(
+                icon: feedback.kind == .success ? .checkCircle : .infoCircle,
+                size: 12,
+                color: feedback.kind == .success ? .green : .orange)
+            Text(feedback.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        // A cross-fade rather than a slide: the reduced-motion-safe form, so this
+        // needs no separate accessibility path.
+        .transition(.opacity)
+    }
+}
+
+extension View {
+    /// Clears a success message a few seconds after it appears — long enough to
+    /// read, short enough that a stale "Installed" never sits next to a button the
+    /// user is about to press again. Failures stay.
+    func autoDismissing(_ state: Binding<InstallFeedbackState>) -> some View {
+        task(id: state.wrappedValue) {
+            guard state.wrappedValue.feedback?.kind == .success else { return }
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            withAnimation { state.wrappedValue.clear() }
+        }
+    }
+}
+
+/// A settings action that writes outside the app, with its result shown next to
+/// the button: the action performs the install and hands back the line to display.
+struct InstallButtonRow: View {
+    let title: String
+    let action: () -> InstallFeedback
+
+    @State private var state = InstallFeedbackState()
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(title) { withAnimation { state.show(action()) } }
+            if let feedback = state.feedback {
+                InstallFeedbackLabel(feedback: feedback)
+            }
+            Spacer(minLength: 0)
+        }
+        .autoDismissing($state)
     }
 }
 
@@ -140,6 +249,49 @@ enum InstalledFonts {
             guard let font = NSFont(name: family, size: 12) else { return false }
             return font.isFixedPitch
         }.sorted()
+    }
+
+    /// Dual-width CJK monospace faces users commonly install, in preference order —
+    /// each draws hanzi at exactly two terminal cells, so falling back to one keeps
+    /// weight and style consistent with the Latin face.
+    private static let cjkFallbackCandidates = [
+        "Sarasa Term SC", "Sarasa Mono SC", "Sarasa Fixed SC",
+        "Maple Mono NF CN", "Maple Mono CN",
+        "LXGW WenKai Mono",
+        "Noto Sans Mono CJK SC",
+    ]
+
+    /// The first installed candidate, probed once per process — fonts installed mid-run are
+    /// deliberately not tracked (a relaunch picks them up).
+    @MainActor private static let installedCJKCandidate: String? =
+        cjkFallbackCandidates.first { NSFont(name: $0, size: 12) != nil }
+
+    /// Whether a family can draw hanzi, memoized per process: `coveredCharacterSet` allocates
+    /// a full coverage bitmap on every call, and the caller sits on the re-style path that
+    /// runs once per open surface on every settings change.
+    @MainActor private static var hanCoverage: [String: Bool] = [:]
+
+    /// The first installed CJK-capable face to append to the terminal's font chain, or
+    /// `nil` when the chain already covers CJK (checked against U+4E00) or none of the known
+    /// candidates is installed. Silent by design: no setting, just a better fallback than the
+    /// system's proportional PingFang when the user has a purpose-built face on disk.
+    @MainActor static func cjkMonospaceFallback(existingChain: [String]) -> String? {
+        guard let han = Unicode.Scalar(0x4E00) else { return nil }
+        for family in existingChain where !family.isEmpty {
+            let covers: Bool
+            if let cached = hanCoverage[family] {
+                covers = cached
+            } else {
+                covers = NSFont(name: family, size: 12)
+                    .map { ($0.coveredCharacterSet as CharacterSet).contains(han) } ?? false
+                hanCoverage[family] = covers
+            }
+            if covers { return nil }
+        }
+        guard let candidate = installedCJKCandidate, !existingChain.contains(candidate) else {
+            return nil
+        }
+        return candidate
     }
 }
 
@@ -225,10 +377,10 @@ struct FontFamilyField: View {
                     Text(name).tag(name)
                 }
                 Divider()
-                Text("Custom…").tag(Self.customTag)
+                Text(localized("Custom…")).tag(Self.customTag)
             }
             if showingCustomField {
-                TextField("Font name", text: $family, prompt: Text("e.g. JetBrains Mono"))
+                TextField(localized("Font name"), text: $family, prompt: Text(localized("e.g. JetBrains Mono")))
                     .textFieldStyle(.roundedBorder)
                     .focused($customFieldFocused)
                     .padding(.top, 4)
@@ -240,7 +392,7 @@ struct FontFamilyField: View {
                 .truncationMode(.tail)
                 .foregroundStyle(preview.isFallback ? .tertiary : .secondary)
             if preview.isFallback {
-                Text("“\(family)” isn’t installed — showing the system default.")
+                Text(localized("“\(family)” isn’t installed — showing the system default."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

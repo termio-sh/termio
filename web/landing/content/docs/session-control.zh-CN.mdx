@@ -1,0 +1,247 @@
+---
+title: 会话控制与命令行
+description: Termio 的编排 API——让 Agent 汇报自己在做什么的状态 hooks，以及让你（或另一个 Agent）从 shell 里派生、驱动和监督会话的 termio sessions 命令行。
+x-i18n:
+  source_path: session-control.mdx
+  source_hash: 03434b91dddcb3121bcd9161e58d8d47b6447d40cd7f0f36c73b0f58407f376c
+  generated_at: 2026-08-16
+---
+
+你在侧栏看到的实时状态背后，是两个相关的可选功能：让 Agent 汇报自己在做什么的**状态
+hooks**，以及让你——或另一个 Agent——从 shell 驱动会话的 **`termio` 命令行工具**。用
+Termio 并不需要它们；但它们让一支 Agent 队伍好带得多。
+
+## Agent 实时状态
+
+Termio 可以把小小的**状态 hooks** 装进你的 Agent 自己的配置文件里（Claude Code、Codex、
+Cursor 以及基于插件的那些）。当 Agent 开始工作、完成，或者停下来提问时，hook 会把这件事
+汇报给 Termio，于是侧栏的 [状态点](/zh-CN/docs/sidebar#status) 反映的就是实际发生的事，
+而不是从输出里猜出来的。
+
+在 **设置 ▸ 通用 ▸ Agent 实时状态** 里打开（Termio 也会在首次启动时问你一次）。关掉它会
+把这些 hooks 移除，同时不动你自己加的任何 hook。
+
+## 会话控制
+
+**设置 ▸ 通用 ▸ 会话控制** 打开下面这套 `termio sessions` 编排 API，并通过往每个 Agent 的
+技能文件夹（`~/.claude/skills`、`~/.codex/skills`）里安装一个 `termio` **Agent 技能**，
+来告诉你的 Agent 它存在。技能按需加载——Agent 平时只带着那一行描述，直到某个任务真的需要
+驱动同伴会话——而 Termio 每次启动都会重新确认它，因此应用更新会自动传播，手改过的内容也会
+自愈。关掉它会把技能移除。
+
+<DocsImage
+  src="/screenshots/docs/25-session-control-settings.png"
+  alt="Termio 通用设置开启命令行工具、会话控制、Agent 实时状态和任务通知"
+  width={1664}
+  height={1288}
+/>
+
+在跑 Termio 没有自动配置的 Agent？同一个技能发布在
+[termio.sh/skill.md](https://termio.sh/skill.md)，也可以直接从仓库安装：
+
+```bash
+npx skills add termio-sh/termio --skill termio
+```
+
+<Callout type="note">
+  这两个开关只在你的 Mac 上写文件——Agent 配置里的 hook 条目，以及技能文件。没有任何东西
+  离开你的机器：状态汇报和会话命令都通过本地套接字发给 Termio 应用，仅此而已。
+</Callout>
+
+## `termio` 命令行工具
+
+打开 **设置 ▸ 通用 ▸ 命令行工具**。它会把一个 `termio` 命令软链到你的 `PATH` 上
+（位于 `/usr/local/bin/termio`；macOS 会要求授权一次），关掉则移除这个链接。
+
+### 打开项目
+
+```bash
+termio                 # 把当前目录作为项目打开
+termio ~/code/myapp    # 打开指定文件夹
+```
+
+在任意目录里执行它，Termio 就会把那个文件夹带进侧栏——相当于 shell 版的 **打开项目**。
+
+### 编排模型
+
+`termio sessions` 这一族命令是 Termio 的编排 API：它让一个 Agent——或你自己的脚本——看见并
+指挥同一个项目里的同伴会话。在动词参考之前，先说下面一切都遵循的设计规则：
+
+- **默认按项目限定作用域。** 每条命令都会把调用方解析到它自己的项目（通过 PTY 携带的会话
+  id，或工作目录），并且只能看见和驱动那里的同伴——绝不触及无关项目里的会话。
+- **一个地址，一个目标。** 会话用创建时生成、由 `list` 打印的 `termio://session/<uuid>`
+  深链寻址（裸 id 或唯一的 id 前缀也行）。这个链接命名的是窗格，而不是它可变的内容，所以
+  一个拷走的地址能在会话被提升、降级或改名后继续有效——粘到任何地方也仍然自带说明。
+- **对话记录才是事实。** Agent 的*结果*从它自己的结构化对话记录里读（路径和行号区间由回复
+  交回给你），绝不从屏幕上刮。屏幕只在普通 `run` 终端里充当结果通道，因为它们没有对话记录。
+- **等待必须显式。** 除非你传 `--wait`，没有命令会阻塞；而 `--wait` 在任何地方都是同一个
+  意思：等这一轮的*结果*，在不可能有结果时快速失败，并用退出码区分结果类型。
+- **只发信号，绝不杀。** 监督平面只观察和汇报——`watch` 事件、`stalled` 警报——但绝不终止
+  会话，也不替它作答。要不要对信号采取行动，永远是监督者的决定。
+
+### 驱动会话
+
+任何命令加上 `--json` 都能得到机器可读的输出。
+
+| 命令 | 作用 |
+| --- | --- |
+| `termio sessions list` | 列出本项目里的会话及其实时状态。 |
+| `termio sessions watch` | 阻塞并按行流式输出每次状态变化——轮询 `list` 的推送式替代。 |
+| `termio sessions spawn "<prompt>"` | 用这段提示启动一个新的 Agent 会话；立即返回它的会话链接。 |
+| `termio sessions run "<command>"` | 启动一个新的普通终端会话并输入那条 shell 命令——开发服务器、跑测试——在一个可见窗格里，不涉及 LLM。 |
+| `termio sessions send <link> "<text>"` | 往已有会话里输入文本，并用一次真实的回车提交——可以是驱动它的提示，也可以是回答权限确认的选项（`"1"`、`"yes"`）。 |
+| `termio sessions read <link>` | 打印会话当前的屏幕内容而不聚焦它（`--lines N` 只取尾部）——这是 `run` 会话的结果通道。 |
+| `termio sessions close <link>` | 关闭一个或多个会话标签。 |
+| `termio sessions focus <link>` | 在应用里把某个会话带到最前。 |
+
+`<link>` 就是 `list` 打印的 `termio://session/<uuid>` 地址（裸 id、唯一 id 前缀或会话标题
+同样可用）。命令会自动限定在当前项目里，而 `termio sessions <verb> --help` 会为任意单个
+动词打印针对性的帮助。
+
+<DocsImage
+  src="/screenshots/docs/18-sessions-list.png"
+  alt="Termio 终端只运行 termio sessions list，七个会话的 Agent 类型和实时状态与侧栏一一对应"
+  width={2424}
+  height={1664}
+/>
+
+<Callout type="note">
+  `answer` 是 `send` 的已弃用别名（只对 Agent 会话有意义），而不带目标的 `send` 行为等同于
+  `spawn`——两者都保留是为了让现有脚本继续可用。请优先用 `spawn` 和 `send`。
+</Callout>
+
+### 派生而不等待
+
+`spawn` 在会话存在的那一刻就返回：回复里带着新会话的链接，而提示本身会在 Agent 启动完成后
+输入进去。加 `--agent <id>`（例如 `codex`、`grok`、`pi`）来选择 Agent；默认与调用方同类。
+
+### 运行普通命令
+
+队伍里并非什么都是 Agent。`run` 用一条 shell 命令启动一个*终端*会话——开发服务器、测试
+watcher、构建——放在一个你能看、也能接手的可见窗格里；而 `read` 可以在不聚焦的情况下打印
+任意会话当前的屏幕。普通命令没有对话记录，所以屏幕就是它的结果通道；Agent 的结果仍然走
+对话记录。
+
+```bash
+termio sessions run "pnpm test"
+termio sessions read 1a2b3c4d --lines 40
+```
+
+### 等待结果：`--wait`
+
+等待永远是显式的，而且在任何地方都是同一个意思：`--wait` 等的是这一轮的*结果*，而不是管道
+通了没有。`send` 和 `spawn` 都接受它（可选 `--timeout <ms>`，默认 300000，取值被限制在
+1000–600000）：
+
+```bash
+termio sessions send termio://session/ab12cd34-9f2e-4c31-b8d7-3e5a12c90f44 "run the tests" --wait
+termio sessions spawn "summarize the failing CI job" --wait --timeout 120000
+```
+
+调用会阻塞到这一轮尘埃落定——会话被观察到处于 `working`，随后离开该状态——回复里带着最终的
+`status`、`transcript` 路径，以及回应落在的 `cursor`..`cursor_end` 行号区间，于是调用方可以
+用自己的文件工具精确读到新增内容。两种特殊情况：
+
+- 停下来提问的会话会立即让等待短路：回复是 `status: "needs-you"`，屏幕上的问题放在
+  `prompt` 里——再用一次 `send` 回答它。
+- 没有状态信号的普通终端会退化为屏幕稳定判定：发送之后屏幕变了，然后不再变。
+
+在不可能有结果时，等待也会**快速失败而不是耗完超时**：
+
+- 提示在 5 秒内毫无反应——状态没动、屏幕没变——会以 `prompt_stalled` 报错：输入被吞了
+  （Agent 还在启动，或者程序忽略输入的文本），不会有任何一轮到来。
+- 等待中途关闭的会话报 `session_closed`；等待中途退回 shell 的 Agent 报 `agent_gone`。
+
+超时时回复依然会返回（`timed_out: true`），带上当前的状态；会话继续运行。退出码把三种结果
+分开，脚本无需解析即可分支：**0** 已落定，**1** 出错（含卡住/消失），**3** 超时。
+
+### 用 `watch` 做监督
+
+`watch` 的设计目标是让一个 Agent 无需轮询就能监督整支队伍：
+
+- **接入时先给快照。** 它首先为每个会话打印一行*当前*状态（在 `--json` 里标记为
+  `"snapshot":true`），这样迟到接入的监督者也能得知某个会话已经在等输入。用 `--no-snapshot`
+  可以跳过。
+- **默认已过滤。** 实时事件默认只包含监督者会采取行动的两种状态，`done` 和 `needs-you`；
+  用 `--state working,idle,done,needs-you` 放宽。
+- **卡住警报，需显式开启。** `--state stalled` 为无人照看的失控情形加上一个监督平面信号：
+  一个仍处于 `working`、但**20 分钟以上没有仓库改动、对话记录几乎不增长**的会话。持续的
+  输出——比如一个不断打日志的长构建——会抑制它。事件在 `evidence` 里带上检测器的判断依据
+  （`"working 42m, no repo change, transcript +3 lines"`），每段安静期只触发一次，进展恢复
+  后重新武装。Termio 只发信号，绝不杀进程——会话真实状态仍是 `working`，侧栏也不受影响。
+  它不在默认过滤里。
+- **事件可直接行动。** `needs-you` 事件在 `prompt` 里带着屏幕上的问题；`done` 事件带着会话的
+  `transcript` 路径和 `cursor_end`——足够你去回答，或者去读结果，不必再多跑一趟。
+- **心跳。** 在 `--json` 模式下，应用会在安静 30 秒后写出 `{"heartbeat":true}`，这样安静的流
+  和死掉的流可以区分。
+- **退出码。** Ctrl-C 之后是 `0`（监督的正常结束），流从应用侧关闭时是 `2`——「我选择停止」
+  和「Termio 不见了」是两种不同的结果。
+
+### 被派生的会话知道谁派生了它
+
+当一个 Termio 会话派生另一个时，送达的提示会以一小段来源说明开头：它写明调用方的链接，并且
+只允许一条回传通道——任务中途的一个问题，或一行完成提示，通过
+`termio sessions send <caller-link> …` 发送。除此之外什么都不走这条路：没有对话，也不能把
+任务反向委派回去。结果仍然以对话记录为事实——监督者去读工人的对话记录，`watch` 作为兜底。
+从普通 shell（不在任何 Termio 会话里）发起的 `spawn` 不会带这段说明。
+
+### 大声失败
+
+这个命令行是为信任退出码、而不是信任散文的调用方设计的。每条一次性命令在出错或收到空回复时
+都以 `1` 退出，并在 15 秒的客户端超时后放弃，而不是在应用繁忙时一直挂着（可用
+`TERMIO_CLI_TIMEOUT` 环境变量覆盖；带 `--wait` 的调用会自动放宽客户端超时，让它活得比服务端
+的等待更久）。
+
+## JSON 契约
+
+Agent 是针对 `--json` 输出编程的，所以它的结构是被固定下来的，而不是靠逆向猜出来的。每个
+JSON 回复都带 `"schema_version": 1`；在同一个版本内字段只会*新增*，绝不改名或删除。未知的
+可选字段会被省略（绝不写成 `""` 或 `null`）。
+
+任何动词上的任何错误都只有一种结构——并且退出码非零：
+
+```json
+{"ok": false, "error": "<code>", "message": "<human-readable next step>", "schema_version": 1}
+```
+
+稳定的错误码：`disabled`、`no_scope`、`bad_op`、`bad_request`、`no_text`、`no_target`、
+`not_found`、`ambiguous`、`wrong_agent`、`bad_agent`、`no_agent`、`start_failed`、
+`not_live`——以及仅在 `--wait` 上出现的 `prompt_stalled`、`session_closed` 和 `agent_gone`。
+
+成功回复，按动词分（下表为简洁起见省略 `schema_version` 和 `"ok": true`）：
+
+| 动词 | 回复字段 |
+| --- | --- |
+| `list` | `project`、`sessions: [{link, id, title, agent, status, description, transcript?}]` —— `link` 是规范地址，`id` 是它 8 个字符的短形式 |
+| `spawn` / `run` | `target`、`title`、`created: true`、`queued: true` —— 载荷仍在送达途中 |
+| `send` | `target`、`title`、`transcript?`、`cursor?` —— 从 `cursor` 往后读回应 |
+| `read` | `target`、`title`、`screen` —— 当前视口，右侧已裁空白，末尾空行已去掉 |
+| `send`/`spawn`/`run` 加 `--wait` | `target`、`title`、`status`、`timed_out`、`created?`、`transcript?`、`cursor?`、`cursor_end?`、`prompt?` |
+| `close` | `closed`、`title` |
+| `focus` | `focused` |
+
+两个等待型动词共用同一种回复结构（`--wait` 在任何地方都是同一个意思）：最终的 `status`，以及
+承载回应的对话记录行号区间 `cursor`..`cursor_end`。`prompt` 只在 `needs-you` 结果里出现——
+也就是会话正显示在屏幕上的那个问题。
+
+`watch` 流式输出以换行分隔的 JSON 事件，而不是单个回复：
+
+```json
+{"schema_version": 1, "link": "termio://session/ab12cd34-9f2e-4c31-b8d7-3e5a12c90f44",
+ "status": "done", "title": "…", "cwd": "…", "snapshot": true, "prompt": "…",
+ "transcript": "…", "cursor_end": 42}
+```
+
+`cwd` 在 shell 汇报出来之前会被省略；`snapshot` 标记接入时的名册行；`prompt` 随 `needs-you`
+事件出现，`transcript` 与 `cursor_end` 随 `done` 事件出现（与等待回复中完全一致），而
+`evidence` 随 `stalled` 事件出现——那是卡住检测器的判断依据，例如
+`"working 42m, no repo change, transcript +3 lines"`。`stalled` 只出现在 watch 流里，绝不会
+作为某个会话在 `list` 或等待回复中的 `status`。安静 30 秒后应用会写出
+`{"heartbeat": true}`。
+
+<Callout type="tip">
+  正是这套东西让一个 Agent 能把活交给另一个——在同伴会话里 `spawn` 一个任务，然后 `watch`
+  （或轮询 `list`）直到它汇报 **完成**，再去读结果。同时盯着好几个时，
+  `termio sessions watch` 会在其中任何一个变成 **完成** 或 **需要你** 的那一刻打印出它的
+  链接——一个 Agent 监督一支队伍，全都在你自己的机器上。
+</Callout>

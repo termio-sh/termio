@@ -4,12 +4,15 @@ import Foundation
 extension TermioStore {
     /// Adds a session to a project, optionally running in one of its linked
     /// worktree folders while remaining in the project's flat session roster.
+    @discardableResult
     func addSession(
         to projectID: Project.ID,
         agent: AgentPreset = .terminal,
-        worktreePath: String? = nil
-    ) {
-        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        worktreePath: String? = nil,
+        spawnDirectory: String? = nil,
+        takeFocus: Bool = true
+    ) -> Session.ID? {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return nil }
         let project = projects[index]
         let terminalCount = project.sessions.filter { $0.agent == .terminal }.count
         let title = agent == .terminal
@@ -17,8 +20,61 @@ extension TermioStore {
             : agent.displayName
         var session = Session(title: title, agent: agent)
         session.worktreePath = worktreePath
+        session.spawnDirectory = spawnDirectory
         projects[index].sessions.append(session)
-        selectedSessionID = session.id
+        if takeFocus {
+            selectedSessionID = session.id
+        } else {
+            activateInBackground(session.id)
+        }
+        return session.id
+    }
+
+    /// Whether `moved` may be drag-reordered next to `target`: both must live in the
+    /// same project and the same worktree bucket. Drives which rows light their
+    /// background as a legal drop target while a session is in flight, so a
+    /// cross-project or primary-over-worktree hover stays inert.
+    func canReorder(_ moved: Session.ID, relativeTo target: Session.ID) -> Bool {
+        guard moved != target,
+              let p = projects.firstIndex(where: { $0.sessions.contains { $0.id == moved } }),
+              let movedIndex = projects[p].sessions.firstIndex(where: { $0.id == moved }),
+              let targetIndex = projects[p].sessions.firstIndex(where: { $0.id == target })
+        else { return false }
+        return sessionBucketKey(projects[p].sessions[movedIndex], in: projects[p])
+            == sessionBucketKey(projects[p].sessions[targetIndex], in: projects[p])
+    }
+
+    /// Moves `moved` next to `target` within their shared bucket, committed on drop
+    /// (a cross-bucket move is a no-op via `canReorder`). The insert side follows the
+    /// drag direction: dropping onto a row *below* lands `moved` just under the target,
+    /// onto one *above* lands it just over — so the gesture reads as "move toward the
+    /// row you let go on". Persistence rides `projects.didSet` like every roster edit.
+    func reorderSession(_ moved: Session.ID, relativeTo target: Session.ID) {
+        guard canReorder(moved, relativeTo: target),
+              let p = projects.firstIndex(where: { $0.sessions.contains { $0.id == moved } }),
+              let movedIndex = projects[p].sessions.firstIndex(where: { $0.id == moved }),
+              let targetIndex = projects[p].sessions.firstIndex(where: { $0.id == target })
+        else { return }
+
+        let row = projects[p].sessions.remove(at: movedIndex)
+        // Re-find the target after the removal so its index stays valid regardless of
+        // which row came first; insert on the side `moved` was dragged from.
+        let newTarget = projects[p].sessions.firstIndex(where: { $0.id == target })
+            ?? projects[p].sessions.count - 1
+        let insertAt = movedIndex < targetIndex ? newTarget + 1 : newTarget
+        projects[p].sessions.insert(row, at: insertAt)
+        // A drop that lands between a group's rows would split its bracket in two;
+        // rows only join or leave a group through "Group with" / "Ungroup", so the
+        // run closes back up around the dropped row (see `gatherSplitRuns`).
+        gatherSplitRuns()
+    }
+
+    /// The sidebar bucket a session sits in: `nil` for the primary checkout (a `nil`
+    /// or project-root `worktreePath`), else the worktree path. Reorder works only
+    /// within one bucket, matching how `primarySessions` splits the tree.
+    private func sessionBucketKey(_ session: Session, in project: Project) -> String? {
+        if session.worktreePath == nil || session.worktreePath == project.path { return nil }
+        return session.worktreePath
     }
 
     /// Creates a fresh detached checkout and records its folder under the parent
@@ -45,7 +101,7 @@ extension TermioStore {
         do {
             try FileManager.default.createDirectory(at: worktreeRoot, withIntermediateDirectories: true)
         } catch {
-            presentWorktreeFailure(message: "Couldn't create the worktrees folder: \(error.localizedDescription)")
+            presentWorktreeFailure(message: localized("Couldn’t create the worktrees folder: \(error.localizedDescription)"))
             return
         }
         // Create the worktree on a fresh branch named after it, not detached. A
@@ -57,7 +113,7 @@ extension TermioStore {
         // the branch needs its own guard, since a branch can exist with no worktree.
         let branchName = uniqueBranchName(base: dirName, in: project.path)
         guard runGit(["worktree", "add", "-b", branchName, worktreePath, "HEAD"], in: project.path) != nil else {
-            presentWorktreeFailure(message: "git couldn't create a worktree for “\(project.name)”. Is it a git repository with at least one commit?")
+            presentWorktreeFailure(message: localized("git couldn’t create a worktree for “\(project.name)”. Is it a git repository with at least one commit?"))
             return
         }
 
@@ -90,15 +146,15 @@ extension TermioStore {
 
         guard let status = runGit(["status", "--porcelain"], in: worktree.path) else {
             presentWorktreeFailure(
-                title: "Couldn't inspect worktree",
-                message: "git couldn't check “\((worktree.path as NSString).lastPathComponent)” for changes, so it was not removed."
+                title: localized("Couldn’t inspect worktree"),
+                message: localized("git couldn’t check “\((worktree.path as NSString).lastPathComponent)” for changes, so it was not removed.")
             )
             return
         }
         guard status.isEmpty else {
             presentWorktreeFailure(
-                title: "Worktree has changes",
-                message: "Commit or discard the changes in “\((worktree.path as NSString).lastPathComponent)” before removing it."
+                title: localized("Worktree has changes"),
+                message: localized("Commit or discard the changes in “\((worktree.path as NSString).lastPathComponent)” before removing it.")
             )
             return
         }
@@ -109,8 +165,8 @@ extension TermioStore {
         let branch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree.path)
         guard runGit(["worktree", "remove", worktree.path], in: projects[projectIndex].path) != nil else {
             presentWorktreeFailure(
-                title: "Couldn't remove worktree",
-                message: "git couldn't remove “\((worktree.path as NSString).lastPathComponent)”."
+                title: localized("Couldn’t remove worktree"),
+                message: localized("git couldn’t remove “\((worktree.path as NSString).lastPathComponent)”.")
             )
             return
         }
@@ -131,8 +187,8 @@ extension TermioStore {
         }
         if !pruneSucceeded {
             presentWorktreeFailure(
-                title: "Worktree removed",
-                message: "The folder was removed, but git couldn't prune its stale worktree metadata."
+                title: localized("Worktree removed"),
+                message: localized("The folder was removed, but git couldn’t prune its stale worktree metadata.")
             )
         }
     }
@@ -173,10 +229,10 @@ extension TermioStore {
     /// or emptied. Mirrors the file-browser rename prompt so both feel the same.
     private func promptForWorktreeName(defaultName: String) -> String? {
         let alert = NSAlert()
-        alert.messageText = "New Worktree"
-        alert.informativeText = "Name the worktree. A new branch of this name is created from HEAD and nested under this project."
-        alert.addButton(withTitle: "Create")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("New Worktree")
+        alert.informativeText = localized("Name the worktree. A new branch of this name is created from HEAD and nested under this project.")
+        alert.addButton(withTitle: localized("Create"))
+        alert.addButton(withTitle: localized("Cancel"))
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.stringValue = defaultName
         alert.accessoryView = field
@@ -213,7 +269,7 @@ extension TermioStore {
     /// Reports a worktree lifecycle failure instead of leaving an operation's
     /// partial or refused outcome silent.
     private func presentWorktreeFailure(
-        title: String = "Couldn't create worktree session",
+        title: String = localized("Couldn’t create worktree session"),
         message: String
     ) {
         let alert = NSAlert()
@@ -230,7 +286,56 @@ extension TermioStore {
     /// another `Terminal N` row there and selects it (the same grow-in-place a
     /// project's own header buttons do). The section persists like any project, so
     /// it reappears on relaunch (the shells themselves restart fresh).
-    func addScratchTerminal() { addScratchSession(agent: .terminal) }
+    func addScratchTerminal() {
+        // On the device you are looking at, not on whichever machine happens to
+        // run the app. Without this the verb silently means "on this Mac" while
+        // the sidebar shows another device's world — the same class of mismatch
+        // that let an environment variable turn local terminals remote.
+        if let alias = currentDevice.alias {
+            addRemoteTerminal(host: alias)
+            return
+        }
+        addScratchSession(agent: .terminal)
+    }
+
+    /// Opens a terminal where the user already is — New Terminal (⌘T). The shell
+    /// starts in the focused session's working directory and the row lands beside it:
+    /// in the same project and worktree bucket for a real project, in the Terminals
+    /// section for a loose shell or a scratch chat (a shell has no business in the
+    /// Chats funnel).
+    ///
+    /// The directory is the cwd the session reported over OSC 7. A shell without
+    /// integration never reports one, and an SSH terminal reports a path that exists
+    /// only on the remote host, so anything that isn't a local directory falls through
+    /// to the session's own anchor — and to `$HOME` with nothing focused, which is
+    /// what New Terminal at Home does on purpose.
+    func addTerminalHere() {
+        // "Here" is a directory on this Mac and does not exist on another
+        // machine, so on a remote device the verb degrades to that device's
+        // `$HOME` rather than pointing at a path that isn't there.
+        if let alias = currentDevice.alias {
+            addRemoteTerminal(host: alias)
+            return
+        }
+        guard let id = selectedSessionID,
+              let project = project(for: id),
+              let session = session(id) else {
+            addScratchTerminal()
+            return
+        }
+        let reported = Self.existingDirectory(
+            workingDirectory(for: id) ?? session.lastWorkingDirectory)
+        let directory = reported
+            ?? session.spawnDirectory
+            ?? session.worktreePath
+            ?? project.path
+        guard project.kind == .folder else {
+            addScratchSession(agent: .terminal, spawnDirectory: directory)
+            return
+        }
+        addSession(to: project.id, agent: .terminal,
+                   worktreePath: session.worktreePath, spawnDirectory: directory)
+    }
 
     /// The agent a bare **New Chat** launches, resolved in priority order:
     /// 1. the agent the user pinned in Settings ▸ Agents (`defaultChatAgentID`),
@@ -273,7 +378,11 @@ extension TermioStore {
     /// `.terminals` funnel for shells, the `.chats` funnel for agents — so a second
     /// click just grows another row there and selects it, rather than piling up
     /// duplicate sections.
-    func addScratchSession(agent: AgentPreset = .terminal) {
+    ///
+    /// `spawnDirectory` overrides where a scratch *terminal* starts, so ⌘T from a
+    /// loose shell opens its sibling at the same cwd. Agents ignore it: being confined
+    /// to the scoped workspace is the point.
+    func addScratchSession(agent: AgentPreset = .terminal, spawnDirectory: String? = nil) {
         // Both funnels are matched by kind, not path: the `.terminals` container's
         // `path` is just the `$HOME` spawn fallback, and the single `.chats` container
         // gathers every agent (Claude, Codex, …) that spawns in the scratch workspace.
@@ -282,44 +391,73 @@ extension TermioStore {
         // action relaunches whatever you actually use (see `defaultChatAgent`).
         if agent != .terminal { settings.lastChatAgentID = agent.rawValue }
         let containerKind: ProjectKind = agent == .terminal ? .terminals : .chats
+        let seededDirectory = agent == .terminal ? spawnDirectory : nil
         if let existing = projects.first(where: { $0.kind == containerKind }) {
-            addSession(to: existing.id, agent: agent)
+            addSession(to: existing.id, agent: agent, spawnDirectory: seededDirectory)
             return
         }
         let title = agent == .terminal ? "Terminal 1" : agent.displayName
-        let session = Session(title: title, agent: agent)
+        var session = Session(title: title, agent: agent)
+        session.spawnDirectory = seededDirectory
         let project = Project(
             name: agent == .terminal ? "Terminals" : "Chats",
             path: path,
-            branch: currentBranch(in: path) ?? "—",
+            branch: "—",
             sessions: [session],
             kind: containerKind
         )
         projects.append(project)
         selectedSessionID = session.id
+        resolveBranchLabel(for: project.id, at: path)
     }
 
-    /// Opens an **SSH terminal** to `host` — a loose terminal that launches
-    /// `ssh <host>` instead of a local shell (see `Session.sshHost`). It gathers in
-    /// the same Terminals container as scratch shells (an SSH session isn't tied to a
-    /// local project either), titled by the host so the sidebar row reads `myserver`
-    /// rather than `Terminal N`. `host` is a `~/.ssh/config` alias or a bare
+    /// The `.host` container for `alias`, created on first use. One block per
+    /// machine, matched by `sshHost` rather than by name or path, so the container
+    /// survives a rename and two sessions on the same box always land together.
+    ///
+    /// `remoteRoot` records where on that box the sessions work; the first caller to
+    /// name a real directory wins (a `Clone to <device>…` knows the checkout path, a
+    /// bare terminal only knows `~`), so opening a shell later never demotes a host
+    /// that already points at a repo.
+    @discardableResult
+    func hostContainer(for alias: String, remoteRoot: String? = nil) -> Project.ID {
+        if let index = projects.firstIndex(where: { $0.sshHost == alias && $0.kind == .host }) {
+            if let remoteRoot, projects[index].path == "~" { projects[index].path = remoteRoot }
+            return projects[index].id
+        }
+        let project = Project(
+            name: alias,
+            // A remote root, never a local path — `localWorkspacePath(for:)` is what
+            // keeps this away from the local PTY's `chdir`.
+            path: remoteRoot ?? "~",
+            branch: "—",
+            sessions: [],
+            kind: .host,
+            sshHost: alias
+        )
+        projects.append(project)
+        return project.id
+    }
+
+    /// Opens an **SSH terminal** to `host` — a terminal that launches `ssh <host>`
+    /// in a local PTY instead of a local shell (see `Session.sshHost`). It gathers
+    /// under that machine's own `.host` container, so an `ssh` shell and a durable
+    /// termiod session on the same box sit in one block rather than scattering
+    /// among loose local terminals. `host` is a `~/.ssh/config` alias or a bare
     /// `user@host`.
     func addSSHSession(host: String) {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else { return }
-        var session = Session(title: host, agent: .terminal)
+        // Named for what it is, not for the box — the block header already says
+        // which machine. The distinction matters inside a host block: an "SSH Shell"
+        // dies with the connection, while the numbered rows beside it are durable
+        // termiod sessions that survive a detach.
+        var session = Session(title: "SSH Shell", agent: .terminal)
         session.sshHost = host
 
-        if let index = projects.firstIndex(where: { $0.kind == .terminals }) {
-            projects[index].sessions.append(session)
-        } else {
-            let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
-            projects.append(Project(
-                name: "Terminals", path: home, branch: "—",
-                sessions: [session], kind: .terminals
-            ))
-        }
+        let containerID = hostContainer(for: host)
+        guard let index = projects.firstIndex(where: { $0.id == containerID }) else { return }
+        projects[index].sessions.append(session)
         selectedSessionID = session.id
     }
 
@@ -329,14 +467,14 @@ extension TermioStore {
     /// isn't in the config still works. Empty entry or Cancel does nothing.
     func presentSSHConnectPanel() {
         let alert = NSAlert()
-        alert.messageText = "New SSH Connection"
-        alert.informativeText = "Enter a host from your ~/.ssh/config, or a user@host to connect to."
-        alert.addButton(withTitle: "Connect")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("New SSH Connection")
+        alert.informativeText = localized("Enter a host from your ~/.ssh/config, or a user@host to connect to.")
+        alert.addButton(withTitle: localized("Connect"))
+        alert.addButton(withTitle: localized("Cancel"))
 
         let combo = NSComboBox(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
         combo.completes = true
-        combo.addItems(withObjectValues: CompanionServer.parseSSHConfigHosts().map(\.alias))
+        combo.addItems(withObjectValues: SSHConfigFile.hosts().map(\.alias))
         alert.accessoryView = combo
         alert.window.initialFirstResponder = combo
 
@@ -447,8 +585,8 @@ extension TermioStore {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
-        panel.message = "Choose a project folder to open in termio."
+        panel.prompt = localized("Open")
+        panel.message = localized("Choose a project folder to open in Termio.")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         addProject(at: url)
     }
@@ -467,11 +605,12 @@ extension TermioStore {
         let project = Project(
             name: url.lastPathComponent,
             path: path,
-            branch: currentBranch(in: path) ?? "—",
+            branch: "—",
             sessions: [session]
         )
         projects.append(project)
         selectedSessionID = project.sessions.first?.id
+        resolveBranchLabel(for: project.id, at: path)
     }
 
     /// Removes a project from the sidebar: tears down every session's live surface
@@ -490,11 +629,8 @@ extension TermioStore {
             monitors[sessionID] = nil
             removeRuntime(for: sessionID)
             processSpawnedAt[sessionID] = nil
-            lastWorkingAt[sessionID] = nil
-            lastHookReportAt[sessionID] = nil
-            lastUserInputAt[sessionID] = nil
-            promotionStreak[sessionID] = nil
-            lastTitleActivity[sessionID] = nil
+            transcriptPaths[sessionID] = nil
+            clearActivityTracking(for: sessionID)
         }
         projects.remove(at: projectIndex)
 
@@ -522,9 +658,9 @@ extension TermioStore {
         let session = projects[projectIndex].sessions[sessionIndex]
 
         let alert = NSAlert()
-        alert.messageText = "Rename Session"
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("Rename Session")
+        alert.addButton(withTitle: localized("Rename"))
+        alert.addButton(withTitle: localized("Cancel"))
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.stringValue = displayTitle(for: session)
         alert.accessoryView = field
@@ -534,6 +670,42 @@ extension TermioStore {
         let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         projects[projectIndex].sessions[sessionIndex].title = name
+    }
+
+    /// The user-facing "Close Session": the same teardown as `closeSession`, but it
+    /// asks first in the one case that loses something with no other record — a plain
+    /// shell with a command running in front of it. Only the interactive entry points
+    /// (the sidebar row, the terminal's context menu) route through here — a session
+    /// whose process already exited, the `termio sessions close` CLI, and the phone's
+    /// stop button all closed deliberately and call `closeSession` directly.
+    func requestCloseSession(_ id: Session.ID) {
+        guard let session = session(id) else { return }
+        guard let reason = closeConfirmationReason(for: session) else {
+            closeSession(id)
+            return
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Close “\(displayTitle(for: session))”?"
+        alert.informativeText = reason
+        // Cancel first so it owns both Return and Escape; the destructive button
+        // takes a deliberate click (see the quit confirmation in `App.swift`).
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Close Session")
+        alert.buttons.last?.hasDestructiveAction = true
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        closeSession(id)
+    }
+
+    /// Why closing this session needs confirming, or `nil` when it doesn't. The only
+    /// case left is a plain shell with a command in front of it: that command exists
+    /// nowhere else, so closing loses it outright. Agent sessions never ask — their
+    /// PTY is alive for the whole life of the session, so confirming on a live PTY
+    /// taxed *every* close to protect a conversation the agent can resume anyway.
+    private func closeConfirmationReason(for session: Session) -> String? {
+        guard session.agent.isShell else { return nil }
+        guard let pty = ptyProcesses[session.id], pty.hasForegroundJob else { return nil }
+        return "A command is still running in this session. Closing it stops the command."
     }
 
     /// Closes a session: drops its cached surface (which tears down the PTY) and
@@ -548,15 +720,16 @@ extension TermioStore {
         projects[projectIndex].sessions.remove(at: sessionIndex)
         ptyProcesses[id]?.terminate()
         ptyProcesses[id] = nil
+        // Close Session is the destroy verb, so a termiod-backed session is
+        // killed in the daemon too — unlike quit/detach, which keeps it alive.
+        termiodLinks[id]?.killAndClose()
+        termiodLinks[id] = nil
         surfaces[id] = nil
         monitors[id] = nil
         removeRuntime(for: id)
         processSpawnedAt[id] = nil
-        lastWorkingAt[id] = nil
-        lastHookReportAt[id] = nil
-        lastUserInputAt[id] = nil
-        promotionStreak[id] = nil
-        lastTitleActivity[id] = nil
+        transcriptPaths[id] = nil
+        clearActivityTracking(for: id)
 
         // If the session held a split pane, collapse that pane; when it was also
         // the focused pane the prune moves the selection to its layout neighbor,
@@ -584,9 +757,23 @@ extension TermioStore {
         guard session(id) != nil else { return }
         ptyProcesses[id]?.terminate()
         ptyProcesses[id] = nil
+        // A respawn-in-place must not leave the old daemon-side process
+        // running under the same name, or the fresh surface would reattach to
+        // it instead of spawning the replacement.
+        termiodLinks[id]?.killAndClose()
+        termiodLinks[id] = nil
         surfaces[id] = nil
         monitors[id] = nil
         processSpawnedAt[id] = nil
+        // The dead child's status must not carry into the respawn: a leftover
+        // spinner would read as the new process already working (and with the
+        // trackers cleared below, the stale-working sweep — which only visits
+        // sessions present in `lastWorkingAt` — could never correct it).
+        setStatus(.idle, for: id)
+        setCurrentTool(nil, for: id)
+        clearActivityTracking(for: id)
+        // `transcriptPaths` deliberately survives: the respawn resumes the same
+        // conversation, so the Info pane's trace should keep pointing at it.
         // `surfaces` is a plain cache, not `@Published` — nothing re-renders on
         // its own, so poke observers; the pane then rebuilds via `surface(for:)`.
         objectWillChange.send()
@@ -603,20 +790,39 @@ extension TermioStore {
         relaunchSession(id)
     }
 
-    /// The checked-out branch of the git repository at `directory`, or `nil` when
-    /// it is not a repo (rendered as "—", matching the seed projects).
-    private func currentBranch(in directory: String) -> String? {
-        runGit(["rev-parse", "--abbrev-ref", "HEAD"], in: directory)
+    /// Fills in a just-created project's branch label off the main thread. Creation
+    /// seeds the label with "—" (the non-repo rendering) because resolving it means
+    /// spawning a `git rev-parse` subprocess and blocking on its exit — a visible
+    /// hitch to pay on the main thread just for sidebar chrome. The patch keys on
+    /// the project id, so a project closed before git answers is simply a no-op.
+    private func resolveBranchLabel(for projectID: Project.ID, at path: String) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let branch = Self.gitOutput(["rev-parse", "--abbrev-ref", "HEAD"], in: path),
+                  !branch.isEmpty else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      let index = self.projects.firstIndex(where: { $0.id == projectID })
+                else { return }
+                self.projects[index].branch = branch
+            }
+        }
     }
 
     /// Runs `git -C <directory> <arguments…>` synchronously, returning trimmed
     /// stdout on success or `nil` on a launch failure or non-zero exit. Callers
-    /// treat `nil` as "couldn't do it" and fall back rather than trapping.
+    /// treat `nil` as "couldn’t do it" and fall back rather than trapping.
     @discardableResult
     private func runGit(_ arguments: [String], in directory: String) -> String? {
+        Self.gitOutput(arguments, in: directory)
+    }
+
+    /// The blocking body behind `runGit`, isolation-free so background work (the
+    /// branch-label resolve) can call it without hopping through the main actor.
+    private nonisolated static func gitOutput(_ arguments: [String], in directory: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["-C", directory] + arguments
+        process.environment = GitEnvironment.optionalLocksDisabled
         let output = Pipe()
         process.standardOutput = output
         process.standardError = Pipe()

@@ -15,6 +15,7 @@
   },
   "icon": { "asset": "opencode-favicon" },
   "install": "https://opencode.ai",
+  "skills": { "dir": "~/.config/opencode/skills" },
   "hooks": {
     "type": "plugin",
     "dir": "~/.config/opencode/plugin",

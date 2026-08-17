@@ -1,0 +1,74 @@
+---
+title: 安装
+description: 下载 macOS 版 Termio，拖进「应用程序」，之后交给 Sparkle 自动更新——无需账号，也没有许可证密钥。
+x-i18n:
+  source_path: installation.mdx
+  source_hash: 50ca1991bff5daf950dc3fe6eed46f2765b1464163dd910e59d68252f430e62c
+  generated_at: 2026-08-16
+---
+
+Termio 用同一个下载包同时运行在 Apple 芯片和 Intel 的 Mac 上。安装就是普通的拖进「应用程序」——不用注册账号，
+也没有许可证密钥要填。
+
+<Callout type="note" title="开始之前">
+  Termio 需要 macOS 14 或更高版本，Apple 芯片和 Intel 的 Mac 都可以。它托管你已经
+  装好的 Agent 命令行工具，本身不打包它们。
+</Callout>
+
+## 下载并安装
+
+1. 从 [downloads.termio.sh](https://downloads.termio.sh/termio.dmg) 下载最新版本。
+   这个链接始终指向最新的、已公证的发布版本。
+2. 打开 `.dmg`，把 **Termio** 拖进 **应用程序** 文件夹。
+3. 从「应用程序」启动它。由于应用已通过 Apple 公证，打开时不会出现 Gatekeeper 警告。
+
+<DocsImage
+  src="/screenshots/docs/00-dmg-install.png"
+  alt="Termio 磁盘映像窗口，左侧是 Termio.app，右侧是「应用程序」文件夹，两者之间有拖放箭头"
+  width={1544}
+  height={1024}
+/>
+
+## 用 Homebrew 安装
+
+更喜欢命令行？Termio 提供 [Homebrew](https://brew.sh) cask：
+
+```sh
+brew install --cask termio-sh/tap/termio
+```
+
+装的是同一个已公证的版本。Termio 之后仍通过 Sparkle 自行更新，所以 `brew upgrade`
+不会动它，除非你加上 `--greedy`。
+
+## 保持最新
+
+Termio 通过 Sparkle 自行更新。它会定期向下载服务器询问是否有新版本，并提示你就地
+安装。这个检查不携带任何账号或设备标识——服务器只看到一个 IP 地址和被询问的版本号。
+
+你也可以随时从 **Termio ▸ 检查更新** 手动触发。
+
+## 自带 Agent
+
+Termio 不打包编程 Agent——它托管你 Mac 上已有的那些。装上你要用的命令行工具（例如
+`claude`、`codex` 或 `gemini`），确保它们在 `PATH` 上。Termio 会在登录 shell 里启动
+每一个，所以你 shell 配置里准备的一切都能用上。
+
+Agent 安装好之后，新建会话时它就会出现在可启动的选项里。
+
+## `termio` 命令（可选）
+
+Termio 附带一个小巧的命令行工具。打开 **设置 ▸ 通用**，开启 **命令行工具**，即可把
+`termio` 软链到你的 `PATH` 上。之后在任意目录执行 `termio` 就会把它作为项目打开，
+而 `termio sessions …` 让你的 Agent 彼此协作。这完全是可选的——参见
+[会话控制与命令行](/zh-CN/docs/session-control)。
+
+## 下一步
+
+<Cards>
+  <Card href="/zh-CN/docs/first-session" title="你的第一个会话">
+    打开项目，在真实终端里启动第一个 Agent。
+  </Card>
+  <Card href="/zh-CN/docs/agents" title="同时运行多个 Agent">
+    看看 Termio 开箱即认的都有哪些 Agent。
+  </Card>
+</Cards>

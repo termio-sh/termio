@@ -1,49 +1,81 @@
 ---
 title: Keyboard shortcuts
-description: A reference for Termio's default shortcuts — sessions, panes, navigation, and view — every one of them rebindable under Settings ▸ Keyboard.
+description: Every shortcut Termio ships, read straight from the app's own command catalog — and how to rebind any of them under Settings ▸ Keyboard.
 ---
 
-Termio is built to run from the keyboard. Here are the defaults, grouped by what
-they do. Every one is rebindable — see [Customizing](#customizing) below.
+Termio is built to run from the keyboard. The tables below are generated from the
+app's command catalog, so they list exactly what this version ships. Every command
+is rebindable — see [Customizing](#customizing).
 
-## Sessions
+## Sessions and projects
 
-| Action | Shortcut |
-| --- | --- |
-| New Terminal | `⌘T` |
-| New Chat | `⌘N` |
-| Open Project | `⌘O` |
-| Open Quickly (jump to session / project / file) | `⌘⇧O` |
-| Command Palette | `⌘⇧P` |
+<Keybindings category="File" />
+
+New Terminal opens the shell where you already are — the working directory of the
+focused session — and puts the new session beside it, in the same project. New
+Terminal at Home always starts at `~`; it ships unbound, so bind it under
+[Customizing](#customizing) if that is the one you reach for.
+
+Cycling follows the sidebar's visual order, so `⇧⌘]` moves to the next session as
+you see it listed, not in the order the sessions were created.
+
+<Keybindings category="Session" />
+
+## Finding things
+
+<Keybindings category="Navigation" />
+
+Both panels are fuzzy-matched. The Command Palette runs *actions*; Open Quickly
+jumps to *things* — sessions, projects, and files. See
+[Command palette & Open Quickly](/docs/navigation).
 
 ## Panes
 
-| Action | Shortcut |
-| --- | --- |
-| Split Right | `⌘D` |
-| Split Down | `⌘⇧D` |
-| Zoom pane (fill the window) | `⌘⇧↩` |
-| Close pane | `⌘W` |
-| Focus left / right / up / down | `⌘⌥←` · `⌘⌥→` · `⌘⌥↑` · `⌘⌥↓` |
+<Keybindings category="Panes" />
+
+Split Left and Split Up ship unbound, the way Ghostty ships them: the two
+directions people reach for constantly get the keys, and the mirrored pair stays a
+menu verb until you bind it yourself. Both are always available from the Command
+Palette and the pane's context menu.
+
+`⌘W` is **Ungroup** — it takes the focused pane out of the group and leaves the
+session running on its own. To end a session, use **Close Session** from the
+sidebar row's context menu.
+
+Panes can also be rearranged with the mouse: hover a pane's header, grab the
+handle that appears, and drop the pane on a neighbour. A highlight previews the
+drop — an edge half places the pane on that side, the center swaps the two.
+
+## Branches and worktrees
+
+Termio takes these two bindings from GitHub Desktop's Branch menu verbatim, where
+New Branch is `⇧⌘N`. Termio's branch-creation verb is the worktree.
+
+<Keybindings category="Branch" />
 
 ## View
 
-| Action | Shortcut |
-| --- | --- |
-| Increase font size | `⌘=` |
-| Decrease font size | `⌘-` |
-| Reset font size | `⌘0` |
-| Toggle project files (inspector) | `⌘⌥0` |
-| Settings | `⌘,` |
+<Keybindings category="Font" />
 
-The system shortcuts you'd expect also work as usual — `⌘C` / `⌘V` to copy and
-paste, `⌘A` to select all, `⌘Q` to quit.
+<Keybindings category="Interface" />
+
+<Keybindings category="Window" />
+
+The system shortcuts you'd expect work as usual — `⌘C` / `⌘V` to copy and paste,
+`⌘A` to select all, `⌘,` for Settings, `⌘Q` to quit.
 
 ## Customizing
 
 Open **Settings ▸ Keyboard** to rebind any command. The editor lists every action
-with its current binding and flags conflicts as you assign them. Your overrides are
-saved to:
+with its current binding and flags conflicts as you assign them. Your overrides
+are saved to:
+
+<DocsImage
+  src="/screenshots/docs/16-rebind-shortcut.png"
+  alt="Termio Keyboard settings filtered to Terminal with a shortcut conflict shown beside the edited binding"
+  width={1664}
+  height={1288}
+/>
 
 ```
 ~/.termio/keybindings.json
@@ -52,8 +84,12 @@ saved to:
 Only the shortcuts you change are written there — the defaults ship with the app,
 so the file stays small and easy to read.
 
+A binding must include `⌘`. Without it, the chord would collide with what the
+terminal itself needs: an agent's TUI expects `⌃C`, `⌥←`, and the rest to reach it
+untouched.
+
 <Callout type="tip">
   Not sure what a command is called? Open the [Command
-  Palette](/docs/navigation) (`⌘⇧P`) — it lists every action alongside its current
+  Palette](/docs/navigation) (`⇧⌘P`) — it lists every action alongside its current
   shortcut, so you can find and run things before you commit them to muscle memory.
 </Callout>

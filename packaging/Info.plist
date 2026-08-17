@@ -2,47 +2,56 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>
-    <string>Termio</string>
-    <key>CFBundleDisplayName</key>
-    <string>Termio</string>
-    <key>CFBundleExecutable</key>
-    <string>termio</string>
-    <key>CFBundleIdentifier</key>
-    <string>sh.termio.app</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.developer-tools</string>
-    <!-- The browser pane (BrowserPane.swift) points at dev servers, which speak
-         plain http on loopback; ATS would refuse those loads without the local-
-         networking exemption. Non-local plain http stays blocked by design — in
-         the pane such a link just won't load, and its Safari button remains. -->
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsLocalNetworking</key>
-        <true/>
-    </dict>
-    <!-- Sparkle auto-update. The feed is the appcast served from Cloudflare R2
-         behind downloads.termio.sh; the release workflow uploads a fresh appcast.xml
-         there on every tag. SUPublicEDKey is the (non-secret) EdDSA public key that
-         pairs with the SPARKLE_ED_KEY signing secret used by the workflow — Sparkle
-         rejects any update whose signature doesn't verify against it. -->
-    <key>SUFeedURL</key>
-    <string>https://downloads.termio.sh/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>zm3UpFrDf8tFcctK2vkEhrms6oFTp50AUb824lP9BAw=</string>
-    <key>SUEnableAutomaticChecks</key>
-    <true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Termio</string>
+	<key>CFBundleExecutable</key>
+	<string>termio</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>sh.termio.app</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+	</array>
+	<key>CFBundleName</key>
+	<string>Termio</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>sh.termio.app.session-link</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>termio</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://downloads.termio.sh/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>zm3UpFrDf8tFcctK2vkEhrms6oFTp50AUb824lP9BAw=</string>
 </dict>
 </plist>

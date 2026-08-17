@@ -15,14 +15,41 @@ import Foundation
 /// termio's config, so both channels share it.
 enum AppChannel {
     /// `"-dev"` for a `*.dev` bundle id, `""` for a release build.
-    static let suffix: String =
-        (Bundle.main.bundleIdentifier?.hasSuffix(".dev") ?? false) ? "-dev" : ""
+    ///
+    /// `TERMIO_CHANNEL` overrides the bundle reading — the same switch
+    /// `build-app.sh` takes at build time, now honoured at runtime. It exists for
+    /// the unbundled case: `swift run` has no bundle identifier, so without it a
+    /// bare binary falls into the *release* channel and shares the shipped app's
+    /// state directory, control socket and companion port.
+    static let suffix: String = {
+        let requested = ProcessInfo.processInfo.environment["TERMIO_CHANNEL"]?
+            .trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        // Only a plain name becomes a path component — anything else is a typo we
+        // must not turn into a stray directory next to the real ones.
+        if !requested.isEmpty, requested != "release",
+           requested.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) {
+            return "-" + requested
+        }
+        if requested == "release" { return "" }
+        return (Bundle.main.bundleIdentifier?.hasSuffix(".dev") ?? false) ? "-dev" : ""
+    }()
 
     /// True for the side-by-side dev build. Use this to gate diagnostics that must
     /// survive a release-configuration compile (`build-app.sh` builds the dev bundle
     /// in release config, so `#if DEBUG` would strip them) yet never appear in the
     /// shipped release app.
     static var isDev: Bool { !suffix.isEmpty }
+
+    /// The URL scheme this channel claims for session deep links (`termio://` /
+    /// `termio-dev://`), so dev and release never route each other's links.
+    /// Registered in Info.plist; `build-app.sh` rewrites it for the dev bundle.
+    static var urlScheme: String { "termio" + suffix }
+
+    /// True when running from a real `.app` bundle (either channel). A bare SwiftPM
+    /// binary (`swift run`, the test runner) has no bundle identifier, and
+    /// bundle-dependent frameworks — `UNUserNotificationCenter` aborts with
+    /// "bundleProxyForCurrentProcess is nil" — must not be touched without one.
+    static let isBundledApp = Bundle.main.bundleIdentifier != nil
 
     /// Internal state — control/status sockets, `state.json`, custom themes, and
     /// downloaded tunnel binaries: `~/Library/Application Support/termio[-dev]`.

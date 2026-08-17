@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import TermioShared
 
 extension AppSettings {
     /// The sidebar text font built from the interface preferences. An empty family
@@ -85,7 +86,7 @@ private struct SidebarSectionHeader: View {
                 SidebarRowContextMenu(items: menuItems) { isMenuOpen = $0 }
             }
         }
-        .background(OutlineSelectionStyleStripper())
+        .background(OutlineViewFixups())
         .listRowBackground(
             SidebarRowHighlight(isSelected: false, isHovering: isMenuOpen, chrome: chrome)
                 .animation(.easeInOut(duration: 0.12), value: isMenuOpen)
@@ -108,16 +109,20 @@ struct SidebarView: View {
     @State private var pinnedCollapsed = false
     /// Whether the "Projects" section is folded shut.
     @State private var projectsCollapsed = false
+    /// Whether the current device's own roster section is folded shut.
+    @State private var deviceWorldCollapsed = false
 
     // Chrome colors borrowed from the selected terminal theme; `nil` keeps the
     // default system look untouched.
     private var chrome: ChromeTheme? { settings.chromeTheme(for: colorScheme) }
 
     var body: some View {
-        // Selection is driven by row taps rather than List's `selection:` binding
-        // so we can paint our own frosted-grey highlight. The system selection
-        // forces an edge-to-edge accent fill (and white text) that can't be
-        // restyled without also draining the row's other accent-tinted controls.
+        // Selection is driven by a *simultaneous* tap on each session row (see
+        // `SessionRow`), never by List's `selection:` binding: with `.onDrag` mounted
+        // on the rows, NSTableView's native click-to-select doesn't commit until
+        // seconds later (the drag machinery swallows the mouseDown) — that shipped as
+        // v0.19.0's dead sidebar clicks. The store stays the single source of
+        // selection truth and `SidebarRowHighlight` its only visual cue.
         // A flat list rather than `Section`s: the sidebar's section spacing leaves
         // a big empty band between a collapsed project's header and the next, and
         // macOS has no `listSectionSpacing`. So the pinned grouping is hand-rolled
@@ -128,7 +133,12 @@ struct SidebarView: View {
         // the rest. A project's membership in the pinned group is itself the pin cue, so
         // pinned rows carry no per-row badge. Both groups keep the user's chosen sort
         // (already applied by `orderedProjects`, which we only partition here — never reorder).
-        let ordered = store.orderedProjects
+        // The sidebar shows one device's world, and `store.currentDevice` says
+        // which. On another machine none of this Mac's own containers apply —
+        // switching is not a filter over one list, it is a different machine's
+        // state — so they are not built at all and the device's own roster
+        // (`deviceWorldSection`) is the whole list.
+        let ordered = store.isShowingThisMac ? store.orderedProjects : []
         let terminals = ordered.filter { $0.kind == .terminals }
         let chats = ordered.filter { $0.kind == .chats }
         // Only real `.folder` projects populate the Pinned working set and the Projects
@@ -147,7 +157,7 @@ struct SidebarView: View {
         // so the working set never shows the same session twice.
         let pinnedSessions: [PinnedSessionEntry] = others.flatMap { project in
             project.sessions.filter { session in
-                guard session.pinned else { return false }
+                guard session.pinned, store.isOnCurrentDevice(session) else { return false }
                 if let wp = session.worktreePath, pinnedWorktreePaths.contains(wp) { return false }
                 return true
             }.map { PinnedSessionEntry(project: project, session: $0) }
@@ -156,6 +166,13 @@ struct SidebarView: View {
         let hasTerminals = terminals.contains { !$0.sessions.isEmpty }
         let hasChats = chats.contains { !$0.sessions.isEmpty }
         return List {
+            // Nudge when agents are running but the status hooks are off — without them
+            // the sidebar spinner stays dark. One tap enables (and reinstalls) them.
+            if !settings.agentHooksEnabled && store.isRunningAnyAgent {
+                AgentHooksOffBanner { settings.agentHooksEnabled = true }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
             // The top "Pinned" working set, under its own section header: pinned projects
             // as full blocks, then pinned worktrees as mini-blocks (header + their
             // sessions), then pinned sessions as shortcut rows — each nested entry tagged
@@ -165,7 +182,7 @@ struct SidebarView: View {
             // deliberately elevated (mirroring the iOS "Needs You" strip at the home top).
             if hasPinned {
                 SidebarSectionHeader(
-                    title: "Pinned",
+                    title: localized("Pinned"),
                     chrome: chrome,
                     isCollapsed: pinnedCollapsed,
                     isFirstSection: true,
@@ -190,15 +207,17 @@ struct SidebarView: View {
             // noise (a new loose terminal reappears the section, via the + / File menu).
             ForEach(terminals.filter { !$0.sessions.isEmpty }) { term in
                 SidebarSectionHeader(
-                    title: "Terminals",
+                    title: localized("Terminals"),
                     chrome: chrome,
                     isCollapsed: collapsedProjects.contains(term.id),
                     isFirstSection: !hasPinned,
                     toggleCollapsed: { toggleCollapsed(term.id) },
                     menuItems: [
-                        .action("New Terminal") { store.addSession(to: term.id, agent: .terminal) },
+                        newTerminalMenuItem(store: store) {
+                            store.addSession(to: term.id, agent: .terminal)
+                        },
                         .separator,
-                        .action("Close All Terminals") { store.removeProject(term.id) },
+                        .action(localized("Close All Terminals")) { store.removeProject(term.id) },
                     ]
                 )
                 if !collapsedProjects.contains(term.id) {
@@ -217,15 +236,15 @@ struct SidebarView: View {
             // mirroring the Terminals header's "New Terminal". Hidden while empty.
             ForEach(chats.filter { !$0.sessions.isEmpty }) { chat in
                 SidebarSectionHeader(
-                    title: "Chats",
+                    title: localized("Chats"),
                     chrome: chrome,
                     isCollapsed: collapsedProjects.contains(chat.id),
                     isFirstSection: !hasPinned && !hasTerminals,
                     toggleCollapsed: { toggleCollapsed(chat.id) },
                     menuItems: [
-                        .action("New Chat") { store.addDefaultChat() },
+                        .action(localized("New Chat")) { store.addDefaultChat() },
                         .separator,
-                        .action("Close All Chats") { store.removeProject(chat.id) },
+                        .action(localized("Close All Chats")) { store.removeProject(chat.id) },
                     ]
                 )
                 if !collapsedProjects.contains(chat.id) {
@@ -240,7 +259,7 @@ struct SidebarView: View {
             // section treatment as Terminals and Pinned, one tier above the folder rows.
             if !others.isEmpty {
                 SidebarSectionHeader(
-                    title: "Projects",
+                    title: localized("Projects"),
                     chrome: chrome,
                     isCollapsed: projectsCollapsed,
                     isFirstSection: !hasPinned && !hasTerminals && !hasChats,
@@ -252,6 +271,11 @@ struct SidebarView: View {
                     ForEach(others) { projectBlock($0) }
                 }
             }
+            // What the device itself says is running. On another machine this is
+            // the whole sidebar; on this Mac it is the sessions the daemon holds
+            // that no row above accounts for.
+            deviceWorldSection(isFirstSection: !hasPinned && !hasTerminals && !hasChats
+                && others.isEmpty)
         }
         // The native macOS `.sidebar` source list — its own Liquid Glass material, full-height
         // behind the traffic lights. (We previously painted the column ourselves to dodge a macOS 26
@@ -259,6 +283,95 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .environment(\.defaultMinListRowHeight, 1)
         .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
+    }
+
+    /// The current device's own roster: the sessions **that machine** reports,
+    /// under a header that names it.
+    ///
+    /// This is the list `list` returned, not a local array narrowed by alias. The
+    /// difference shows the moment a session was started somewhere else — from the
+    /// `termiod` CLI on the box, or by a phone — because such a session appears
+    /// here and could not appear in anything derived from this Mac's state file.
+    ///
+    /// On this Mac the sections above already draw the app's own rows, so only the
+    /// sessions they do not account for are listed; on any other device this is
+    /// the entire sidebar.
+    @ViewBuilder
+    private func deviceWorldSection(isFirstSection: Bool) -> some View {
+        let device = store.currentDevice
+        let showingThisMac = store.isShowingThisMac
+        let rows = store.deviceWorld().filter { row in
+            guard showingThisMac else { return true }
+            // A row the local sections already drew would be a duplicate; what is
+            // left is what only the daemon knows about.
+            if case .running(_, nil) = row { return true }
+            return false
+        }
+        // On this Mac an empty extra list is nothing to report — the sidebar above
+        // is already the answer. On another device the section is the sidebar, so
+        // it stays and says what it is waiting for.
+        if !showingThisMac || !rows.isEmpty {
+            SidebarSectionHeader(
+                title: showingThisMac ? localized("Also Running") : device.name,
+                chrome: chrome,
+                isCollapsed: deviceWorldCollapsed,
+                isFirstSection: isFirstSection,
+                toggleCollapsed: {
+                    withAnimation(.easeInOut(duration: 0.18)) { deviceWorldCollapsed.toggle() }
+                },
+                menuItems: deviceWorldMenuItems(device)
+            )
+            if !deviceWorldCollapsed {
+                if !showingThisMac, let note = deviceRosterNote() {
+                    DeviceNoteRow(text: note, chrome: chrome)
+                }
+                ForEach(rows) { row in
+                    switch row {
+                    case .running(let information, let session):
+                        if let session {
+                            SessionRow(session: session, chrome: chrome)
+                        } else {
+                            // A session on this device with no row here. Opening it
+                            // is adoption, not creation: it keeps the name the
+                            // device gave it so the attach lands on that PTY.
+                            DeviceOnlySessionRow(information: information, chrome: chrome)
+                        }
+                    case .notStarted(let session):
+                        SessionRow(session: session, chrome: chrome)
+                    case .ended(let session, let tombstone):
+                        EndedSessionRow(session: session, tombstone: tombstone, chrome: chrome)
+                    }
+                }
+            }
+        }
+    }
+
+    private func deviceWorldMenuItems(_ device: KnownDevice) -> [SidebarMenuItem] {
+        var items: [SidebarMenuItem] = []
+        if let alias = device.alias {
+            items.append(.action(localized("New Terminal")) { store.addRemoteTerminal(host: alias) })
+            items.append(.separator)
+        }
+        items.append(.action(localized("Refresh")) { store.refreshDeviceSessions() })
+        return items
+    }
+
+    /// What to say when the device has not produced a list: it is being asked, it
+    /// refused, or there is no session host to ask. Each is a different fact and
+    /// none of them is "no sessions".
+    private func deviceRosterNote() -> String? {
+        switch store.deviceSessions {
+        case .unavailable:
+            return localized("Termio isn’t running sessions through termiod.")
+        case .loading:
+            return localized("Asking \(store.currentDevice.name)…")
+        case .failed(let message):
+            return message
+        case .ready(let sessions):
+            return sessions.live.isEmpty && store.deviceWorld().isEmpty
+                ? localized("Nothing is running on \(store.currentDevice.name).")
+                : nil
+        }
     }
 
     /// One project's rows: its header, then (unless folded) its primary-checkout
@@ -290,7 +403,7 @@ struct SidebarView: View {
                 )
                 if !collapsedWorktrees.contains(worktree.id) {
                     let sessions = project.sessions.filter {
-                        $0.worktreePath == worktree.path
+                        $0.worktreePath == worktree.path && store.isOnCurrentDevice($0)
                     }
                     let splitMarks = splitLinkMarks(for: sessions)
                     ForEach(sessions) { session in
@@ -321,7 +434,9 @@ struct SidebarView: View {
             breadcrumb: project.name
         )
         if !collapsedWorktrees.contains(worktree.id) {
-            let sessions = project.sessions.filter { $0.worktreePath == worktree.path }
+            let sessions = project.sessions.filter {
+                $0.worktreePath == worktree.path && store.isOnCurrentDevice($0)
+            }
             let splitMarks = splitLinkMarks(for: sessions)
             ForEach(sessions) { session in
                 SessionRow(session: session, chrome: chrome, leadingIndent: 16,
@@ -366,8 +481,13 @@ struct SidebarView: View {
     /// verbatim. Once the folder layer exists, only sessions anchored to the primary
     /// checkout remain shallow.
     private func primarySessions(for project: Project) -> [Session] {
-        guard !project.worktrees.isEmpty else { return project.sessions }
-        return project.sessions.filter {
+        // A project is a folder on one machine, but a session opened from its row
+        // can run on another ("New Terminal ▸ <device>"). That session belongs to
+        // the device it runs on and shows up in that device's world, so drawing it
+        // here as well would put one session in two machines' sidebars.
+        let sessions = project.sessions.filter(store.isOnCurrentDevice)
+        guard !project.worktrees.isEmpty else { return sessions }
+        return sessions.filter {
             $0.worktreePath == nil || $0.worktreePath == project.path
         }
     }
@@ -473,6 +593,12 @@ private struct ProjectHeader: View {
         worktree == nil && project.kind == .terminals
     }
 
+    /// A machine's header. Like the Terminals funnel it is not a folder — its path
+    /// is on the other box — so it offers no worktree, Finder, or git actions.
+    private var isHostHeader: Bool {
+        worktree == nil && project.kind == .host
+    }
+
     private var targetPath: String {
         worktree?.path ?? project.path
     }
@@ -485,11 +611,16 @@ private struct ProjectHeader: View {
     }
 
     private var headerHelp: String {
+        // A host's tooltip names the machine and where its sessions work on it —
+        // `targetPath` alone would read as a local directory.
+        if isHostHeader, let alias = project.sshHost {
+            return project.path == "~" ? alias : "\(alias):\(project.path)"
+        }
         guard let worktree,
               store.isDetachedHead(forFolder: worktree.path),
               let commit = store.branch(forFolder: worktree.path)
         else { return targetPath }
-        return "Detached at \(commit)"
+        return localized("Detached at \(commit)")
     }
 
     /// Every folder container — project or worktree — swaps closed/open folders as its
@@ -499,6 +630,9 @@ private struct ProjectHeader: View {
     /// sidebar size, and a plain folder keeps the two header kinds visually one family.
     private var headerIcon: HugeIcon {
         if isTerminalsHeader { return .terminal }
+        // A machine, not a directory: the server mark is what distinguishes a host
+        // block from a folder at a glance, which is the whole point of the section.
+        if isHostHeader { return .serverStack }
         return isCollapsed ? .folder : .folderOpen
     }
 
@@ -510,13 +644,14 @@ private struct ProjectHeader: View {
     /// the hovered label can fade out exactly under them rather than guessing.
     /// Zero for the Terminals section, which offers no agent quick-add cluster.
     private var quickAddClusterWidth: CGFloat {
-        guard !isTerminalsHeader else { return 0 }
+        guard !isTerminalsHeader, !isHostHeader else { return 0 }
         let count = headerSessionPresets(settings).count
         guard count > 0 else { return 0 }
         return CGFloat(count) * 22 + CGFloat(count - 1) * 3
     }
 
-    /// The right-click menu: a "New … Session" entry per enabled agent, then the
+    /// The right-click menu: New Terminal, a "New Agent Session ▸" submenu with one
+    /// row per enabled agent (the same row shape as File ▸ New Chat), then the
     /// project's own actions. Mirrors the hover controls so both routes stay in sync.
     /// The Terminals section is not a folder project — agents don't belong in `$HOME`
     /// (they get a real project or the scoped scratch workspace), and worktree /
@@ -525,26 +660,47 @@ private struct ProjectHeader: View {
     private var menuItems: [SidebarMenuItem] {
         if isTerminalsHeader {
             return [
-                .action("New Terminal") { store.addSession(to: project.id, agent: .terminal) },
+                newTerminalMenuItem(store: store) {
+                    store.addSession(to: project.id, agent: .terminal)
+                },
                 .separator,
-                .action("Close All Terminals") { store.removeProject(project.id) },
+                .action(localized("Close All Terminals")) { store.removeProject(project.id) },
             ]
         }
-        var items: [SidebarMenuItem] = headerSessionPresets(settings).map { preset in
-            .action(preset == .terminal ? "New Terminal" : "New \(preset.displayName) Session") {
-                addSession(preset)
-            }
+        // A machine's menu names the machine: both terminal kinds it can host (the
+        // durable termiod session and the plain `ssh` shell), then Close All. No
+        // worktree/Finder/git rows — none of them mean anything for a box over there.
+        if isHostHeader, let alias = project.sshHost {
+            return [
+                .action(localized("New Terminal")) {
+                    store.addRemoteTerminal(host: alias, cwd: project.path == "~" ? nil : project.path)
+                },
+                .action("New SSH Shell") { store.addSSHSession(host: alias) },
+                .separator,
+                .action("Close All Sessions on \(alias)") { store.removeProject(project.id) },
+            ]
         }
+        var items: [SidebarMenuItem] = [
+            newTerminalMenuItem(store: store, project: project) { addSession(.terminal) },
+            .submenu(localized("New Agent Session"), enabledAgentPresets(settings)
+                .filter { $0 != .terminal }
+                .map { preset in .agent(preset) { addSession(preset) } }),
+        ]
         if let worktree {
+            if let cloneTo = cloneToDeviceMenuItem(
+                store: store, folder: worktree.path, project: project.id) {
+                items.append(.separator)
+                items.append(cloneTo)
+            }
             items.append(.separator)
-            items.append(.action(worktree.pinned ? "Unpin" : "Pin") {
+            items.append(.action(worktree.pinned ? localized("Unpin") : localized("Pin")) {
                 store.toggleWorktreePinned(worktree.id)
             })
-            items.append(.action("Reveal in Finder") {
+            items.append(.action(localized("Reveal in Finder")) {
                 NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: worktree.path)
             })
             items.append(.separator)
-            items.append(.action("Remove Worktree") {
+            items.append(.action(localized("Remove Worktree")) {
                 store.removeWorktree(worktree.id, from: project.id)
             })
             return items
@@ -553,17 +709,21 @@ private struct ProjectHeader: View {
         // container's own quick-add controls fill it with sessions on demand.
         // Only for git repositories (a worktree needs one; "—" marks a non-repo folder).
         if project.branch != "—" {
-            items.append(.action("New Worktree") { store.addWorktree(from: project.id) })
+            items.append(.action(localized("New Worktree")) { store.addWorktree(from: project.id) })
+            if let cloneTo = cloneToDeviceMenuItem(
+                store: store, folder: project.path, project: project.id) {
+                items.append(cloneTo)
+            }
         }
         items.append(.separator)
-        items.append(.action(project.pinned ? "Unpin" : "Pin to Top") {
+        items.append(.action(project.pinned ? localized("Unpin") : localized("Pin to Top")) {
             store.togglePinned(project.id)
         })
-        items.append(.action("Reveal in Finder") {
+        items.append(.action(localized("Reveal in Finder")) {
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: project.path)
         })
         items.append(.separator)
-        items.append(.action("Remove Project") { store.removeProject(project.id) })
+        items.append(.action(localized("Remove Project")) { store.removeProject(project.id) })
         return items
     }
 
@@ -614,10 +774,8 @@ private struct ProjectHeader: View {
             // "Pinned" group label is the cue. Muted, so it reads as quiet metadata; on
             // hover it falls under the quick-add cluster (masked out with the label tail).
             if worktree != nil {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .help("Git worktree")
+                HugeIconView(icon: .gitBranch, size: 10, color: .secondary)
+                    .help(localized("Git worktree"))
             }
         }
         // On hover the trailing icons would otherwise sit on top of a long project
@@ -644,8 +802,10 @@ private struct ProjectHeader: View {
         // lifecycle actions live in the right-click menu rather than inline.
         .overlay(alignment: .trailing) {
             // The Terminals section gets no agent cluster — an agent loose in `$HOME`
-            // is exactly what the scoped scratch workspace exists to prevent.
-            if !isTerminalsHeader {
+            // is exactly what the scoped scratch workspace exists to prevent. A host
+            // gets none either: `addSession` builds a *local* session, so a quick-add
+            // there would silently start the agent on this Mac, not on the box.
+            if !isTerminalsHeader, !isHostHeader {
                 HStack(spacing: 3) {
                     ForEach(headerSessionPresets(settings)) { preset in
                         AgentQuickAddButton(preset: preset, chrome: chrome) {
@@ -671,7 +831,7 @@ private struct ProjectHeader: View {
         // Strip the source list's native blue accent (the ring/fill AppKit paints on a
         // right-clicked or selected row) at the NSOutlineView layer, so our own
         // highlights are the only selection cue — same treatment the file tree uses.
-        .background(OutlineSelectionStyleStripper())
+        .background(OutlineViewFixups())
         .listRowBackground(
             SidebarRowHighlight(isSelected: false, isHovering: isMenuOpen, chrome: chrome)
                 .animation(.easeInOut(duration: 0.12), value: isMenuOpen)
@@ -694,11 +854,16 @@ func headerSessionPresets(_ settings: AppSettings) -> [AgentPreset] {
     [.terminal] + enabledAgentPresets(settings).filter { $0 != .terminal }
 }
 
-/// One entry in a sidebar row's right-click menu — a titled action, a titled
+/// One entry in a sidebar row's right-click menu — a titled action, an agent row
+/// (display name plus brand icon, the File ▸ New Chat row shape), a titled
 /// submenu of further entries, or a separator.
 enum SidebarMenuItem {
     case action(String, () -> Void)
+    case agent(AgentPreset, () -> Void)
     indirect case submenu(String, [SidebarMenuItem])
+    /// A greyed-out, non-actionable row — used to explain an empty submenu inline
+    /// (e.g. "No SSH hosts in ~/.ssh/config") rather than leaving a dead click.
+    case disabled(String)
     case separator
 }
 
@@ -777,10 +942,21 @@ private struct SidebarRowContextMenu: NSViewRepresentable {
                 switch item {
                 case .separator:
                     menu.addItem(.separator())
+                case let .disabled(title):
+                    // A nil action leaves the item greyed out and un-clickable.
+                    let menuItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                    menuItem.isEnabled = false
+                    menu.addItem(menuItem)
                 case let .action(title, handler):
                     let menuItem = NSMenuItem(title: title, action: #selector(invoke(_:)), keyEquivalent: "")
                     menuItem.target = self
                     menuItem.representedObject = Handler(handler)
+                    menu.addItem(menuItem)
+                case let .agent(preset, handler):
+                    let menuItem = NSMenuItem(title: preset.displayName, action: #selector(invoke(_:)), keyEquivalent: "")
+                    menuItem.target = self
+                    menuItem.representedObject = Handler(handler)
+                    menuItem.image = agentMenuImage(for: preset)
                     menu.addItem(menuItem)
                 case let .submenu(title, children):
                     let menuItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
@@ -839,7 +1015,7 @@ private struct AgentQuickAddButton: View {
         .buttonStyle(.borderless)
         .onHover { isHovering = $0 }
         .animation(.easeInOut(duration: 0.1), value: isHovering)
-        .help("New \(preset.displayName) session")
+        .help(localized("New \(preset.displayName) session"))
     }
 }
 
@@ -903,31 +1079,32 @@ private struct SessionRow: View {
     /// lives. `nil` for a row in its normal tree spot.
     var breadcrumb: String? = nil
     @State private var isHovering = false
-    /// A same-project session is being dragged over this row — highlight it as the
-    /// grouping target (VS Code's blue pane-drop cue).
+    /// A same-bucket session is being dragged over this row: light its whole-row
+    /// background (the hover lift) as the reorder drop target. Only set when the
+    /// in-flight session could legally land here (`store.canReorder`).
     @State private var isDropTarget = false
-
-    /// The drag pasteboard payload identifying a session by id. Namespaced so the
-    /// row's `.dropDestination` accepts only a session drag, never arbitrary text.
-    private static let dragPrefix = "termio-session:"
 
     private var isSelected: Bool { store.selectedSessionID == session.id }
 
-    /// The row's right-click menu. Rename/Pin/Close are always present; the two
-    /// split "type switch" items appear conditionally — "Unsplit" only when the
+    /// The row's right-click menu. Rename/Pin/Close Session are always present; the two
+    /// split "type switch" items appear conditionally — "Ungroup" only when the
     /// session is already in a group (联合 → 独立), and "Group with ▸" only when
     /// there is a sibling to combine it with (独立 → 联合).
     private var menuItems: [SidebarMenuItem] {
         var items: [SidebarMenuItem] = [
-            .action("Rename…") { store.renameSession(session.id) }
+            .action(localized("Rename…")) { store.renameSession(session.id) },
+            .action(localized("Copy Session Link")) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(store.sessionLink(for: session), forType: .string)
+            },
         ]
         let targets = store.groupableTargets(for: session.id)
         if store.isInSplitGroup(session.id) || !targets.isEmpty { items.append(.separator) }
         if store.isInSplitGroup(session.id) {
-            items.append(.action("Unsplit") { store.detachFromSplit(session.id) })
+            items.append(.action(localized("Ungroup")) { store.detachFromSplit(session.id) })
         }
         if !targets.isEmpty {
-            items.append(.submenu("Group with", targets.map { target in
+            items.append(.submenu(localized("Group with"), targets.map { target in
                 .action(store.displayTitle(for: target)) {
                     store.groupSession(session.id, with: target.id)
                 }
@@ -935,9 +1112,9 @@ private struct SessionRow: View {
         }
         items.append(contentsOf: [
             .separator,
-            .action(session.pinned ? "Unpin" : "Pin") { store.toggleSessionPinned(session.id) },
+            .action(session.pinned ? localized("Unpin") : localized("Pin")) { store.toggleSessionPinned(session.id) },
             .separator,
-            .action("Close") { store.closeSession(session.id) },
+            .action(localized("Close Session")) { store.requestCloseSession(session.id) },
         ])
         return items
     }
@@ -952,12 +1129,14 @@ private struct SessionRow: View {
             // muted grey from AgentIconView.
             Group {
                 if session.isSSH, store.status(for: session.id) != .working {
-                    // An SSH terminal reads as a remote link — a network glyph in the
-                    // terminal grey — except while a detected remote agent is working,
-                    // when it falls through to the spinner below.
-                    Image(systemName: "network")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
+                    // An SSH terminal is a machine, so it carries the same server
+                    // glyph as its host row in Settings ▸ SSH (a globe reads as
+                    // "web", not "that box") — except while a detected remote
+                    // agent is working, when it falls through to the spinner below.
+                    // Size 15 like the folder and agent marks sharing this
+                    // 16-wide column — HugeIconShape normalizes ink width, so
+                    // equal size is what makes the glyphs read as one family.
+                    HugeIconView(icon: .serverStack, size: 15, color: .secondary)
                 } else if store.status(for: session.id) == .working {
                     // The spinner carries no status color — its motion already
                     // says "working", so color stays reserved for the states
@@ -967,12 +1146,18 @@ private struct SessionRow: View {
                     // the sidebar's folder and terminal glyphs; the comet's own
                     // opacity ramp provides all the fade, so the head reads at
                     // full icon strength instead of a double-discounted grey.
-                    WorkingIndicator()
+                    WorkingIndicator(tint: .sidebarWorkingInk)
                 } else {
                     AgentIconView(agent: store.effectiveAgent(for: session), size: 15)
                 }
             }
             .frame(width: 16)
+            // The resting "your turn" status now rides the leading mark itself — a green ring when
+            // the agent just finished, orange when it's blocked on you — so all of a row's status
+            // (spinner = working, ring = your turn, nothing = idle) reads from one place on the left
+            // instead of being split with a trailing dot. An overlay, so the ring never shifts the
+            // row's layout, and it sits *around* the brand glyph so the vendor color stays intact.
+            .overlay { StatusRing(status: store.status(for: session.id)) }
             .help(store.statusDescription(for: session.id))
             Text(store.displayTitle(for: session))
                 .font(settings.interfaceFont)
@@ -990,43 +1175,29 @@ private struct SessionRow: View {
                     .truncationMode(.middle)
                     .layoutPriority(-1)
             }
+            // Nothing trails the title in the flow: the resting status dot and the
+            // hover close button both live in the trailing overlay below (zero
+            // layout width), so the title always spans the full row and truncates
+            // only at the true trailing edge. The spacer just left-aligns the title.
             Spacer(minLength: 4)
-            // At rest a status dot trails the title only when the session needs the
-            // user (working is shown by the leading spinner instead), so the title
-            // keeps nearly the whole row width. The hover actions live in the overlay
-            // below and reserve no flow width of their own.
-            StatusDot(status: store.status(for: session.id))
-                .frame(width: 16)
-                .opacity(isHovering ? 0 : 1)
-                .help(store.statusDescription(for: session.id))
         }
-        // VSCode-style trailing actions: hovering paints them over the trailing edge
-        // (where the status dot was), reserving no resting width. Creating a worktree
-        // is a folder-level action now (the project header's "New worktree" button),
-        // so a session row carries only its close button.
+        // VSCode-style trailing edge, reserving zero flow width: the close button appears here on
+        // hover only. Status no longer trails the title — it moved to the leading mark's ring (above)
+        // — so at rest the trailing edge is empty and the title spans the full row. Reordering is a
+        // drag of the whole row (no separate handle), and creating a worktree is a folder-level
+        // action (the project header's "New worktree" button), so the cluster carries only the close.
         .overlay(alignment: .trailing) {
-            HStack(spacing: 0) {
-                // The drag handle (独立 → 联合): grab it and drop onto another
-                // session's row to combine the two into one split group. It lives on
-                // its own subview with no tap gesture so `.draggable` isn't preempted
-                // by the row's selection tap — the conflict noted in the file browser.
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20, height: 22)
-                    .contentShape(Rectangle())
-                    .help("Drag onto another session to split them together")
-                    .draggable(Self.dragPrefix + session.id.uuidString)
+            ZStack(alignment: .trailing) {
                 SessionRowActionButton(
                     systemImage: "xmark.circle.fill",
-                    help: "Close session",
+                    help: localized("Close session"),
                     chrome: chrome
                 ) {
-                    store.closeSession(session.id)
+                    store.requestCloseSession(session.id)
                 }
+                .opacity(isHovering ? 1 : 0)
+                .allowsHitTesting(isHovering)
             }
-            .opacity(isHovering ? 1 : 0)
-            .allowsHitTesting(isHovering)
         }
         .padding(.vertical, settings.interfaceRowPadding)
         // Indent the session content under its project header (or its worktree
@@ -1046,44 +1217,257 @@ private struct SessionRow: View {
             }
         }
         .contentShape(Rectangle())
-        // Accept a session drag dropped onto this row: combine the dragged session
-        // with this one into a split group. A String payload (not a custom type) so
-        // it rides the same pasteboard SwiftUI drop reads; the prefix filter rejects
-        // any non-session text, and a self-drop is ignored.
+        // Drag the whole row to reorder it within its bucket (no handle). Uses
+        // `.onDrag` (AppKit's drag session) rather than `.draggable` (SwiftUI's): a
+        // SwiftUI drag settles its preview over ~0.3s on release, while an AppKit drag
+        // image just vanishes on a successful drop — so the row moves crisply. The
+        // drag only carries the session id; nothing reorders until the drop commits
+        // it (see the drop below). It starts at all only because selection rides a
+        // *simultaneous* tap (below) — an exclusive `.onTapGesture` kills the drag.
+        .onDrag {
+            store.draggingSessionID = session.id
+            // The payload is the session's canonical deep link, not a private
+            // token: a drag carries plain text, so any text target — a terminal,
+            // an editor, a text field — will accept it. Shipping the link means a
+            // stray drop pastes something that works (`termio://session/<uuid>`,
+            // what `termio sessions` takes) instead of leaking an internal id.
+            return NSItemProvider(object: store.sessionLink(for: session) as NSString)
+        } preview: {
+            // The drag preview is just the row's identity (icon + title), so the
+            // floating chip never carries the hover-only close button. `.fixedSize`
+            // keeps the label at its natural width — the preview proposes a tight size
+            // that would otherwise squeeze the flexible Text away, leaving only the
+            // fixed-width icon — and the material plate makes the chip legible.
+            HStack(spacing: 6) {
+                AgentIconView(agent: store.effectiveAgent(for: session), size: 15)
+                    .frame(width: 16)
+                Text(store.displayTitle(for: session))
+                    .font(settings.interfaceFont)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(.regularMaterial)
+            )
+        }
+        // Reorder on drop: only a payload that parses as a session link counts, so
+        // arbitrary dropped text is still rejected — a self-drop is ignored, and a
+        // cross-bucket drop is a no-op in the store.
         .dropDestination(for: String.self) { payloads, _ in
-            guard let payload = payloads.first(where: { $0.hasPrefix(Self.dragPrefix) }),
-                  let moved = UUID(uuidString: String(payload.dropFirst(Self.dragPrefix.count))),
+            store.draggingSessionID = nil
+            // Clear the drop lift the instant we commit so it can't linger on this row
+            // (or ghost onto its new neighbour) as the list settles the move.
+            isDropTarget = false
+            guard let moved = payloads.lazy.compactMap(TermioStore.sessionID(fromLink:)).first,
                   moved != session.id
             else { return false }
-            store.groupSession(moved, with: session.id)
+            store.reorderSession(moved, relativeTo: session.id)
             return true
-        } isTargeted: { isDropTarget = $0 }
-        .overlay {
-            if isDropTarget {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(Color.accentColor, lineWidth: 2)
-                    .padding(.horizontal, 4)
-            }
+        } isTargeted: { targeted in
+            // Light the background only when the in-flight session could actually land
+            // here — same project + worktree bucket — so a cross-section hover stays inert.
+            isDropTarget = targeted
+                && (store.draggingSessionID.map { store.canReorder($0, relativeTo: session.id) } ?? false)
         }
         .onHover { isHovering = $0 }
-        .onTapGesture {
-            // Tapping a session in the sidebar always returns to its terminal — close the file
-            // editor even when this row is already selected (no selection change to react to).
-            store.openFileURL = nil
+        // Click-to-select rides a *simultaneous* tap, not `.onTapGesture`: an
+        // exclusive tap gesture preempts the row drag (it never starts), while a
+        // simultaneous one fires only when the mouse goes down and up in place, so
+        // click-select and drag-reorder coexist. List's native `selection:` binding
+        // can't carry the click instead — with `.onDrag` mounted, NSTableView's
+        // click-to-select doesn't commit for seconds (the drag machinery swallows
+        // the mouseDown), which shipped as v0.19.0's dead sidebar clicks.
+        .simultaneousGesture(TapGesture().onEnded {
+            // Re-tapping the row you're already on returns to its terminal, closing its
+            // open file editor. Tapping a *different* session must NOT clear here: the
+            // selection didSet captures the outgoing session's inspector layout first
+            // (issue #160), so clearing pre-capture would drop its open file.
+            if store.selectedSessionID == session.id {
+                store.openFileURL = nil
+            }
             store.selectedSessionID = session.id
-            // Re-tapping the row you're already on still clears a resting done/attention
-            // dot (the selection didSet only reacts to a change).
+            // Re-tapping the row you're already on still clears a resting
+            // done/attention dot (the selection didSet only reacts to a change).
             store.markSeen(session.id)
-        }
+        })
         // NSMenu rather than SwiftUI's `.contextMenu` so right-click leaves no blue
         // accent ring on the row (see `SidebarRowContextMenu`).
         .background(SidebarRowContextMenu(items: menuItems))
+        // The reorder drop target (VS Code's `Over` effect) reuses the *hover* lift
+        // verbatim — same frosted-grey fill, same row-sized region and insets — so the
+        // drop cue never introduces a second background shape; it reads as a hover.
         .listRowBackground(
-            SidebarRowHighlight(isSelected: isSelected, isHovering: isHovering, chrome: chrome)
+            SidebarRowHighlight(isSelected: isSelected,
+                                isHovering: isHovering || isDropTarget,
+                                chrome: chrome)
                 .animation(.easeInOut(duration: 0.12), value: isSelected)
                 .animation(.easeInOut(duration: 0.12), value: isHovering)
+                // No animation on the drop cue: it must snap off the instant the drag
+                // leaves or commits (VS Code's `Over` feedback is instant), otherwise
+                // the lift lingers on the row while it's already moving.
+                .animation(nil, value: isDropTarget)
         )
         .animation(.easeInOut(duration: 0.12), value: isHovering)
+    }
+}
+
+/// A quiet line under a device's header saying why there are no rows — reaching
+/// the machine, the reason it could not be reached, or that nothing runs there.
+/// A device is across a network, so "we do not know yet" is a real answer and
+/// gets said rather than being drawn as an empty list.
+private struct DeviceNoteRow: View {
+    @EnvironmentObject var settings: AppSettings
+    let text: String
+    let chrome: ChromeTheme?
+
+    var body: some View {
+        Text(text)
+            .font(settings.interfaceFont)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .padding(.vertical, settings.interfaceRowPadding)
+            .padding(.leading, 16)
+            .listRowBackground(
+                SidebarRowHighlight(isSelected: false, isHovering: false, chrome: chrome))
+    }
+}
+
+/// A session the **device** reports that this app has no row for — started from
+/// the `termiod` CLI on that machine, or by another client.
+///
+/// Its existence is the proof the list is the device's and not this Mac's: no
+/// amount of filtering a local array can produce a row for a session this app
+/// never created. Everything shown comes off the wire — the daemon's title, its
+/// command, its directory on that machine.
+///
+/// Clicking it adopts it (see `TermioStore.adoptDeviceSession`), which gives the
+/// session a row here and attaches to the PTY that is already running rather
+/// than starting a second one beside it.
+private struct DeviceOnlySessionRow: View {
+    @EnvironmentObject var store: TermioStore
+    @EnvironmentObject var settings: AppSettings
+    let information: Termiod.SessionInformation
+    let chrome: ChromeTheme?
+    @State private var isHovering = false
+
+    private var title: String {
+        if let title = information.title, !title.isEmpty { return title }
+        return information.name
+    }
+
+    /// What the device says the row is doing, in the fewest words that stay true:
+    /// the command, and the directory it runs in on that machine.
+    private var detail: String {
+        let directory = information.cwd.isEmpty
+            ? "" : URL(fileURLWithPath: information.cwd).lastPathComponent
+        return [information.command, directory]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            HugeIconView(icon: .terminal, size: 15, color: .secondary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .font(settings.interfaceFont)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(settings.interfaceFont)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 4)
+            if information.attachedClients > 0 {
+                // Someone else is watching this session. Worth saying out loud —
+                // the write token is single-holder, so opening it may not hand
+                // over the keyboard.
+                HugeIconView(icon: .view, size: 13, color: .secondary)
+            }
+        }
+        .padding(.vertical, settings.interfaceRowPadding)
+        .padding(.leading, 16)
+        .contentShape(Rectangle())
+        .help(information.cwd.isEmpty
+              ? localized("Opened outside Termio on this device")
+              : localized("Opened outside Termio, in \(information.cwd)"))
+        .onHover { isHovering = $0 }
+        .simultaneousGesture(TapGesture().onEnded { store.adoptDeviceSession(information) })
+        .background(SidebarRowContextMenu(items: [
+            .action(localized("Open")) { store.adoptDeviceSession(information) },
+        ]))
+        .listRowBackground(
+            SidebarRowHighlight(isSelected: false, isHovering: isHovering, chrome: chrome)
+                .animation(.easeInOut(duration: 0.12), value: isHovering))
+    }
+}
+
+/// A row whose session the device buried. The reason is the host's word
+/// (`exited` · `killed` · `daemon_lost`) turned into something a person reads —
+/// the host describes state and never decides presentation.
+///
+/// It stays clickable: opening it spawns the session again under the same name,
+/// which is what the user means by clicking a row that used to work.
+private struct EndedSessionRow: View {
+    @EnvironmentObject var store: TermioStore
+    @EnvironmentObject var settings: AppSettings
+    let session: Session
+    let tombstone: Termiod.SessionTombstone
+    let chrome: ChromeTheme?
+    @State private var isHovering = false
+
+    private var isSelected: Bool { store.selectedSessionID == session.id }
+
+    private var reason: String {
+        switch tombstone.reason {
+        case "exited":
+            guard let status = tombstone.exitStatus else { return localized("Ended") }
+            return status == 0 ? localized("Ended") : localized("Ended — exit \(status)")
+        case "killed": return localized("Closed")
+        case "daemon_lost": return localized("The session host went away")
+        default: return tombstone.reason
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            AgentIconView(agent: store.effectiveAgent(for: session), size: 15)
+                .frame(width: 16)
+                .opacity(0.5)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(store.displayTitle(for: session))
+                    .font(settings.interfaceFont)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(reason)
+                    .font(settings.interfaceFont)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(.vertical, settings.interfaceRowPadding)
+        .padding(.leading, 16)
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
+        .simultaneousGesture(TapGesture().onEnded { store.selectedSessionID = session.id })
+        .background(SidebarRowContextMenu(items: [
+            .action(localized("Close Session")) { store.requestCloseSession(session.id) },
+        ]))
+        .listRowBackground(
+            SidebarRowHighlight(isSelected: isSelected, isHovering: isHovering, chrome: chrome)
+                .animation(.easeInOut(duration: 0.12), value: isHovering))
     }
 }
 
@@ -1147,16 +1531,18 @@ struct SidebarRowHighlight: View {
 
 /// A small coloured dot mirroring the menu-bar pulse: hidden when idle, amber
 /// when the session wants attention, blue while working.
-private struct StatusDot: View {
+/// The resting "your turn" status, drawn as a ring *around* the leading brand mark: green when the
+/// agent just finished, orange when it's blocked on you. Working is the leading spinner and idle is
+/// nothing, so only those two states light the ring. Sized well past the 16pt icon column so it
+/// reads as a clear halo at a glance — the sidebar's most-scanned signal — while staying an overlay
+/// that never shifts the row.
+private struct StatusRing: View {
     let status: SessionStatus
 
     var body: some View {
         Circle()
-            .fill(color)
-            .frame(width: 7, height: 7)
-            // Working is shown by the leading spinner and idle shows nothing, so
-            // only the two resting "your turn" states trail the title as a dot:
-            // green when the agent just finished, orange when it's blocked on you.
+            .stroke(color, lineWidth: 2)
+            .frame(width: 21, height: 21)
             .opacity(status == .done || status == .needsAttention ? 1 : 0)
     }
 
@@ -1168,93 +1554,44 @@ private struct StatusDot: View {
 /// The "agent is working" mark: a 3×3 grid of dots with a bright comet that orbits
 /// the eight perimeter cells, so the small nine-square grid reads as rotating. Sits
 /// in place of the session's brand icon while a turn is in flight (see `SessionRow`).
-struct WorkingIndicator: View {
-    /// Pure ink, deeper than `.primary`: labelColor keeps ~15% transparency and
-    /// the sidebar's vibrancy lightens it again, which left even the comet's
-    /// full-opacity head reading grey. Appearance-adaptive black/white punches
-    /// through both.
-    private static let ink = Color(nsColor: NSColor(name: nil) { appearance in
+extension Color {
+    /// Pure ink for the sidebar's working spinner: `labelColor` keeps ~15%
+    /// transparency and the sidebar's vibrancy lightens it again, which left even
+    /// the comet's full-opacity head reading grey. Appearance-adaptive
+    /// black/white punches through both. The shared `WorkingIndicator` takes its
+    /// tint from the caller so iOS can pass an agent brand color instead.
+    static let sidebarWorkingInk = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .white : .black
     })
+}
 
-    var tint: Color = Self.ink
-
-    /// When nil the comet self-animates via `TimelineView`; supplying a phase
-    /// (0...1) renders one still frame instead, so a caller can drive the rotation
-    /// with its own timer where `TimelineView` never ticks — e.g. inside an open
-    /// `NSMenu`, which runs a modal event-tracking loop.
-    var phase: Double? = nil
-
-    /// The eight perimeter cells of the 3×3 grid in clockwise order, as
-    /// `(column, row)` with the center at `(1, 1)`. The comet travels this ring.
-    private static let ring: [(Int, Int)] = [
-        (0, 0), (1, 0), (2, 0), (2, 1), (2, 2), (1, 2), (0, 2), (0, 1),
-    ]
-    // Dots this small read lighter than their nominal opacity, so the size and
-    // the opacity ramp are tuned together: 2.5pt pure ink with a 0.5 tail floor
-    // sits at the same perceived weight as the neighboring 15pt glyphs.
-    private let dotSize: CGFloat = 2.5
-    private let spacing: CGFloat = 3.6
-    private let period: Double = 1.1
+/// Sidebar nudge shown when agents run with the status hooks disabled. Low-alarm by
+/// design — a neutral card, not an accent banner. "Enable" turns the hooks back on.
+private struct AgentHooksOffBanner: View {
+    let enable: () -> Void
 
     var body: some View {
-        if let phase {
-            grid(phase: phase)
-        } else {
-            TimelineView(.animation) { context in
-                let p = context.date.timeIntervalSinceReferenceDate
-                    .truncatingRemainder(dividingBy: period) / period
-                grid(phase: p)
+        HStack(spacing: 9) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(localized("Live agent status is off"))
+                    .font(.callout.weight(.medium))
+                Text(localized("Agents won’t show as working."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+            Spacer(minLength: 4)
+            Button(localized("Enable"), action: enable)
+                .buttonStyle(.borderless)
+                .font(.callout.weight(.medium))
         }
-    }
-
-    private func grid(phase: Double) -> some View {
-        ZStack {
-            // A steady center anchors the spinning ring, matching the tail
-            // so the grid reads as one solid mark with a swell running
-            // around it.
-            dot(opacity: 0.5, scale: 1)
-            ForEach(Array(Self.ring.enumerated()), id: \.offset) { index, cell in
-                let distance = ringDistance(at: index, phase: phase)
-                dot(opacity: opacity(distance: distance), scale: scale(distance: distance))
-                    .offset(
-                        x: CGFloat(cell.0 - 1) * spacing,
-                        y: CGFloat(cell.1 - 1) * spacing
-                    )
-            }
-        }
-        .frame(width: 13, height: 13)
-    }
-
-    private func dot(opacity: Double, scale: Double) -> some View {
-        Circle()
-            .fill(tint)
-            .frame(width: dotSize * scale, height: dotSize * scale)
-            .opacity(opacity)
-    }
-
-    /// A perimeter cell's distance from the comet's head, measured the shorter way
-    /// around the ring so the tail wraps.
-    private func ringDistance(at index: Int, phase: Double) -> Double {
-        let count = Double(Self.ring.count)
-        let head = phase * count
-        let raw = abs(Double(index) - head)
-        return min(raw, count - raw)
-    }
-
-    /// The rotation is carried by two signals so neither has to be extreme: a
-    /// brightness wave AND a size swell at the comet's head. Opacity alone needed a
-    /// near-invisible tail to read as motion, which left the whole mark far paler
-    /// than the full-ink glyphs beside it; with the swell doing half the work the
-    /// tail floor stays at half ink and the grid keeps real visual weight.
-    private func opacity(distance: Double) -> Double {
-        max(0.5, 1 - distance / 4)
-    }
-
-    /// Size factor for a cell: the head swells a fifth and the swell dies
-    /// out over the next two cells.
-    private func scale(distance: Double) -> Double {
-        1 + 0.2 * max(0, 1 - distance / 2)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+        .padding(.vertical, 4)
     }
 }

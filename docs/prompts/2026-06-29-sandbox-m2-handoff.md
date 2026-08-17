@@ -1,6 +1,6 @@
 # 2026-06-29 — Sandbox M2 handoff prompt
 
-Handoff prompt for another agent to continue the termio sandbox work (M2:
+Handoff prompt for another agent to continue the Termio sandbox work (M2:
 per-project container + agent install). Paste the block below.
 
 ---
@@ -9,7 +9,7 @@ per-project container + agent install). Paste the block below.
 继续 termio 的 sandbox 功能开发（M2）。termio 是 ~/Documents/GitHub/termio 的原生 Swift + libghostty 终端。
 
 先读这两个，它们是完整交接：
-1. docs/design/sandbox-vm.md —— 完整设计（必读）
+1. docs/design/20260629-sandbox-vm.md —— 完整设计（必读）
 2. 你的记忆里的 project-termio-sandbox —— 当前状态 + NEXT
 
 == 目标 ==

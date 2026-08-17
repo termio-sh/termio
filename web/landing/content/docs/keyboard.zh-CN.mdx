@@ -1,0 +1,87 @@
+---
+title: 键盘快捷键
+description: Termio 附带的每一个快捷键，直接读自应用自己的命令目录——以及如何在「设置 ▸ 键盘」里重新绑定它们。
+x-i18n:
+  source_path: keyboard.mdx
+  source_hash: 442fd8a66085ee1c16c32e1ce3fe28571139230d9332eb9f5fe2923868ab9051
+  generated_at: 2026-08-16
+---
+
+Termio 是为键盘操作而造的。下面的表格由应用的命令目录生成，因此列出的正是这个版本实际
+附带的内容。每个命令都可以重新绑定——参见 [自定义](#customizing)。
+
+## 会话与项目
+
+<Keybindings category="File" unboundLabel="未绑定" />
+
+「New Terminal」会在你已经在的地方打开 shell——当前会话的工作目录——并把新会话放在它旁边，
+留在同一个项目里。「New Terminal at Home」则始终从 `~` 开始；它出厂不带按键，如果你常用
+它，就去[自定义](#customizing)里绑一个。
+
+循环切换遵循侧栏的视觉顺序，所以 `⇧⌘]` 会移到你看到的下一个会话，而不是按创建顺序。
+
+<Keybindings category="Session" unboundLabel="未绑定" />
+
+## 找东西
+
+<Keybindings category="Navigation" unboundLabel="未绑定" />
+
+两个面板都是模糊匹配。命令面板执行*操作*；快速打开跳到*东西*——会话、项目和文件。参见
+[命令面板与快速打开](/zh-CN/docs/navigation)。
+
+## 窗格 [#panes]
+
+<Keybindings category="Panes" unboundLabel="未绑定" />
+
+「向左拆分」和「向上拆分」出厂时不带按键，和 Ghostty 的做法一样：人们高频使用的两个方向
+拿到按键，镜像的那一对保持为菜单命令，直到你自己去绑定。两者始终可以从命令面板和窗格的
+右键菜单里用到。
+
+`⌘W` 是 **取消编组**——它把当前窗格从编组里拿出来，会话继续独立运行。要结束一个会话，
+用侧栏行右键菜单里的 **关闭会话**。
+
+窗格也可以用鼠标重排：把指针移到窗格标题栏上，抓住出现的手柄，把窗格拖到邻居上。高亮会
+预示落点——落在某一半就放到那一侧，落在正中则把两个窗格互换。
+
+## 分支与 worktree
+
+这两个绑定 Termio 照抄 GitHub Desktop 的「Branch」菜单：在那里「New Branch」是 `⇧⌘N`。
+而 Termio 里创建分支的动词是 worktree。
+
+<Keybindings category="Branch" unboundLabel="未绑定" />
+
+## 视图
+
+<Keybindings category="Font" unboundLabel="未绑定" />
+
+<Keybindings category="Interface" unboundLabel="未绑定" />
+
+<Keybindings category="Window" unboundLabel="未绑定" />
+
+你预期的系统快捷键照常可用——`⌘C` / `⌘V` 拷贝粘贴，`⌘A` 全选，`⌘,` 打开设置，`⌘Q` 退出。
+
+## 自定义 [#customizing]
+
+打开 **设置 ▸ 键盘** 即可重新绑定任意命令。编辑器会列出每个操作及其当前绑定，并在你指派时
+标出冲突。你的覆盖保存在：
+
+<DocsImage
+  src="/screenshots/docs/16-rebind-shortcut.png"
+  alt="Termio 键盘设置筛选出 Terminal，并在正在编辑的绑定旁显示快捷键冲突"
+  width={1664}
+  height={1288}
+/>
+
+```
+~/.termio/keybindings.json
+```
+
+只有你改动过的快捷键会被写进去——默认值随应用一起发布，所以这个文件保持很小、很好读。
+
+绑定必须包含 `⌘`。不含它的组合会和终端本身需要的按键冲突：Agent 的 TUI 指望 `⌃C`、`⌥←`
+之类原封不动地送到它手上。
+
+<Callout type="tip">
+  不确定某个命令叫什么？打开 [命令面板](/zh-CN/docs/navigation)（`⇧⌘P`）——它把每个操作
+  连同当前快捷键一起列出，让你在把按键练成肌肉记忆之前先找到并执行它。
+</Callout>

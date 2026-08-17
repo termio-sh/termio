@@ -1,0 +1,109 @@
+name: macOS
+
+# Build + test check for the macOS app. Until this existed the app — the bulk of
+# the codebase — was only ever compiled by release.yml on a version tag, so a PR
+# that broke `swift build` merged green and surfaced inside the signing pipeline.
+# Path-filtered so landing-page or iOS-only pushes never spin a (metered) macOS
+# runner; the iOS companion has its own pipeline in ios.yml. Two jobs: `build` on
+# Apple silicon for every push and PR, and `intel` on an x86_64 image after merge,
+# because the app ships as a universal binary and nothing else runs its Intel half.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "Sources/**"
+      - "Shared/**"
+      - "Tests/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - ".swiftlint.yml"
+      - "scripts/check-strings.sh"
+      - "scripts/compile-strings.sh"
+      - ".github/workflows/macos.yml"
+  pull_request:
+    paths:
+      - "Sources/**"
+      - "Shared/**"
+      - "Tests/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - ".swiftlint.yml"
+      - "scripts/check-strings.sh"
+      - "scripts/compile-strings.sh"
+      - ".github/workflows/macos.yml"
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same toolchain pin as release.yml. A PR passing on a toolchain that releases
+  # don't use is a false green, and keeping the two in step means an image that
+  # drops this Xcode breaks both workflows together rather than silently
+  # diverging. Bump both at once.
+  DEVELOPER_DIR: /Applications/Xcode_26.4.app/Contents/Developer
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Errors (force_try, force_cast) fail the job; force_unwrapping warnings
+      # surface in the log without blocking. Config at .swiftlint.yml.
+      - name: Lint
+        run: |
+          which swiftlint || brew install swiftlint
+          swiftlint lint --reporter github-actions-logging
+
+      # A `localized("…")` key the catalog doesn't carry compiles and runs — it
+      # just resolves to English — so only a check catches it. Runs before the
+      # build: it's seconds, and it fails for a reason no compiler error names.
+      - name: Check strings
+        run: ./scripts/check-strings.sh
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      # The shipped bundle is universal, but release.yml only ever cross-compiles
+      # the Intel slice on a version tag — so a dependency that loses its x86_64
+      # slice, or a link error that only x86_64 hits, would surface during signing
+      # rather than on the PR that caused it. This is the same single-`--arch`
+      # invocation build-app.sh uses, on the free Apple-silicon runner.
+      - name: Cross-compile the Intel slice
+        run: swift build --arch x86_64
+
+  # Actually running x86_64 code, which the cross-compile above cannot do and
+  # `lipo` cannot prove: a slice that links is not a slice that works. Intel
+  # images are larger runners, which are billed even on a public repo, so this
+  # stays off pull requests — the cross-compile step covers those — and runs
+  # after merge, well before a release tag turns a breakage into a bad DMG.
+  intel:
+    if: github.event_name != 'pull_request'
+    runs-on: macos-26-intel
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Native x86_64 on an Intel host — no --arch needed.
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Verify the built binary is x86_64
+        run: |
+          binary="$(swift build --show-bin-path)/termio"
+          archs="$(lipo -archs "$binary")"
+          echo "built architectures: $archs"
+          [[ "$archs" == *x86_64* ]]

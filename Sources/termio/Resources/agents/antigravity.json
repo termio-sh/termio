@@ -5,5 +5,6 @@
   "wire": "antigravity",
   "command": "agy",
   "icon": { "asset": "antigravity-favicon" },
-  "install": "https://antigravity.google/product/antigravity-cli"
+  "install": "https://antigravity.google/product/antigravity-cli",
+  "skills": { "dir": "~/.gemini/antigravity/skills" }
 }

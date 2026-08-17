@@ -1,5 +1,24 @@
 import Foundation
 
+/// The companion wire contract's revision. One monotonically increasing
+/// integer, bumped when either end needs to make a compatibility decision — a
+/// new request, a changed meaning for an existing field, a new byte mode — not
+/// for additive fields that already have a safe default.
+///
+/// History:
+///   0: pre-versioning. No `wire` field on the wire; any peer that omits it.
+///   1: 2026-08-07: `wire` declared on `.auth` and `CompanionRoster`.
+public enum Wire {
+    /// A peer that predates the field entirely. Absent decodes to this.
+    public static let legacy = 0
+    /// This build's revision.
+    public static let current = 1
+    /// Oldest Mac this phone will talk to.
+    public static let minimumServer = 0
+    /// Oldest phone this Mac will serve.
+    public static let minimumClient = 0
+}
+
 /// The companion wire protocol, shared by the Mac companion server and the iOS
 /// client so the two never drift. v1 is deliberately tiny:
 ///
@@ -16,7 +35,7 @@ public enum CompanionControl: Codable, Sendable, Equatable {
     /// pairing token from the Mac's QR code. Until it lands, the server sends
     /// nothing and refuses every other message — the port may sit behind a
     /// public tunnel URL, where "connected" must not mean "trusted".
-    case auth(token: String)
+    case auth(token: String, wire: Int)
     /// The client asks to bridge a specific session's PTY (roster session id).
     /// Sent once, immediately after the socket opens; the server replays its
     /// recent output and starts streaming.
@@ -35,6 +54,18 @@ public enum CompanionControl: Codable, Sendable, Equatable {
     /// it for an agent-less start until the next roster push. nil from an
     /// older Mac; the client falls back to the agent it asked for.
     case started(sessionID: String, agent: String?)
+    /// The Terminals tab's ＋ → "New Terminal": open a plain login shell in the
+    /// Mac's loose `.terminals` funnel, the shell twin of the agent-less
+    /// `.start`. It carries no project because the funnel is found-or-created by
+    /// kind on the Mac (like ⌘T), so — unlike `.start` — the phone can seed the
+    /// very first terminal too. Answered with `.started` (agent `"terminal"`).
+    case startTerminal
+    /// The Terminals tab's ＋ → "New SSH": open a loose terminal that runs
+    /// `ssh <host>` instead of a local shell. `host` is a `~/.ssh/config` alias
+    /// (see `.sshConfigHosts`) or a bare `user@host`. Like `.startTerminal` it
+    /// gathers in the `.terminals` funnel and needs no project. Answered with
+    /// `.started`.
+    case startSSH(host: String)
     /// The client asks the Mac to close a session (the phone's swipe-to-remove).
     /// No success reply — the next roster push drops the row everywhere.
     case stop(sessionID: String)
@@ -78,6 +109,20 @@ public enum CompanionControl: Codable, Sendable, Equatable {
     /// `truncated` marks that more matched than the returned batch. `query`
     /// echoes the request so a stale reply for an old keystroke is discardable.
     case searchResults(query: String, paths: [String], truncated: Bool)
+    /// The client asks for the project's working-tree changes — the phone's
+    /// Changes pane, the same `git status` the desktop git pane lists. Answered
+    /// with `.changes` (empty when the project isn't a git work tree).
+    case listChanges(projectID: String)
+    /// The working-tree changes (server → client), repo-relative and already
+    /// carrying their `+`/`−` counts so the list needs no second round trip.
+    case changes(files: [WireChange])
+    /// The client asks for one changed file's unified diff, echoing the status letter
+    /// it already holds from `.changes` — an untracked file diffs against nothing, and
+    /// re-deriving that on the Mac would mean a second `git status` walk of the repo per
+    /// tap. Answered with `.diff` or `.error`.
+    case readDiff(projectID: String, path: String, status: String)
+    /// One file's unified diff (server → client).
+    case diff(WireDiff)
     /// The server rejected a request (unknown session, no live PTY).
     /// Phone → Mac: render this session's agent transcript as an HTML trace
     /// (the same dashboard-over-conversation the desktop Info pane shows). The
@@ -98,11 +143,18 @@ public enum CompanionControl: Codable, Sendable, Equatable {
 
     case error(message: String)
 
+    /// A message this build has no case for — a newer peer's vocabulary. The
+    /// receiver ignores it, but it arrives as a value rather than as `nil` so
+    /// the drop can be logged: "the phone asked for something this Mac is too
+    /// old to do" is the failure mode `wire` exists to explain, and it is
+    /// invisible if an unknown tag decodes to nothing.
+    case unsupported(type: String)
+
     public func encoded() -> String {
         // Small, hand-stable JSON so both ends agree without a schema tool.
         switch self {
-        case .auth(let token):
-            return Self.json(["t": "auth", "token": token])
+        case .auth(let token, let wire):
+            return Self.json(["t": "auth", "token": token, "wire": wire])
         case .attach(let sessionID):
             return #"{"t":"attach","session":"\#(sessionID)"}"#
         case .start(let projectID, let agent):
@@ -115,6 +167,10 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             var fields: [String: Any] = ["t": "started", "session": sessionID]
             if let agent { fields["agent"] = agent }
             return Self.json(fields)
+        case .startTerminal:
+            return #"{"t":"startTerminal"}"#
+        case .startSSH(let host):
+            return Self.json(["t": "startSSH", "host": host])
         case .stop(let sessionID):
             return #"{"t":"stop","session":"\#(sessionID)"}"#
         case .resize(let cols, let rows):
@@ -159,6 +215,27 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             return Self.json([
                 "t": "searchResults", "query": query, "paths": paths, "truncated": truncated,
             ])
+        case .listChanges(let projectID):
+            return Self.json(["t": "listChanges", "project": projectID])
+        case .changes(let files):
+            return Self.json([
+                "t": "changes",
+                "files": files.map {
+                    [
+                        "path": $0.path, "status": $0.status,
+                        "add": $0.additions, "del": $0.deletions,
+                        "binary": $0.isBinary, "staged": $0.isStaged,
+                    ]
+                },
+            ])
+        case .readDiff(let projectID, let path, let status):
+            return Self.json([
+                "t": "readDiff", "project": projectID, "path": path, "status": status,
+            ])
+        case .diff(let diff):
+            return Self.json([
+                "t": "diff", "path": diff.path, "text": diff.text, "binary": diff.binary,
+            ])
         case .trace(let sessionID, let dark):
             return Self.json(["t": "trace", "session": sessionID, "dark": dark])
         case .traceHTML(let sessionID, let html):
@@ -177,6 +254,13 @@ public enum CompanionControl: Codable, Sendable, Equatable {
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
             return #"{"t":"error","message":"\#(escaped)"}"#
+        case .unsupported(let type):
+            // The tag is carried under its own envelope rather than re-emitted
+            // as itself. Echoing the raw tag would turn a message this build
+            // could not read into one a peer *can*: forwarding an unsupported
+            // `startTerminal` would spawn a terminal. What was not understood on
+            // the way in must not become a command on the way out.
+            return Self.json(["t": "unsupported", "of": type])
         }
     }
 
@@ -188,7 +272,7 @@ public enum CompanionControl: Codable, Sendable, Equatable {
         switch type {
         case "auth":
             guard let token = obj["token"] as? String else { return nil }
-            return .auth(token: token)
+            return .auth(token: token, wire: obj["wire"] as? Int ?? Wire.legacy)
         case "attach":
             guard let sessionID = obj["session"] as? String else { return nil }
             return .attach(sessionID: sessionID)
@@ -200,6 +284,11 @@ public enum CompanionControl: Codable, Sendable, Equatable {
         case "started":
             guard let sessionID = obj["session"] as? String else { return nil }
             return .started(sessionID: sessionID, agent: obj["agent"] as? String)
+        case "startTerminal":
+            return .startTerminal
+        case "startSSH":
+            guard let host = obj["host"] as? String else { return nil }
+            return .startSSH(host: host)
         case "stop":
             guard let sessionID = obj["session"] as? String else { return nil }
             return .stop(sessionID: sessionID)
@@ -275,6 +364,36 @@ public enum CompanionControl: Codable, Sendable, Equatable {
                 query: query, paths: paths,
                 truncated: obj["truncated"] as? Bool ?? false
             )
+        case "listChanges":
+            guard let projectID = obj["project"] as? String else { return nil }
+            return .listChanges(projectID: projectID)
+        case "changes":
+            let raw = obj["files"] as? [[String: Any]] ?? []
+            return .changes(files: raw.compactMap { entry in
+                guard let path = entry["path"] as? String else { return nil }
+                return WireChange(
+                    path: path,
+                    status: entry["status"] as? String ?? "M",
+                    additions: entry["add"] as? Int ?? 0,
+                    deletions: entry["del"] as? Int ?? 0,
+                    isBinary: entry["binary"] as? Bool ?? false,
+                    isStaged: entry["staged"] as? Bool ?? false
+                )
+            })
+        case "readDiff":
+            guard let projectID = obj["project"] as? String,
+                  let path = obj["path"] as? String else { return nil }
+            return .readDiff(
+                projectID: projectID, path: path,
+                status: obj["status"] as? String ?? "M"
+            )
+        case "diff":
+            guard let path = obj["path"] as? String,
+                  let text = obj["text"] as? String else { return nil }
+            return .diff(WireDiff(
+                path: path, text: text,
+                binary: obj["binary"] as? Bool ?? false
+            ))
         case "trace":
             guard let sessionID = obj["session"] as? String else { return nil }
             return .trace(sessionID: sessionID, dark: obj["dark"] as? Bool ?? false)
@@ -299,8 +418,13 @@ public enum CompanionControl: Codable, Sendable, Equatable {
         case "error":
             guard let message = obj["message"] as? String else { return nil }
             return .error(message: message)
+        case "unsupported":
+            // Only reachable from this build's own `encoded()`; a peer never
+            // originates it. Named so the envelope round-trips instead of
+            // decaying into a second layer of "unsupported".
+            return .unsupported(type: obj["of"] as? String ?? "")
         default:
-            return nil
+            return .unsupported(type: type)
         }
     }
 
@@ -323,6 +447,68 @@ public struct WireFileEntry: Codable, Sendable, Equatable {
         self.name = name
         self.isDir = isDir
         self.changed = changed
+    }
+}
+
+// MARK: - Changes (git working tree)
+
+/// One changed file in the Mac's working tree, as the phone's Changes pane shows it:
+/// the repo-relative path, git's status letter, and the line counts. Deliberately
+/// flatter than the desktop's `GitChange` — the phone lists and diffs, it never stages.
+public struct WireChange: Codable, Sendable, Equatable {
+    public let path: String
+    /// git's status letter, the desktop's own vocabulary: `M`odified, `A`dded,
+    /// `D`eleted, `R`enamed, `C`opied, `U`ntracked, `!` conflicted.
+    public let status: String
+    public let additions: Int
+    public let deletions: Int
+    /// `--numstat` reported `-` for the counts, so `+`/`−` would be a lie.
+    public let isBinary: Bool
+    /// The change sits entirely in the index — what `git commit` would take now.
+    public let isStaged: Bool
+
+    public init(
+        path: String, status: String, additions: Int, deletions: Int,
+        isBinary: Bool = false, isStaged: Bool = false
+    ) {
+        self.path = path
+        self.status = status
+        self.additions = additions
+        self.deletions = deletions
+        self.isBinary = isBinary
+        self.isStaged = isStaged
+    }
+}
+
+extension WireChange {
+    /// The one-line caption both the Changes row and the diff reader's header show:
+    /// where the file lives and what it gained and lost.
+    public var caption: String {
+        let directory = (path as NSString).deletingLastPathComponent
+        var parts: [String] = directory.isEmpty ? [] : [directory]
+        parts.append(isBinary ? "binary" : "+\(additions) −\(deletions)")
+        if isStaged { parts.append("staged") }
+        return parts.joined(separator: " · ")
+    }
+
+    public var name: String { (path as NSString).lastPathComponent }
+}
+
+/// A `readDiff` reply: one file's unified diff as text, parsed on the phone with
+/// `DiffParser`. Whether a fold can be *expanded* is read off the text itself — a diff
+/// fetched with whole-file context has every line in it, one fetched at git's default
+/// context does not — so nothing here has to describe it separately.
+public struct WireDiff: Codable, Sendable, Equatable {
+    public let path: String
+    public let text: String
+    /// Binary content: `text` is empty and the reader says so rather than
+    /// rendering git's "Binary files differ" line as if it were code.
+    public let binary: Bool
+
+    public init(path: String, text: String, binary: Bool = false) {
+        self.path = path
+        self.text = text
+        self.binary = binary
     }
 }
 
@@ -411,6 +597,38 @@ public struct RosterSession: Codable, Sendable, Equatable {
 }
 
 /// One project and its sessions.
+/// Decodes an array element by element, dropping the ones that fail.
+///
+/// `decodeIfPresent` only tolerates a *missing* key: a key that is present but
+/// whose contents don't match throws, and the throw travels all the way up. On
+/// the roster that turns one unreadable session into an empty tree — the phone
+/// shows nothing at all rather than one row less. A peer is only as forward-
+/// compatible as its least tolerant array.
+///
+/// A failed `decode` leaves the container's cursor where it was, so the slot has
+/// to be consumed by decoding something that always succeeds; without that the
+/// loop never reaches `isAtEnd`.
+private struct SkippedWireElement: Decodable {}
+
+private func decodeLossyArray<Element: Decodable, Key: CodingKey>(
+    _ container: KeyedDecodingContainer<Key>,
+    _ key: Key
+) -> [Element] {
+    typealias Skipped = SkippedWireElement
+    guard var unkeyed = try? container.nestedUnkeyedContainer(forKey: key) else { return [] }
+    var elements: [Element] = []
+    while !unkeyed.isAtEnd {
+        if let element = try? unkeyed.decode(Element.self) {
+            elements.append(element)
+        } else if (try? unkeyed.decode(Skipped.self)) == nil {
+            // Nothing consumed the slot, so the cursor can't advance — stop
+            // rather than spin.
+            break
+        }
+    }
+    return elements
+}
+
 public struct RosterProject: Codable, Sendable, Equatable {
     public let id: String
     public let name: String
@@ -434,6 +652,18 @@ public struct RosterProject: Codable, Sendable, Equatable {
         self.branch = branch
         self.kind = kind
         self.sessions = sessions
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, path, branch, kind, sessions }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        path = try c.decode(String.self, forKey: .path)
+        branch = try c.decodeIfPresent(String.self, forKey: .branch)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        sessions = decodeLossyArray(c, CodingKeys.sessions)
     }
 }
 
@@ -461,6 +691,15 @@ public struct RosterAgent: Codable, Sendable, Equatable {
 /// `"roster"` so it coexists with the small `CompanionControl` messages.
 public struct CompanionRoster: Codable, Sendable, Equatable {
     public let t: String
+    public let wire: Int
+    /// The serving Mac's stable identity — a UUID minted once and persisted on
+    /// the Mac — so the phone can keep several Macs paired and key them by
+    /// something that survives tunnel restarts and DHCP renumbering (the URL
+    /// does neither). nil from an older Mac that predates multi-Mac pairing.
+    public let macID: String?
+    /// The Mac's user-facing computer name ("Jiwei's MacBook Pro"), for the
+    /// phone's paired-Mac list. nil from an older Mac.
+    public let macName: String?
     public let projects: [RosterProject]
     /// The agents the Mac has enabled in Settings ▸ Agents, in preset order —
     /// the phone's new-session menu mirrors this instead of a fixed list. Empty
@@ -468,19 +707,28 @@ public struct CompanionRoster: Codable, Sendable, Equatable {
     /// falls back to its built-in defaults).
     public let agents: [RosterAgent]
 
-    public init(projects: [RosterProject], agents: [RosterAgent] = []) {
+    public init(
+        projects: [RosterProject], agents: [RosterAgent] = [], wire: Int = Wire.current,
+        macID: String? = nil, macName: String? = nil
+    ) {
         t = "roster"
+        self.wire = wire
+        self.macID = macID
+        self.macName = macName
         self.projects = projects
         self.agents = agents
     }
 
-    private enum CodingKeys: String, CodingKey { case t, projects, agents }
+    private enum CodingKeys: String, CodingKey { case t, wire, macID, macName, projects, agents }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         t = try c.decode(String.self, forKey: .t)
-        projects = try c.decodeIfPresent([RosterProject].self, forKey: .projects) ?? []
-        agents = try c.decodeIfPresent([RosterAgent].self, forKey: .agents) ?? []
+        wire = try c.decodeIfPresent(Int.self, forKey: .wire) ?? Wire.legacy
+        macID = try c.decodeIfPresent(String.self, forKey: .macID)
+        macName = try c.decodeIfPresent(String.self, forKey: .macName)
+        projects = decodeLossyArray(c, CodingKeys.projects)
+        agents = decodeLossyArray(c, CodingKeys.agents)
     }
 
     public func encodedJSON() -> String {

@@ -16,6 +16,7 @@
   },
   "icon": { "vector": "codex" },
   "install": "https://developers.openai.com/codex/cli",
+  "skills": { "dir": "~/.codex/skills" },
   "titleStatus": {
     "working": ["(?:^| )[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?: |$)"],
     "attention": ["Action Required"]

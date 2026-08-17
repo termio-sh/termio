@@ -13,9 +13,19 @@ struct MobileSettingsTab: View {
     @State private var hosts: [String] = []
     @State private var selectedHost = ""
     @State private var copied = false
+    @State private var confirmRotate = false
     @State private var token = PairingToken.current
     @ObservedObject private var tunnel = TunnelManager.shared
     @ObservedObject private var mobile = MobileAccess.shared
+    /// Draft custom-relay fields, loaded from the persisted values on appear and
+    /// written back only when the user commits them, so a half-typed command
+    /// never becomes the live spec mid-keystroke.
+    @State private var customCommand = ""
+    @State private var customURLPattern = ""
+
+    /// A tunnel is up (or coming up): the QR carries the public URL, not the LAN
+    /// address, and the LAN host picker no longer applies.
+    private var onTunnel: Bool { tunnel.provider != .off }
 
     /// What the QR encodes: the tunnel's public URL while one is running,
     /// the LAN address otherwise — either way carrying the pairing token the
@@ -36,112 +46,214 @@ struct MobileSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Mobile Access", isOn: $mobile.isEnabled)
+                Toggle(localized("Mobile Access"), isOn: $mobile.isEnabled)
             } footer: {
-                Text("When off, this Mac stops listening and your iPhone disconnects — but stays paired. Turn it back on to reconnect; no new QR needed.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                footnote(localized("Turn off to disconnect your iPhone; pairing is kept."))
             }
 
             // Everything below only means anything while we're serving, so the
             // master switch reveals it — a dimmed, unscannable QR (and an
             // address nothing is listening on) is more misleading than absent.
             if mobile.isEnabled {
+                // One section, one job: connect a phone. The QR is the hero, so
+                // it leads; the controls that rewrite it (Tunnel, LAN address)
+                // sit as its immediate neighbours below — adjacent enough that
+                // there's no "the QR above…" indirection to hold in your head.
                 Section {
                     if hosts.isEmpty, !tunnelRunning {
-                        Text("No network address found. Join a network, then reopen this tab.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                        footnote(localized("No network address found. Join a network, then reopen this tab."))
                     } else {
-                        qrCard
-                        if hosts.count > 1, !tunnelRunning {
-                            Picker("Address", selection: $selectedHost) {
-                                ForEach(hosts, id: \.self) { host in
-                                    Text(host).tag(host)
-                                }
-                            }
-                        }
-                        addressRow
+                        // QR + its URL are one unit ("scan this, or copy the same
+                        // thing") — kept in a single row so no divider splits them.
+                        scanBlock
                     }
-                } header: {
-                    SectionHeaderLabel(title: "Pair iPhone")
-                } footer: {
-                    Text(tunnelRunning
-                        ? "On the iPhone app, tap the Mac pill on the session list (or Settings ▸ Connectivity) and choose Scan QR Code. The tunnel address works from anywhere."
-                        : "On the iPhone app, tap the Mac pill on the session list (or Settings ▸ Connectivity) and choose Scan QR Code. Both devices must be on the same network.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
 
-                Section {
-                    Picker("Tunnel", selection: Binding(
+                    // One precise control: where the companion is reachable —
+                    // LAN only, or fronted by a named tunnel.
+                    Picker(localized("Tunnel"), selection: Binding(
                         get: { tunnel.provider },
                         set: { tunnel.setProvider($0) }
                     )) {
                         ForEach(TunnelManager.Provider.allCases) { provider in
-                            Text(provider.label).tag(provider)
+                            Text(Self.pickerLabel(provider)).tag(provider)
                         }
                     }
-                    statusRow
+                    // The custom-relay editor: shown only when Custom is picked,
+                    // so the common third-party path stays uncluttered.
+                    if tunnel.provider == .custom { customTunnelEditor }
+                    if !onTunnel, hosts.count > 1 {
+                        Picker(localized("Address"), selection: $selectedHost) {
+                            ForEach(hosts, id: \.self) { host in
+                                Text(host).tag(host)
+                            }
+                        }
+                    }
+                    if onTunnel { statusRow }
                 } header: {
-                    SectionHeaderLabel(title: "Remote Access")
+                    SectionHeaderLabel(title: localized("Connect iPhone"))
                 } footer: {
-                    Text("Fronts this Mac with a public URL so the iPhone can connect away from home. The QR above switches to the tunnel address while one is running; every connection still has to present this Mac's pairing token.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    // Say plainly whose server the phone's traffic crosses, so
+                    // the "can I self-host the relay?" question is answered in
+                    // the app: the bundled providers all terminate on a third
+                    // party, Custom is one the user runs themselves.
+                    footnote(tunnelFootnote)
                 }
 
                 Section {
-                    Button("Reset Pairing…", role: .destructive) {
-                        token = PairingToken.regenerate()
-                    }
+                    // A rare, destructive maintenance action: it rests as a plain
+                    // button and lets the confirmation dialog carry the red.
+                    Button(localized("Rotate Pairing Token…")) { confirmRotate = true }
+                        .confirmationDialog(
+                            localized("Rotate the pairing token?"),
+                            isPresented: $confirmRotate,
+                            titleVisibility: .visible
+                        ) {
+                            Button(localized("Rotate Token"), role: .destructive) {
+                                token = PairingToken.regenerate()
+                            }
+                            Button(localized("Cancel"), role: .cancel) {}
+                        } message: {
+                            Text(localized("Every paired iPhone is signed out and must re-scan the new QR to reconnect."))
+                        }
                 } footer: {
-                    Text("Generates a new pairing token. Every previously paired phone is signed out until it scans the new QR.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    footnote(localized("Issues a new token and revokes every paired iPhone."))
                 }
             }
         }
         .formStyle(.grouped)
-        .onAppear(perform: refreshHosts)
+        .onAppear {
+            refreshHosts()
+            let custom = CustomTunnel.current
+            customCommand = custom.command
+            customURLPattern = custom.urlPattern
+        }
     }
 
+    /// A provider's name as the picker shows it. `Spec.label` is the tool's own
+    /// name, so it reaches the screen untranslated — right for the three brands
+    /// (Tunelo, Cloudflare, ngrok are proper nouns everywhere), wrong for the
+    /// two entries that are ordinary words. Those go through the catalog, which
+    /// already carries "Custom" for the theme picker.
+    private static func pickerLabel(_ provider: TunnelManager.Provider) -> String {
+        switch provider {
+        case .off: return localized("Off — LAN only")
+        case .custom: return localized("Custom")
+        case .tunelo, .cloudflared, .ngrok: return provider.label
+        }
+    }
+
+    /// Whose server the phone's traffic crosses, phrased for the current
+    /// selection: a self-hosted Custom relay, a bundled third-party tunnel, or
+    /// LAN-only. Answers the "is the relay self-hostable?" question in the app.
+    private var tunnelFootnote: String {
+        if tunnel.provider == .custom {
+            return localized("On iPhone, tap the Mac pill ▸ Scan QR Code. Traffic crosses the relay you run yourself — no third party in the path.")
+        }
+        if onTunnel {
+            return localized("On iPhone, tap the Mac pill ▸ Scan QR Code. The tunnel address works from any network, and terminates on the provider's servers. Pick Custom to run your own relay instead.")
+        }
+        return localized("On iPhone, tap the Mac pill ▸ Scan QR Code. Both devices must share a LAN.")
+    }
+
+    /// Command + URL-pattern editor for a self-hosted relay. A run-any-command
+    /// field is a code-execution surface, so it is fronted by an explicit
+    /// warning rather than presented as a bare text field — the command runs on
+    /// the user's own machine, with their own privileges, and only when they
+    /// select Custom. Committed on submit (or via Apply) so a half-typed command
+    /// never becomes the live spec.
+    @ViewBuilder
+    private var customTunnelEditor: some View {
+        // The prompts stay untranslated: they are literal command lines and a
+        // literal regex, not prose.
+        TextField(localized("Command"), text: $customCommand, prompt: Text(verbatim: "cloudflared tunnel run --url http://127.0.0.1:{port} my-tunnel"))
+            .font(.system(.callout, design: .monospaced))
+            .onSubmit(commitCustomTunnel)
+        TextField(localized("URL Pattern"), text: $customURLPattern, prompt: Text(verbatim: #"https://[a-z0-9-]+\.example\.com"#))
+            .font(.system(.callout, design: .monospaced))
+            .onSubmit(commitCustomTunnel)
+        HStack {
+            if !customURLPattern.isEmpty, !patternCompiles {
+                Label(localized("Not a valid regular expression"), systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
+            Spacer()
+            Button(localized("Apply"), action: commitCustomTunnel)
+                .disabled(!customTunnelChanged)
+        }
+        footnote(localized("Runs on this Mac with your privileges when Custom is selected — no shell, arguments split on spaces. Use {port} for the companion port; the URL pattern is a regex matching the public https URL your relay prints."))
+    }
+
+    /// Whether the draft URL pattern is a compilable regex.
+    private var patternCompiles: Bool {
+        (try? NSRegularExpression(pattern: customURLPattern)) != nil
+    }
+
+    /// Whether the draft differs from what's persisted (drives the Apply button).
+    private var customTunnelChanged: Bool {
+        let saved = CustomTunnel.current
+        return customCommand != saved.command || customURLPattern != saved.urlPattern
+    }
+
+    /// Persist the draft relay and, if Custom is the active provider, restart the
+    /// tunnel so the new command takes effect. Trimmed so trailing whitespace
+    /// doesn't smuggle an empty argv token in.
+    private func commitCustomTunnel() {
+        let command = customCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = customURLPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        CustomTunnel.save(command: command, urlPattern: pattern)
+        customCommand = command
+        customURLPattern = pattern
+        if tunnel.provider == .custom { tunnel.reloadCustom() }
+    }
+
+    private func footnote(_ text: String) -> some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+
+    /// Just the tunnel's health — the public host already shows in the address
+    /// row above, so this line carries state, not a second copy of the URL.
     @ViewBuilder
     private var statusRow: some View {
         HStack {
-            Text("Status")
+            Text(localized("Status"))
             Spacer()
             switch tunnel.status {
             case .off:
-                Text("Off — LAN only")
+                Text(localized("Starting…"))
                     .foregroundStyle(.secondary)
             case .installing:
                 ProgressView().controlSize(.small)
-                Text("Installing \(tunnel.provider.binaryName)…")
+                Text(localized("Installing \(tunnel.provider.binaryName)…"))
                     .foregroundStyle(.secondary)
             case .starting:
                 ProgressView().controlSize(.small)
-                Text("Starting tunnel…")
+                Text(localized("Starting tunnel…"))
                     .foregroundStyle(.secondary)
-            case .running(let publicURL):
+            case .running:
                 Image(systemName: "circle.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(.green)
-                Text(publicURL.host ?? publicURL.absoluteString)
-                    .font(.system(.callout, design: .monospaced))
+                Text(localized("Connected"))
                     .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
             case .failed(let message):
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
                 Text(message)
                     .font(.callout)
                     .foregroundStyle(.red)
+                    .multilineTextAlignment(.trailing)
             }
         }
     }
 
-    private var qrCard: some View {
-        HStack {
-            Spacer()
+    /// The hero unit: the QR to scan with its own URL captioned directly beneath
+    /// it. One row (no divider between) so the pair reads as a single thing.
+    private var scanBlock: some View {
+        VStack(spacing: 12) {
             if let qr = Self.qrImage(for: url) {
                 Image(nsImage: qr)
                     .interpolation(.none)
@@ -151,8 +263,9 @@ struct MobileSettingsTab: View {
                     .background(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            Spacer()
+            addressRow
         }
+        .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
     }
 
@@ -174,7 +287,7 @@ struct MobileSettingsTab: View {
                 copied = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
             } label: {
-                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                Label(copied ? localized("Copied") : localized("Copy"), systemImage: copied ? "checkmark" : "doc.on.doc")
             }
             .buttonStyle(.borderless)
             .fixedSize()

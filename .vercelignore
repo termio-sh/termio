@@ -7,9 +7,18 @@
 # docs site from the build — which is exactly what happened once. Keep the slash.
 /.build/
 /.swiftpm/
+/.claude/
+/.termio/
+/.wrangler/
+/.agents/
 /Sources/
 /Tests/
+/Shared/
+/companion/
+/ios/
+/plans/
 /termio.app/
+/termio-dev.app/
 /packaging/
 /scripts/
 /tools/
@@ -17,3 +26,4 @@
 /web/docs/
 /web/landing/node_modules/
 /web/landing/.next/
+/web/landing/tsconfig.tsbuildinfo

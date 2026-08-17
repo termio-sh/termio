@@ -1,6 +1,6 @@
-# termio Web — Architecture
+# Termio Web — Architecture
 
-This describes the `web/` project: the marketing site. termio is **free to use**
+This describes the `web/` project: the marketing site. Termio is **free to use**
 — there is no checkout, no licensing service, and no backend. The desktop app
 lives in the repository root (`Sources/termio`) and is out of scope here.
 
@@ -8,7 +8,7 @@ lives in the repository root (`Sources/termio`) and is out of scope here.
 
 ### `web/landing` — marketing site
 
-The public website. A developer evaluates termio and clicks through to download
+The public website. A developer evaluates Termio and clicks through to download
 the Mac app.
 
 - **Stack:** Next.js + TypeScript, styled with Tailwind CSS and
@@ -19,7 +19,7 @@ the Mac app.
 
 ## Distribution
 
-termio ships as a notarized `.dmg` and updates itself in place:
+Termio ships as a notarized `.dmg` and updates itself in place:
 
 - **Download** — the landing "Download for Mac" buttons point at a stable
   Cloudflare R2 URL (behind `downloads.termio.sh`) that always serves the newest

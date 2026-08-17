@@ -1,0 +1,28 @@
+[package]
+name = "termiod-vt"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# The engine build (Zig, cross-target, static archive) and the raw FFI both live
+# in `libghostty-vt`, so this crate carries no vendored source and no build
+# script. What stays here is termiod's own snapshot boundary: the wire cell is
+# ours, not the engine's.
+#
+# Pinned to termio-sh/libghostty-rs, our fork, which builds ghostty 9d8fbd1 —
+# the same one libghostty-swift 1.0.16 ships to the Mac and iOS clients, so the
+# host and its clients run one VT. That parity is why this engine was chosen
+# over alacritty_terminal in the first place.
+#
+# It has to be a fork rather than a rev bump: `libghostty-vt-sys` checks its
+# bindings in, so they must be regenerated against the ghostty they build.
+# Pointing GHOSTTY_SOURCE_DIR at a different one does not fail to build — it
+# corrupts the heap. Bumping ghostty here means bumping the fork's
+# GHOSTTY_COMMIT and regenerating in the same commit, never one without the
+# other.
+#
+# Track libghostty-swift when it releases: its title carries the ghostty it
+# built (`1.0.16 · ghostty v1.3.1-1841-g9d8fbd1`), and that sha is the one to
+# match here.
+[dependencies]
+libghostty-vt = { git = "https://github.com/termio-sh/libghostty-rs", rev = "7441da21c64a7b2391c92cbc47cc8a2269d13fda" }

@@ -7,13 +7,19 @@ final class LineNumberRulerView: NSRulerView {
     private var numberFont: NSFont
     private var numberColor: NSColor
     private var gutterColor: NSColor
+    /// How far below each line fragment's top the editor's glyph tops sit (the centering lift
+    /// from its fixed line height). The numbers shift by the same amount to stay on the code's
+    /// baseline instead of floating above it.
+    private var baselineShift: CGFloat
 
     override var isOpaque: Bool { true }
 
-    init(scrollView: NSScrollView, editorFont: NSFont, numberColor: NSColor, gutterColor: NSColor) {
+    init(scrollView: NSScrollView, editorFont: NSFont, numberColor: NSColor, gutterColor: NSColor,
+         baselineShift: CGFloat) {
         self.numberFont = Self.gutterFont(for: editorFont)
         self.numberColor = numberColor
         self.gutterColor = gutterColor
+        self.baselineShift = baselineShift
         super.init(scrollView: scrollView, orientation: .verticalRuler)
         clientView = scrollView.documentView
         ruleThickness = 42
@@ -22,10 +28,17 @@ final class LineNumberRulerView: NSRulerView {
     @available(*, unavailable)
     required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    func restyle(editorFont: NSFont, numberColor: NSColor, gutterColor: NSColor) {
-        numberFont = Self.gutterFont(for: editorFont)
+    func restyle(editorFont: NSFont, numberColor: NSColor, gutterColor: NSColor,
+                 baselineShift: CGFloat) {
+        // Called from every representable update — bail when nothing changed, so the routine
+        // per-render pass doesn't force a full gutter repaint alongside every keystroke.
+        let font = Self.gutterFont(for: editorFont)
+        if font == numberFont, numberColor == self.numberColor,
+           gutterColor == self.gutterColor, baselineShift == self.baselineShift { return }
+        numberFont = font
         self.numberColor = numberColor
         self.gutterColor = gutterColor
+        self.baselineShift = baselineShift
         needsDisplay = true
     }
 
@@ -63,7 +76,7 @@ final class LineNumberRulerView: NSRulerView {
             let string = "\(number)" as NSString
             let size = string.size(withAttributes: attributes)
             let x = self.ruleThickness - size.width - 6
-            let y = fragMinY + inset + yOffset
+            let y = fragMinY + inset + yOffset + self.baselineShift
             let topClipInset = self.window.map { 1 / $0.backingScaleFactor } ?? 0
             guard y > self.bounds.minY + topClipInset else { return }
             string.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
@@ -72,13 +85,9 @@ final class LineNumberRulerView: NSRulerView {
         let visibleGlyphRange = layoutManager.glyphRange(forBoundingRect: textView.visibleRect, in: container)
         let visibleCharRange = layoutManager.characterRange(forGlyphRange: visibleGlyphRange, actualGlyphRange: nil)
 
-        // Line number of the first visible character: 1 + the newlines before it.
-        var lineNumber = 1
-        var index = 0
-        while index < visibleCharRange.location {
-            if content.character(at: index) == 10 { lineNumber += 1 }
-            index += 1
-        }
+        // Line number of the first visible character, counted from the scroll anchor — O(delta)
+        // per draw. Counting from character zero made every scroll tick O(document prefix).
+        var lineNumber = line(forCharacter: visibleCharRange.location, in: content)
 
         // One number per logical line (paragraph), at its first line fragment.
         content.enumerateSubstrings(
@@ -100,5 +109,37 @@ final class LineNumberRulerView: NSRulerView {
            layoutManager.extraLineFragmentTextContainer != nil {
             drawNumber(lineNumber, layoutManager.extraLineFragmentRect.minY)
         }
+    }
+
+    // MARK: Line numbering anchor
+
+    /// The line number at a known character offset, advanced as the view scrolls so each draw
+    /// counts newlines only over the scroll delta. Reset whenever the text changes — an edit
+    /// above the anchor shifts every line number below it.
+    private var lineAnchor: (character: Int, line: Int) = (0, 1)
+
+    /// The text changed: restart the anchor from the top. The next draw pays one prefix scan;
+    /// scrolling stays O(delta).
+    func invalidateLineAnchor() {
+        lineAnchor = (0, 1)
+    }
+
+    /// 1-based line number of the character at `index`, counted from the nearest anchor, which
+    /// then moves to `index` for the next draw.
+    private func line(forCharacter index: Int, in content: NSString) -> Int {
+        var (anchorCharacter, anchorLine) = lineAnchor
+        if anchorCharacter > content.length { (anchorCharacter, anchorLine) = (0, 1) }
+        var line = anchorLine
+        if index >= anchorCharacter {
+            for position in anchorCharacter..<index where content.character(at: position) == 10 {
+                line += 1
+            }
+        } else {
+            for position in index..<anchorCharacter where content.character(at: position) == 10 {
+                line -= 1
+            }
+        }
+        lineAnchor = (index, line)
+        return line
     }
 }

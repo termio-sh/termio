@@ -1,16 +1,37 @@
 import Foundation
 import SwiftUI
 
+/// The one quiet-chip chrome worn by every inspector pane-header icon control — the
+/// explorer/Changes buttons, the Issues refresh & filter, the ↗ Open-on-GitHub, and the
+/// detail's hide-list / maximize / close. A 22×22 hit target with a faint rounded fill that
+/// fades in on hover; the glyph itself is coloured secondary→primary by its host. Factored out
+/// so a `Button` and a `Menu` label render pixel-identical chrome despite being different types.
+struct TreeHeaderChip: ViewModifier {
+    @Binding var hovering: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: 22, height: 22)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(hovering ? 0.08 : 0))
+            )
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+    }
+}
+
 /// A quiet icon button for the explorer / Changes pane headers. The explorer's file
 /// actions draw VS Code's own codicon glyphs (see `Codicon`) so the toolbar matches
 /// VS Code; the Changes pane uses SF Symbols. Both render quiet `.secondary` at rest,
-/// brightening to primary on hover over a faint rounded fill.
+/// brightening to primary on hover over the shared `TreeHeaderChip` fill.
 struct TreeHeaderButton: View {
-    /// Either an SF Symbol name or a VS Code codicon — the two icon sources the two
-    /// header toolbars draw from.
+    /// An SF Symbol, a VS Code codicon, or a Hugeicons stroke glyph — the icon
+    /// sources the pane header toolbars draw from.
     enum Source {
         case symbol(String)
         case codicon(Codicon)
+        case huge(HugeIcon)
     }
 
     let source: Source
@@ -24,18 +45,17 @@ struct TreeHeaderButton: View {
         self.action = action
     }
 
+    init(huge: HugeIcon, help: String, action: @escaping () -> Void) {
+        self.source = .huge(huge)
+        self.help = help
+        self.action = action
+    }
+
     var body: some View {
         Button(action: action) {
-            icon
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(Color.primary.opacity(isHovering ? 0.08 : 0))
-                )
-                .contentShape(Rectangle())
+            icon.modifier(TreeHeaderChip(hovering: $isHovering))
         }
         .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
         .help(help)
     }
 
@@ -49,6 +69,12 @@ struct TreeHeaderButton: View {
                 .foregroundStyle(isHovering ? Color.primary : Color.secondary)
         case .codicon(let codicon):
             CodiconView(icon: codicon, size: 15, color: isHovering ? .primary : .secondary)
+        case .huge(let icon):
+            // 1.0pt: the one weight every inspector header Hugeicon shares (↗, the detail's
+            // window controls, the filter funnel), tuned to sit at the optical weight of the
+            // codicon refresh beside it rather than reading heavier than it.
+            HugeIconView(icon: icon, size: 15, color: isHovering ? .primary : .secondary,
+                         lineWidthOverride: 1.0)
         }
     }
 }
@@ -64,4 +90,11 @@ struct FileTreeActions {
     let newFolder: (_ directory: URL) -> Void
     let rename: (URL) -> Void
     let delete: (URL) -> Void
+    /// Types the row's path into the selected session's agent prompt — Cursor's
+    /// "Add File to Chat" verb, on the same shell-quoted token a drag onto the
+    /// terminal inserts.
+    let addToChat: (URL) -> Void
+    /// Read at menu-open time so the item tracks the live session: a plain shell
+    /// has no chat to add to, so the row doesn't offer one.
+    let canAddToChat: () -> Bool
 }

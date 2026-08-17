@@ -1,13 +1,13 @@
-# termio — landing page
+# Termio — landing page
 
-The marketing site for **termio**, a native macOS terminal that gives every AI
+The marketing site for **Termio**, a native macOS terminal that gives every AI
 coding agent (Claude Code, Codex, Gemini, Amp, and more) a first-class home.
-termio is **free to use** — the site's only call to action is the Mac download.
+Termio is **free to use** — the site's only call to action is the Mac download.
 
 Built with **Next.js (App Router) + TypeScript + Tailwind CSS v4 + shadcn/ui**.
 The visual design is modeled on [superwhisper.com](https://superwhisper.com) — a
 dark, cinematic, gradient-forward Mac-app aesthetic — while all copy and product
-facts are about termio.
+facts are about Termio.
 
 ## Run it
 

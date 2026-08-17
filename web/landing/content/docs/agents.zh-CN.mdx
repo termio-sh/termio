@@ -1,0 +1,59 @@
+---
+title: 同时运行多个 Agent
+description: 让一支 Agent 队伍并排工作，一眼读出它们的实时状态，并让 Termio 的 hooks 在某一个需要你时立刻告诉你。
+x-i18n:
+  source_path: agents.mdx
+  source_hash: d27bfb6603af316d63460e973bfab02241213c91741f38412cc3dbf671ddbc28
+  generated_at: 2026-08-16
+---
+
+Termio 就是为同时运行多个 Agent 造的。侧栏是你的控制台：每个会话是一行，每一行都汇报
+它的 Agent 此刻在做什么。
+
+## 内置的 Agent
+
+Termio 开箱即认常见的编程 Agent：
+
+| Agent | 命令行 |
+| --- | --- |
+| Claude Code | `claude` |
+| Codex | `codex` |
+| Gemini | `gemini` |
+| Amp | `amp` |
+| Pi | `pi` |
+| OpenCode | `opencode` |
+| Copilot | `copilot` |
+| Cursor | `cursor-agent` |
+
+其中任何一个只要装在你的 `PATH` 上，就会出现在启动选项里。普通 shell 始终可用。用的是
+别的工具？任何命令行工具都能成为一等 Agent——参见
+[自定义 Agent](/zh-CN/docs/custom-agents)。
+
+<DocsImage
+  src="/screenshots/docs/17-agents-settings.png"
+  alt="Termio 的 Agent 设置显示完整内置目录，并选中 Claude Code"
+  width={1664}
+  height={1288}
+/>
+
+## 一眼读出状态
+
+每个会话行都带一个实时状态点——**工作中**、**空闲**、**完成**，或**需要你**。Termio
+从多种信号里推导它们：Agent 自己暴露的 hooks，以及在没有 hooks 时的终端输出，这样即使
+面对不发结构化事件的 Agent，侧栏也保持诚实。
+[侧栏指南](/zh-CN/docs/sidebar#status) 解释了每种状态的含义，
+[会话控制](/zh-CN/docs/session-control) 讲了让它们最准确的那些可选 hooks。
+
+<DocsImage
+  src="/screenshots/docs/05-session-statuses.png"
+  alt="Termio 侧栏和 termio sessions list 输出显示空闲、工作中、完成和需要你状态"
+  width={2424}
+  height={1664}
+/>
+
+## 切换而不丢失位置
+
+点击一个会话会立刻把它带到前面；其余的继续在后台运行。因为每个会话都是真实进程，Agent
+不会因为不在屏幕上就暂停——你可以在一个会话里发起长任务，切到另一个，等第一个举手时再
+回来。会话多到超过几个时，`⇧⌘O` 能直接按名字跳过去——参见
+[导航](/zh-CN/docs/navigation)。

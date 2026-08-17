@@ -1,0 +1,83 @@
+---
+title: 检查器
+description: 浏览文件、带语法高亮地编辑、读 git 差异、搜索项目——一整块侧面板，永不把你从终端里拽出来。
+x-i18n:
+  source_path: inspector.mdx
+  source_hash: b819a8f91967d9a35cbb611110137c5c886ccbd42c4fb62e67ecc4c0689fd1ad
+  generated_at: 2026-08-16
+---
+
+检查器是 Termio 用来处理终端*周边*一切的侧面板：文件、更改和搜索。它就在会话旁边，
+让你不必切换应用也能看代码。
+
+## 文件
+
+文件树映射工作目录。单击文件会在内置编辑器里打开，带语法高亮、软换行和实时的行列显示。
+编辑自动保存——没有保存按钮。图片、PDF 和 HTML 则用「快速查看」预览。
+
+<DocsImage
+  src="/screenshots/docs/06-files-editor.png"
+  alt="Termio 文件检查器选中一个 Swift 文件，并在终端旁的语法高亮编辑器中打开"
+  width={2424}
+  height={1664}
+/>
+
+<DocsImage
+  src="/screenshots/docs/23-quick-look.png"
+  alt="Termio 文件检查器选中一个文件，并在只读的「快速查看」中打开其图片预览"
+  width={2424}
+  height={1664}
+/>
+
+## 更改
+
+git 面板有三个只读标签：
+
+- **更改** —— 当前的差异，以清晰的统一视图渲染。
+- **对比** —— 当前分支相对它将要合入的分支：一个 PR 会带过去的文件和提交，从合并基点
+  算差异，所以列表和平台上看到的一致。
+- **历史** —— 最近的提交，带作者头像、可展开的文件列表和逐个提交的差异。
+
+<DocsImage
+  src="/screenshots/docs/07-changes-diff.png"
+  alt="Termio「更改」标签选中 build-app.sh，并在终端旁显示红绿统一差异"
+  width={2424}
+  height={1664}
+/>
+
+<DocsImage
+  src="/screenshots/docs/08-commit-history.png"
+  alt="Termio「历史」标签同时显示一个提交、其中一个文件，以及该文件在这次提交中的差异"
+  width={2424}
+  height={1664}
+/>
+
+它是有意做成只读的：写入 git（提交、推送、开 PR）留在终端里，因为 Agent 和你自己的命令
+本来就在那儿。
+
+## 搜索 [#search]
+
+检查器的 **搜索** 标签在整个项目里做内容搜索（底层是 `git grep`），并把你直接带到匹配的
+那一行。它搜的是文件内部，不只是文件名。这就是你在编辑器里熟悉的「在文件中查找」。
+
+<DocsImage
+  src="/screenshots/docs/09-project-search.png"
+  alt="Termio 搜索检查器显示 DiffGapText 查询、按文件分组的结果和高亮的匹配文字"
+  width={2424}
+  height={1664}
+/>
+
+想按*名字*找文件？那是 [快速打开](/zh-CN/docs/navigation)（`⇧⌘O`），它同时也在会话和最近
+的项目之间跳转。
+
+## 从终端里打开文件
+
+在终端输出里按住 Cmd 点击文件路径——即使在 Agent 的 TUI 里也行——Termio 会在编辑器里打开它。
+Cmd 点击网址会用浏览器打开，`file://` 链接则打开一个只读预览浮层。
+
+<DocsImage
+  src="/screenshots/docs/22-open-terminal-path.png"
+  alt="Termio 终端中的相对 Swift 文件路径在旁边的内置只读编辑器中打开"
+  width={2424}
+  height={1664}
+/>

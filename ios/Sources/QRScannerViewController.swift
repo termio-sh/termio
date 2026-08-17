@@ -16,7 +16,7 @@ final class QRScannerViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Scan QR Code"
+        title = localized("Scan QR Code")
         view.backgroundColor = .black
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped)
@@ -66,7 +66,7 @@ final class QRScannerViewController: UIViewController {
 
     private func showUnavailableHint() {
         let label = UILabel()
-        label.text = "Camera unavailable.\nType the address instead."
+        label.text = localized("Camera unavailable.\nType the address instead.")
         label.numberOfLines = 0
         label.textAlignment = .center
         label.textColor = .secondaryLabel

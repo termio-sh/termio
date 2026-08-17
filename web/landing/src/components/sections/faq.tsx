@@ -31,14 +31,24 @@ const faqs: { question: string; answer: string }[] = [
     answer: `Termio gives a first-class native terminal to ${supportedAgents.join(", ")}. Because each session is just a real PTY, any CLI-based agent works — and we add more as the ecosystem grows.`,
   },
   {
+    question: "Is there an iPhone app?",
+    answer:
+      "Yes. The free iPhone companion mirrors your Mac sessions live — the full terminal, with a key bar for esc, tab and ctrl, plus hold-to-speak voice input. It's in public beta on TestFlight; pair it by scanning the QR code in Settings → Mobile.",
+  },
+  {
     question: "Is my code private?",
     answer:
       "Yes. Termio is local-only: no telemetry, no cloud sync, and no account is needed to start. Your repositories, agent output and sessions never leave your machine.",
   },
   {
+    question: "Is Termio available in my language?",
+    answer:
+      "Termio and the iPhone companion ship in English and Simplified Chinese. The app follows your macOS language; Settings → General pins one if you'd rather choose.",
+  },
+  {
     question: "What are the requirements?",
     answer:
-      "macOS, Apple Silicon. Termio is a native app built for Apple Silicon Macs. You bring your own agent CLIs and their API keys.",
+      "macOS 14 or later, on Apple silicon or Intel — Termio ships as a universal binary, so the same download runs natively on both. You bring your own agent CLIs and their API keys.",
   },
 ];
 

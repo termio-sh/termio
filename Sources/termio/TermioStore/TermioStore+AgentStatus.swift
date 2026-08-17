@@ -1,6 +1,15 @@
 import Foundation
+import os
 
 extension TermioStore {
+    /// Probe-level trace for the stall detector, readable via
+    /// `log stream --predicate 'category == "stall-detection"' --level info`.
+    /// The thresholds ship untuned against real fleets (design doc §4.7 keeps
+    /// `stalled` out of the default watch filter for exactly that reason), and
+    /// this is the evidence stream tuning needs: which windows slid on output
+    /// volume, and what each probe measured when one fired or held.
+    private static let stallTrace = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "sh.termio.app", category: "stall-detection")
     /// Brings up the hook socket and aligns `~/.claude/settings.json` with the
     /// current setting. The listener always runs (it is harmless when no hooks are
     /// installed); only the settings-file side is toggled.
@@ -17,7 +26,18 @@ extension TermioStore {
         // "turn ended" signal), so the sweep has to tick at that granularity to
         // clear a stuck spinner promptly. A 2s repeating timer is negligible.
         staleWorkingSweep = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sweepStaleWorking() }
+            MainActor.assumeIsolated {
+                self?.sweepStaleWorking()
+                self?.sweepStalledSessions()
+            }
+        }
+    }
+
+    /// Whether any session is an agent (declared or detected via `effectiveAgent`). Gates
+    /// the "status is off" reminder — a shell-only workspace has nothing to report.
+    var isRunningAnyAgent: Bool {
+        projects.contains { project in
+            project.sessions.contains { effectiveAgent(for: $0) != .terminal }
         }
     }
 
@@ -43,7 +63,7 @@ extension TermioStore {
                 await self?.handleSessionControl(request) ?? Data()
             },
             onWatch: { [weak self] request in
-                self?.resolveWatchScope(request) ?? (nil, nil)
+                self?.resolveWatchScope(request) ?? (nil, nil, [])
             })
         control.start()
         sessionControl = control
@@ -87,7 +107,7 @@ extension TermioStore {
             if let path = carriedTranscript {
                 // A hook-carried path can name a *new* conversation id in its filename
                 // (after `/clear`), so advance the resume pin to match — a no-op unless
-                // it actually rotated. See docs/design/agent-resume-identity.md.
+                // it actually rotated. See docs/design/20260716-agent-resume-identity.md.
                 reconcileResumeID(id, transcriptPath: path)
             }
             if let conversation = conversationToken(report.conversationID) {
@@ -145,9 +165,11 @@ extension TermioStore {
         case "attention":
             // The agent is blocked waiting on the user (a permission prompt or a
             // free-text answer). Mirror the bell path: only flag a session the user
-            // isn't already looking at.
+            // isn't actually watching — with termio backgrounded, even the selected
+            // session needs the cue (it's what fires the desktop notification). This
+            // is an observable blocking condition, so its dot survives a click.
             clearWorking(id)
-            if selectedSessionID != id { setStatus(.needsAttention, for: id) }
+            flagBlockingAttention(for: id)
         case "idle":
             clearWorking(id)
             setStatus(.idle, for: id)
@@ -167,10 +189,46 @@ extension TermioStore {
         return raw
     }
 
-    private func clearWorking(_ id: Session.ID) {
+    /// Not private: the termiod status path (`applyTermiodStatus`) ends a turn
+    /// through the same door, so the two cannot drift on what "stopped working"
+    /// clears.
+    func clearWorking(_ id: Session.ID) {
         setCurrentTool(nil, for: id)
         lastWorkingAt[id] = nil
         promotionStreak[id] = nil
+    }
+
+    /// Drops every per-session activity-tracking entry — the one place that
+    /// enumerates these dictionaries, so the teardown paths (close, project
+    /// removal, relaunch) can't drift out of step when a new tracker is added.
+    /// `transcriptPaths` is deliberately not here: a relaunch resumes the same
+    /// conversation, so only the close/remove paths clear it (inline).
+    func clearActivityTracking(for id: Session.ID) {
+        // Whatever banner the session had delivered no longer describes a live turn.
+        TaskNotificationCenter.shared.forget(id)
+        lastWorkingAt[id] = nil
+        lastHookReportAt[id] = nil
+        lastUserInputAt[id] = nil
+        promotionStreak[id] = nil
+        lastTitleActivity[id] = nil
+        lastProgressActivity[id] = nil
+        lastScreenActivity[id] = nil
+        stallProbes[id] = nil
+        blockingAttention.remove(id)
+    }
+
+    /// Light the "blocked on you" dot from a genuine, observable blocking condition
+    /// (a hook / screen / title "attention" signal). Unlike a one-shot bell, these
+    /// have a matching "resolved" transition, so the dot is recorded as blocking
+    /// (`blockingAttention`) and survives a click in `markSeen` — looking at a
+    /// permission prompt isn't answering it. Only flags a session the user isn't
+    /// already watching, mirroring the raw `!isViewing` guard it replaces; the flag
+    /// is still set even when the status write is a no-op, so a bell-set dot already
+    /// showing gets *upgraded* to blocking when the real signal arrives.
+    func flagBlockingAttention(for id: Session.ID) {
+        guard !isViewing(id) else { return }
+        blockingAttention.insert(id)
+        setStatus(.needsAttention, for: id)
     }
 
     /// Marks the moment of live user input into a session's terminal. Keystroke
@@ -216,6 +274,11 @@ extension TermioStore {
             if screenChanged || bytes >= streamingByteFloor {
                 lastWorkingAt[id] = Date()
             }
+            // Feed the stall detector's output-rate suppressor (§4.7 probe 4)
+            // with the raw byte volume. The rate over the whole window is what
+            // discriminates: build logs scrolling through a TUI repaint far more
+            // bytes per second than an idle spinner's frame updates.
+            stallProbes[id]?.streamedBytes += bytes
             return
         }
         guard screenChanged else {
@@ -266,11 +329,11 @@ extension TermioStore {
             setStatus(.working, for: id)
         case .attention:
             clearWorking(id)
-            if selectedSessionID != id { setStatus(.needsAttention, for: id) }
+            flagBlockingAttention(for: id)
         case .idle:
             clearWorking(id)
             if previous == .working || previous == .attention {
-                setStatus(selectedSessionID == id ? .idle : .done, for: id)
+                setStatus(isViewing(id) ? .idle : .done, for: id)
             } else {
                 setStatus(.idle, for: id)
             }
@@ -301,11 +364,49 @@ extension TermioStore {
             lastWorkingAt[id] = Date()
         case .attention:
             clearWorking(id)
-            if selectedSessionID != id { setStatus(.needsAttention, for: id) }
+            flagBlockingAttention(for: id)
         case .idle:
             guard previous == .working, status(for: id) == .working else { return }
             clearWorking(id)
-            setStatus(selectedSessionID == id ? .idle : .done, for: id)
+            setStatus(isViewing(id) ? .idle : .done, for: id)
+        }
+    }
+
+    /// Drives status from the agent's ConEmu-style `OSC 9;4` progress reports —
+    /// the in-band busy/idle signal Grok ships natively (`9;4;1;-1` while a turn
+    /// runs, `9;4;0;` when it ends). Like the title, this is a *correction* channel
+    /// layered over hooks on the one channel that cannot break (the PTY byte stream),
+    /// so its arbitration is deliberately identical to `applyTitleActivity` and just
+    /// as subordinate: a progress-working never overrides `needsAttention` (a blocked
+    /// agent can keep its busy bar lit — the herdr "blocker outranks a stale busy
+    /// progress" rule), and a progress-idle only ends a turn that is genuinely
+    /// working, so a lone or stale `9;4;0` can't clear a hook- or title-set state.
+    /// The `OSCProgressScanner` only reaches busy/idle, never attention, so the
+    /// attention arm is unreachable here but kept exhaustive for the shared enum.
+    func applyProgressActivity(_ activity: AgentStatusRules.Activity, for id: Session.ID) {
+        // Gate on the session's *live* agent, not a value captured when the sink was
+        // built: a plain terminal promoted to a hand-started Grok now opts in, while a
+        // shell that stays a shell (its `wget` bar) stays out. Re-reading the session
+        // here also drops any event that outlived the pane it came from — a session
+        // torn down or relaunched before this main-actor block ran no longer resolves,
+        // or resolves to an agent that doesn't emit progress, so it can't repopulate a
+        // cleared entry or move a replacement process's dot.
+        guard let session = session(id), effectiveAgent(for: session).emitsProgressStatus else { return }
+        guard lastProgressActivity[id] != activity else { return }
+        let previous = lastProgressActivity[id]
+        lastProgressActivity[id] = activity
+        switch activity {
+        case .working:
+            guard status(for: id) != .needsAttention else { return }
+            setStatus(.working, for: id)
+            lastWorkingAt[id] = Date()
+        case .attention:
+            clearWorking(id)
+            flagBlockingAttention(for: id)
+        case .idle:
+            guard previous == .working, status(for: id) == .working else { return }
+            clearWorking(id)
+            setStatus(isViewing(id) ? .idle : .done, for: id)
         }
     }
 
@@ -364,6 +465,7 @@ extension TermioStore {
         projects[location.project].sessions[location.session] = session
         setLiveTitle(nil, for: id)
         lastTitleActivity[id] = nil
+        lastProgressActivity[id] = nil
         clearWorking(id)
         let current = status(for: id)
         if current == .working || current == .done { setStatus(.idle, for: id) }
@@ -444,6 +546,183 @@ extension TermioStore {
         }
     }
 
+    // MARK: Loop-level stall detection (design doc §4.7)
+
+    /// How long a session must be continuously `.working` with no progress marker
+    /// before it reads as stalled — probe 1's window, and the span every other
+    /// probe compares across.
+    nonisolated static let stallWindow: TimeInterval =
+        stallOverride("TERMIO_STALL_WINDOW_SECONDS", default: 20 * 60)
+    /// Transcript lines the window must add to count as progress (probe 3's K).
+    nonisolated static let stallTranscriptLineFloor: Int =
+        Int(stallOverride("TERMIO_STALL_TRANSCRIPT_LINES", default: 5))
+    /// The average PTY output rate (bytes/second across the window) at or above
+    /// which probe 4 suppresses the alert: the agent is visibly producing —
+    /// output genuinely scrolling through the terminal. Calibrated against
+    /// measured Claude Code rates (2026-07): parked on a spinner ~1.4 KB/s,
+    /// a tool call with collapsed output ~1.1 KB/s, streaming a text response
+    /// ~1.5 KB/s averaged across its thinking pauses — while full-screen output
+    /// scrolls run tens of KB/s. The default sits above every measured idle mode.
+    /// Note the flip side: a TUI that collapses tool output (Claude) keeps a
+    /// legitimate long build *under* this rate, so a window-length quiet build
+    /// still signals — from outside the agent the two are indistinguishable,
+    /// which is exactly why this plane signals and never kills (§4.7); the
+    /// transcript-tail awareness of phase 4b is the planned refinement.
+    nonisolated static let stallStreamByteRate: Double =
+        stallOverride("TERMIO_STALL_STREAM_BYTES_PER_SECOND", default: 4096)
+    /// How often the expensive probes may re-run per session once its window has
+    /// elapsed. Scaled with the window so a shortened testing window still probes
+    /// promptly; the 2s floor is the sweep's own tick.
+    nonisolated static let stallProbeInterval: TimeInterval = max(2, stallWindow / 40)
+
+    /// Testing-only override for the stall thresholds, so live verification does
+    /// not take 20 minutes: the environment variable when a dev launch exports
+    /// one, else a `defaults` key of the same name, else the shipped default.
+    /// Read once at first use; deliberately not a setting.
+    nonisolated private static func stallOverride(_ key: String, default value: Double) -> Double {
+        if let raw = ProcessInfo.processInfo.environment[key],
+           let overridden = Double(raw), overridden > 0 { return overridden }
+        let stored = UserDefaults.standard.double(forKey: key)
+        return stored > 0 ? stored : value
+    }
+
+    /// The stall sweep, riding the same 2s timer as `sweepStaleWorking`. The four
+    /// probes are evaluated lazily, cheapest first: the clock (probe 1) and the
+    /// output-rate suppressor (probe 4) are plain arithmetic and gate everything;
+    /// only a fully-elapsed, unsuppressed window pays for the off-main git +
+    /// transcript measurement (probes 2 and 3). Verdict `1 AND 2 AND 3 AND NOT 4`
+    /// emits one `stalled` watch event, then holds until a progress marker
+    /// re-arms the window.
+    func sweepStalledSessions() {
+        let now = Date()
+        for (id, probe) in stallProbes {
+            guard status(for: id) == .working else { stallProbes[id] = nil; continue }
+            guard !probe.measuring else { continue }
+            guard probe.baseline != nil else {
+                launchStallMeasurement(for: id, capture: true)
+                continue
+            }
+            guard now.timeIntervalSince(probe.windowStart) >= Self.stallWindow,
+                  now.timeIntervalSince(probe.lastProbeAt) >= Self.stallProbeInterval
+            else { continue }
+            if probe.isStreamSuppressed(at: now, bytesPerSecond: Self.stallStreamByteRate) {
+                // Sustained output is progress in itself: slide the window instead
+                // of alerting, and drop the baseline so the next capture compares
+                // against the world as of now.
+                Self.stallTrace.info(
+                    "suppressed session=\(id, privacy: .public) streamed_bytes=\(probe.streamedBytes, privacy: .public) elapsed_s=\(Int(now.timeIntervalSince(probe.windowStart)), privacy: .public)")
+                var slid = probe
+                slid.slideWindow(to: now, baseline: nil)
+                stallProbes[id] = slid
+                continue
+            }
+            launchStallMeasurement(for: id, capture: false)
+        }
+    }
+
+    /// Opens the stall window for a session that just entered `.working`: stamps
+    /// `workingSince` now; the first sweep tick captures the baseline. Called
+    /// only from `setStatus`, the single status choke point.
+    func beginStallWatch(for id: Session.ID) {
+        let now = Date()
+        stallProbes[id] = StallProbe(workingSince: now, windowStart: now)
+    }
+
+    /// Runs the expensive probes off the main actor — the BranchModel
+    /// main-thread-git freeze is the documented hazard — and applies the result
+    /// back on it. With `capture` the result seeds a fresh window's baseline;
+    /// otherwise it is judged against the existing one.
+    private func launchStallMeasurement(for id: Session.ID, capture: Bool) {
+        guard var probe = stallProbes[id] else { return }
+        probe.measuring = true
+        if !capture { probe.lastProbeAt = Date() }
+        stallProbes[id] = probe
+        let generation = probe.generation
+        let baseline = probe.baseline
+        // The baseline's directory is reused for the whole window, so an agent
+        // `cd`-ing between repos can't masquerade as repo progress.
+        let directory = capture ? stallProbeDirectory(for: id) : baseline?.directory
+        let transcript = transcriptPaths[id] ?? resolveTranscriptPath(for: id)
+        Task { [weak self] in
+            let measured = await Self.measureStallEvidence(
+                directory: directory, transcript: transcript, known: baseline)
+            guard let self, var probe = self.stallProbes[id],
+                  probe.generation == generation else { return }
+            probe.measuring = false
+            if capture {
+                probe.baseline = StallProbe.Baseline(directory: directory, measured: measured)
+                self.stallProbes[id] = probe
+                return
+            }
+            let assessment = probe.assess(
+                measured, at: Date(), transcriptLineFloor: Self.stallTranscriptLineFloor)
+            self.stallProbes[id] = probe
+            Self.stallTrace.info(
+                "probe session=\(id, privacy: .public) verdict=\(String(describing: assessment), privacy: .public) fingerprint=\(measured.repoFingerprint, privacy: .public) transcript_lines=\(measured.transcriptLines, privacy: .public) streamed_bytes=\(probe.streamedBytes, privacy: .public)")
+            if case .stalled(let linesGrown) = assessment {
+                self.emitStalled(
+                    id, workingSince: probe.workingSince, transcriptLinesGrown: linesGrown)
+            }
+        }
+    }
+
+    /// Where probe 2 fingerprints: the session's own worktree when it has one,
+    /// else the live shell cwd, else the project checkout.
+    private func stallProbeDirectory(for id: Session.ID) -> String? {
+        guard let session = session(id) else { return nil }
+        return session.worktreePath ?? runtimes[id]?.workingDirectory ?? project(for: id)?.path
+    }
+
+    /// One off-main reading of probes 2 and 3. The transcript's full line count is
+    /// only paid for when its size moved (or nothing is known yet) — an unchanged
+    /// `stat` answers "grew < K lines" by itself.
+    nonisolated private static func measureStallEvidence(
+        directory: String?, transcript: String?, known: StallProbe.Baseline?
+    ) async -> StallMeasurement {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                let fingerprint = directory.map { GitService.stallFingerprint(in: $0) } ?? ""
+                guard let transcript else {
+                    return continuation.resume(returning: StallMeasurement(
+                        repoFingerprint: fingerprint, transcriptPath: nil,
+                        transcriptLines: 0, transcriptSize: 0))
+                }
+                let attributes = try? FileManager.default.attributesOfItem(atPath: transcript)
+                let size = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+                let lines: Int
+                if let known, known.transcriptPath == transcript, known.transcriptSize == size {
+                    lines = known.transcriptLines
+                } else {
+                    lines = lineCount(of: transcript)
+                }
+                continuation.resume(returning: StallMeasurement(
+                    repoFingerprint: fingerprint, transcriptPath: transcript,
+                    transcriptLines: lines, transcriptSize: size))
+            }
+        }
+    }
+
+    /// Broadcasts the one `stalled` event. Watch-plane only (§4.7): the session's
+    /// real status stays `.working` — no new `SessionStatus` case, the sidebar and
+    /// menu bar are untouched — and the default watch filter (done, needs-you)
+    /// keeps the signal opt-in via `--state stalled`.
+    private func emitStalled(
+        _ id: Session.ID, workingSince: Date, transcriptLinesGrown: Int
+    ) {
+        guard let session = session(id), let project = project(for: id) else { return }
+        let minutes = max(1, Int(Date().timeIntervalSince(workingSince) / 60))
+        let growth = "transcript +\(transcriptLinesGrown) line"
+            + (transcriptLinesGrown == 1 ? "" : "s")
+        var event = SessionWatchEvent(
+            projectID: project.id,
+            link: sessionLink(for: session),
+            status: "stalled",
+            title: displayTitle(for: session),
+            cwd: runtimes[id]?.workingDirectory ?? "")
+        event.evidence = "working \(minutes)m, no repo change, \(growth)"
+        SessionWatchHub.shared.broadcast(event)
+    }
+
     /// Resolves a status report back to its session. The exact key is the
     /// `TERMIO_SESSION` id termio stamped into the PTY and the agent echoed back, so
     /// this is unambiguous even when several sessions share one project directory.
@@ -493,4 +772,105 @@ extension TermioStore {
             return "Waiting for you"
         }
     }
+}
+
+/// Per-session state for loop-level stall detection (design doc §4.7). One value
+/// exists per continuously-working session, created on the `.working` transition
+/// and dropped on the way out. The window slides forward on every progress
+/// marker; `alerted` is the edge-trigger latch — one `stalled` event per quiet
+/// window, re-armed only by progress. A plain value type so the verdict logic is
+/// testable without the store.
+struct StallProbe {
+    /// When the session entered `.working` — probe 1's clock, and the duration the
+    /// evidence string reports.
+    let workingSince: Date
+    /// Start of the current no-progress window; slides to "now" on any progress.
+    var windowStart: Date
+    /// PTY output bytes seen since `windowStart` — probe 4's numerator, fed by
+    /// `noteOutputActivity`. Volume, not tick counting: an idle agent's spinner
+    /// repaints on every tick too, so only the byte *rate* separates "parked on a
+    /// spinner" from "build logs scrolling through the TUI".
+    var streamedBytes = 0
+    /// What the window's probes compare against, captured off-main just after
+    /// `windowStart`. `nil` while a capture is pending.
+    var baseline: Baseline?
+    /// An off-main capture or probe is in flight; the sweep must not stack another.
+    var measuring = false
+    /// Ties an in-flight off-main measurement back to this exact probe value, so a
+    /// result landing after the session left and re-entered `.working` is
+    /// discarded instead of judged against the wrong window.
+    let generation = UUID()
+    var lastProbeAt = Date.distantPast
+    var alerted = false
+
+    struct Baseline {
+        /// The directory fingerprinted at capture, reused for the whole window.
+        let directory: String?
+        let repoFingerprint: String
+        let transcriptPath: String?
+        let transcriptLines: Int
+        let transcriptSize: Int64
+
+        init(directory: String?, measured: StallMeasurement) {
+            self.directory = directory
+            repoFingerprint = measured.repoFingerprint
+            transcriptPath = measured.transcriptPath
+            transcriptLines = measured.transcriptLines
+            transcriptSize = measured.transcriptSize
+        }
+    }
+
+    enum Assessment: Equatable {
+        /// A progress marker landed — the window slid forward and re-armed.
+        case progress
+        /// Every probe agrees: emit the one `stalled` event.
+        case stalled(transcriptLinesGrown: Int)
+        /// No progress, but the alert already fired — keep holding.
+        case hold
+    }
+
+    /// Whether probe 4 suppresses the alert: the window's average output rate
+    /// says the agent is visibly producing.
+    func isStreamSuppressed(at now: Date, bytesPerSecond: Double) -> Bool {
+        let elapsed = now.timeIntervalSince(windowStart)
+        guard elapsed > 0 else { return false }
+        return Double(streamedBytes) >= elapsed * bytesPerSecond
+    }
+
+    /// Judges a fresh measurement against the baseline (probes 2 and 3) and
+    /// applies the verdict: progress slides the window and re-arms; the first
+    /// all-probes-agree verdict latches `alerted` so the event fires exactly once.
+    mutating func assess(
+        _ measured: StallMeasurement, at now: Date, transcriptLineFloor: Int
+    ) -> Assessment {
+        guard let baseline else { return .hold }
+        let linesGrown = max(0, measured.transcriptLines - baseline.transcriptLines)
+        if measured.repoFingerprint != baseline.repoFingerprint
+            || linesGrown >= transcriptLineFloor {
+            slideWindow(to: now, baseline: Baseline(
+                directory: baseline.directory, measured: measured))
+            return .progress
+        }
+        if alerted { return .hold }
+        alerted = true
+        return .stalled(transcriptLinesGrown: linesGrown)
+    }
+
+    /// Restarts the no-progress window at `now` and re-arms the alert. A `nil`
+    /// baseline makes the next sweep tick capture a fresh one.
+    mutating func slideWindow(to now: Date, baseline newBaseline: Baseline?) {
+        windowStart = now
+        streamedBytes = 0
+        baseline = newBaseline
+        alerted = false
+    }
+}
+
+/// One off-main reading of a session's progress evidence: the repo fingerprint
+/// plus the transcript's current extent.
+struct StallMeasurement {
+    let repoFingerprint: String
+    let transcriptPath: String?
+    let transcriptLines: Int
+    let transcriptSize: Int64
 }

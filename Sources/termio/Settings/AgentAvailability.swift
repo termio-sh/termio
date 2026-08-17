@@ -13,7 +13,24 @@ enum AgentAvailability {
     /// for the app run. The probe is bounded so a slow/hung rc can't wedge Settings;
     /// on failure it yields an empty list, which makes every check fall back to
     /// "assume available" rather than raise a false alarm.
-    private static let resolvedPath = Task.detached(priority: .utility) { resolvePathDirectories() }
+    private static let resolvedPath = Task.detached(priority: .utility) { pathDirectories() }
+
+    /// The resolved login-shell PATH, shared between the async probe and the
+    /// synchronous installer check so both agree on one answer. The detached task
+    /// populates it when it finishes; the sync check reads it without blocking.
+    private static let pathLock = NSLock()
+    // Guarded by `pathLock` on every access; the lock is the synchronization the
+    // compiler cannot see.
+    nonisolated(unsafe) private static var pathCache: [String]?
+
+    private static func pathDirectories() -> [String] {
+        pathLock.withLock {
+            if let cached = pathCache { return cached }
+            let resolved = resolvePathDirectories()
+            pathCache = resolved
+            return resolved
+        }
+    }
 
     /// Whether the first word of `command` (its binary) is an executable on PATH. An
     /// absolute/`~` path is checked directly; an empty command (the plain login shell)
@@ -28,6 +45,30 @@ enum AgentAvailability {
         let directories = await resolvedPath.value
         // Probe failed (no PATH) → don't cry wolf; only flag when we actually looked.
         guard !directories.isEmpty else { return true }
+        return directories.contains {
+            FileManager.default.isExecutableFile(atPath: $0 + "/" + binary)
+        }
+    }
+
+    /// A non-blocking, synchronous check for call sites that can't await (the skill
+    /// installer's per-launch sync). Absolute/`~` commands are checked directly;
+    /// relative binaries resolve against the login-shell PATH once the async probe
+    /// has populated the cache, and the process PATH before that — so a very early
+    /// call may under-report an installed agent, but never blocks on the shell, and
+    /// the next launch's sync re-checks and picks it up.
+    static func isCommandInstalled(_ command: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespaces)
+        guard let binary = trimmed.split(separator: " ").first.map(String.init), !binary.isEmpty
+        else { return true }
+        if binary.hasPrefix("/") || binary.hasPrefix("~") {
+            return FileManager.default.isExecutableFile(atPath: (binary as NSString).expandingTildeInPath)
+        }
+        var directories: [String] = []
+        pathLock.withLock { directories = pathCache ?? [] }
+        if directories.isEmpty {
+            directories = ProcessInfo.processInfo.environment["PATH"]?
+                .split(separator: ":").map(String.init) ?? []
+        }
         return directories.contains {
             FileManager.default.isExecutableFile(atPath: $0 + "/" + binary)
         }

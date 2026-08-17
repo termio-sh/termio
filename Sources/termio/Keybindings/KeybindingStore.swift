@@ -101,13 +101,54 @@ final class KeybindingStore: ObservableObject {
 
     /// Fixed shortcuts termio does not expose for rebinding but must still guard
     /// against, so the recorder can warn instead of silently double-binding.
-    private static let reserved: [(label: String, shortcut: Shortcut)] = [
+    private static var reserved: [(label: String, shortcut: Shortcut)] { hostReserved + surfaceReserved }
+
+    /// App-layer keys with no catalog entry: they act on the app, not on the
+    /// terminal's text, so the host owns them and the surface must not keep its
+    /// own binding for them (see `surfaceUnbindTriggers`).
+    static let hostReserved: [(label: String, shortcut: Shortcut)] = [
         ("Settings…", .init(modifiers: [.command], key: .char(","))),
         ("Quit Termio", .init(modifiers: [.command], key: .char("q"))),
+        // macOS reserves ⌃⌘F for full screen; the View menu's Enter Full Screen
+        // item is inserted by AppKit, so termio has no command of its own here —
+        // only the duty to stop the surface from eating the key.
+        ("Enter Full Screen", .init(modifiers: [.command, .control], key: .char("f"))),
+    ]
+
+    /// Keys the *surface* owns: they act on the terminal's own text, ghostty
+    /// already implements them, and unbinding them would break the terminal.
+    /// Listed only so the recorder refuses to rebind them.
+    private static let surfaceReserved: [(label: String, shortcut: Shortcut)] = [
         ("Copy", .init(modifiers: [.command], key: .char("c"))),
         ("Paste", .init(modifiers: [.command], key: .char("v"))),
         ("Select All", .init(modifiers: [.command], key: .char("a"))),
     ]
+
+    // MARK: - Surface handoff
+
+    /// Every trigger the host claims, in ghostty's `keybind` syntax.
+    ///
+    /// A surface-handled keybind is consumed before the menu bar ever sees the
+    /// event, and `TerminalCallbackBridge` drops the actions this embedding
+    /// cannot perform (splits, tabs, windows, full screen), so any ghostty
+    /// default sharing a trigger with a termio command silently kills that
+    /// command while a terminal has focus. Deriving the list from the effective
+    /// table — rather than hand-listing triggers — means a command added to the
+    /// catalog or a shortcut a user rebinds in Settings can never be swallowed.
+    var surfaceUnbindTriggers: [String] {
+        Self.unbindTriggers(claiming: KeyCommandCatalog.all.compactMap { shortcut(for: $0.id) }
+            + Self.hostReserved.map(\.shortcut))
+    }
+
+    /// The pure half, so the mapping can be tested without the singleton's
+    /// on-disk overrides.
+    static func unbindTriggers(claiming shortcuts: [Shortcut]) -> [String] {
+        var triggers = Set(shortcuts.map(\.ghosttyTrigger))
+        // ⌘⇧= arrives as "+", which ghostty binds separately from "=". The
+        // shifted spelling has no `Shortcut` of its own, so pair it by hand.
+        if triggers.contains("super+=") { triggers.insert("super+plus") }
+        return triggers.sorted()
+    }
 
     // MARK: - Persistence
 

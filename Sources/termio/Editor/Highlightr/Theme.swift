@@ -37,6 +37,12 @@ open class Theme {
     open var boldCodeFont : RPFont!
     /// Italic font to be used by this theme
     open var italicCodeFont : RPFont!
+    /// termio addition: stamped onto every highlighted run — the highlight pass replaces
+    /// attributes wholesale, so a style set only on the text view would be wiped.
+    open var codeParagraphStyle : NSParagraphStyle?
+    /// termio addition: travels with `codeParagraphStyle` — its fixed line height bottom-aligns
+    /// glyphs, and this lifts them back to the line's vertical center.
+    open var codeBaselineOffset : CGFloat = 0
     
     private var themeDict : RPThemeDict!
     private var strippedTheme : RPThemeStringDict!
@@ -137,6 +143,12 @@ open class Theme {
         {
             var attrs = [AttributedStringKey: Any]()
             attrs[.font] = codeFont
+            if let codeParagraphStyle {
+                attrs[.paragraphStyle] = codeParagraphStyle
+            }
+            if codeBaselineOffset != 0 {
+                attrs[.baselineOffset] = codeBaselineOffset
+            }
             for style in styleList
             {
                 var style = style
@@ -162,7 +174,14 @@ open class Theme {
         }
         else
         {
-			returnString = NSAttributedString(string: string, attributes:[AttributedStringKey.font:codeFont as Any] )
+            var attrs: [AttributedStringKey: Any] = [.font: codeFont as Any]
+            if let codeParagraphStyle {
+                attrs[.paragraphStyle] = codeParagraphStyle
+            }
+            if codeBaselineOffset != 0 {
+                attrs[.baselineOffset] = codeBaselineOffset
+            }
+            returnString = NSAttributedString(string: string, attributes: attrs)
         }
 
         return returnString

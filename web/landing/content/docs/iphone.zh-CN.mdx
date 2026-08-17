@@ -1,0 +1,68 @@
+---
+title: iPhone 伴侣应用
+description: 用二维码把 Termio iOS 应用与你的 Mac 配对，随时用手机查看正在运行的 Agent——只连你自己的机器，不经过任何中继。
+x-i18n:
+  source_path: iphone.mdx
+  source_hash: 1f5a89a0827ff042c20c37c007d0ae351de5a90969ddfc0612db0df7ec69eced
+  generated_at: 2026-08-16
+---
+
+Termio for iPhone 是伴侣应用，不是另一个服务。它只连接一个地方：你自己 Mac 上的 Termio
+应用，走你的局域网或你自己配置的隧道。中间没有中继。
+
+## 配对
+
+1. 在 Mac 上打开伴侣设置，显示配对二维码。
+2. 在 iOS 应用里扫码。相机只用来读这个码——扫描在设备本地完成，不存储也不上传任何东西。
+
+配对之后，只要手机和 Mac 能彼此看见，手机就能访问 Mac 上的会话。
+
+<DocsImage
+  src="/screenshots/docs/19-pair-iphone.png"
+  alt="Mac 上的 Termio 移动设置已开启移动访问，并显示供 iPhone 扫描的配对二维码"
+  width={1664}
+  height={1288}
+/>
+
+## 手机上能做什么
+
+- **查看你的项目和会话**，状态和 Mac 上完全一致，另有一条跨项目的「需要你」清单，列出正在
+  等待输入的会话。
+- **直接往会话里输入。** 手机驱动的是真实终端——你是在像桌面那样直接对 Agent 打字，配有
+  用于回滚和跳转的按键条，以及可选的按住说话语音输入。
+- **只读预览文件**，走同一条连接。
+
+<DocsMediaGrid>
+  <DocsImage
+    src="/screenshots/docs/20-iphone-sessions.png"
+    alt="iPhone 上的 Termio 显示多个项目、Agent 会话及其实时状态指示"
+    width={1206}
+    height={2622}
+    variant="phone"
+  />
+  <DocsImage
+    src="/screenshots/docs/27-iphone-terminal.png"
+    alt="Termio iPhone 终端显示 git 历史、终端按键条和软件键盘"
+    width={1206}
+    height={2622}
+    variant="phone"
+  />
+</DocsMediaGrid>
+
+<DocsImage
+  src="/screenshots/docs/28-iphone-file-preview.png"
+  alt="iPhone 上的 Termio 显示只读、带语法高亮的 Swift 文件预览及文件元数据"
+  width={1206}
+  height={2622}
+  variant="phone"
+/>
+
+## 远程连到你的 Mac
+
+在同一个 Wi-Fi 下，配对就够了。要连到别处的 Mac，请把它放到你自己掌控的隧道后面（例如一个
+命名的 `cloudflared` 隧道），然后对着那个地址配对。Termio 绝不把你的流量绕经我们的服务器。
+
+<Callout type="warning">
+  睡着的 Mac 没法回应手机。想要随时可达，就让 Mac 保持唤醒（Termio 有一个「保持可达」开关），
+  或者用局域网里另一台长期在线的设备唤醒它。
+</Callout>

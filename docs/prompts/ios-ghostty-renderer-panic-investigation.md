@@ -3,12 +3,12 @@
 > Hand this to a fresh research agent. It front-loads everything already proven
 > (via on-device logs and a read of Ghostty's official iOS integration) so the
 > agent doesn't re-derive dead ends. Goal: find the Zig/integration root cause and
-> decide whether termio should switch from the third-party wrapper to Ghostty's
+> decide whether Termio should switch from the third-party wrapper to Ghostty's
 > official iOS integration.
 
 ---
 
-You are investigating two bugs in an iOS terminal app (termio) that embeds
+You are investigating two bugs in an iOS terminal app (Termio) that embeds
 libghostty (Ghostty's terminal core) via the third-party SPM package
 `Lakr233/libghostty-spm` (v1.2.8), product `GhosttyTerminal`. The Zig core ships
 as a prebuilt `GhosttyKit.xcframework`. Backend is the in-memory / host-managed
@@ -34,7 +34,7 @@ surface object), inside `CA::Context::commit_transaction` →
 `_UIApplicationFlushCATransaction`. Cause: `ghostty_surface_free` frees the Zig
 surface but the wrapper adds its `CAMetalLayer` as a **sublayer** of the view
 whose delegate still points at the freed surface; the next CoreAnimation commit
-messages that dangling delegate. (termio currently mitigates by nil-ing the
+messages that dangling delegate. (Termio currently mitigates by nil-ing the
 sublayer delegate after free, but that's a patch on a structural problem.)
 
 ## ALREADY PROVEN — do not re-investigate from the Swift side
@@ -85,10 +85,10 @@ both.
    apprt (used by libghostty) not deliver tag 39 while the official macOS/iOS
    Swift layer gets `healthy`? Is it a missing handler, a target/filter, or a
    config/callback the wrapper never sets?
-4. Compare integration approaches and give a recommendation: should termio
+4. Compare integration approaches and give a recommendation: should Termio
    **replace `Lakr233/libghostty-spm` with Ghostty's official Swift integration**
    (`SurfaceView_UIKit` / `OSSurfaceView` / `Ghostty.Surface`)? Detail: what those
-   files require, whether they support the in-memory/host-managed backend termio
+   files require, whether they support the in-memory/host-managed backend Termio
    needs (companion + SSH streaming, not a PTY), the `layerClass` vs sublayer
    difference for Bug B, and the health wiring for Bug A. Rank against the
    alternative of patching the vendored wrapper.
@@ -110,7 +110,7 @@ both.
     `macos/Sources/Ghostty/Ghostty.Surface.swift`, `Ghostty.Action.swift`
     (see how it maps `GHOSTTY_ACTION_RENDERER_HEALTH`).
   - Official iOS app entry: `macos/Sources/App/iOS/iOSApp.swift`.
-- Local wrapper (how termio drives it today):
+- Local wrapper (how Termio drives it today):
   `ios/vendor/libghostty-spm/Sources/GhosttyTerminal/{Controller,Surface,InMemory,Platform/UIKit}`
   — note the stubbed display link, `main.async` draws, sublayer usage, and
   `TerminalCallbackBridge.handleAction` (which has no RENDERER_HEALTH case because

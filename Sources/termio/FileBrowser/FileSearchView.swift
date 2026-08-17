@@ -13,7 +13,6 @@ struct FileSearchView: View {
 
     /// The project (or worktree) root the search runs under.
     let rootURL: URL
-    let font: Font
     /// Leaves the pane (back to the Files tab) — Esc in an empty field.
     let onDismiss: () -> Void
     /// Opens a hit in the editor at its 1-based line.
@@ -56,25 +55,44 @@ struct FileSearchView: View {
 
     private var searchField: some View {
         VStack(spacing: 0) {
-            NativeSearchField(
-                text: $query,
-                isFocused: $fieldFocused,
-                focusRequest: focusRequest,
-                placeholder: "Search Project",
-                onSubmit: {
-                    if let first = matches.first { onOpen(first.url, first.line) }
-                },
-                // Esc clears a live query first; a second Esc (empty field)
-                // leaves the pane.
-                onExit: {
-                    if query.isEmpty {
-                        onDismiss()
-                    } else {
-                        query = ""
+            // The magnifier and clear button are drawn here, not by AppKit: the field
+            // is a bare `NSTextField` (see `NativeSearchField`) because a bezel-less
+            // `NSSearchField` misplaces its built-in icons.
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                NativeSearchField(
+                    text: $query,
+                    isFocused: $fieldFocused,
+                    focusRequest: focusRequest,
+                    placeholder: localized("Search Project"),
+                    onSubmit: {
+                        if let first = matches.first { onOpen(first.url, first.line) }
+                    },
+                    // Esc clears a live query first; a second Esc (empty field)
+                    // leaves the pane.
+                    onExit: {
+                        if query.isEmpty {
+                            onDismiss()
+                        } else {
+                            query = ""
+                        }
                     }
+                )
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(localized("Clear"))
                 }
-            )
-            .frame(height: 24)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 28)
+            .background { fieldChrome }
             .padding(.horizontal, 8)
             .padding(.top, 7)
             .padding(.bottom, trimmedQuery.isEmpty ? 7 : 4)
@@ -85,7 +103,7 @@ struct FileSearchView: View {
                         ProgressView()
                             .controlSize(.mini)
                     }
-                    Text(isSearching ? "Searching…" : summary(fileCount: groups.count))
+                    Text(isSearching ? localized("Searching…") : summary(fileCount: groups.count))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
@@ -94,42 +112,86 @@ struct FileSearchView: View {
                 .padding(.bottom, 5)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    /// The field's own chrome, replacing the `NSSearchField` bezel (stripped in
+    /// `makeNSView`): a Liquid Glass capsule on macOS 26 — same material recipe as
+    /// the toolbar's `InspectorTabsToolbar` track — and a flat capsule fill below.
+    @ViewBuilder
+    private var fieldChrome: some View {
+        if #available(macOS 26.0, *) {
+            Capsule()
+                .fill(.clear)
+                .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
+        } else {
+            Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
+        }
+    }
+
+    /// One flat row of the results list, with a globally unique, stable id.
+    /// The list is deliberately a single `ForEach` over these: the previous
+    /// shape — a per-file `ForEach` nesting a per-hit `ForEach` keyed by bare
+    /// line number — mis-diffed inside `LazyVStack` when typing replaced the
+    /// whole match set (line-number ids collide across files, so SwiftUI
+    /// stitched rows from different files under one header, or rendered them
+    /// empty). Flat rows keyed by `path` / `path:line` make the diff
+    /// unambiguous.
+    private enum ResultRow: Identifiable {
+        case header(relative: String, url: URL, count: Int, firstLine: Int, isExpanded: Bool)
+        case match(ContentMatch)
+
+        var id: String {
+            switch self {
+            case .header(let relative, _, _, _, _): return relative
+            case .match(let match): return "\(match.relative):\(match.line)"
+            }
+        }
+    }
+
+    private var rows: [ResultRow] {
+        var out: [ResultRow] = []
+        for group in groups {
+            let isExpanded = !collapsedFiles.contains(group.relative)
+            out.append(.header(relative: group.relative, url: group.url, count: group.items.count,
+                               firstLine: group.items[0].line, isExpanded: isExpanded))
+            if isExpanded {
+                for match in group.items { out.append(.match(match)) }
+            }
+        }
+        return out
     }
 
     @ViewBuilder
     private var resultList: some View {
-        let grouped = groups
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: []) {
-                ForEach(grouped, id: \.relative) { group in
-                    let isExpanded = !collapsedFiles.contains(group.relative)
-                    FileHeaderRow(
-                        url: group.url,
-                        relative: group.relative,
-                        count: group.items.count,
-                        isExpanded: isExpanded,
-                        chrome: chrome,
-                        toggleExpanded: {
-                            withAnimation(.easeInOut(duration: 0.12)) {
-                                if isExpanded {
-                                    collapsedFiles.insert(group.relative)
-                                } else {
-                                    collapsedFiles.remove(group.relative)
+                ForEach(rows) { row in
+                    switch row {
+                    case .header(let relative, let url, let count, let firstLine, let isExpanded):
+                        FileHeaderRow(
+                            url: url,
+                            relative: relative,
+                            count: count,
+                            isExpanded: isExpanded,
+                            chrome: chrome,
+                            toggleExpanded: {
+                                withAnimation(.easeInOut(duration: 0.12)) {
+                                    if isExpanded {
+                                        collapsedFiles.insert(relative)
+                                    } else {
+                                        collapsedFiles.remove(relative)
+                                    }
                                 }
-                            }
-                        },
-                        open: { onOpen(group.url, group.items[0].line) }
-                    )
-                    if isExpanded {
-                        ForEach(group.items, id: \.line) { match in
-                            MatchRow(
-                                match: match,
-                                query: trimmedQuery,
-                                chrome: chrome,
-                                open: { onOpen(match.url, match.line) }
-                            )
-                        }
+                            },
+                            open: { onOpen(url, firstLine) }
+                        )
+                    case .match(let match):
+                        MatchRow(
+                            match: match,
+                            query: trimmedQuery,
+                            chrome: chrome,
+                            open: { onOpen(match.url, match.line) }
+                        )
                     }
                 }
             }
@@ -141,10 +203,10 @@ struct FileSearchView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 18))
                         .foregroundStyle(.quaternary)
-                    Text("No Matches")
+                    Text(localized("No Matches"))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text("Try another search term.")
+                    Text(localized("Try another search term."))
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                 }
@@ -154,7 +216,7 @@ struct FileSearchView: View {
 
     private func summary(fileCount: Int) -> String {
         let capped = matches.count >= Self.matchLimit
-        return "\(matches.count)\(capped ? "+" : "") matches in \(fileCount) files"
+        return localized("\(matches.count)\(capped ? "+" : "") matches in \(fileCount) files")
     }
 
     private var chrome: ChromeTheme? { settings.chromeTheme(for: colorScheme) }
@@ -180,8 +242,11 @@ struct FileSearchView: View {
     // MARK: - Search
 
     /// Debounce + cancel-on-keystroke (Warp's abort pattern): each edit kills
-    /// the in-flight task; only a typing pause reaches the actual grep, which
-    /// runs detached so the field never hitches.
+    /// the in-flight task, and the cancellation reaches all the way down —
+    /// `ContentSearch` terminates its grep subprocess — so a stale search stops
+    /// consuming the machine instead of racing the fresh one. Deliberately NOT
+    /// `Task.detached`: a detached task sits outside this task tree, which is
+    /// exactly what would strand the grep beyond cancellation's reach.
     private func scheduleSearch() {
         searchTask?.cancel()
         let trimmed = trimmedQuery
@@ -196,9 +261,7 @@ struct FileSearchView: View {
             try? await Task.sleep(for: Self.debounce)
             guard !Task.isCancelled else { return }
             isSearching = true
-            let found = await Task.detached(priority: .userInitiated) {
-                ContentSearch.search(trimmed, under: root, limit: limit)
-            }.value
+            let found = await ContentSearch.search(trimmed, under: root, limit: limit)
             guard !Task.isCancelled else { return }
             matches = found
             isSearching = false
@@ -238,7 +301,7 @@ private struct NativeSearchField: NSViewRepresentable {
     /// fade-out — the blue outline you saw hanging over the next pane. Resign first responder
     /// with animations disabled (and drop the ring type) so the outline goes the instant the tab
     /// changes, matching the now-instant content swap.
-    static func dismantleNSView(_ field: NSSearchField, coordinator: Coordinator) {
+    static func dismantleNSView(_ field: NSTextField, coordinator: Coordinator) {
         field.focusRingType = .none
         guard let window = field.window,
               window.firstResponder === field || window.firstResponder === field.currentEditor()
@@ -249,17 +312,29 @@ private struct NativeSearchField: NSViewRepresentable {
         NSAnimationContext.endGrouping()
     }
 
-    func makeNSView(context: Context) -> NSSearchField {
-        let field = NSSearchField()
+    func makeNSView(context: Context) -> NSTextField {
+        // A plain text field, not `NSSearchField`: the SwiftUI wrapper draws the
+        // chrome (glass capsule, magnifier, clear button — see `searchField`), and
+        // a bezel-less `NSSearchField` misplaces its built-in icons. Bare text is
+        // also what sidesteps the field's appearance animations (the focus-ring
+        // bloom and the centered-placeholder slide) that replayed on every
+        // auto-focused appearance of the pane.
+        let field = NSTextField()
         field.delegate = context.coordinator
         field.placeholderString = placeholder
         field.controlSize = .small
         field.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        field.focusRingType = .default
+        field.focusRingType = .none
+        field.isBezeled = false
+        field.isBordered = false
+        field.drawsBackground = false
+        field.usesSingleLineMode = true
+        field.cell?.wraps = false
+        field.cell?.isScrollable = true
         return field
     }
 
-    func updateNSView(_ field: NSSearchField, context: Context) {
+    func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.parent = self
 
         if field.stringValue != text {
@@ -279,7 +354,7 @@ private struct NativeSearchField: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, NSSearchFieldDelegate {
+    final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: NativeSearchField
         var lastFocusRequest = -1
 
@@ -287,13 +362,13 @@ private struct NativeSearchField: NSViewRepresentable {
             self.parent = parent
         }
 
-        func submit(_ sender: NSSearchField) {
+        func submit(_ sender: NSTextField) {
             updateText(from: sender)
             parent.onSubmit()
         }
 
         func controlTextDidChange(_ notification: Notification) {
-            guard let field = notification.object as? NSSearchField else { return }
+            guard let field = notification.object as? NSTextField else { return }
             updateText(from: field)
         }
 
@@ -312,7 +387,7 @@ private struct NativeSearchField: NSViewRepresentable {
         ) -> Bool {
             switch commandSelector {
             case #selector(NSResponder.insertNewline(_:)):
-                guard let field = control as? NSSearchField else { return false }
+                guard let field = control as? NSTextField else { return false }
                 submit(field)
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
@@ -323,7 +398,7 @@ private struct NativeSearchField: NSViewRepresentable {
             }
         }
 
-        private func updateText(from field: NSSearchField) {
+        private func updateText(from field: NSTextField) {
             guard parent.text != field.stringValue else { return }
             parent.text = field.stringValue
         }
@@ -357,7 +432,7 @@ private struct FileHeaderRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(isExpanded ? "Collapse Results" : "Expand Results")
+            .help(isExpanded ? localized("Collapse Results") : localized("Expand Results"))
 
             HStack(spacing: 5) {
                 FileIconView(url: url, size: 15, symbolSize: 13)
@@ -374,10 +449,14 @@ private struct FileHeaderRow: View {
                         .truncationMode(.head)
                 }
                 Spacer(minLength: 4)
+                // Count as a capsule badge (VS Code's count badge), so the number
+                // reads as metadata rather than trailing content.
                 Text("\(count)")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .frame(minWidth: 18, alignment: .trailing)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .frame(minWidth: 16, minHeight: 15)
+                    .background(Capsule().fill(.quaternary.opacity(0.6)))
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: open)
@@ -395,9 +474,11 @@ private struct FileHeaderRow: View {
     }
 }
 
-/// One hit line: the dimmed line number in a fixed gutter, then the line's text
-/// with the matched substring tinted accent — enough context to pick the right
-/// hit without opening anything.
+/// One hit line, styled after Xcode's Find navigator: the line's text in the
+/// system font with the context dimmed and the matched substring lifted to
+/// full-strength semibold — the matches are what the eye lands on, not the
+/// context. No line-number gutter (neither Xcode nor VS Code shows one; the
+/// click jumps to the line anyway), so the text aligns under the file name.
 private struct MatchRow: View {
     let match: ContentMatch
     let query: String
@@ -406,22 +487,27 @@ private struct MatchRow: View {
 
     @State private var isHovering = false
 
+    /// Leading context kept before the first hit, cut at a word boundary — VS
+    /// Code's `lcut(…, 26)`: enough to identify the line, short enough that the
+    /// hit stays near the left edge.
+    private static let leadingContextMax = 26
+
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("\(match.line)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .frame(width: 34, alignment: .trailing)
+        HStack(spacing: 0) {
             Text(highlightedText())
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 2)
-        .padding(.leading, 27)
+        // Aligns the text's leading edge with the header row's file name
+        // (10 padding + 12 chevron + 4 spacing + 16 icon + 5 spacing).
+        .padding(.leading, 47)
         .padding(.trailing, 8)
-        .frame(minHeight: 21)
+        // One flat row height for every hit (VS Code pins all search rows to
+        // 22px) — the list's rhythm stays even no matter what the text holds.
+        .frame(height: 22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .background(
@@ -432,23 +518,42 @@ private struct MatchRow: View {
         .onTapGesture(perform: open)
     }
 
-    /// The line trimmed for display, windowed so the hit is visible even when
-    /// it sits deep in a long line (leading context replaced by an ellipsis),
-    /// with the query's first occurrence tinted accent + bold.
+    /// The line trimmed for display: leading context word-boundary-cut to
+    /// `leadingContextMax` chars (with an ellipsis) so the first hit sits near
+    /// the left edge, then every occurrence of the query marked with the
+    /// highlighter treatment — full-strength text on a soft accent wash. The
+    /// context stays `.secondary` (the row's base style), so hits carry the
+    /// row's visual weight even when the match is two characters inside a word.
     private func highlightedText() -> AttributedString {
-        var display = match.text.trimmingCharacters(in: .whitespaces)
-        if let range = display.range(of: query, options: .caseInsensitive) {
-            let offset = display.distance(from: display.startIndex, to: range.lowerBound)
-            if offset > 40 {
-                let start = display.index(range.lowerBound, offsetBy: -20)
-                display = "…" + display[start...]
+        var display = Substring(match.text.trimmingCharacters(in: .whitespaces))
+        if let first = display.range(of: query, options: .caseInsensitive),
+           display.distance(from: display.startIndex, to: first.lowerBound) > Self.leadingContextMax {
+            var start = display.index(first.lowerBound, offsetBy: -Self.leadingContextMax)
+            // Land on the next word boundary so the cut doesn't open mid-word.
+            if let space = display[start..<first.lowerBound].firstIndex(of: " ") {
+                start = display.index(after: space)
             }
+            display = display[start...]
+        } else {
+            return marked(display)
         }
-        var attributed = AttributedString(display)
-        if let range = attributed.range(of: query, options: .caseInsensitive) {
-            attributed[range].foregroundColor = .accentColor
-            attributed[range].inlinePresentationIntent = .stronglyEmphasized
+        return AttributedString("…") + marked(display)
+    }
+
+    /// `display` with every case-insensitive occurrence of the query lifted to
+    /// `.primary` over an accent wash.
+    private func marked(_ display: Substring) -> AttributedString {
+        var attributed = AttributedString()
+        var rest = display
+        while let range = rest.range(of: query, options: .caseInsensitive) {
+            attributed += AttributedString(String(rest[..<range.lowerBound]))
+            var hit = AttributedString(String(rest[range]))
+            hit.foregroundColor = .primary
+            hit.backgroundColor = Color.accentColor.opacity(0.28)
+            attributed += hit
+            rest = rest[range.upperBound...]
         }
+        attributed += AttributedString(String(rest))
         return attributed
     }
 }

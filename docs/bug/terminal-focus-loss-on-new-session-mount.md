@@ -13,7 +13,7 @@ related:
 
 > Fixed on 2026-07-14. The app-side `moveFocus` driver covers the selected surface,
 > and equivalent pre-window retry behavior shipped in `libghostty-swift` `1.0.12`,
-> which termio now requires and pins.
+> which Termio now requires and pins.
 
 ## Symptom
 

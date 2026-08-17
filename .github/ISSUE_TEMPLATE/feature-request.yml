@@ -1,0 +1,19 @@
+name: Feature request
+description: Something termio should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and where termio gets in the way. The concrete situation helps more than the proposed solution.
+      placeholder: I run six agents across two projects and can't tell which one asked a question without clicking through each session.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd want instead
+      placeholder: A needs-you filter in the sidebar.
+    validations:
+      required: false

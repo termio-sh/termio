@@ -5,12 +5,12 @@ type: rfc
 created: 2026-07-04
 updated: 2026-07-04
 related:
-  - ios-terminal-input.md
+260703-ios-terminal-input.md
 ---
 
 # Push-to-talk voice dictation (macOS, OpenAI) + iOS terminal space key
 
-> Hold the terminal keyboard's **space bar**, speak a prompt, release — termio
+> Hold the terminal keyboard's **space bar**, speak a prompt, release — Termio
 > records the mic, transcribes it with OpenAI's `gpt-4o-transcribe`, and drops
 > the text into the composer draft for you to review and send. Tap the space
 > bar and it's just a space; hold it (when push-to-talk is on) and it's the mic
@@ -44,7 +44,7 @@ proves the same loop: **hold a key, talk, release, text lands in the field.**
 Typeless (fn key → cleaned text), superwhisper (local Whisper), and Doubao's
 mobile input method all converge on it.
 
-termio has no audio code today (verified: no `AVFoundation`/`Speech`/mic usage
+Termio has no audio code today (verified: no `AVFoundation`/`Speech`/mic usage
 anywhere except the QR scanner's video capture). This RFC adds the smallest
 honest version of that loop, plus the trivial space-key fix the iOS custom
 keyboard is missing.
@@ -84,7 +84,7 @@ was written from; the load-bearing conclusions:
   ("send it Tuesday, no, Wednesday" → keeps only "Wednesday"). Speech is treated
   as a stream of edits, not a literal transcript.
 - The cleanup runs on a **user-editable prompt**, not a fixed style, and is
-  **context-aware** (formal in Outlook, casual in iMessage). termio's context is
+  **context-aware** (formal in Outlook, casual in iMessage). Termio's context is
   fixed and strong: *the target is a coding agent* — so the prompt's job is to
   preserve code, paths, identifiers, and shell syntax verbatim and **not**
   prose-ify them. That single constant is our differentiator.
@@ -195,12 +195,12 @@ focusedSurface.write(Data(payload.utf8))   // no trailing \r → user reviews
 
 #### The hotkey
 
-termio is a foreground AppKit app with a menu-bar tray. Push-to-talk needs
+Termio is a foreground AppKit app with a menu-bar tray. Push-to-talk needs
 key-down **and** key-up (hold semantics), so a plain `KeyboardShortcut` is
 insufficient. Options, in order of preference:
 
 1. **In-window `NSEvent` local monitor** for `.keyDown`/`.keyUp` on a chosen
-   combo (e.g. ⌥Space) — works while termio is focused, no accessibility
+   combo (e.g. ⌥Space) — works while Termio is focused, no accessibility
    permission. **Recommended for MVP** — you're already looking at the terminal
    you're dictating into.
 2. **Global** `NSEvent.addGlobalMonitorForEvents` or Carbon
@@ -243,7 +243,7 @@ prompt is user-editable but ships with a coding-agent-tuned default:
 > URLs, and any technical term — never prose-ify them. Output only the cleaned
 > text, nothing else.
 
-This is the one place termio's fixed context ("target is a coding agent") turns
+This is the one place Termio's fixed context ("target is a coding agent") turns
 into a concrete advantage over general dictation apps.
 
 ### Phasing
@@ -285,7 +285,7 @@ into a concrete advantage over general dictation apps.
 3. **Cleanup default** — ship Phase 3 off (raw transcription is already good), or
    on for a more magical first run? Leaning off (latency honesty).
 4. **Model exposure** — expose the model picker to users, or hardcode
-   `gpt-4o-transcribe` and keep Settings small? termio's ethos favors fewer
+   `gpt-4o-transcribe` and keep Settings small? Termio's ethos favors fewer
    knobs; maybe hide the picker until asked.
 
 sudo

@@ -1,6 +1,10 @@
+import { testflightUrl, githubUrl } from "@/lib/site";
+
 const footerLinks: { label: string; href: string }[] = [
   { label: "Changelog", href: "/changelog" },
   { label: "Docs", href: "/docs" },
+  { label: "GitHub", href: githubUrl },
+  { label: "iOS Beta", href: testflightUrl },
   { label: "Privacy", href: "/privacy" },
   { label: "Terms", href: "/terms" },
 ];

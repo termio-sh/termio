@@ -1,14 +1,14 @@
 import TermioShared
 import UIKit
 
-/// The shell: the home is two tabs — Projects (the strip + project list, with
-/// its pushed project pages) and Chats (the Mac's loose agent sessions),
-/// mirroring the desktop sidebar's Chats/Projects pairing as the two top-level
-/// destinations. The switcher is a compact Telegram-scale glass pill floating
-/// bottom-LEFT (`HomeTabPill` — see there for why the system tab bar doesn't
-/// fit), leaving the bottom-right corner to each screen's own ＋ (the Slack
-/// compose corner) at the pill's own 64pt scale, so the bottom edge reads as
-/// one balanced bar on every home screen — pushed project pages included.
+/// The shell: four native tabs — Projects (including its pushed project pages),
+/// Chats, Terminals, and Settings — mirror the desktop app's main destinations.
+/// A child `UITabBarController` owns those four home stacks, giving the app the
+/// system Liquid Glass tab bar while this outer container continues to own the
+/// live terminal overlays and their lifecycle.
+/// Screen-specific actions stay beside their page title, leaving the bottom
+/// edge to one stable navigation surface on every home screen, pushed project
+/// pages included.
 /// Tapping a session anywhere slides its terminal in full-screen over the
 /// whole thing, and "back" slides it away to reveal the tabs wherever they
 /// were. Screens draw their own chrome (large titles, glass buttons, the
@@ -49,18 +49,40 @@ final class RootContainerViewController: UIViewController {
     private lazy var settingsNav: UINavigationController = {
         let settings = SettingsViewController()
         settings.showsCloseButton = false
-        let nav = UINavigationController(rootViewController: settings)
-        // Keep the table's last rows clear of the floating pill.
-        nav.additionalSafeAreaInsets.bottom = 76
-        return nav
+        return UINavigationController(rootViewController: settings)
     }()
-    /// The bottom-left floating switcher between the three.
-    private let tabPill = HomeTabPill(items: [
-        (title: "Projects", icon: .folder),
-        (title: "Chats", icon: .bubbleChat),
-        (title: "Terminals", icon: .terminal),
-        (title: "Settings", icon: .settings),
-    ])
+    /// UIKit owns the home destination switcher so iOS 26 can supply its full
+    /// Liquid Glass material, selection lens, press response, safe-area
+    /// behavior, and future platform updates. Keeping it as a child of this
+    /// outer container leaves terminal screens as siblings above it, so parked
+    /// libghostty surfaces stay installed in the window exactly as before.
+    private lazy var homeTabs: UITabBarController = {
+        let controller = UITabBarController()
+        // The identifier carries its own English key rather than the title, so
+        // the UI tests keep addressing `home.tab.projects` in every language.
+        let destinations: [(nav: UIViewController, key: String, title: String, icon: HugeIcon)] = [
+            (projectsNav, "projects", localized("Projects"), .folder),
+            (chatsNav, "chats", localized("Chats"), .bubbleChat),
+            (terminalsNav, "terminals", localized("Terminals"), .terminal),
+            (settingsNav, "settings", localized("Settings"), .settings),
+        ]
+        for (index, destination) in destinations.enumerated() {
+            let item = UITabBarItem(
+                title: destination.title,
+                image: destination.icon.strokeImage(boxSize: 24, strokeWeight: 1.7),
+                tag: index
+            )
+            // A selected tab fills its symbol in, the way every system tab bar
+            // does; the outline stays for the unselected ones.
+            item.selectedImage = destination.icon.solidImage(boxSize: 24)
+            item.accessibilityIdentifier = "home.tab.\(destination.key)"
+            destination.nav.tabBarItem = item
+        }
+        controller.setViewControllers(destinations.map(\.nav), animated: false)
+        controller.tabBar.tintColor = .label
+        controller.tabBar.unselectedItemTintColor = .secondaryLabel
+        return controller
+    }()
 
     /// Every parked terminal is a live libghostty surface (scrollback + render
     /// buffers + a streaming socket) whose view stays in the window. On the
@@ -76,36 +98,30 @@ final class RootContainerViewController: UIViewController {
     /// runs are handled too.
     private weak var activeScreen: UIViewController?
 
+    private var themeObserver: NSObjectProtocol?
+    private var pairingObserver: NSObjectProtocol?
+
+    deinit {
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
+        if let pairingObserver {
+            NotificationCenter.default.removeObserver(pairingObserver)
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        themeObserver = installThemeBackdrop()
 
-        // All tab stacks are permanent base layers: added once, always behind
-        // any terminal, only ever toggled hidden — so each tab keeps its
-        // scroll position and pushed pages across switches.
-        let tabStacks: [UIViewController] = [projectsNav, chatsNav, terminalsNav, settingsNav]
-        for nav in tabStacks {
-            addChild(nav)
-            nav.view.frame = view.bounds
-            nav.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            view.addSubview(nav.view)
-            nav.didMove(toParent: self)
-            nav.view.isHidden = nav !== projectsNav
-        }
-
-        // The switcher floats over all of them; terminals slide in above it.
-        tabPill.onSelect = { [weak self] index in
-            guard let self else { return }
-            for (i, nav) in tabStacks.enumerated() {
-                nav.view.isHidden = i != index
-            }
-        }
-        tabPill.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(tabPill)
-        NSLayoutConstraint.activate([
-            tabPill.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            tabPill.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-        ])
+        // The native tab controller is the permanent base layer. Its selected
+        // navigation stack can change without affecting terminal overlays,
+        // which remain children of this outer root and slide in above it.
+        addChild(homeTabs)
+        homeTabs.view.frame = view.bounds
+        homeTabs.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(homeTabs.view)
+        homeTabs.didMove(toParent: self)
 
         store.onOpenSession = { [weak self] session, companionURL in
             guard let self else { return }
@@ -125,12 +141,32 @@ final class RootContainerViewController: UIViewController {
         }
         store.onStartError = { [weak self] reason in
             let alert = UIAlertController(
-                title: "Couldn't start session", message: reason, preferredStyle: .alert
+                title: localized("Couldn't start session"), message: reason, preferredStyle: .alert
             )
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            alert.addAction(UIAlertAction(title: localized("OK"), style: .default))
             self?.present(alert, animated: true)
         }
         store.start()
+
+        // Switching (or forgetting) a Mac orphans every terminal screen: each
+        // one's socket and session ids belong to the previous link. Drop them
+        // all; the new roster repopulates the lists.
+        pairingObserver = NotificationCenter.default.addObserver(
+            forName: CompanionLink.pairingDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.dropTerminalsForPairingChange() }
+        }
+    }
+
+    private func dropTerminalsForPairingChange() {
+        let parked = recentTerminals.values
+        recentTerminals.removeAll()
+        recentKeys.removeAll()
+        for screen in parked where screen !== activeScreen {
+            evict(screen)
+        }
+        // No longer in the cache, so goHome tears the active one down too.
+        if activeScreen != nil { goHome() }
     }
 
     /// Under memory pressure, shed every parked terminal except the one on
@@ -173,6 +209,11 @@ final class RootContainerViewController: UIViewController {
         }
         if let terminal = screen as? TerminalViewController {
             terminal.onRequestBack = { [weak self] in self?.goHome() }
+            terminal.onBackBegan = { [weak self] in self?.beginInteractiveBack() }
+            terminal.onBackChanged = { [weak self] tx in self?.updateInteractiveBack(translationX: tx) }
+            terminal.onBackEnded = { [weak self] vx, commit in
+                self?.finishInteractiveBack(velocityX: vx, commit: commit)
+            }
             terminal.onClose = { [weak self, weak screen] in
                 guard let screen else { return }
                 self?.close(screen)
@@ -227,12 +268,69 @@ final class RootContainerViewController: UIViewController {
         }
         if animated {
             UIView.animate(withDuration: 0.3, delay: 0,
-                           options: .curveEaseIn,
+                           options: .curveEaseOut,
                            animations: { screen.view.frame = offscreen },
                            completion: { _ in finish() })
         } else {
             screen.view.frame = offscreen
             finish()
+        }
+    }
+
+    // MARK: - Interactive back (finger-tracked right-swipe)
+
+    /// The screen currently being dragged back to the list. Held so update/finish
+    /// keep driving the same view even if `activeScreen` is cleared on commit.
+    private var interactiveBackScreen: UIViewController?
+
+    private func beginInteractiveBack() {
+        interactiveBackScreen = activeScreen
+    }
+
+    /// Follow the finger: slide the active screen right by `translationX`
+    /// (already clamped to >= 0 by the caller), revealing the list underneath.
+    private func updateInteractiveBack(translationX: CGFloat) {
+        guard let screen = interactiveBackScreen else { return }
+        screen.view.frame = view.bounds.offsetBy(dx: translationX, dy: 0)
+    }
+
+    /// Release: either complete the pop (carrying the fling velocity, then the
+    /// SAME park-or-evict teardown as `goHome`) or spring back to full screen.
+    private func finishInteractiveBack(velocityX: CGFloat, commit: Bool) {
+        guard let screen = interactiveBackScreen else { return }
+        interactiveBackScreen = nil
+        let width = view.bounds.width
+        let currentX = screen.view.frame.origin.x
+
+        if commit {
+            // Teardown deferred from goHome to here (only once the drag commits).
+            if activeScreen === screen { activeScreen = nil }
+            store.currentSessionKey = nil
+            refreshHomeLists()
+            let parked = recentTerminals.contains { $0.value === screen }
+            let offscreen = view.bounds.offsetBy(dx: width, dy: 0)
+            let remaining = max(1, width - currentX)
+            let v = min(max(velocityX / remaining, 0), 30)
+            UIView.animate(withDuration: 0.3, delay: 0,
+                           usingSpringWithDamping: 0.9, initialSpringVelocity: v,
+                           options: .curveEaseOut,
+                           animations: { screen.view.frame = offscreen },
+                           completion: { _ in
+                if parked {
+                    screen.view.isHidden = true // stays in the window: surface alive
+                } else {
+                    self.evict(screen)
+                }
+            })
+        } else {
+            // Cancel: settle back to x = 0. A leftward flick (negative vx) is
+            // toward the target, so negate; away-from-target starts from rest.
+            let remaining = max(1, currentX)
+            let v = min(max(-velocityX / remaining, 0), 30)
+            UIView.animate(withDuration: 0.3, delay: 0,
+                           usingSpringWithDamping: 0.9, initialSpringVelocity: v,
+                           options: .curveEaseOut,
+                           animations: { screen.view.frame = self.view.bounds })
         }
     }
 

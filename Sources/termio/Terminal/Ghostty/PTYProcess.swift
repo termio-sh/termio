@@ -102,7 +102,7 @@ final class PTYProcess: @unchecked Sendable {
     private var companionCols = 0
     private var companionRows = 0
     private var resizeObservers: [UUID: (Int, Int) -> Void] = [:]
-    private var exitObservers: [(Int32) -> Void] = []
+    private var exitObservers: [UUID: (Int32) -> Void] = [:]
     private var terminated = false
     /// Set (under `lock`) the moment `waitpid` reaps the child, after which its
     /// pid may be recycled — the escalation kill checks this so a delayed
@@ -217,7 +217,7 @@ final class PTYProcess: @unchecked Sendable {
                 let runtimeMs = UInt64(max(0, Date().timeIntervalSince(self.startedAt) * 1000))
                 self.onExit?(Int32(code), runtimeMs)
                 self.lock.lock()
-                let observers = self.exitObservers
+                let observers = Array(self.exitObservers.values)
                 self.lock.unlock()
                 for observer in observers { observer(Int32(code)) }
             }
@@ -448,10 +448,22 @@ final class PTYProcess: @unchecked Sendable {
     }
 
     /// Observe child exit (in addition to `onExit`, which the store owns).
-    /// Fired on the main queue.
-    func addExitObserver(_ observer: @escaping (Int32) -> Void) {
+    /// Fired on the main queue. The token unregisters it — an observer tied to
+    /// something shorter-lived than the PTY (a phone attach, outlived when the
+    /// same connection re-attaches to another session) must be removed on that
+    /// teardown, or the dead pairing still hears this PTY's exit.
+    @discardableResult
+    func addExitObserver(_ observer: @escaping (Int32) -> Void) -> UUID {
+        let id = UUID()
         lock.lock()
-        exitObservers.append(observer)
+        exitObservers[id] = observer
+        lock.unlock()
+        return id
+    }
+
+    func removeExitObserver(_ id: UUID) {
+        lock.lock()
+        exitObservers[id] = nil
         lock.unlock()
     }
 
@@ -493,6 +505,15 @@ final class PTYProcess: @unchecked Sendable {
     /// keystrokes via the companion bridge, synthetic `sessions send` text — so
     /// this is the one place input can be timestamped for all of them. Guarded
     /// by `writeLock` like the rest of the writer state.
+    ///
+    /// It cuts the other way too: in `.inMemory` mode this is also how libghostty
+    /// answers protocol queries — DSR, DA, XTGETTCAP — and a reply is
+    /// indistinguishable from a keystroke here, so a TUI that queries more often
+    /// than `userInputQuietWindow` starves `noteOutputActivity`'s idle→working
+    /// promotion. Hooks are no escape: a session is on that path *because* it has
+    /// hooks (`statusRules` is nil then), and `antigravity`/`hermes` have neither.
+    /// The fix is to stamp the key/paste entry and the companion input handler
+    /// instead of every stdin byte.
     private var lastInputAtLocked = Date.distantPast
 
     /// Thread-safe read of the last stdin-write instant. The status tap reads it
@@ -885,6 +906,26 @@ final class PTYProcess: @unchecked Sendable {
         return arguments.isEmpty ? nil : arguments
     }
 
+    /// Whether the child is still running — the session has a live process to
+    /// lose. False once the pid is reaped.
+    var isAlive: Bool {
+        lock.lock()
+        let exited = childExited
+        lock.unlock()
+        return !exited && pid > 0
+    }
+
+    /// Whether something other than the child shell itself holds the tty's
+    /// foreground group, i.e. a command is actually running in the pane rather
+    /// than a shell idling at its prompt. This is the signal iTerm2 keys its
+    /// prompt-on-close off; a bare prompt is its own foreground group and reads
+    /// as free to close.
+    var hasForegroundJob: Bool {
+        guard isAlive else { return false }
+        let foreground = tcgetpgrp(masterFD)
+        return foreground > 0 && foreground != pid
+    }
+
     /// SIGKILLs the child's process group if it hasn't been reaped yet.
     /// Idempotent; safe after the pid is reaped (the `childExited` check keeps
     /// the kill off a recycled pid). The app-quit path calls this directly
@@ -914,8 +955,9 @@ final class PTYProcess: @unchecked Sendable {
             let ps = Process()
             ps.executableURL = URL(fileURLWithPath: "/bin/ps")
             // -E appends each process's environment to the command column
-            // (own-user processes only, which is exactly the scope wanted).
-            ps.arguments = ["-axEww", "-o", "pid=,ppid=,command="]
+            // (own-user processes only, which is exactly the scope wanted);
+            // `tty` gates out daemons — see the guard below.
+            ps.arguments = ["-axEww", "-o", "pid=,ppid=,tty=,command="]
             let out = Pipe()
             ps.standardOutput = out
             do { try ps.run() } catch {
@@ -929,9 +971,16 @@ final class PTYProcess: @unchecked Sendable {
                 guard line.contains("TERMIO_SESSION="),
                       line.contains("TERM_PROGRAM=termio") else { continue }
                 let fields = line.split(separator: " ", omittingEmptySubsequences: true)
-                guard fields.count >= 2,
+                // fields: pid, ppid, tty, command… — `ppid == 1` alone can't
+                // tell a stranded agent from a tool that daemonized off the
+                // pane (a tmux/screen server, or termio itself): both
+                // re-parent to launchd carrying the stamps. The tell is the
+                // tty — a stray still holds its dead PTY (`ttysNNN`), which is
+                // why it leaks; a daemon shed it (`??`).
+                guard fields.count >= 3,
                       let pid = pid_t(fields[0]), let ppid = pid_t(fields[1]),
-                      ppid == 1, pid != getpid()
+                      ppid == 1, pid != getpid(),
+                      fields[2] != "??"
                 else { continue }
                 Log.pty.info("reaping stray session process pid=\(pid, privacy: .public)")
                 // The group first (the leader's tree), then the pid itself —

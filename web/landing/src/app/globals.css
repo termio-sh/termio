@@ -1,6 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+/* fumadocs-ui supplies the docs chrome (sidebar, TOC, search dialog, mobile nav).
+   Its `shadcn` theme maps every `--color-fd-*` onto the shadcn variables this site
+   already defines, so the docs' own light/dark scoping (`.docs-surface`) drives
+   the library's components too — the tokens resolve at the use site. `style.css`
+   is deliberately not imported: it re-imports Tailwind. */
+@import "fumadocs-ui/css/shadcn.css";
+@import "fumadocs-ui/css/preset.css";
+@source "../../node_modules/fumadocs-ui/dist/**/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -15,6 +23,7 @@
   --color-brand-red: #ff5252;
   --color-brand-amber: #ffb764;
   --color-brand-amber-deep: #fd9426;
+  --color-brand-gold: #eab308;
   --color-brand-green: #27c93f;
   --color-brand-green-deep: #16c253;
   --color-brand-blue: #0088ff;
@@ -29,6 +38,7 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-code: var(--code);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -58,26 +68,47 @@
    no colored accent. Applied to <html> (see layout.tsx). */
 :root {
   color-scheme: light;
-  --background: #ffffff;
-  --foreground: #1d1d1f;
-  --card: #ffffff;
-  --card-foreground: #1d1d1f;
-  --popover: #ffffff;
-  --popover-foreground: #1d1d1f;
+  /* The light palette's raw values, named once. The docs surface re-applies these
+     when the reader's system is in light mode (see `.docs-surface`), so the two
+     places that resolve a light theme can never drift apart. */
+  --light-background: #ffffff;
+  --light-foreground: #1d1d1f;
+  --light-card: #ffffff;
+  --light-popover: #ffffff;
+  --light-primary: #14171c;
+  --light-primary-foreground: #ffffff;
+  --light-secondary: #f5f5f7;
+  --light-muted-foreground: #6e6e73;
+  --light-accent: #e8e8ed;
+  --light-border: #d2d2d7;
+  --light-input: #d2d2d7;
+  /* Code blocks sit on their own surface: near-black in dark mode, a quiet grey in
+     light mode. A near-black block on a white page reads as a hole. */
+  --light-code: #f5f5f7;
+  --light-selection: rgba(0, 0, 0, 0.08);
+
+  --background: var(--light-background);
+  --foreground: var(--light-foreground);
+  --card: var(--light-card);
+  --card-foreground: var(--light-foreground);
+  --popover: var(--light-popover);
+  --popover-foreground: var(--light-foreground);
   /* Premium near-black for buttons — a hair cooler and deeper than the ink, so the
      CTA reads as an object rather than heavy text. */
-  --primary: #14171c;
-  --primary-foreground: #ffffff;
-  --secondary: #f5f5f7;
-  --secondary-foreground: #1d1d1f;
-  --muted: #f5f5f7;
-  --muted-foreground: #6e6e73;
-  --accent: #e8e8ed;
-  --accent-foreground: #1d1d1f;
+  --primary: var(--light-primary);
+  --primary-foreground: var(--light-primary-foreground);
+  --secondary: var(--light-secondary);
+  --secondary-foreground: var(--light-foreground);
+  --muted: var(--light-secondary);
+  --muted-foreground: var(--light-muted-foreground);
+  --accent: var(--light-accent);
+  --accent-foreground: var(--light-foreground);
   --destructive: #e30000;
-  --border: #d2d2d7;
-  --input: #d2d2d7;
-  --ring: #1d1d1f;
+  --border: var(--light-border);
+  --input: var(--light-input);
+  --ring: var(--light-foreground);
+  --code: var(--light-code);
+  --selection: var(--light-selection);
   --radius: 1rem;
   /* Apple's standard easing curve and the spring used for press feedback. */
   --ease-apple: cubic-bezier(0.25, 0.1, 0.25, 1);
@@ -85,8 +116,22 @@
      Safari/Chrome render native SF (Display/Text optical sizing chosen by size).
      SF Pro can't be self-hosted (Apple license), so we ride the OS font; non-Apple
      visitors fall back to their own system UI font. */
-  --font-system-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  /* The CJK families at the tail only ever come into play for glyphs the Latin
+     faces don't have — which is what the translated docs need on a machine whose
+     system font isn't Apple's. */
+  --font-system-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   --font-mono-stack: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* fumadocs' shadcn theme styles #nd-sidebar from the shadcn `--sidebar*` family,
+     which this site never defined. An undefined var() with no fallback makes the
+     whole declaration invalid, so `border-color: var(--sidebar-border)` fell back
+     to the inherited colour — a near-black rule down the side of the page. */
+  --sidebar: var(--light-background);
+  --sidebar-foreground: var(--light-foreground);
+  --sidebar-border: var(--light-border);
+  --sidebar-accent: var(--light-secondary);
+  --sidebar-accent-foreground: var(--light-foreground);
+  --sidebar-ring: var(--light-foreground);
+  --sidebar-primary-foreground: var(--light-primary-foreground);
 }
 
 /* The site's real palette — a near-black canvas with light ink, the superwhisper
@@ -95,22 +140,226 @@
    class so it stays consistent with the page. */
 .dark {
   color-scheme: dark;
-  --background: #08080a;
-  --foreground: #f4f4f6;
-  --card: #0c0c0f;
-  --card-foreground: #f4f4f6;
-  --popover: #0e0e12;
-  --popover-foreground: #f4f4f6;
-  --primary: #ffffff;
-  --primary-foreground: #08080a;
-  --secondary: #161619;
-  --secondary-foreground: #f4f4f6;
-  --muted: #161619;
-  --muted-foreground: #8e8e98;
-  --accent: #161619;
-  --accent-foreground: #f4f4f6;
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.14);
+  /* Raw values, named once — the docs' theme switch re-applies this same palette
+     when a reader picks Dark while their system is Light. */
+  --dark-background: #08080a;
+  --dark-foreground: #f4f4f6;
+  /* Card sits one clear step above the page black — #0c0c0f was only ~4 gray
+     levels off #08080a, invisible on most panels. */
+  --dark-card: #121217;
+  --dark-popover: #0e0e12;
+  --dark-primary: #ffffff;
+  --dark-primary-foreground: #08080a;
+  --dark-secondary: #161619;
+  --dark-muted-foreground: #8e8e98;
+  --dark-border: rgba(255, 255, 255, 0.1);
+  --dark-input: rgba(255, 255, 255, 0.14);
+  --dark-code: #0c0c0f;
+  --dark-selection: rgba(255, 255, 255, 0.16);
+
+  --background: var(--dark-background);
+  --foreground: var(--dark-foreground);
+  --card: var(--dark-card);
+  --card-foreground: var(--dark-foreground);
+  --popover: var(--dark-popover);
+  --popover-foreground: var(--dark-foreground);
+  --primary: var(--dark-primary);
+  --primary-foreground: var(--dark-primary-foreground);
+  --secondary: var(--dark-secondary);
+  --secondary-foreground: var(--dark-foreground);
+  --muted: var(--dark-secondary);
+  --muted-foreground: var(--dark-muted-foreground);
+  --accent: var(--dark-secondary);
+  --accent-foreground: var(--dark-foreground);
+  --border: var(--dark-border);
+  --input: var(--dark-input);
+  --code: var(--dark-code);
+  --selection: var(--dark-selection);
+  --sidebar: var(--dark-background);
+  --sidebar-foreground: var(--dark-foreground);
+  --sidebar-border: var(--dark-border);
+  --sidebar-accent: var(--dark-secondary);
+  --sidebar-accent-foreground: var(--dark-foreground);
+  --sidebar-ring: var(--dark-foreground);
+  --sidebar-primary-foreground: var(--dark-primary-foreground);
+}
+
+/* The docs are a reading surface, not part of the site's dark object, so they get
+   their own appearance: the reader's system by default, overridable by the switch
+   in the docs header. `<html class="dark">` still governs the landing page, which is
+   deliberately dark-only, so all of this is scoped to `.docs-surface`.
+
+   Three states, and the selectors are ordered so the more specific one wins:
+     - no `data-docs-theme` on <html>  → follow the OS (the media query below)
+     - `data-docs-theme="light"`       → light, whatever the OS says
+     - `data-docs-theme="dark"`        → dark, whatever the OS says
+   The attribute goes on <html> rather than on the surface itself so the blocking
+   script in the docs layout can set it before first paint — there is no
+   `.docs-surface` element yet at that point. */
+
+/* stylelint-disable-next-line no-duplicate-selectors */
+@media (prefers-color-scheme: light) {
+  /* The document itself has to agree, or a light docs page keeps a dark scrollbar
+     and flashes dark canvas when the reader over-scrolls. */
+  html:not([data-docs-theme]):has(.docs-surface) {
+    color-scheme: light;
+    --color-fd-background: var(--background);
+    --color-fd-foreground: var(--foreground);
+    --color-fd-muted: var(--muted);
+    --color-fd-muted-foreground: var(--muted-foreground);
+    --color-fd-popover: var(--popover);
+    --color-fd-popover-foreground: var(--popover-foreground);
+    --color-fd-card: var(--card);
+    --color-fd-card-foreground: var(--card-foreground);
+    --color-fd-border: var(--border);
+    --color-fd-primary: var(--primary);
+    --color-fd-primary-foreground: var(--primary-foreground);
+    --color-fd-secondary: var(--secondary);
+    --color-fd-secondary-foreground: var(--secondary-foreground);
+    --color-fd-accent: var(--accent);
+    --color-fd-accent-foreground: var(--accent-foreground);
+    --color-fd-ring: var(--ring);
+    /* fumadocs' shadcn theme styles #nd-sidebar from the shadcn `--sidebar*` family,
+       which this site never defined. An undefined var() with no fallback makes the
+       whole declaration invalid, so `border-color: var(--sidebar-border)` fell back
+       to the inherited colour — a near-black rule down the side of the page. */
+    --sidebar: var(--light-background);
+    --sidebar-foreground: var(--light-foreground);
+    --sidebar-border: var(--light-border);
+    --sidebar-accent: var(--light-secondary);
+    --sidebar-accent-foreground: var(--light-foreground);
+    --sidebar-ring: var(--light-foreground);
+    --sidebar-primary-foreground: var(--light-primary-foreground);
+  }
+  html:not([data-docs-theme]):has(.docs-surface) body {
+    background-color: var(--light-background);
+  }
+  html:not([data-docs-theme]):has(.docs-surface) {
+    color-scheme: light;
+    --background: var(--light-background);
+    --foreground: var(--light-foreground);
+    --card: var(--light-card);
+    --card-foreground: var(--light-foreground);
+    --popover: var(--light-popover);
+    --popover-foreground: var(--light-foreground);
+    --primary: var(--light-primary);
+    --primary-foreground: var(--light-primary-foreground);
+    --secondary: var(--light-secondary);
+    --secondary-foreground: var(--light-foreground);
+    --muted: var(--light-secondary);
+    --muted-foreground: var(--light-muted-foreground);
+    --accent: var(--light-accent);
+    --accent-foreground: var(--light-foreground);
+    --border: var(--light-border);
+    --input: var(--light-input);
+    --ring: var(--light-foreground);
+    --code: var(--light-code);
+    --selection: var(--light-selection);
+  }
+}
+
+html[data-docs-theme="light"]:has(.docs-surface) {
+  color-scheme: light;
+  --color-fd-background: var(--background);
+  --color-fd-foreground: var(--foreground);
+  --color-fd-muted: var(--muted);
+  --color-fd-muted-foreground: var(--muted-foreground);
+  --color-fd-popover: var(--popover);
+  --color-fd-popover-foreground: var(--popover-foreground);
+  --color-fd-card: var(--card);
+  --color-fd-card-foreground: var(--card-foreground);
+  --color-fd-border: var(--border);
+  --color-fd-primary: var(--primary);
+  --color-fd-primary-foreground: var(--primary-foreground);
+  --color-fd-secondary: var(--secondary);
+  --color-fd-secondary-foreground: var(--secondary-foreground);
+  --color-fd-accent: var(--accent);
+  --color-fd-accent-foreground: var(--accent-foreground);
+  --color-fd-ring: var(--ring);
+  /* fumadocs' shadcn theme styles #nd-sidebar from the shadcn `--sidebar*` family,
+     which this site never defined. An undefined var() with no fallback makes the
+     whole declaration invalid, so `border-color: var(--sidebar-border)` fell back
+     to the inherited colour — a near-black rule down the side of the page. */
+  --sidebar: var(--light-background);
+  --sidebar-foreground: var(--light-foreground);
+  --sidebar-border: var(--light-border);
+  --sidebar-accent: var(--light-secondary);
+  --sidebar-accent-foreground: var(--light-foreground);
+  --sidebar-ring: var(--light-foreground);
+  --sidebar-primary-foreground: var(--light-primary-foreground);
+}
+html[data-docs-theme="light"]:has(.docs-surface) body {
+  background-color: var(--light-background);
+}
+html[data-docs-theme="light"]:has(.docs-surface) {
+  color-scheme: light;
+  --background: var(--light-background);
+  --foreground: var(--light-foreground);
+  --card: var(--light-card);
+  --card-foreground: var(--light-foreground);
+  --popover: var(--light-popover);
+  --popover-foreground: var(--light-foreground);
+  --primary: var(--light-primary);
+  --primary-foreground: var(--light-primary-foreground);
+  --secondary: var(--light-secondary);
+  --secondary-foreground: var(--light-foreground);
+  --muted: var(--light-secondary);
+  --muted-foreground: var(--light-muted-foreground);
+  --accent: var(--light-accent);
+  --accent-foreground: var(--light-foreground);
+  --border: var(--light-border);
+  --input: var(--light-input);
+  --ring: var(--light-foreground);
+  --code: var(--light-code);
+  --selection: var(--light-selection);
+}
+
+/* Dark has to re-assert the palette rather than just standing aside: on a light
+   system the media query above would otherwise win inside the surface. */
+html[data-docs-theme="dark"]:has(.docs-surface) {
+  color-scheme: dark;
+  --background: var(--dark-background);
+  --foreground: var(--dark-foreground);
+  --card: var(--dark-card);
+  --card-foreground: var(--dark-foreground);
+  --popover: var(--dark-popover);
+  --popover-foreground: var(--dark-foreground);
+  --primary: var(--dark-primary);
+  --primary-foreground: var(--dark-primary-foreground);
+  --secondary: var(--dark-secondary);
+  --secondary-foreground: var(--dark-foreground);
+  --muted: var(--dark-secondary);
+  --muted-foreground: var(--dark-muted-foreground);
+  --accent: var(--dark-secondary);
+  --accent-foreground: var(--dark-foreground);
+  --border: var(--dark-border);
+  --input: var(--dark-input);
+  --ring: var(--dark-foreground);
+  --code: var(--dark-code);
+  --selection: var(--dark-selection);
+  --color-fd-background: var(--background);
+  --color-fd-foreground: var(--foreground);
+  --color-fd-muted: var(--muted);
+  --color-fd-muted-foreground: var(--muted-foreground);
+  --color-fd-popover: var(--popover);
+  --color-fd-popover-foreground: var(--popover-foreground);
+  --color-fd-card: var(--card);
+  --color-fd-card-foreground: var(--card-foreground);
+  --color-fd-border: var(--border);
+  --color-fd-primary: var(--primary);
+  --color-fd-primary-foreground: var(--primary-foreground);
+  --color-fd-secondary: var(--secondary);
+  --color-fd-secondary-foreground: var(--secondary-foreground);
+  --color-fd-accent: var(--accent);
+  --color-fd-accent-foreground: var(--accent-foreground);
+  --color-fd-ring: var(--ring);
+  --sidebar: var(--dark-background);
+  --sidebar-foreground: var(--dark-foreground);
+  --sidebar-border: var(--dark-border);
+  --sidebar-accent: var(--dark-secondary);
+  --sidebar-accent-foreground: var(--dark-foreground);
+  --sidebar-ring: var(--dark-foreground);
+  --sidebar-primary-foreground: var(--dark-primary-foreground);
 }
 
 @layer base {
@@ -255,6 +504,11 @@
       0 1px 1px rgba(0, 0, 0, 0.35),
       0 12px 32px -14px rgba(0, 0, 0, 0.7);
   }
+  /* The docs no longer use the floating glass pill — they have their own header
+     (components/docs/docs-header.tsx) — so there is no light variant to declare
+     here. If glass ever returns to a docs page, its override has to live in this
+     layer beside the rule above: a copy in @layer components would lose to any
+     utility no matter how specific. */
 
   /* Frosted pill used for section eyebrow labels. */
   .glass-pill {
@@ -321,6 +575,68 @@
     }
   }
 
+  /* Orchestration demo: a short dash travels the full beam path once per
+     pulse. The path is normalized with pathLength=100; the 200 gap keeps a
+     single dash visible, and the offset sweep walks it from before the start
+     (30) to past the end (-105). React re-keys the path per pulse to restart. */
+  @keyframes beam-pulse {
+    from {
+      stroke-dashoffset: 30;
+      opacity: 1;
+    }
+    85% {
+      opacity: 1;
+    }
+    to {
+      stroke-dashoffset: -105;
+      opacity: 0;
+    }
+  }
+  .beam-pulse {
+    stroke-dasharray: 30 200;
+    stroke-linecap: round;
+    animation: beam-pulse 1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+  @keyframes demo-cursor-blink {
+    50% {
+      opacity: 0;
+    }
+  }
+  .demo-cursor {
+    animation: demo-cursor-blink 1s step-end infinite;
+  }
+  @keyframes dot-pulse {
+    50% {
+      opacity: 0.35;
+    }
+  }
+  .dot-working {
+    animation: dot-pulse 1.6s ease-in-out infinite;
+  }
+  /* Output lines land all at once (not typed) but fade + rise in gently, so a
+     result "arriving" reads as a soft reveal rather than an abrupt pop. */
+  @keyframes line-in {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .line-in {
+    animation: line-in 0.32s var(--ease-apple) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .beam-pulse,
+    .demo-cursor,
+    .dot-working,
+    .line-in {
+      animation: none;
+    }
+  }
+
   /* Lightweight scroll-entrance: elements fade/slide in when revealed via IntersectionObserver. */
   .reveal {
     opacity: 0;
@@ -374,85 +690,65 @@
     @apply text-foreground underline decoration-muted-foreground/50 underline-offset-4 transition-colors hover:decoration-foreground;
   }
 
-  /* Docs prose — the same reading-column voice as the legal pages, extended for
-     technical content: anchored headings, inline + block code, tables, blockquotes
-     and rules. System SF throughout (no web font), 15px body at 1.7 leading. */
-  .prose-docs {
-    @apply text-[15px] leading-[1.7] text-foreground/80;
+  /* ── Docs surface ────────────────────────────────────────────────────────── */
+
+  .docs-surface {
+    @apply bg-background text-foreground;
   }
-  .prose-docs > :first-child {
-    @apply mt-0;
+
+  /* Integrating our own header with the library's frame.
+     `#nd-docs-layout` carries inline styles, which no stylesheet rule can beat —
+     but they are written in terms of variables, and those we can set:
+
+       --fd-docs-row-1: var(--fd-banner-height, 0px)   ← where the rails stick
+       rail height:     calc(--fd-docs-height - --fd-docs-row-1)
+
+     With the library's own nav disabled, `--fd-header-height` is 0 and the rails
+     stuck to the top of the viewport — sliding under our sticky header, which is
+     what made the sidebar look clipped and the page feel unstable while
+     scrolling. Our header occupies exactly the row the library reserves for a
+     banner, so that is the variable to fill.
+
+     `min-height` is then set here rather than left at `--fd-docs-height`: the
+     grid starts 3.5rem down the page, so a full 100dvh of minimum height made
+     every page — even a short one — scroll by exactly the height of the header,
+     and the scrollbar appeared and disappeared as you moved between pages. */
+  #nd-docs-layout {
+    /* 3.5rem of bar plus its 1px bottom border: the rails stick to this value,
+       so if it under-counts by a pixel their top edge sits behind the border and
+       the boundary shimmers as content scrolls past it. */
+    --fd-banner-height: calc(3.5rem + 1px);
+    min-height: calc(100dvh - 3.5rem - 1px);
   }
-  .prose-docs h2 {
-    @apply mt-12 scroll-mt-28 text-xl font-semibold leading-tight tracking-tight text-foreground;
+
+  /* A scrollbar that comes and goes shifts the whole column sideways when you
+     move between a short page and a long one. Docs pages always reserve it. */
+  html:has(.docs-surface) {
+    overflow-y: scroll;
   }
-  .prose-docs h3 {
-    @apply mt-9 scroll-mt-28 text-base font-semibold leading-snug tracking-tight text-foreground;
+
+  /* Our own header carries the wordmark, and the collapse toggle is off, so the
+     sidebar's title row has nothing left in it — drop the row rather than leave
+     it holding empty space above the search field. */
+  #nd-sidebar a[href="/"]:empty {
+    display: none;
   }
-  .prose-docs h4 {
-    @apply mt-7 scroll-mt-28 text-[15px] font-semibold text-foreground;
+  #nd-sidebar div:has(> a[href="/"]:empty:only-child) {
+    display: none;
   }
-  .prose-docs p {
-    @apply mt-4 text-[15px] leading-[1.7] text-foreground/80;
+  /* The floating "expand" affordance that pairs with collapsing — inert while
+     `collapsible` is off, but it is still a fixed element in the layer stack. */
+  [data-sidebar-panel] {
+    display: none;
   }
-  .prose-docs ul {
-    @apply mt-4 space-y-2.5;
+  /* CJK copy needs a little more air between lines than Latin at the same size,
+     and Chinese punctuation shouldn't start a line. */
+  .docs-surface:lang(zh-CN) .prose,
+  .docs-surface:lang(zh-CN) .prose p,
+  .docs-surface:lang(zh-CN) .prose li {
+    @apply leading-[1.85];
   }
-  .prose-docs ol {
-    @apply mt-4 list-decimal space-y-2.5 pl-5 marker:text-muted-foreground;
-  }
-  .prose-docs ul > li {
-    @apply relative pl-6 text-[15px] leading-[1.7] text-foreground/80;
-  }
-  /* The site's dash bullet — a short hairline instead of a dot. */
-  .prose-docs ul > li::before {
-    content: "";
-    @apply absolute left-0 top-[0.82em] h-px w-3 bg-muted-foreground/70;
-  }
-  .prose-docs ol > li {
-    @apply pl-1 text-[15px] leading-[1.7] text-foreground/80;
-  }
-  .prose-docs li > ul,
-  .prose-docs li > ol {
-    @apply mt-2.5;
-  }
-  .prose-docs strong {
-    @apply font-semibold text-foreground;
-  }
-  .prose-docs a {
-    @apply font-medium text-foreground underline decoration-muted-foreground/40 underline-offset-4 transition-colors hover:decoration-brand-teal;
-  }
-  /* Inline code — a quiet monospace chip. The :not(pre code) guard keeps block
-     code inside <pre> unchipped. */
-  .prose-docs :not(pre) > code {
-    @apply rounded-md border border-border bg-secondary px-1.5 py-0.5 font-mono text-[0.85em] text-foreground;
-  }
-  .prose-docs pre {
-    @apply mt-5 overflow-x-auto rounded-lg border border-border bg-[#0c0c0f] p-4 text-[13px] leading-[1.6];
-  }
-  .prose-docs pre code {
-    @apply font-mono text-foreground/90;
-  }
-  .prose-docs blockquote {
-    @apply mt-5 border-l-2 border-brand-teal/60 pl-4 text-foreground/70 italic;
-  }
-  .prose-docs hr {
-    @apply my-10 border-border;
-  }
-  .prose-docs img {
-    @apply mt-5 rounded-2xl border border-border;
-  }
-  /* Tables — a compact hairline grid matching the site's borders. */
-  .prose-docs table {
-    @apply mt-6 w-full border-collapse overflow-hidden text-[14px];
-  }
-  .prose-docs th {
-    @apply border-b border-border px-3 py-2 text-left font-semibold text-foreground;
-  }
-  .prose-docs td {
-    @apply border-b border-border px-3 py-2 align-top text-foreground/80;
-  }
-  .prose-docs tbody tr:last-child td {
-    @apply border-b-0;
+  .docs-surface:lang(zh-CN) .prose {
+    line-break: strict;
   }
 }

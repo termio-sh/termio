@@ -167,7 +167,7 @@ A shift like this comes once or twice in an engineer's career. The last one was 
 
 The vehicle of this revolution, ironically, is the thing the IDE spent forty years replacing — the terminal. Agents are born in the terminal, and the ADE's natural form is a terminal reinvented for directing them.
 
-This is why we build [termio](https://termio.sh): a native macOS terminal for agents — multiple CLI agents running in parallel, a menu-bar glance telling you who's working and who's waiting on your call, and your phone taking over supervision when you step away from the desk. Not an AI plugin for an editor, not a scheduling dashboard in the cloud: own the runtime, stand neutral, and make one thing — a human supervising a fleet of agents — into muscle memory.
+This is why we build [Termio](https://termio.sh): a native macOS terminal for agents — multiple CLI agents running in parallel, a menu-bar glance telling you who's working and who's waiting on your call, and your phone taking over supervision when you step away from the desk. Not an AI plugin for an editor, not a scheduling dashboard in the cloud: own the runtime, stand neutral, and make one thing — a human supervising a fleet of agents — into muscle memory.
 
 In the punch-card era, the environment queued for you. In the time-sharing era, it waited for you. In the Turbo era, it compiled for you. In the Eclipse era, it remembered for you. In the VS Code era, it connected for you.
 

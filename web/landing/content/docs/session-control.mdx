@@ -1,6 +1,6 @@
 ---
 title: Session control & the CLI
-description: Turn on session control to let your agents report status and coordinate with each other, and use the termio command-line tool to open projects and drive sessions from the shell.
+description: Termio's orchestration API — status hooks that let agents report what they're doing, and the termio sessions CLI that lets you (or another agent) spawn, drive, and supervise sessions from the shell.
 ---
 
 Two related, opt-in features sit behind the live statuses you see in the sidebar:
@@ -9,7 +9,7 @@ command-line tool** that lets you — or another agent — drive sessions from t
 shell. Neither is required to use Termio; both make a fleet of agents easier to
 run.
 
-## Session control
+## Live agent status
 
 Termio can install small **status hooks** into your agents' own config files
 (Claude Code, Codex, Cursor, and the plugin-based agents). When an agent starts
@@ -17,21 +17,46 @@ working, finishes, or stops to ask a question, the hook reports that to Termio, 
 the sidebar's [status dots](/docs/sidebar#status) reflect exactly what's happening
 instead of being guessed from output.
 
-Turn it on from **Settings ▸ Agents** (Termio also offers it once on first
-launch). Toggling it off removes the hooks again, leaving any hooks you added
-yourself untouched.
+Turn it on from **Settings ▸ General ▸ Live agent status** (Termio also offers it
+once on first launch). Toggling it off removes the hooks again, leaving any hooks
+you added yourself untouched.
+
+## Session control
+
+**Settings ▸ General ▸ Session control** turns on the `termio sessions`
+orchestration API below, and teaches your agents it exists by installing a
+`termio` **agent skill** into each agent's skills folder (`~/.claude/skills`,
+`~/.codex/skills`). The skill loads on demand — an agent carries only its
+one-line description until a task actually involves driving sibling sessions —
+and Termio re-asserts it on every launch, so app updates propagate and
+hand-edits heal automatically. Toggling it off removes the skill again.
+
+<DocsImage
+  src="/screenshots/docs/25-session-control-settings.png"
+  alt="Termio General settings with Command-line tool, Session control, Live agent status, and task notifications enabled"
+  width={1664}
+  height={1288}
+/>
+
+Running an agent Termio doesn't auto-configure? The same skill is published at
+[termio.sh/skill.md](https://termio.sh/skill.md) and installable straight from
+the repo:
+
+```bash
+npx skills add termio-sh/termio --skill termio
+```
 
 <Callout type="note">
-  Session control only writes the status hooks into agent configs on your Mac.
-  Nothing leaves your machine — the reports travel over a local socket to the
-  Termio app, and nowhere else.
+  Both toggles only write files on your Mac — hook entries in agent configs and
+  the skill file. Nothing leaves your machine: status reports and session
+  commands travel over a local socket to the Termio app, and nowhere else.
 </Callout>
 
 ## The `termio` command-line tool
 
-Install the CLI from **Settings ▸ General ▸ Install Command-Line Tool**. It
-symlinks a `termio` command onto your `PATH` (at `/usr/local/bin/termio`; macOS
-asks for permission once).
+Turn on **Settings ▸ General ▸ Command-line tool**. It symlinks a `termio`
+command onto your `PATH` (at `/usr/local/bin/termio`; macOS asks for permission
+once), and turning it off removes the link again.
 
 ### Open a project
 
@@ -43,33 +68,225 @@ termio ~/code/myapp    # open a specific folder
 Run it in any directory and Termio brings that folder into the sidebar — the
 shell equivalent of **Open Project**.
 
+### The orchestration model
+
+The `termio sessions` family is Termio's orchestration API: it lets one agent —
+or your own scripts — see and steer sibling sessions in the same project. Before
+the verb reference, the design rules everything below follows:
+
+- **Project-scoped by default.** Every command resolves the caller to its own
+  project (via the session id the PTY carries, or the working directory) and can
+  only see and drive siblings there — never sessions in unrelated projects.
+- **One address, one target.** Sessions are addressed by
+  `termio://session/<uuid>` deep links minted at creation and printed by
+  `list` (a bare id or unique id-prefix works too). The link names the pane,
+  never its mutable contents, so a copied address survives the session
+  promoting, demoting, or being renamed — and stays self-describing when
+  pasted anywhere.
+- **Transcript as truth.** An agent's *result* is read from its own structured
+  transcript (the path and line range the replies hand back), never scraped off
+  the screen. The screen is the result channel only for plain `run` terminals,
+  which have no transcript.
+- **Waiting is explicit.** No command blocks unless you pass `--wait`, and
+  `--wait` always means the same thing: wait for the turn's *outcome*, fail
+  fast when no outcome can come, and split the result across exit codes.
+- **Signal, never kill.** The supervision plane observes and reports — `watch`
+  events, the `stalled` alarm — but never terminates or auto-answers a session.
+  Acting on a signal is always the supervisor's decision.
+
 ### Drive sessions
 
-The `termio sessions` family lets one agent see and steer its siblings in the same
-project — the machinery behind multi-agent workflows. Add `--json` to any command
-for machine-readable output.
+Add `--json` to any command for machine-readable output.
 
 | Command | What it does |
 | --- | --- |
 | `termio sessions list` | List the sessions in this project with their live status. |
-| `termio sessions watch` | Block and stream one line per status change — the push alternative to polling `list`. Defaults to `done` and `needs-you`; widen with `--state working,idle,done,needs-you`. Runs until you interrupt it. |
-| `termio sessions spawn "<prompt>"` | Start a new agent session on the prompt. Add `--agent <id>` (e.g. `codex`, `grok`, `pi`) to choose the agent; it defaults to the caller's own kind. The reply carries the new `<agent>@<id>` handle. |
-| `termio sessions send <agent>@<id> "<text>"` | Type text into an existing session and submit it with a real Return keypress — a prompt to drive it, or a menu choice (`"1"`, `"yes"`) to answer a permission prompt. |
-| `termio sessions close <agent>@<id>` | Close one or more session tabs. |
-| `termio sessions focus <agent>@<id>` | Bring a session to the front in the app. |
+| `termio sessions watch` | Block and stream one line per status change — the push alternative to polling `list`. |
+| `termio sessions spawn "<prompt>"` | Start a new agent session on the prompt; replies immediately with its session link. |
+| `termio sessions run "<command>"` | Start a new plain terminal session typing that shell command — a dev server, a test run — in a visible pane, no LLM. |
+| `termio sessions send <link> "<text>"` | Type text into an existing session and submit it with a real Return keypress — a prompt to drive it, or a menu choice (`"1"`, `"yes"`) to answer a permission prompt. |
+| `termio sessions read <link>` | Print the session's current screen without focusing it (`--lines N` keeps the tail) — the result channel for `run` sessions. |
+| `termio sessions close <link>` | Close one or more session tabs. |
+| `termio sessions focus <link>` | Bring a session to the front in the app. |
 
-`<agent>@<id>` is the handle `list` prints (a bare id or session title also works).
-Commands are scoped to the current project automatically.
+`<link>` is the `termio://session/<uuid>` address `list` prints (a bare id,
+unique id-prefix, or session title also works). Commands are scoped to the
+current project automatically, and `termio sessions <verb> --help` prints
+focused help for any one verb.
+
+<DocsImage
+  src="/screenshots/docs/18-sessions-list.png"
+  alt="A Termio terminal running only termio sessions list, with seven sessions and their agent types and live states matching the sidebar"
+  width={2424}
+  height={1664}
+/>
 
 <Callout type="note">
-  `answer` is a deprecated alias of `send`, and `send` with no handle behaves like
+  `answer` is a deprecated alias of `send` (meaningful for agent sessions only), and `send` with no target behaves like
   `spawn` — both kept so existing scripts keep working. Prefer `spawn` and `send`.
 </Callout>
+
+### Spawning without waiting
+
+`spawn` returns the moment the session exists: the reply carries the new
+session's link, and the prompt itself is typed in once the agent finishes
+booting. Add
+`--agent <id>` (e.g. `codex`, `grok`, `pi`) to choose the agent; it defaults to
+the caller's own kind.
+
+### Running plain commands
+
+Not everything in a fleet is an agent. `run` starts a *terminal* session on a
+shell command — a dev server, a test watcher, a build — in a visible pane you
+can watch and take over, and `read` prints any session's current screen
+without focusing it. A plain command has no transcript, so its screen is its
+result channel; agent results keep flowing through transcripts.
+
+```bash
+termio sessions run "pnpm test"
+termio sessions read 1a2b3c4d --lines 40
+```
+
+### Waiting for the outcome: `--wait`
+
+Waiting is always explicit, and it means the same thing everywhere: `--wait`
+waits for the *outcome* of the turn, never for plumbing. Both `send` and `spawn`
+accept it (with an optional `--timeout <ms>`, default 300000, clamped
+1000–600000):
+
+```bash
+termio sessions send termio://session/ab12cd34-9f2e-4c31-b8d7-3e5a12c90f44 "run the tests" --wait
+termio sessions spawn "summarize the failing CI job" --wait --timeout 120000
+```
+
+The call blocks until the turn settles — the session was seen `working` and has
+rested off it — and the reply carries the final `status`, the `transcript` path,
+and the `cursor`..`cursor_end` line range the response landed in, so the caller
+reads exactly the new content with its own file tools. Two special cases:
+
+- A session that stops to ask something short-circuits the wait immediately:
+  the reply is `status: "needs-you"` with the on-screen question in `prompt` —
+  answer it with another `send`.
+- A plain terminal with no status signal falls back to screen settling: the
+  screen changed after the send, then went still.
+
+Waits also **fail fast instead of burning the timeout** when no outcome can
+come:
+
+- A prompt that shows no effect within 5 seconds — no status move, no screen
+  change — errors as `prompt_stalled`: the input was eaten (an agent still
+  booting, a program that ignores typed text), and no turn is coming.
+- A session that closes mid-wait errors as `session_closed`; an agent that
+  exits back to its shell mid-wait errors as `agent_gone`.
+
+On timeout the reply still comes back (`timed_out: true`) with whatever the
+current status is; the session keeps running. The exit code splits the three
+outcomes so scripts can branch without parsing: **0** settled, **1** error
+(including stalled/vanished), **3** timed out.
+
+### Supervising with `watch`
+
+`watch` is built so an agent can supervise a fleet without polling:
+
+- **Snapshot on attach.** It first prints one line per session with its
+  *current* status (tagged `"snapshot":true` in `--json`), so a supervisor
+  attaching late still learns a session is already waiting on input. Skip it
+  with `--no-snapshot`.
+- **Filtered by default.** Live events default to the two states a supervisor
+  acts on, `done` and `needs-you`; widen with
+  `--state working,idle,done,needs-you`.
+- **Stall alarm, opt-in.** `--state stalled` adds a watch-plane signal for the
+  unattended runaway: a session still `working` that has made **no repo change
+  and next-to-no transcript growth for 20+ minutes**. Sustained output — a long
+  build streaming logs — suppresses it. The event carries the detector's
+  reasoning in `evidence` (`"working 42m, no repo change, transcript +3
+  lines"`), fires once per quiet stretch, and re-arms when progress resumes.
+  Termio only signals; it never kills — the session's real status stays
+  `working` and the sidebar is untouched. Not in the default filter.
+- **Actionable events.** A `needs-you` event carries the on-screen question in
+  `prompt`; a `done` event carries the session's `transcript` path and
+  `cursor_end` — enough to answer, or to read the result, without another
+  round-trip.
+- **Heartbeat.** In `--json` mode the app writes `{"heartbeat":true}` after 30
+  seconds of silence, so a quiet stream is distinguishable from a dead one.
+- **Exit codes.** `0` after Ctrl-C (the normal end of supervision), `2` when
+  the stream closed from the app side — "I chose to stop" and "Termio went
+  away" are different outcomes.
+
+### Spawned sessions know their caller
+
+When one Termio session spawns another, the delivered prompt opens with a short
+provenance envelope: it names the caller's link and allows exactly one
+back-channel — a mid-task question, or a one-line completion ping, via
+`termio sessions send <caller-link> …`. Nothing else travels that way: no
+conversation, no delegating tasks back. Results stay transcript-as-truth — the
+supervisor reads the worker's transcript, with `watch` as the backstop. A
+`spawn` from a plain shell (outside any Termio session) gets no envelope.
+
+### Fail loud
+
+The CLI is built for callers that trust exit codes, not prose. Every one-shot
+command exits `1` on an error or an empty reply, and gives up after a
+15-second client timeout rather than hanging on a busy app (override with the
+`TERMIO_CLI_TIMEOUT` environment variable; a `--wait` call widens the client
+timeout automatically to outlive the server-side wait).
+
+## JSON contract
+
+Agents code against `--json` output, so its shapes are pinned, not
+reverse-engineered. Every JSON reply carries `"schema_version": 1`; fields may
+be *added* within a version, never renamed or removed. Optional fields are
+omitted when unknown (never emitted as `""` or `null`).
+
+Every error, on any verb, has one shape — and the exit code is nonzero:
+
+```json
+{"ok": false, "error": "<code>", "message": "<human-readable next step>", "schema_version": 1}
+```
+
+The stable codes: `disabled`, `no_scope`, `bad_op`, `bad_request`, `no_text`,
+`no_target`, `not_found`, `ambiguous`, `wrong_agent`, `bad_agent`, `no_agent`,
+`start_failed`, `not_live` — plus, on `--wait` only, `prompt_stalled`,
+`session_closed`, and `agent_gone`.
+
+Success replies, per verb (`schema_version` and `"ok": true` omitted below for
+brevity):
+
+| Verb | Reply fields |
+| --- | --- |
+| `list` | `project`, `sessions: [{link, id, title, agent, status, description, transcript?}]` — `link` is the canonical address, `id` its 8-char short form |
+| `spawn` / `run` | `target`, `title`, `created: true`, `queued: true` — the payload is still being delivered |
+| `send` | `target`, `title`, `transcript?`, `cursor?` — read the response from `cursor` onward |
+| `read` | `target`, `title`, `screen` — the current viewport, right-trimmed, trailing blank rows dropped |
+| `send`/`spawn`/`run` `--wait` | `target`, `title`, `status`, `timed_out`, `created?`, `transcript?`, `cursor?`, `cursor_end?`, `prompt?` |
+| `close` | `closed`, `title` |
+| `focus` | `focused` |
+
+The two wait verbs share one reply shape (`--wait` means the same thing
+everywhere): the final `status`, and the transcript line range
+`cursor`..`cursor_end` holding the response. `prompt` appears only on a
+`needs-you` outcome — the question the session is showing on screen.
+
+`watch` streams newline-delimited JSON events rather than one reply:
+
+```json
+{"schema_version": 1, "link": "termio://session/ab12cd34-9f2e-4c31-b8d7-3e5a12c90f44",
+ "status": "done", "title": "…", "cwd": "…", "snapshot": true, "prompt": "…",
+ "transcript": "…", "cursor_end": 42}
+```
+
+`cwd` is omitted until the shell reports one; `snapshot` marks the on-attach
+roster lines; `prompt` rides on `needs-you` events, `transcript` +
+`cursor_end` on `done` events (exactly as in wait replies), and `evidence` on
+`stalled` events — the stall detector's reasoning, e.g.
+`"working 42m, no repo change, transcript +3 lines"`. `stalled` appears only
+on the watch stream, never as a session's `status` in `list` or wait replies.
+After 30 seconds of silence the app writes `{"heartbeat": true}`.
 
 <Callout type="tip">
   This is what lets one agent hand work to another — `spawn` a task in a sibling
   session, then `watch` (or poll `list`) until it reports **done** and read the
-  result. Watching several at once, `termio sessions watch` prints the handle the
+  result. Watching several at once, `termio sessions watch` prints the link the
   moment any of them turns **done** or **needs-you** — one agent supervising a
   fleet, all on your own machine.
 </Callout>

@@ -8,23 +8,31 @@ import SwiftUI
 /// controller sits in that chain (above the SwiftUI tree it hosts), it is the
 /// natural owner of the panel while the inspector is focused.
 @MainActor
-final class FileBrowserHostingController: NSHostingController<AnyView>, @MainActor QLPreviewPanelDataSource {
+// @preconcurrency: `panel.dataSource = self` needs a conformance usable from a
+// nonisolated context; Quick Look delivers its data-source calls on the main
+// thread, which the dynamic check this buys enforces.
+final class FileBrowserHostingController: NSHostingController<AnyView>, @preconcurrency QLPreviewPanelDataSource {
     private let state: FileBrowserState
 
     init(store: TermioStore, settings: AppSettings) {
         let state = FileBrowserState()
         self.state = state
         super.init(rootView: AnyView(
-            FileBrowserView(
-                onQuickLook: { FileBrowserHostingController.toggleQuickLook() },
-                // A single click opens the file over the terminal (driven by `store.openFileURL`):
-                // a previewable file (image, PDF, HTML) in the read-only preview, everything else
-                // in the editor. The terminal pane picks which based on the file kind. (Spacebar
-                // still pops Quick Look for a quick peek without leaving the tree.)
-                onActivate: { url in
-                    store.openFileInEditor(url)
-                }
-            )
+            // The inspector shows its list (tree / search / changes / issues) with any open detail
+            // — editor, diff, PR/issue, trace — layered on top of it (see `InspectorRoot`), so a
+            // click opens the file *here*, beside the terminal, rather than covering the terminal.
+            InspectorRoot(list: AnyView(
+                FileBrowserView(
+                    onQuickLook: { FileBrowserHostingController.toggleQuickLook() },
+                    // A single click opens the file in the inspector (driven by `store.openFileURL`):
+                    // a previewable file (image, PDF, HTML) in the read-only preview, everything else
+                    // in the editor. `InspectorDetailContent` picks which based on the file kind.
+                    // (Spacebar still pops Quick Look for a quick peek without leaving the tree.)
+                    onActivate: { url in
+                        store.openFileInEditor(url)
+                    }
+                )
+            ))
             .environmentObject(store)
             .environmentObject(settings)
             .environmentObject(state)

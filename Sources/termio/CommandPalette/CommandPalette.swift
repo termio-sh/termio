@@ -9,6 +9,10 @@ import SwiftUI
 enum PaletteMode {
     case openQuickly
     case commands
+    /// Live theme browsing (opened from the "Change Theme…" command). Edits only
+    /// the slot matching the current appearance, previews on highlight, commits on
+    /// Return, and reverts on Esc — the terminal is the preview surface.
+    case themes
 }
 
 /// The shared palette panel behind ⌘⇧O (Open Quickly) and ⌘⇧P (Command
@@ -48,6 +52,12 @@ struct CommandPaletteView: View {
     @State private var highlighted = 0
     @State private var keyMonitor: Any?
     @State private var projectFiles: [ProjectFile] = []
+    /// The slot theme in use when theme browsing began, restored on Esc/dismiss so
+    /// arrow-key preview is no-risk. `nil` whenever the palette isn't browsing themes.
+    @State private var themeSnapshot: String?
+    /// Set once the user commits a theme (Return/click) so leaving the mode keeps it
+    /// instead of reverting to the snapshot.
+    @State private var themeCommitted = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -66,14 +76,31 @@ struct CommandPaletteView: View {
             claimSearchFocus(attempt: 0)
             loadProjectFiles()
         }
-        .onDisappear(perform: removeKeyMonitor)
+        .onDisappear {
+            removeKeyMonitor()
+            // A live preview the panel is torn down mid-browse (dismissed by
+            // clicking away) still needs reverting.
+            endThemeBrowsing(commit: themeCommitted)
+        }
         .onChange(of: query) { _, _ in highlighted = 0 }
         // Pressing the other shortcut while open switches modes in place —
         // stale search text from the previous mode would just show "No matches".
-        .onChange(of: store.paletteMode) { _, _ in
+        .onChange(of: store.paletteMode) { old, new in
+            // Leaving themes without committing restores the snapshot.
+            if old == .themes, new != .themes { endThemeBrowsing(commit: themeCommitted) }
             query = ""
             highlighted = 0
+            if new == .themes { beginThemeBrowsing() }
             loadProjectFiles()
+        }
+        // Live-preview the highlighted theme on the open terminals as the user
+        // arrows/hovers through the list (same recolor path as Settings).
+        .onChange(of: highlighted) { _, index in
+            guard mode == .themes, themeSnapshot != nil else { return }
+            let items = filtered
+            guard items.indices.contains(index),
+                  case .theme(let name) = items[index].kind else { return }
+            setCurrentSlotTheme(name)
         }
     }
 
@@ -82,6 +109,14 @@ struct CommandPaletteView: View {
     /// during dismissal.
     private var mode: PaletteMode { store.paletteMode ?? .commands }
 
+    private var placeholder: String {
+        switch mode {
+        case .openQuickly: return localized("Jump to session, project, or file…")
+        case .commands: return localized("Run a command…")
+        case .themes: return localized("Search themes…")
+        }
+    }
+
     // MARK: - Pieces
 
     private var searchField: some View {
@@ -89,10 +124,7 @@ struct CommandPaletteView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 17))
                 .foregroundStyle(.secondary)
-            TextField(
-                mode == .openQuickly ? "Jump to session, project, or file…" : "Run a command…",
-                text: $query
-            )
+            TextField(placeholder, text: $query)
             .textFieldStyle(.plain)
             .font(.system(size: 20))
             .focused($searchFocused)
@@ -110,7 +142,7 @@ struct CommandPaletteView: View {
                     // a lone "Sessions" banner over everything is noise.
                     let sectioned = Set(items.map(\.section)).count > 1
                     if items.isEmpty {
-                        Text("No matches")
+                        Text(localized("No matches"))
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 20)
                     }
@@ -157,6 +189,7 @@ struct CommandPaletteView: View {
         switch mode {
         case .openQuickly: return openQuicklyItems
         case .commands: return commandItems
+        case .themes: return themeItems
         }
     }
 
@@ -212,24 +245,32 @@ struct CommandPaletteView: View {
         var actions: [PaletteAction] = []
         let keys = KeybindingStore.shared
         if store.selectedSessionID != nil {
-            actions.append(.init(id: "split-right", title: "Split Right",
-                                 symbol: "rectangle.split.2x1", shortcut: keys.display(for: .splitRight)) {
+            actions.append(.init(id: "split-right", title: localized("Split Right"),
+                                 icon: .layoutColumns, shortcut: keys.display(for: .splitRight)) {
                 $0.splitSelectedPane(.horizontal)
             })
-            actions.append(.init(id: "split-down", title: "Split Down",
-                                 symbol: "rectangle.split.1x2", shortcut: keys.display(for: .splitDown)) {
+            actions.append(.init(id: "split-left", title: localized("Split Left"),
+                                 icon: .layoutColumns, shortcut: keys.display(for: .splitLeft)) {
+                $0.splitSelectedPane(.horizontal, slot: .first)
+            })
+            actions.append(.init(id: "split-down", title: localized("Split Down"),
+                                 icon: .layoutRows, shortcut: keys.display(for: .splitDown)) {
                 $0.splitSelectedPane(.vertical)
+            })
+            actions.append(.init(id: "split-up", title: localized("Split Up"),
+                                 icon: .layoutRows, shortcut: keys.display(for: .splitUp)) {
+                $0.splitSelectedPane(.vertical, slot: .first)
             })
         }
         if store.splitRoot != nil {
-            actions.append(.init(id: "zoom-split", title: "Zoom Split",
-                                 symbol: "arrow.up.left.and.arrow.down.right",
+            actions.append(.init(id: "zoom-split", title: localized("Zoom Split"),
+                                 icon: .expand,
                                  shortcut: keys.display(for: .splitZoom)) {
                 $0.toggleSelectedPaneZoom()
             })
-            actions.append(.init(id: "close-pane", title: "Close Pane",
-                                 symbol: "rectangle", shortcut: keys.display(for: .closePane)) {
-                $0.closeSelectedPane()
+            actions.append(.init(id: "ungroup", title: localized("Ungroup"),
+                                 icon: .square, shortcut: keys.display(for: .ungroup)) {
+                $0.ungroupSelectedPane()
             })
             for (id, command, selector) in [
                 ("focus-left", KeyCommandID.focusPaneLeft, #selector(AppDelegate.focusPaneLeft(_:))),
@@ -238,21 +279,49 @@ struct CommandPaletteView: View {
                 ("focus-down", .focusPaneDown, #selector(AppDelegate.focusPaneDown(_:))),
             ] {
                 actions.append(.init(id: id, title: KeyCommandCatalog.info(command).title,
-                                     symbol: "arrow.left.and.right.square",
+                                     icon: .arrowsLeftRight,
                                      shortcut: keys.display(for: command)) { _ in
                     NSApp.sendAction(selector, to: nil, from: nil)
                 })
             }
         }
-        actions.append(.init(id: "new-terminal", title: "New Terminal",
-                             symbol: "plus.rectangle", shortcut: keys.display(for: .newTerminal)) {
-            $0.addScratchTerminal()
+        // The Session menu's cycling verbs, whenever there's something to cycle.
+        if !store.sidebarSessionGroups.isEmpty {
+            for (id, command, selector) in [
+                ("next-session", KeyCommandID.nextSession, #selector(AppDelegate.nextSession(_:))),
+                ("previous-session", .previousSession, #selector(AppDelegate.previousSession(_:))),
+            ] {
+                actions.append(.init(id: id, title: KeyCommandCatalog.info(command).title,
+                                     icon: .arrowsLeftRight,
+                                     shortcut: keys.display(for: command)) { _ in
+                    NSApp.sendAction(selector, to: nil, from: nil)
+                })
+            }
+        }
+        // The branch verbs (File menu), listed only when the selected session
+        // lives in a real git project — the menu bar's own enablement rule.
+        if let sid = store.selectedSessionID, let project = store.project(for: sid),
+           project.kind == .folder, project.branch != "—" {
+            actions.append(.init(id: "new-worktree", title: localized("New Worktree…"),
+                                 icon: .gitBranch,
+                                 shortcut: keys.display(for: .newWorktree)) { _ in
+                NSApp.sendAction(#selector(AppDelegate.newWorktree(_:)), to: nil, from: nil)
+            })
+            actions.append(.init(id: "new-pull-request", title: localized("New Pull Request"),
+                                 icon: .gitPullRequest,
+                                 shortcut: keys.display(for: .newPullRequest)) { _ in
+                NSApp.sendAction(#selector(AppDelegate.newPullRequest(_:)), to: nil, from: nil)
+            })
+        }
+        actions.append(.init(id: "new-terminal", title: localized("New Terminal"),
+                             icon: .plusSquare, shortcut: keys.display(for: .newTerminal)) {
+            $0.addTerminalHere()
         })
         // The single "New Chat" verb (default agent, always the scratch Chats
         // funnel), carrying its ⌘N shortcut — the palette twin of File ▸ New Chat.
         if store.defaultChatAgent() != nil {
-            actions.append(.init(id: "new-chat", title: "New Chat",
-                                 symbol: "plus.bubble", shortcut: keys.display(for: .newChat)) {
+            actions.append(.init(id: "new-chat", title: localized("New Chat"),
+                                 icon: .bubbleChatAdd, shortcut: keys.display(for: .newChat)) {
                 $0.addDefaultChat()
             })
         }
@@ -261,8 +330,8 @@ struct CommandPaletteView: View {
         // page's behaviour).
         for agent in enabledAgentPresets(store.settings) where agent != .terminal {
             actions.append(.init(id: "new-session-\(agent.id)",
-                                 title: "New \(agent.displayName) Session",
-                                 symbol: nil, agent: agent, shortcut: nil) { store in
+                                 title: localized("New \(agent.displayName) Session"),
+                                 icon: nil, agent: agent, shortcut: nil) { store in
                 if let sid = store.selectedSessionID, let project = store.project(for: sid) {
                     store.addSession(to: project.id, agent: agent)
                 } else {
@@ -270,41 +339,50 @@ struct CommandPaletteView: View {
                 }
             })
         }
-        actions.append(.init(id: "new-ssh", title: "New SSH Connection…",
-                             symbol: "network", shortcut: nil) {
+        actions.append(.init(id: "new-ssh", title: localized("New SSH Connection…"),
+                             icon: .network, shortcut: nil) {
             $0.presentSSHConnectPanel()
         })
-        actions.append(.init(id: "open-project", title: "Open Project…",
-                             symbol: "folder", shortcut: keys.display(for: .openProject)) {
+        actions.append(.init(id: "open-project", title: localized("Open Project…"),
+                             icon: .folder, shortcut: keys.display(for: .openProject)) {
             $0.presentOpenProjectPanel()
         })
-        for (id, title, symbol, command, selector) in [
-            ("font-increase", "Increase Font Size", "textformat.size.larger",
+        // One shared "Aa" glyph for the font-size trio: Hugeicons has no
+        // larger/smaller/reset variants, so the titles carry the distinction.
+        for (id, title, command, selector) in [
+            ("font-increase", localized("Increase Font Size"),
              KeyCommandID.increaseFontSize, #selector(AppDelegate.increaseFontSize(_:))),
-            ("font-decrease", "Decrease Font Size", "textformat.size.smaller",
+            ("font-decrease", localized("Decrease Font Size"),
              .decreaseFontSize, #selector(AppDelegate.decreaseFontSize(_:))),
-            ("font-reset", "Reset Font Size", "textformat.size",
+            ("font-reset", localized("Reset Font Size"),
              .resetFontSize, #selector(AppDelegate.resetFontSize(_:))),
         ] {
-            actions.append(.init(id: id, title: title, symbol: symbol,
+            actions.append(.init(id: id, title: title, icon: .textFont,
                                  shortcut: keys.display(for: command)) { _ in
                 NSApp.sendAction(selector, to: nil, from: nil)
             })
         }
-        actions.append(.init(id: "toggle-sidebar", title: "Toggle Sidebar",
-                             symbol: "sidebar.leading", shortcut: nil) { _ in
+        actions.append(.init(id: "toggle-sidebar", title: localized("Toggle Sidebar"),
+                             icon: .sidebarLeft, shortcut: nil) { _ in
             NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
         })
-        actions.append(.init(id: "toggle-files", title: "Toggle Project Files",
-                             symbol: "sidebar.trailing", shortcut: keys.display(for: .toggleProjectFiles)) { _ in
+        actions.append(.init(id: "toggle-files", title: localized("Toggle Project Files"),
+                             icon: .sidebarRight, shortcut: keys.display(for: .toggleProjectFiles)) { _ in
             NSApp.sendAction(#selector(AppDelegate.toggleFilesInspector(_:)), to: nil, from: nil)
         })
-        actions.append(.init(id: "settings", title: "Settings…",
-                             symbol: "gearshape", shortcut: "⌘,") { _ in
+        actions.append(.init(id: "change-theme", title: localized("Change Theme…"),
+                             icon: nil, symbol: "paintpalette", shortcut: nil,
+                             switchesMode: .themes) { _ in })
+        actions.append(.init(id: "browse-themes", title: localized("Browse Themes…"),
+                             icon: nil, symbol: "square.grid.2x2", shortcut: nil) { _ in
+            NSApp.sendAction(#selector(AppDelegate.browseThemes(_:)), to: nil, from: nil)
+        })
+        actions.append(.init(id: "settings", title: localized("Settings…"),
+                             icon: .settings, shortcut: "⌘,") { _ in
             NSApp.sendAction(#selector(AppDelegate.showSettings(_:)), to: nil, from: nil)
         })
-        actions.append(.init(id: "check-updates", title: "Check for Updates…",
-                             symbol: "arrow.triangle.2.circlepath", shortcut: nil) { _ in
+        actions.append(.init(id: "check-updates", title: localized("Check for Updates…"),
+                             icon: .refresh, shortcut: nil) { _ in
             NSApp.sendAction(#selector(AppDelegate.checkForUpdates(_:)), to: nil, from: nil)
         })
         if AppChannel.isDev {
@@ -314,14 +392,103 @@ struct CommandPaletteView: View {
             // key. Fix ON → focus is reasserted on the next runloop; fix OFF → the
             // cursor stays hollow. Watch the `focus` log category for both events.
             actions.append(.init(id: "debug-orphan-focus", title: "Debug: Orphan Terminal Focus",
-                                 symbol: "cursorarrow.slash", shortcut: nil) { _ in
+                                 icon: .cursorDisabled, shortcut: nil) { _ in
                 Log.focus.info("fault injector: invoked, posting first-responder orphan in 0.35s")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                     NotificationCenter.default.post(name: .termioDebugOrphanFocus, object: nil)
                 }
             })
+            // Dumps the selected terminal's layer tree (stdout + `app` log) —
+            // run while a rendering glitch is on screen to tell a doubled or
+            // stale render layer from a presentation-timing artifact.
+            actions.append(.init(id: "debug-dump-layers", title: "Debug: Dump Terminal Layers",
+                                 icon: nil, symbol: "square.3.layers.3d", shortcut: nil) { _ in
+                NotificationCenter.default.post(name: .termioDebugDumpLayers, object: nil)
+            })
+            // Renders the main window into /tmp/termio-dev-window.png and writes the full
+            // AppKit view hierarchy (class, frame, hidden, layer bg) to
+            // /tmp/termio-dev-views.txt — self-rendering needs no Screen Recording grant,
+            // so an agent can "see" a layout glitch it reproduced. Delayed so the palette
+            // panel has closed and any transition has settled before the capture.
+            actions.append(.init(id: "debug-snapshot-window", title: "Debug: Snapshot Window",
+                                 icon: nil, symbol: "camera", shortcut: nil) { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    DebugWindowSnapshot.capture()
+                }
+            })
         }
         return actions
+    }
+
+    // MARK: - Themes
+
+    /// The theme selector's rows: a "Terminal default" reset plus the installed
+    /// themes matching the slot's brightness, so the palette can never apply one
+    /// that renders the wrong way — or one that isn't in the library, which would
+    /// leave the slot pointing at a name nothing can resolve. Browsing the store's
+    /// uninstalled 50 is the sheet's job.
+    private var themeItems: [PaletteItem] {
+        let dark = slotIsDark
+        // Return-to-default leads; the label names the slot being edited so
+        // "default" isn't ambiguous.
+        var items: [PaletteItem] = [
+            themeItem(name: "", title: dark ? localized("Default Dark Theme") : localized("Default Light Theme"))
+        ]
+        items += ThemeLibrary.installedThemeNames(dark: dark).map { themeItem(name: $0) }
+        return items
+    }
+
+    private func themeItem(name: String, title: String? = nil,
+                           section: PaletteSection = .themes) -> PaletteItem {
+        .init(id: "theme-\(name.isEmpty ? "__default__" : name)",
+              kind: .theme(name: name), section: section,
+              title: title ?? name, subtitle: nil)
+    }
+
+    /// Which slot the palette edits — the one the terminals render right now, so
+    /// changing "the theme" changes what's on screen. Mirrors how the surfaces pick
+    /// a slot: pinned modes are fixed, System follows the effective appearance.
+    private var slotIsDark: Bool {
+        switch store.settings.appearanceMode {
+        case .light: return false
+        case .dark: return true
+        case .system: return NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        }
+    }
+
+    private var currentSlotThemeName: String {
+        slotIsDark ? store.settings.darkThemeName : store.settings.lightThemeName
+    }
+
+    /// Writes the current slot's theme, which fires `AppSettings.objectWillChange`
+    /// and recolors every open surface (see `applyAppearanceToOpenSurfaces`).
+    private func setCurrentSlotTheme(_ name: String) {
+        if slotIsDark {
+            store.settings.darkThemeName = name
+        } else {
+            store.settings.lightThemeName = name
+        }
+    }
+
+    private func beginThemeBrowsing() {
+        themeSnapshot = currentSlotThemeName
+        themeCommitted = false
+        // Land the highlight on the theme already in use so browsing starts from the
+        // current look and the seed-preview is a no-op. A miss means the slot points
+        // at a theme that is no longer in the library; moving the highlight to row 0
+        // would then live-apply "Terminal default" over it, so leave it alone.
+        let current = currentSlotThemeName
+        guard let index = themeItems.firstIndex(where: {
+            if case .theme(let name) = $0.kind { return name == current }
+            return false
+        }) else { return }
+        highlighted = index
+    }
+
+    private func endThemeBrowsing(commit: Bool) {
+        if !commit, let snapshot = themeSnapshot { setCurrentSlotTheme(snapshot) }
+        themeSnapshot = nil
+        themeCommitted = false
     }
 
     /// Fuzzy filter + rank. Empty query shows the browsable sets (sessions,
@@ -354,6 +521,18 @@ struct CommandPaletteView: View {
     }
 
     private func run(_ item: PaletteItem, keepOpen: Bool = false) {
+        // Mode-switch commands (Change Theme…) re-drive the open panel into a new
+        // mode rather than closing it.
+        if case .action(let action) = item.kind, let target = action.switchesMode {
+            store.paletteMode = target
+            return
+        }
+        // Commit a theme before dismissing, so leaving the mode keeps it instead
+        // of reverting to the snapshot.
+        if case .theme(let name) = item.kind {
+            setCurrentSlotTheme(name)
+            themeCommitted = true
+        }
         if !keepOpen { onClose() }
         switch item.kind {
         case .session(let session):
@@ -366,6 +545,8 @@ struct CommandPaletteView: View {
             store.openFileInEditor(file.url)
         case .action(let action):
             action.perform(store)
+        case .theme:
+            break // already applied above
         }
     }
 
@@ -440,14 +621,17 @@ struct CommandPaletteView: View {
 /// Open Quickly's display groups, in rank order; `.commands` is the palette's
 /// single (headerless) group.
 private enum PaletteSection: Int, Hashable {
-    case sessions, recentProjects, files, commands
+    case sessions, recentProjects, files, commands, themes
 
     var title: String? {
         switch self {
-        case .sessions: return "Sessions"
-        case .recentProjects: return "Recent"
-        case .files: return "Files"
+        case .sessions: return localized("Sessions")
+        case .recentProjects: return localized("Recent")
+        case .files: return localized("Files")
         case .commands: return nil
+        // Themes are the only group in their mode, so the header never draws
+        // (see `sectioned`).
+        case .themes: return localized("Themes")
         }
     }
 }
@@ -458,6 +642,8 @@ private struct PaletteItem: Identifiable {
         case recentProject(RecentProject)
         case file(ProjectFile)
         case action(PaletteAction)
+        /// A terminal theme name (empty = "Terminal default").
+        case theme(name: String)
     }
 
     let id: String
@@ -490,19 +676,29 @@ private struct PaletteItem: Identifiable {
 private struct PaletteAction: Identifiable {
     let id: String
     let title: String
-    /// SF Symbol name, or nil when `agent` supplies a brand icon instead.
-    let symbol: String?
+    /// Hugeicons glyph, or nil when `agent` supplies a brand icon instead.
+    let icon: HugeIcon?
+    /// An SF Symbol name, used in place of `icon` when a system glyph reads better
+    /// than any Hugeicon (e.g. `paintpalette` for Change Theme…, matching the
+    /// Appearance settings). Takes precedence over `icon` when set.
+    var symbol: String?
     var agent: AgentPreset?
     let shortcut: String?
+    /// Set when the command switches the palette into another mode in place (e.g.
+    /// Change Theme…) rather than running and dismissing; `perform` is then unused.
+    var switchesMode: PaletteMode?
     let perform: @MainActor (TermioStore) -> Void
 
-    init(id: String, title: String, symbol: String?, agent: AgentPreset? = nil,
-         shortcut: String?, perform: @escaping @MainActor (TermioStore) -> Void) {
+    init(id: String, title: String, icon: HugeIcon?, symbol: String? = nil,
+         agent: AgentPreset? = nil, shortcut: String?, switchesMode: PaletteMode? = nil,
+         perform: @escaping @MainActor (TermioStore) -> Void) {
         self.id = id
         self.title = title
+        self.icon = icon
         self.symbol = symbol
         self.agent = agent
         self.shortcut = shortcut
+        self.switchesMode = switchesMode
         self.perform = perform
     }
 }
@@ -544,7 +740,7 @@ private struct PaletteRow: View {
     @ViewBuilder
     private var trailing: some View {
         if case .session(let session) = item.kind, store.selectedSessionID == session.id {
-            Text("current")
+            Text(localized("current"))
                 .font(.system(size: 10))
                 .foregroundStyle(isHighlighted ? Color.white.opacity(0.8) : Color.secondary)
         } else if let shortcut = item.shortcut {
@@ -560,21 +756,35 @@ private struct PaletteRow: View {
         case .session(let session):
             AgentIconView(agent: session.agent, size: 14)
         case .recentProject:
-            symbolIcon("clock.arrow.circlepath")
+            hugeIcon(.clock)
         case .file:
-            symbolIcon("doc.text")
+            hugeIcon(.fileDoc)
         case .action(let action):
             if let agent = action.agent {
                 AgentIconView(agent: agent, size: 14)
+            } else if let symbol = action.symbol {
+                symbolIcon(symbol)
             } else {
-                symbolIcon(action.symbol ?? "questionmark")
+                hugeIcon(action.icon ?? .terminal)
+            }
+        case .theme(let name):
+            // The theme's own colors are its icon — Warp-style, so the list reads
+            // as swatches. The default row (no definition) shows the palette glyph.
+            if let definition = ThemeLibrary.theme(named: name) {
+                ThemeSwatch(definition: definition, compact: true)
+            } else {
+                symbolIcon("paintpalette")
             }
         }
     }
 
     private func symbolIcon(_ name: String) -> some View {
         Image(systemName: name)
-            .font(.system(size: 12))
+            .font(.system(size: 13))
             .foregroundStyle(isHighlighted ? Color.white : Color.secondary)
+    }
+
+    private func hugeIcon(_ icon: HugeIcon) -> some View {
+        HugeIconView(icon: icon, size: 13, color: isHighlighted ? .white : .secondary)
     }
 }

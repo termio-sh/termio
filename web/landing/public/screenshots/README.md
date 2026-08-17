@@ -6,7 +6,7 @@ hand-built CSS mockups so the page shows the actual product.
 ## Hero (the one that matters most)
 
 - **File:** `public/screenshots/hero.png` (or `.webp` — webp is smaller, prefer it)
-- **What to show:** the termio window, **dark**, showing the sidebar (project →
+- **What to show:** the Termio window, **dark**, showing the sidebar (project →
   agent sessions) next to a **working** terminal pane — ideally a real Claude Code
   or Codex session mid-task. A dark screenshot is correct: it floats as a dark
   product shot on the light page (Apple "dark device on white" treatment).
@@ -34,3 +34,6 @@ The four feature cards currently use stylized CSS diagrams (agent list, live
 sessions, branch tree, privacy toggles). Those are fine as diagrams, but if you
 want real crops, drop e.g. `multi-agent.png`, `sessions.png`, `worktrees.png` and
 I'll swap them in the same way.
+
+
+![alt text](image.png)

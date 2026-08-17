@@ -32,10 +32,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code (for the script)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout stats ledger
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: stats
           path: _stats

@@ -15,12 +15,12 @@ updated: 2026-07-02
 
 ## Motivation
 
-termio shows one session at a time; the sidebar is the multiplexer. That is
+Termio shows one session at a time; the sidebar is the multiplexer. That is
 right for switching *between* agents, but not for working *alongside* one: ssh
 into a server while a local shell tails logs, or run commands next to a working
 agent. Ghostty solves this with splits — but splits are not a libghostty
 feature. They live entirely in Ghostty's macOS app layer; every embedder builds
-their own. This RFC is termio's version.
+their own. This RFC is Termio's version.
 
 Two facts make it cheap here:
 
@@ -173,14 +173,14 @@ Session**, acting on the pane under the cursor (which is focused first).
 
 The embedded view cannot provide this itself: `libghostty-spm` is an external
 package (Lakr233) whose `TerminalViewRepresentable` hardcodes
-`TerminalView(frame:)` — termio cannot inject an `AppTerminalView` subclass to
+`TerminalView(frame:)` — Termio cannot inject an `AppTerminalView` subclass to
 override `menu(for:)`. And the package's `rightMouseDown`
 (`AppTerminalView+Input.swift:157`) forwards right-clicks to the surface as
 `GHOSTTY_MOUSE_RIGHT` (never consulting `menu(for:)`), except on a text
 selection where it pops its own Copy menu — so SwiftUI `.contextMenu` or the
 NSView `.menu` property would never fire.
 
-Instead, termio installs a **local `NSEvent` monitor** for `.rightMouseDown`
+Instead, Termio installs a **local `NSEvent` monitor** for `.rightMouseDown`
 (the same bypass-the-package spirit as the link-open delegate workaround):
 
 - Convert the event location into the terminal pane's coordinate space; ignore

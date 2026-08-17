@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// The coding-plan usage limits for the agents termio runs, reusing the OAuth
-/// credentials the `claude` and `codex` CLIs already leave on disk — the same
-/// approach as steipete's CodexBar, scoped to the two agents with a clean
-/// local-cred endpoint. A reference view, not an ambient one: it pulls fresh on
-/// open and on Refresh, so a glance here tells you whether to start that long run.
+/// credentials the `claude`, `codex`, `kimi`, and `grok` CLIs already leave on
+/// disk — the same approach as steipete's CodexBar, scoped to the agents with a
+/// clean local-cred endpoint. A reference view, not an ambient one: it pulls
+/// fresh on open and on Refresh, so a glance here tells you whether to start
+/// that long run.
 struct UsageSettingsTab: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var usage: UsageMonitor
@@ -45,11 +46,11 @@ struct UsageSettingsTab: View {
     private var emptyState: some View {
         Form {
             Section {
-                Text("Enable Claude Code or Codex in the Agents tab to see their usage here.")
+                Text(localized("Enable Claude Code, Codex, Kimi, or Grok in the Agents tab to see their usage here."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } header: {
-                SectionHeaderLabel(title: "Usage")
+                SectionHeaderLabel(title: localized("Usage"))
             }
         }
         .formStyle(.grouped)
@@ -132,17 +133,19 @@ private struct UsageAgentDetail: View {
         Form {
             Section {
                 Text(agent == .claudeCode
-                    ? "termio can show \(agent.displayName)'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain."
-                    : "termio can show \(agent.displayName)'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it.")
+                    ? localized("Termio can show \(agent.displayName)'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain.")
+                    : agent == .kimi
+                    ? localized("Termio can show \(agent.displayName)'s token usage and plan limits by reading its local session logs and its `credentials/kimi-code.json` sign-in. Nothing is read until you allow it.")
+                    : localized("Termio can show \(agent.displayName)'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Button("Allow Usage Access") {
+                Button(localized("Allow Usage Access")) {
                     settings.setUsageAuthorized(agent, enabled: true)
                     if agent == .claudeCode { settings.claudeKeychainDeclined = false }
                     usage.forceRefresh()
                 }
             } header: {
-                SectionHeaderLabel(title: "Usage")
+                SectionHeaderLabel(title: localized("Usage"))
             }
         }
         .formStyle(.grouped)
@@ -152,19 +155,19 @@ private struct UsageAgentDetail: View {
         Form {
             Section {
                 if let tokens = usage.tokenUsage[agent] {
-                    TokenUsageRow(label: "Today", stats: tokens.today, hasCost: tokens.hasCost)
-                    TokenUsageRow(label: "Yesterday", stats: yesterdayStats(tokens), hasCost: tokens.hasCost)
-                    TokenUsageRow(label: "This week", stats: tokens.week, hasCost: tokens.hasCost)
-                    TokenUsageRow(label: "This month", stats: tokens.month, hasCost: tokens.hasCost)
+                    TokenUsageRow(label: localized("Today"), stats: tokens.today, hasCost: tokens.hasCost)
+                    TokenUsageRow(label: localized("Yesterday"), stats: yesterdayStats(tokens), hasCost: tokens.hasCost)
+                    TokenUsageRow(label: localized("This week"), stats: tokens.week, hasCost: tokens.hasCost)
+                    TokenUsageRow(label: localized("This month"), stats: tokens.month, hasCost: tokens.hasCost)
                 } else {
-                    Text("No local usage yet — run `\(agent.command ?? agent.rawValue)` once, then Refresh.")
+                    Text(.init(localized("No local usage yet — run `\(agent.command ?? agent.rawValue)` once, then Refresh.")))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             } header: {
-                SectionHeaderLabel(title: "Token usage")
+                SectionHeaderLabel(title: localized("Token usage"))
             } footer: {
-                Text("Tallied from \(agent.displayName)'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.\(usage.tokenUsage[agent]?.hasCost == true ? " Cost is estimated at API rates." : "")")
+                Text(localized("Tallied from \(agent.displayName)'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.\(usage.tokenUsage[agent]?.hasCost == true ? localized(" Cost is estimated at API rates.") : "")"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -173,7 +176,7 @@ private struct UsageAgentDetail: View {
                 Section {
                     UsageActivityChart(daily: tokens.daily, hasCost: tokens.hasCost)
                 } header: {
-                    SectionHeaderLabel(title: "Activity")
+                    SectionHeaderLabel(title: localized("Activity"))
                 }
             }
 
@@ -183,32 +186,32 @@ private struct UsageAgentDetail: View {
                         UsageWindowRow(window: window)
                     }
                 } header: {
-                    SectionHeaderLabel(title: "Plan limits")
+                    SectionHeaderLabel(title: localized("Plan limits"))
                 }
             } else if agent == .claudeCode, settings.claudeKeychainDeclined {
                 Section {
-                    Button("Allow Keychain Access…") {
+                    Button(localized("Allow Keychain Access…")) {
                         settings.claudeKeychainDeclined = false
                         usage.refresh()
                     }
                 } header: {
-                    SectionHeaderLabel(title: "Plan limits")
+                    SectionHeaderLabel(title: localized("Plan limits"))
                 } footer: {
-                    Text("Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.")
+                    Text(localized("Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
             Section {
-                Button("Refresh", action: usage.forceRefresh)
-                Button("Revoke Access") {
+                Button(localized("Refresh"), action: usage.forceRefresh)
+                Button(localized("Revoke Access")) {
                     settings.setUsageAuthorized(agent, enabled: false)
                     usage.forceRefresh()
                 }
                 .foregroundStyle(.secondary)
             } footer: {
-                Text("Plan limits come from \(agent.displayName)'s OAuth login; no passwords are stored. Revoking stops all reading of \(agent.displayName)'s data.")
+                Text(localized("Plan limits come from \(agent.displayName)'s OAuth login; no passwords are stored. Revoking stops all reading of \(agent.displayName)'s data."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -230,7 +233,7 @@ private struct TokenUsageRow: View {
             Text(label)
                 .font(.callout)
             Spacer()
-            Text("\(stats.tokenSummary) tokens")
+            Text(localized("\(stats.tokenSummary) tokens"))
                 .font(.callout.monospacedDigit())
                 .foregroundStyle(.secondary)
             if hasCost, !stats.costSummary.isEmpty {
@@ -252,7 +255,7 @@ private enum UsageChartRange: String, CaseIterable, Identifiable {
     var dayCount: Int { self == .week ? 7 : 30 }
 
     var summaryLabel: String {
-        self == .week ? "Last 7 days" : "Last 30 days"
+        self == .week ? localized("Last 7 days") : localized("Last 30 days")
     }
 }
 
@@ -282,7 +285,7 @@ private struct UsageActivityChart: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
-                Picker("Range", selection: $range) {
+                Picker(localized("Range"), selection: $range) {
                     ForEach(UsageChartRange.allCases) { range in
                         Text(range.rawValue).tag(range)
                     }
@@ -296,7 +299,7 @@ private struct UsageActivityChart: View {
             HStack {
                 Text(bars.first?.label ?? "")
                 Spacer()
-                Text("Today")
+                Text(localized("Today"))
             }
             .font(.caption2)
             .foregroundStyle(.tertiary)
@@ -332,7 +335,7 @@ private struct UsageActivityChart: View {
     }
 
     private func phrase(_ label: String, _ stats: TokenWindowStats) -> String {
-        var text = "\(label) · \(stats.tokenSummary) tokens"
+        var text = localized("\(label) · \(stats.tokenSummary) tokens")
         if hasCost, !stats.costSummary.isEmpty { text += " · \(stats.costSummary)" }
         return text
     }
@@ -384,7 +387,7 @@ private struct UsageWindowRow: View {
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
                 if !window.resetSummary.isEmpty {
-                    Text("· resets \(window.resetSummary)")
+                    Text(localized("· resets \(window.resetSummary)"))
                         .font(.callout)
                         .foregroundStyle(.tertiary)
                 }

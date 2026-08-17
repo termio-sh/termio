@@ -43,10 +43,17 @@ struct GitChangesView: View {
     /// several become the targets of the batch context-menu actions.
     @State private var selection = Set<String>()
 
-    init(repoRoot: String, changeCount: Binding<Int>) {
+    /// The last working-tree diff opened from this list. Closing the overlay releases
+    /// `selection` (so clicking the same row reopens it), but this row keeps the
+    /// selected grey — back from a full-screen diff, the list still shows which file
+    /// it was (the Issues list's rule).
+    @State private var lastOpenedPath: String?
+
+    init(repoRoot: String, changeCount: Binding<Int>, isPaneVisible: (() -> Bool)? = nil) {
         self.repoRoot = repoRoot
         self._changeCount = changeCount
-        self._model = StateObject(wrappedValue: GitPanelModel(repoRoot: repoRoot))
+        self._model = StateObject(
+            wrappedValue: GitPanelModel(repoRoot: repoRoot, isPaneVisible: isPaneVisible))
     }
 
     private var chrome: ChromeTheme? { settings.chromeTheme(for: colorScheme) }
@@ -56,17 +63,57 @@ struct GitChangesView: View {
             topBar
             switch mode {
             case .changes: changesBody
+            case .compare: GitCompareView(model: model, repoRoot: repoRoot, chrome: chrome, font: settings.interfaceFont)
             case .history: GitHistoryView(model: model, repoRoot: repoRoot, chrome: chrome, font: settings.interfaceFont)
             }
             // Only Changes has a real total to report ("N files +A −D"). History's
             // count would just echo the fetch limit — meaningless, so no bar.
             if mode == .changes { bottomBar }
         }
-        .task(id: repoRoot) { await model.load() }
+        .task(id: repoRoot) {
+            // Resume the remembered inner mode, then let an open overlay override it:
+            // the detail dictates the list it sits over (the Issues pane's rule), so a
+            // restored History diff never sits on a Changes list. Re-selecting the
+            // working-tree row is the mount-time half of the `openDiff` follow below,
+            // which only fires on change and so misses a diff that was already open.
+            if let remembered = store.gitPaneModes[repoRoot] { mode = remembered }
+            if let request = store.openDiff, request.repoRoot == repoRoot {
+                if request.range != nil {
+                    mode = .compare
+                } else if request.commit != nil {
+                    mode = .history
+                } else {
+                    mode = .changes
+                    selection = [request.change.path]
+                    lastOpenedPath = request.change.path
+                }
+            }
+            await model.load()
+        }
         .task(id: mode) { if mode == .history { await model.loadHistory() } }
+        .onChange(of: mode) { _, mode in store.gitPaneModes[repoRoot] = mode }
+        // Replay any refresh that arrived while the inspector was collapsed, the
+        // moment the pane is actually shown again (either signal can fire first
+        // depending on how the view was re-attached).
+        .onAppear { model.flushDeferredRefresh() }
+        .onChange(of: store.inspectorVisible) { _, visible in
+            if visible { model.flushDeferredRefresh() }
+        }
         .onChange(of: model.changes.count) { _, count in changeCount = count }
         .onChange(of: selection) { _, selected in
             if selected.count == 1, let change = model.changes.first(where: { $0.path == selected.first }) {
+                // A selection that merely mirrors the working-tree diff already on screen is the
+                // echo of the `store.openDiff` mirror below — a session switch restoring a saved
+                // diff lands here — not a click. Re-opening it would count as a fresh open and
+                // un-collapse an inspector the user closed (issue #272). Closing the overlay
+                // releases the selection, so clicking the same row still reopens it. The saved
+                // request carries the sibling list it was captured with, so hand the pane's
+                // current one over — that keeps the ← / → walk honest without re-opening.
+                let showing = store.openDiff
+                guard showing?.commit != nil || showing?.change.path != change.path else {
+                    store.refreshOpenDiffSiblings(model.changes)
+                    return
+                }
                 open(change)
             } else if selected.count > 1, store.openDiff != nil {
                 // A multi-selection has no single diff to show — drop the overlay.
@@ -78,8 +125,12 @@ struct GitChangesView: View {
         // and release a lone selection so clicking the same row reopens its diff. The
         // `openFileURL` guards keep a diff↔preview hand-off from reading as a close.
         .onChange(of: store.openDiff) { _, request in
-            if let request, request.commit == nil, selection != [request.change.path] {
-                selection = [request.change.path]
+            // Only a working-tree diff belongs to this list; a commit's or a branch
+            // comparison's file rows live in their own tab and must not move the
+            // Changes selection under them.
+            if let request, request.commit == nil, request.range == nil {
+                lastOpenedPath = request.change.path
+                if selection != [request.change.path] { selection = [request.change.path] }
             }
             if request == nil, store.openFileURL == nil {
                 Task { await model.load() }
@@ -89,19 +140,19 @@ struct GitChangesView: View {
         .onChange(of: store.openFileURL) { _, url in
             if url == nil, store.openDiff == nil, selection.count == 1 { selection.removeAll() }
         }
-        .alert("Discard Changes?", isPresented: discardAlertPresented, presenting: pendingDiscard) { changes in
-            Button("Discard Changes", role: .destructive) { performDiscard(changes) }
-            Button("Cancel", role: .cancel) { pendingDiscard = nil }
+        .alert(localized("Discard Changes?"), isPresented: discardAlertPresented, presenting: pendingDiscard) { changes in
+            Button(localized("Discard Changes"), role: .destructive) { performDiscard(changes) }
+            Button(localized("Cancel"), role: .cancel) { pendingDiscard = nil }
         } message: { changes in
             Text(discardMessage(changes))
         }
         .alert(
-            "Couldn’t Update .gitignore",
+            localized("Couldn’t update .gitignore"),
             isPresented: gitignoreErrorPresented
         ) {
-            Button("OK") { gitignoreErrorMessage = nil }
+            Button(localized("OK")) { gitignoreErrorMessage = nil }
         } message: {
-            Text(gitignoreErrorMessage ?? "The ignore rule could not be added.")
+            Text(gitignoreErrorMessage ?? localized("The ignore rule couldn’t be added."))
         }
     }
 
@@ -122,8 +173,9 @@ struct GitChangesView: View {
 
     private var modeSwitch: some View {
         HStack(spacing: 0) {
-            segment("Changes", .changes)
-            segment("History", .history)
+            segment(localized("Changes"), .changes)
+            segment(localized("Compare"), .compare)
+            segment(localized("History"), .history)
         }
         // The selection pill rides behind the active segment and slides across on switch.
         .background { selectionPill }
@@ -148,30 +200,17 @@ struct GitChangesView: View {
             .onTapGesture { mode = value }
     }
 
-    @ViewBuilder
+    // Flat track + pill on every OS, matching the Issues pane's switch (`CapsuleSwitch`): macOS 26's
+    // `.glassEffect` cast an ambient drop shadow that read as stray chrome and made this switch look
+    // different from the GitHub pane's, so both now use plain capsule fills with no shadow.
     private var selectionPill: some View {
-        if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.interactive(), in: .capsule)
-                .matchedGeometryEffect(id: mode, in: pillNamespace, isSource: false)
-        } else {
-            Capsule(style: .continuous)
-                .fill(Color(nsColor: .controlColor))
-                .shadow(color: .black.opacity(0.18), radius: 0.5, y: 0.5)
-                .matchedGeometryEffect(id: mode, in: pillNamespace, isSource: false)
-        }
+        Capsule(style: .continuous)
+            .fill(Color(nsColor: .controlColor))
+            .matchedGeometryEffect(id: mode, in: pillNamespace, isSource: false)
     }
 
-    @ViewBuilder
     private var trackBackground: some View {
-        if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .capsule)
-        } else {
-            Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
-        }
+        Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
     }
 
     /// Status strip under the content: what the visible list adds up to. There is no
@@ -196,7 +235,9 @@ struct GitChangesView: View {
         if !model.changes.isEmpty {
             let additions = model.changes.reduce(0) { $0 + $1.additions }
             let deletions = model.changes.reduce(0) { $0 + $1.deletions }
-            Text("\(model.changes.count) \(model.changes.count == 1 ? "file" : "files")")
+            Text(model.changes.count == 1
+                ? localized("\(model.changes.count) file")
+                : localized("\(model.changes.count) files"))
                 .foregroundStyle(.secondary)
             if additions > 0 { Text("+\(additions)").foregroundStyle(.green) }
             if deletions > 0 { Text("−\(deletions)").foregroundStyle(.red) }
@@ -215,10 +256,10 @@ struct GitChangesView: View {
             // Fill the pane (like the loading state) rather than sizing to the compact empty
             // view — otherwise the enclosing `VStack` shrinks to content height and the host
             // centers the whole pane instead of pinning the header to the top.
-            ContentUnavailableView(
-                "No Changes",
-                systemImage: "checkmark.circle",
-                description: Text("The working tree is clean.")
+            PaneEmptyState(
+                localized("No Changes"),
+                icon: .checkCircle,
+                message: localized("The working tree is clean.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -238,7 +279,10 @@ struct GitChangesView: View {
                 fileURL: fileURL(for: change),
                 font: settings.interfaceFont,
                 chrome: chrome,
-                isSelected: selection.contains(change.path),
+                // The lone last-opened row stays grey after its overlay closes; a live
+                // multi-selection takes over the moment one exists.
+                isSelected: selection.contains(change.path)
+                    || (selection.isEmpty && lastOpenedPath == change.path),
                 onDiscard: { pendingDiscard = [change] }
             )
             .contextMenu { contextMenu(for: change) }
@@ -265,43 +309,43 @@ struct GitChangesView: View {
         let targets = targets(for: change)
         let fileExtension = (change.path as NSString).pathExtension.lowercased()
         if targets.count == 1 {
-            Button("Open in Editor") { openInEditor(change) }
-            Button("Reveal in Finder") { revealInFinder(change) }
+            Button(localized("Open in Editor")) { openInEditor(change) }
+            Button(localized("Reveal in Finder")) { revealInFinder(change) }
             Divider()
-            Button("Copy Path") { copyPath(change) }
-            Button("Copy Relative Path") { copyToPasteboard(change.path) }
-            Button("Copy Diff") { copyDiff(targets) }
+            Button(localized("Copy Path")) { copyPath(change) }
+            Button(localized("Copy Relative Path")) { copyToPasteboard(change.path) }
+            Button(localized("Copy Diff")) { copyDiff(targets) }
             // GitHub Desktop's two ignore actions, verbatim — the by-extension form is
             // what clears a build-products flood one file type at a time.
             if change.isUntracked {
                 Divider()
-                Button("Ignore File (Add to .gitignore)") { addToGitignore(paths: [change.path]) }
+                Button(localized("Ignore File (Add to .gitignore)")) { addToGitignore(paths: [change.path]) }
                 if !fileExtension.isEmpty {
-                    Button("Ignore All .\(fileExtension) Files (Add to .gitignore)") {
+                    Button(localized("Ignore All .\(fileExtension) Files (Add to .gitignore)")) {
                         addRawPatternToGitignore("*." + fileExtension)
                     }
                 }
             }
             Divider()
-            Button("Discard Changes…", role: .destructive) { pendingDiscard = targets }
+            Button(localized("Discard Changes…"), role: .destructive) { pendingDiscard = targets }
         } else {
-            Button("Copy Paths") {
+            Button(localized("Copy Paths")) {
                 copyToPasteboard(targets.map { fileURL(for: $0).path }.joined(separator: "\n"))
             }
-            Button("Copy Relative Paths") {
+            Button(localized("Copy Relative Paths")) {
                 copyToPasteboard(targets.map(\.path).joined(separator: "\n"))
             }
-            Button("Copy Diff") { copyDiff(targets) }
+            Button(localized("Copy Diff")) { copyDiff(targets) }
             // GitHub Desktop acts on the whole selection here too.
             let untracked = targets.filter(\.isUntracked)
             if !untracked.isEmpty {
                 Divider()
-                Button("Ignore \(untracked.count) Selected Files (Add to .gitignore)") {
+                Button(localized("Ignore \(untracked.count) Selected Files (Add to .gitignore)")) {
                     addToGitignore(paths: untracked.map(\.path))
                 }
             }
             Divider()
-            Button("Discard \(targets.count) Files…", role: .destructive) { pendingDiscard = targets }
+            Button(localized("Discard \(targets.count) Files…"), role: .destructive) { pendingDiscard = targets }
         }
     }
 
@@ -316,7 +360,7 @@ struct GitChangesView: View {
             let succeeded = await GitService.appendToGitignore([pattern], in: repoRoot)
             if !succeeded {
                 gitignoreErrorMessage =
-                    "termio could not append to the repository’s .gitignore. Check its permissions and try again."
+                    localized("Termio could not append to the repository’s .gitignore. Check its permissions and try again.")
             }
             await model.load()
         }
@@ -328,7 +372,7 @@ struct GitChangesView: View {
         let encoded = paths.map { GitService.gitignorePattern(for: $0) }
         guard encoded.allSatisfy({ $0 != nil }) else {
             gitignoreErrorMessage =
-                "Git ignore patterns cannot represent a filename containing a line break."
+                localized("Git ignore patterns cannot represent a filename containing a line break.")
             return
         }
         let patterns = encoded.compactMap { $0 }
@@ -337,7 +381,7 @@ struct GitChangesView: View {
             let succeeded = await GitService.appendToGitignore(patterns, in: repoRoot)
             if !succeeded {
                 gitignoreErrorMessage =
-                    "termio could not append to the repository’s .gitignore. Check its permissions and try again."
+                    localized("Termio could not append to the repository’s .gitignore. Check its permissions and try again.")
             }
             await model.load()
         }
@@ -407,11 +451,11 @@ struct GitChangesView: View {
     /// names before collapsing to a count (GitHub Desktop's cap).
     private func discardMessage(_ changes: [GitChange]) -> String {
         if changes.count == 1, let only = changes.first {
-            return "All changes to “\(only.name)” will be lost. This cannot be undone."
+            return localized("All changes to “\(only.name)” will be lost. This cannot be undone.")
         }
         let listed = changes.prefix(10).map(\.name).joined(separator: "\n")
-        let more = changes.count > 10 ? "\n…and \(changes.count - 10) more" : ""
-        return "All changes to these \(changes.count) files will be lost. This cannot be undone.\n\n\(listed)\(more)"
+        let more = changes.count > 10 ? localized("\n…and \(changes.count - 10) more") : ""
+        return localized("All changes to these \(changes.count) files will be lost. This cannot be undone.\n\n\(listed)\(more)")
     }
 
     private var discardAlertPresented: Binding<Bool> {
@@ -479,11 +523,11 @@ private struct GitChangeRow: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help("Discard Changes…")
+                .help(localized("Discard Changes…"))
             } else {
                 HStack(spacing: 5) {
                     if change.isBinary {
-                        Text("binary").foregroundStyle(.secondary)
+                        Text(localized("binary")).foregroundStyle(.secondary)
                     } else {
                         if change.additions > 0 { Text("+\(change.additions)").foregroundStyle(.green) }
                         if change.deletions > 0 { Text("−\(change.deletions)").foregroundStyle(.red) }
@@ -492,7 +536,7 @@ private struct GitChangeRow: View {
                         Circle()
                             .fill(.green)
                             .frame(width: 5, height: 5)
-                            .help("Staged — the next git commit takes this file")
+                            .help(localized("Staged — the next git commit takes this file"))
                     }
                 }
                 .font(.system(size: 10.5, weight: .medium, design: .monospaced))
@@ -506,7 +550,7 @@ private struct GitChangeRow: View {
         .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .background(OutlineSelectionStyleStripper())
+        .background(OutlineViewFixups())
         .draggable(fileURL)
         .listRowInsets(EdgeInsets())
         .listRowSeparator(.hidden)

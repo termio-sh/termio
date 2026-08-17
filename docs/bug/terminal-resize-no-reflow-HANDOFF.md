@@ -28,7 +28,7 @@ delivered (TIOCSWINSZ succeeded, the grid followed, ghostty painted the new
 grid) — but the child never learned it should repaint, so the VT screen kept
 the old-width drawing. §1's "environmental, not a code regression" was exactly
 right: the variable that changed 2 days prior was the **Claude Code version**
-(its resize-detection mechanism changed); termio's spawn shape had always been
+(its resize-detection mechanism changed); Termio's spawn shape had always been
 wrong but nothing had stepped on it before.
 
 **Fix:** `PTYProcess.init` now spawns via `forkpty` — the shape every terminal
@@ -85,13 +85,13 @@ input separator) reflows to fill the new width, no white void on the right.**
 
 The full resize chain was logged end to end (`TERMIO_GEOM` in the wrapper's
 `TerminalSurfaceCoordinator.synchronizeMetrics`, plus `TERMIO_RESIZE_CB` / `TERMIO_RESIZEHOST` /
-`TERMIO_TIOCSWINSZ` in termio). Dragging the window produced, per drag:
+`TERMIO_TIOCSWINSZ` in Termio). Dragging the window produced, per drag:
 
 | step | log | result |
 | --- | --- | --- |
 | view frame resizes | `TERMIO_GEOM view_pt=326→727 grid=38→84` | ✅ the NSView DOES track the window |
 | ghostty recomputes grid | same `grid=` field | ✅ surface grid tracks (up to 84 cols) |
-| wrapper → termio resize callback | `TERMIO_RESIZE_CB cols=84` ×271 | ✅ fires |
+| wrapper → Termio resize callback | `TERMIO_RESIZE_CB cols=84` ×271 | ✅ fires |
 | `PTYProcess.resizeFromHost` | `TERMIO_RESIZEHOST … owner=host` ×271 | ✅ runs, `owner=host` (NOT companion) |
 | winsize to the child | `TERMIO_TIOCSWINSZ cols=74 rc=0` (coalesced ~5×) | ✅ **child gets the correct winsize** |
 
@@ -111,7 +111,7 @@ Corollary rule-outs (already proven, do not revisit):
 
 ## 4. Architecture facts you MUST know
 
-- **termio owns the PTY host-side** (`.inMemory` backend via `Sources/termio/PTYProcess.swift`), NOT
+- **Termio owns the PTY host-side** (`.inMemory` backend via `Sources/termio/PTYProcess.swift`), NOT
   ghostty's `.exec`. The agent process is independent of the ghostty surface, so the surface can be
   torn down / recreated without killing Claude. (`docs/CLAUDE.md` is stale — it says `.exec`.)
 - The `InMemoryTerminalSession` (in the wrapper) holds the VT/screen state; the ghostty **surface**
@@ -120,10 +120,10 @@ Corollary rule-outs (already proven, do not revisit):
   render tick on macOS.** A dropped render edge = stale paint. `warmUpRendering` / `pumpRendering`
   (in `TermioStore+TerminalSurface.swift`) exist to pump `controller.tick()` for a while to force
   paints. This is the likely locus of the repaint failure.
-- **Lakr233 vs the jiweiyuan fork is a drop-in swap for termio.** Session control
+- **Lakr233 vs the jiweiyuan fork is a drop-in swap for Termio.** Session control
   (`TermioStore+SessionControl.swift`) reaches the raw `ghostty_surface_t` by **Mirror reflection**
   and calls the raw C API `ghostty_surface_key` — it does NOT use the fork's public
-  `submitReturn`/`sendKeyEvent`/`rawValue`. Verified: termio compiles **unchanged** against
+  `submitReturn`/`sendKeyEvent`/`rawValue`. Verified: Termio compiles **unchanged** against
   `Lakr233/libghostty-spm` 1.2.9. (macOS `Package.swift` is currently pointed at Lakr233 1.2.9.)
 
 ---
@@ -178,7 +178,7 @@ Because §1 says it's environmental, chase these — roughly in order:
    is a classic terminal-sizing/repaint breaker. Move the window to the built-in display and retest.
 3. **Compare against a known-good terminal.** Run the SAME Claude Code in **Ghostty.app** or
    **Terminal.app** and resize. If Claude Code itself no longer reflows there either, the regression
-   is in the **Claude Code agent version**, not termio — which would perfectly explain "same code,
+   is in the **Claude Code agent version**, not Termio — which would perfectly explain "same code,
    worked 2 days ago, broken now." This single test rules the agent in or out and should be done
    EARLY.
 4. **Fix the repaint directly** (the confirmed failure point). The size reaches the child correctly,
@@ -187,7 +187,7 @@ Because §1 says it's environmental, chase these — roughly in order:
    b. Investigate whether the **Metal layer size** updates on resize (`updateMetalLayerMetrics` in
       the wrapper's `AppTerminalView+Lifecycle`) — a Metal layer stuck at the old size would render
       the correct grid into a stale-size drawable.
-   c. Nuclear: recreate the ghostty surface on resize (termio owns the PTY, so the agent survives —
+   c. Nuclear: recreate the ghostty surface on resize (Termio owns the PTY, so the agent survives —
       but the InMemory session must replay/repaint its screen). This is the user's literal
       "reload ghostty on drag" request; keep as last resort due to flicker/scroll loss.
 
@@ -202,7 +202,7 @@ Because §1 says it's environmental, chase these — roughly in order:
 - **You cannot script a window resize** (System Events can't set bounds here). You must ask the user
   to drag the window, then read `/tmp/termio-dev.log`.
 - Re-add the `TERMIO_GEOM` NSLog to the wrapper's `synchronizeMetrics` (log `size.width` points +
-  computed `grid` cols) and the `TERMIO_RESIZE_CB/RESIZEHOST/TIOCSWINSZ` logs in termio to re-observe
+  computed `grid` cols) and the `TERMIO_RESIZE_CB/RESIZEHOST/TIOCSWINSZ` logs in Termio to re-observe
   the chain — but note §3 already established the chain works up to the child.
 
 ---

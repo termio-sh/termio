@@ -25,12 +25,27 @@ that worktree's branch. Point one agent at your `main` checkout and another at a
 `feat/…` worktree, and their edits never collide — each has its own working tree,
 its own index, its own branch.
 
-An empty worktree shows a **New session here** row so you can drop an agent into
-it directly.
+An empty worktree still appears in the tree. Open its context menu and choose
+**New Terminal** or **New Agent Session** to start there.
+
+<DocsImage
+  src="/screenshots/docs/12-worktree-hierarchy.png"
+  alt="A Termio project with main and feature worktrees expanded, and an empty worktree context menu offering New Terminal and New Agent Session"
+  width={2424}
+  height={1664}
+/>
 
 ## Reviewing the work
 
-The inspector's git pane is read-only by design: two tabs, **Changes** and
-**History**, let you read the diff and browse commits per worktree. Committing,
-pushing, and opening pull requests happen in the terminal, where you (or the
-agent) already are — see the [inspector guide](/docs/inspector).
+The inspector's git pane is read-only by design: three tabs — **Changes**,
+**Compare**, and **History** — let you read the diff, see what the branch would
+merge, and browse commits per worktree. Committing, pushing, and opening pull
+requests happen in the terminal, where you (or the agent) already are — see the
+[inspector guide](/docs/inspector).
+
+<DocsImage
+  src="/screenshots/docs/13-review-worktree.png"
+  alt="A feature worktree selected in the Termio sidebar with its own file changes and unified diff open in the inspector"
+  width={2424}
+  height={1664}
+/>

@@ -2,11 +2,12 @@ import AppKit
 import SwiftUI
 
 /// The editor that covers the terminal pane: a soft-wrapped, monospaced `NSTextView` whose text is
-/// syntax-highlighted by Highlightr (highlight.js), with a slim header (file name + close) and a VS
-/// Code-style footer (language · caret · encoding). The file is read once on open and **auto-saved**
-/// — a short idle after the last keystroke flushes it to disk, and closing flushes any pending
-/// write — so there is no Save button (⌘S still forces an immediate flush for muscle memory).
-/// Escape (or the close button) dismisses back to the terminal.
+/// syntax-highlighted by Highlightr (highlight.js), with a slim fixed header (the file name, pinned
+/// like the inspector panes' headers) over the scrolling content. The
+/// file is read once on open and **auto-saved** — a short idle after the last keystroke flushes it to
+/// disk, and closing flushes any pending write — so there is no Save button (⌘S still forces an
+/// immediate flush for muscle memory). It closes three ways: the toolbar close button, a right-click
+/// "Close" (terminal-style), or Escape — all dismiss back to the terminal.
 /// Non-text files that can't be decoded as UTF-8 show a short notice rather than a wall of mojibake.
 struct FileEditorView: View {
     let url: URL
@@ -18,8 +19,24 @@ struct FileEditorView: View {
     /// The 1-based line to scroll to and flash on open — a content-search hit. `nil` opens at the
     /// top as always. Changing it while the same file is open re-scrolls (clicking another hit).
     let jumpLine: Int?
+    /// The original remote name when `url` is a randomized staged copy.
+    let displayName: String?
     /// Dismisses the overlay (clears `store.openFileURL`) and hands focus back to the terminal.
     let onClose: () -> Void
+
+    /// The right-click "Add to Chat" on both faces (editor and Markdown reader), supplied by the
+    /// host rather than read out of the environment — the editor also opens from the Settings
+    /// window, whose SwiftUI root is a separate `NSHostingView` with no store in scope. The
+    /// argument is the selected text, `nil` for the whole document (Cursor's split: selection →
+    /// snippet, file → reference). Left nil where there is no session to send to; the menu item
+    /// then never appears.
+    let addToChat: ((String?) -> Void)?
+    let canAddToChat: (() -> Bool)?
+
+    /// Whether the header carries the inspector's window controls (hide list / maximize / close).
+    /// A sheet has no list column to collapse and no inspector to fill, so it hosts the editor
+    /// without them and supplies its own way out.
+    let showsInspectorChrome: Bool
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -28,55 +45,85 @@ struct FileEditorView: View {
     private enum Mode: Hashable { case edit, preview }
     /// Markdown opens in Preview (a doc you mostly read); source stays one click away.
     @State private var mode: Mode
+    /// Slides the mode toggle's glass pill between Edit and Preview.
+    @Namespace private var modePillNamespace
 
-    @State private var text: String
+    @State private var text = ""
     /// The text last written to disk, so auto-save only writes on a genuine change.
-    @State private var savedText: String
-    @State private var loadFailed: Bool
+    @State private var savedText = ""
+    /// False until the async load lands — the editor mounts only then, so the
+    /// highlighter and the jump-to-line both see the real document, never the
+    /// empty placeholder.
+    @State private var loaded = false
+    @State private var loadFailed = false
+    /// Set when the file is too large for syntax highlighting (see `highlightByteLimit`).
+    @State private var highlightDisabled = false
     @State private var saveError: String?
-    @State private var cursor: EditorCursor?
     /// The pending debounced write, cancelled and rescheduled on each keystroke.
     @State private var saveTask: Task<Void, Never>?
+    @State private var findBarVisible = false
+    @State private var findQuery = ""
+    @State private var findOptions = FindOptions()
+    @State private var findFocusedIndex = 0
+    @State private var findMatchCount = 0
+    /// The query at the last Return press. A second Return on the same query advances to the
+    /// next match (VS Code / Safari convention).
+    @State private var findLastSubmittedQuery = ""
+    /// Bumped on every ⌘F so the find bar re-focuses even when already on screen.
+    @State private var findFocusTrigger = 0
 
-    /// The highlight.js language id, sniffed once from the file extension (`nil` lets highlight.js
-    /// auto-detect). Stable for the lifetime of the open file.
+    /// Past this size the file renders as plain text: highlight.js parses off-main, but
+    /// *applying* its result is thousands of main-thread `setAttributes` calls plus a
+    /// whole-document relayout — seconds of beachball on a generated 600 KB YAML.
+    private static let highlightByteLimit = 256 * 1024
+
+    /// The highlight.js language id, sniffed once from the file extension. `nil` renders the file
+    /// as plain text — the storage skips highlighting entirely without a language (there is no
+    /// auto-detect pass). Stable for the lifetime of the open file.
     private let language: String?
+    /// A synthetic URL carrying the original remote name for icons and
+    /// extension/name-based language detection. File I/O always uses `url`.
+    private let displayURL: URL
     /// The file's path relative to its git root — shown next to the name like the diff header
-    /// (`GitDiffView`), so the two overlays read the same. `nil` outside a repo.
-    private let relativePath: String?
+    /// (`GitDiffView`), so the two overlays read the same. `nil` outside a repo. Resolved in
+    /// `load()` alongside the file read: the walk-up-for-`.git` is filesystem work, and this
+    /// init re-runs on every parent render.
+    @State private var relativePath: String?
 
     init(url: URL, settings: AppSettings, readOnly: Bool = false, jumpLine: Int? = nil,
-         onClose: @escaping () -> Void) {
+         displayName: String? = nil,
+         addToChat: ((String?) -> Void)? = nil, canAddToChat: (() -> Bool)? = nil,
+         showsInspectorChrome: Bool = true, onClose: @escaping () -> Void) {
         self.url = url
         self.settings = settings
         self.readOnly = readOnly
         self.jumpLine = jumpLine
+        self.displayName = displayName
+        self.addToChat = addToChat
+        self.canAddToChat = canAddToChat
+        self.showsInspectorChrome = showsInspectorChrome
         self.onClose = onClose
-        let contents = try? String(contentsOf: url, encoding: .utf8)
-        _text = State(initialValue: contents ?? "")
-        _savedText = State(initialValue: contents ?? "")
-        _loadFailed = State(initialValue: contents == nil)
+        let displayURL = displayName.map {
+            URL(fileURLWithPath: "/", isDirectory: true).appendingPathComponent($0)
+        } ?? url
+        self.displayURL = displayURL
+        // No I/O here: SwiftUI re-runs this init on every parent render (the store's
+        // session churn), and only the first init per `.id(url)` identity keeps its
+        // state — filesystem work would hit the disk over and over just to be discarded.
+        // The actual load (and the git-root walk) happens once, in `.task`.
         // A jump-to-line open (content-search hit, cmd-click) targets the *source*, so it
         // must land in Edit — Preview has no lines to jump to and would swallow the scroll.
-        _mode = State(initialValue: Self.isMarkdown(url) && jumpLine == nil ? .preview : .edit)
-        self.language = Self.highlightLanguage(for: url)
-        self.relativePath = Self.repoRelativePath(for: url)
+        _mode = State(initialValue: Self.isMarkdown(displayURL) && jumpLine == nil ? .preview : .edit)
+        self.language = Self.highlightLanguage(for: displayURL)
     }
+    private var fileName: String { displayName ?? url.lastPathComponent }
 
     /// Markdown files get the Edit/Preview toggle; sniffed from the extension only (matching
     /// the `markdown` grammar in `highlightLanguage`).
     static func isMarkdown(_ url: URL) -> Bool {
         ["md", "markdown", "mdx"].contains(url.pathExtension.lowercased())
     }
-    private var isMarkdown: Bool { Self.isMarkdown(url) }
-
-    /// The file's path relative to its git root (the form the diff header shows, e.g.
-    /// `core 2/lib/fs.ts`). `nil` when the file isn't inside a git work tree.
-    private static func repoRelativePath(for url: URL) -> String? {
-        let file = url.standardizedFileURL
-        guard let root = GitRoot.find(for: file) else { return nil }
-        return String(file.path.dropFirst(root.path.count + 1))
-    }
+    private var isMarkdown: Bool { Self.isMarkdown(displayURL) }
 
     private var isDirty: Bool { text != savedText }
 
@@ -109,54 +156,42 @@ struct FileEditorView: View {
         // the safe-area top; padding it again just opened a dead band above the header.)
         Group {
             if loadFailed {
-                ContentUnavailableView(
-                    "Can't Open as Text",
-                    systemImage: "doc.questionmark",
-                    description: Text("\(url.lastPathComponent) isn't a UTF-8 text file.")
+                PaneEmptyState(
+                    localized("Can’t open as text"),
+                    icon: .fileQuestion,
+                    message: localized("\(fileName) isn’t a UTF-8 text file.")
                 )
+            } else if !loaded {
+                // The bare background while the async read runs — small files land
+                // within a frame or two, so a spinner would only flash.
+                Color.clear
             } else {
+                // A fixed header over the content (no divider, no footer), matching the inspector
+                // panes' pinned headers (File Explorer's "TERMIO", Issues, Git) — the file name
+                // stays put while you scroll rather than sliding away and leaving you place-blind.
                 VStack(spacing: 0) {
                     header
-                    Divider()
-                    if isMarkdown && mode == .preview {
-                        // Render the *live* buffer, so flipping over from Edit shows unsaved
-                        // keystrokes without a round-trip through disk.
-                        MarkdownReaderView(
-                            source: text,
-                            fileURL: url,
-                            settings: settings,
-                            colorScheme: colorScheme
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        HighlightedTextView(
-                            text: $text,
-                            cursor: $cursor,
-                            language: language,
-                            theme: colorScheme == .dark ? "xcode-dark" : "xcode",
-                            font: editorFont,
-                            backgroundColor: settings.terminalBackgroundColor,
-                            caretColor: caretColor,
-                            lineNumberColor: lineNumberColor,
-                            currentLineColor: currentLineColor,
-                            isEditable: !readOnly,
-                            jumpToLine: jumpLine,
-                            onSave: saveNow
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    Divider()
-                    statusBar
+                    editorContent
                 }
             }
         }
         // Match the diff overlay (`GitDiffView`): a plain VStack whose background bleeds under the
         // titlebar — no outer `.frame`, which was reserving an empty band above the header.
         .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
+        .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .termioShowFindBar)) { _ in
+            openFindBar()
+        }
         // Auto-save: debounce a write after each edit; Escape closes (flushing first). A read-only
         // peek never writes, so neither the debounce nor the exit flush is armed.
         .onChange(of: text) {
             if !readOnly { scheduleSave() }
+        }
+        // A fresh jump target while a Markdown file sits in Preview (clicking another
+        // content-search hit): the jump needs the source editor's lines, so flip to Edit
+        // first — Preview has no text view to scroll and would swallow it.
+        .onChange(of: jumpLine) {
+            if jumpLine != nil, mode == .preview { mode = .edit }
         }
         .onExitCommand { close() }
         // A safety flush if the overlay goes away without the close button (file switch, app quit).
@@ -165,12 +200,72 @@ struct FileEditorView: View {
         }
     }
 
+    /// The scrolling body — the Markdown reader in Preview, else the Highlightr source editor. It
+    /// scrolls below the fixed header; the source editor also carries the right-click "Close".
+    @ViewBuilder private var editorContent: some View {
+        if isMarkdown && mode == .preview {
+            // Render the *live* buffer, so flipping over from Edit shows unsaved keystrokes
+            // without a round-trip through disk.
+            MarkdownReaderView(
+                source: text,
+                fileURL: url,
+                settings: settings,
+                colorScheme: colorScheme,
+                addToChat: addToChat,
+                canAddToChat: canAddToChat
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            HighlightedTextView(
+                text: $text,
+                language: highlightDisabled ? nil : language,
+                theme: colorScheme == .dark ? "xcode-dark" : "xcode",
+                font: editorFont,
+                lineSpacing: settings.codeLineSpacing(for: editorFont),
+                backgroundColor: settings.terminalBackgroundColor,
+                caretColor: caretColor,
+                lineNumberColor: lineNumberColor,
+                currentLineColor: currentLineColor,
+                isEditable: !readOnly,
+                jumpToLine: jumpLine,
+                findQuery: findBarVisible ? findQuery : "",
+                findOptions: findOptions,
+                findFocusedIndex: findFocusedIndex,
+                onMatchesChanged: { count in
+                    findMatchCount = count
+                    if count > 0, findFocusedIndex >= count { findFocusedIndex = 0 }
+                },
+                showsCloseMenuItem: true,
+                addToChat: addToChat,
+                canAddToChat: canAddToChat,
+                onSave: saveNow
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .topTrailing) {
+                if findBarVisible {
+                    FileFindBar(
+                        query: $findQuery,
+                        options: $findOptions,
+                        currentMatch: findMatchCount == 0 ? 0 : findFocusedIndex + 1,
+                        totalMatches: findMatchCount,
+                        onSubmit: submitFind,
+                        onNext: { advanceFind(by: 1) },
+                        onPrevious: { advanceFind(by: -1) },
+                        onClose: closeFindBar,
+                        focusTrigger: findFocusTrigger
+                    )
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 8) {
             // The file's real language/tool logo (a Devicon mark) when bundled, else a
             // tinted SF Symbol — sized to match the diff header's leading status badge
             // (12–13pt in a 16-wide slot) so the editor and diff headers are the same height.
-            FileIconView(url: url, size: 15, symbolSize: 13)
+            FileIconView(url: displayURL, size: 15, symbolSize: 13)
                 .frame(width: 16)
             // The repo-relative path already ends in the file name, so showing the bare name
             // alongside it just repeats the same word — keep only the path as the header label.
@@ -181,7 +276,7 @@ struct FileEditorView: View {
                     .lineLimit(1)
                     .truncationMode(.head)
             } else {
-                Text(url.lastPathComponent)
+                Text(fileName)
                     .font(.system(size: 12.5, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -191,7 +286,7 @@ struct FileEditorView: View {
                 Circle()
                     .fill(Color.secondary)
                     .frame(width: 5, height: 5)
-                    .help("Unsaved changes — saving…")
+                    .help(localized("Unsaved changes — saving…"))
                     .transition(.opacity)
             }
             if let saveError {
@@ -200,90 +295,75 @@ struct FileEditorView: View {
                     .foregroundStyle(.orange)
                     .lineLimit(1)
             }
-            // The close control lives in the toolbar (a bordered, Liquid Glass button on the
-            // terminal column's trailing edge); this trailing spacer keeps the label left-aligned.
             Spacer()
             // Markdown reads as a document by default; the toggle keeps the source one click away.
             if isMarkdown {
                 modeToggle
             }
+            // The content-area window controls (hide list / maximize / close) ride the header's
+            // trailing edge, after the file's own controls.
+            if showsInspectorChrome {
+                InspectorDetailChromeButtons()
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        // Leading edge matches the Markdown reader's body padding (20) so the file name lines up
+        // with the document text beneath it.
+        .padding(.leading, 20)
+        .padding(.trailing, 12)
+        // One explicit height for every file type: the mode pill is taller than the text row, so
+        // without the clamp a markdown header outgrows plain files'.
+        .frame(height: Self.headerHeight)
         .background(Color(nsColor: settings.terminalBackgroundColor))
         .animation(.easeOut(duration: 0.15), value: isDirty)
     }
 
-    /// A two-segment Edit/Preview toggle, drawn by hand (a segmented `Picker` only renders
-    /// `Text`/`Image`, not the stroked `HugeIconView`) so it matches termio's own chrome —
-    /// a faint track with the active segment lifted onto the terminal background.
+    /// Uniform header height across file types; the toggle's 26pt outer track sits
+    /// centered inside it with breathing room.
+    private static let headerHeight: CGFloat = 32
+
+    /// The Edit/Preview switch in the app's glass-pill language — the same construction
+    /// as `InspectorTabsToolbar` (own capsule track, Liquid Glass selection pill sliding
+    /// between segments via `matchedGeometryEffect`, flat fills pre-Tahoe), scaled to the
+    /// slim header. Hand-drawn for the same reason: a native segmented control has no
+    /// track to sit on over termio's transparent chrome.
     private var modeToggle: some View {
-        HStack(spacing: 2) {
-            modeSegment(.edit, icon: .edit, help: "Edit source")
-            modeSegment(.preview, icon: .view, help: "Preview")
+        HStack(spacing: 0) {
+            modeSegment(.edit, icon: .edit, help: localized("Edit source"))
+            modeSegment(.preview, icon: .view, help: localized("Preview"))
         }
+        .background { modePill }
         .padding(2)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
-        )
+        .background { modeTrack }
+        // The pill's slide is animated locally here; the mode is set WITHOUT
+        // `withAnimation` so the editor/preview content swaps instantly instead of
+        // cross-fading for the pill's whole duration (the InspectorTabsToolbar lesson).
+        .animation(.snappy(duration: 0.25), value: mode)
     }
 
     private func modeSegment(_ segment: Mode, icon: HugeIcon, help: String) -> some View {
         let selected = mode == segment
-        return Button { withAnimation(.easeOut(duration: 0.12)) { mode = segment } } label: {
-            HugeIconView(
-                icon: icon, size: 14,
-                color: selected ? (chrome?.accent ?? .primary) : .secondary
-            )
-            .frame(width: 34, height: 24)
+        return HugeIconView(icon: icon, size: 13, color: selected ? .primary : .secondary,
+                            lineWidthOverride: 1.4)
+            .frame(width: 30, height: 22)
+            .matchedGeometryEffect(id: segment, in: modePillNamespace)
             // A filled hit shape so the whole segment — not just the icon's thin
-            // stroke — takes the click, which is what made the toggle feel unresponsive.
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(selected ? Color(nsColor: settings.terminalBackgroundColor) : .clear)
-                    .shadow(color: .black.opacity(selected ? 0.12 : 0), radius: 1, y: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-        .help(help)
+            // stroke — takes the click.
+            .contentShape(.capsule)
+            .onTapGesture { mode = segment }
+            .help(help)
     }
 
-    /// A slim VS Code-style footer: language on the left, cursor position and file facts on the
-    /// right. The caret tracks as you move around the file.
-    private var statusBar: some View {
-        HStack(spacing: 0) {
-            Text(languageName)
-            if readOnly {
-                // Mark the peek so the absent caret/typing doesn't read as the editor being broken.
-                statusItem("Read-Only")
-            }
-            Spacer()
-            if isMarkdown && mode == .preview {
-                // No caret in the rendered view — name the mode so the missing Ln/Col reads right.
-                statusItem("Preview")
-            } else if let cursor {
-                statusItem("Ln \(cursor.line), Col \(cursor.column)")
-            }
-            statusItem("UTF-8")
-        }
-        .font(.system(size: 11))
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(Color(nsColor: settings.terminalBackgroundColor))
+    // The selected pill: a flat fill, no glass and no drop shadow — the raised/glass pill cast a
+    // shadow that read as heavy chrome over the document. The fill alone (brighter than the track)
+    // is enough to show which segment is active.
+    private var modePill: some View {
+        Capsule(style: .continuous)
+            .fill(Color.primary.opacity(0.14))
+            .matchedGeometryEffect(id: mode, in: modePillNamespace, isSource: false)
     }
 
-    private func statusItem(_ text: String) -> some View {
-        Text(text).padding(.leading, 14)
-    }
-
-    /// A human-readable name for the detected language ("Plain Text" when auto/unknown).
-    private var languageName: String {
-        guard let language else { return "Plain Text" }
-        return language.prefix(1).uppercased() + language.dropFirst()
+    private var modeTrack: some View {
+        Capsule(style: .continuous).fill(Color.primary.opacity(0.06))
     }
 
     /// An explicit save (⌘S): cancels the pending debounce and flushes the buffer to disk right
@@ -312,23 +392,87 @@ struct FileEditorView: View {
         onClose()
     }
 
+    /// ⌘F: show the find bar. Skipped in Markdown Preview mode — there's no NSTextView to
+    /// search underneath.
+    private func openFindBar() {
+        guard mode == .edit else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 1)) { findBarVisible = true }
+        // NSTextView keeps first responder otherwise, and SwiftUI's @FocusState can't wrestle
+        // it away — drop it explicitly so the find field can claim the keyboard.
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        findFocusTrigger &+= 1
+    }
+
+    private func closeFindBar() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 1)) { findBarVisible = false }
+        findQuery = ""
+        findLastSubmittedQuery = ""
+        findMatchCount = 0
+        findFocusedIndex = 0
+        findOptions = FindOptions()
+    }
+
+    /// Return: fresh query → jump to match 1; same query → next match.
+    private func submitFind() {
+        guard !findQuery.isEmpty else { return }
+        if findQuery == findLastSubmittedQuery, findMatchCount > 0 {
+            advanceFind(by: 1)
+        } else {
+            findLastSubmittedQuery = findQuery
+            findFocusedIndex = 0
+        }
+    }
+
+    private func advanceFind(by offset: Int) {
+        guard findMatchCount > 0 else { return }
+        findFocusedIndex = ((findFocusedIndex + offset) % findMatchCount + findMatchCount) % findMatchCount
+    }
+
+    /// Reads the file once per opened identity (`.id(url)` on the overlay), off the main
+    /// thread — a large file must not beachball the click that opened it. Oversized files
+    /// also flip `highlightDisabled` so the editor renders them as plain text.
+    private func load() async {
+        let url = url
+        let result: (text: String?, bytes: Int, relativePath: String?) =
+            await Task.detached(priority: .userInitiated) {
+                // The repo-relative header path rides the same background hop as the read:
+                // GitRoot walks ancestors with filesystem checks, which stalls on network mounts.
+                let file = url.standardizedFileURL
+                let relative = GitRoot.find(for: file).map {
+                    String(file.path.dropFirst($0.path.count + 1))
+                }
+                guard let data = try? Data(contentsOf: url) else { return (nil, 0, relative) }
+                return (String(data: data, encoding: .utf8), data.count, relative)
+            }.value
+        relativePath = result.relativePath
+        guard let contents = result.text else {
+            loadFailed = true
+            return
+        }
+        highlightDisabled = result.bytes >= Self.highlightByteLimit
+        text = contents
+        savedText = contents
+        loaded = true
+    }
+
     /// Writes the buffer to disk if it differs from what's already there. The single place a save
     /// happens, shared by the debounce, the close button, and the disappear safety net.
     private func writeIfNeeded() {
-        guard !readOnly, text != savedText else { return }
+        guard !readOnly, loaded, text != savedText else { return }
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
             savedText = text
             saveError = nil
         } catch {
-            saveError = "Save failed: \(error.localizedDescription)"
+            saveError = localized("Save failed: \(error.localizedDescription)")
         }
     }
 
     /// Maps a file to a highlight.js language id, matched against grammars the bundled highlight.js
     /// actually ships (e.g. it has no `toml`/`jsonc` — those fold into `ini`/`json`). The whole file
     /// name is checked first (so `Dockerfile`, `Cargo.lock`, `yarn.lock`, … resolve by name, not
-    /// extension), then the extension. Unknown files return `nil` to let highlight.js auto-detect.
+    /// extension), then the extension. Unknown files return `nil` and render as plain text — the
+    /// storage treats a missing language as "don't highlight", not as an auto-detect request.
     /// Shared with `GitDiffView`, which colors diff lines through the same grammar set.
     static func highlightLanguage(for url: URL) -> String? {
         // Extension-less or specially-named files, keyed by the whole (lowercased) name.
@@ -339,6 +483,13 @@ struct FileEditorView: View {
         case "gemfile", "podfile", "rakefile", "gemfile.lock": return "ruby"
         case "cargo.lock", "poetry.lock", "pipfile": return "ini" // TOML-ish (no toml grammar)
         case "yarn.lock": return "yaml"
+        // highlight.js ships no ssh_config grammar; `properties` is the closest fit — an
+        // ssh_config line *is* `Directive value`, which it colors as key + rest-of-line value
+        // (`ini` needs `=` or `[section]` and would leave the whole file grey). The bare name
+        // `config` only qualifies inside `.ssh`, since it's also git's ini-style config.
+        case "ssh_config", "sshd_config": return "properties"
+        case "config" where url.deletingLastPathComponent().lastPathComponent == ".ssh":
+            return "properties"
         case ".gitignore", ".dockerignore", ".npmignore": return "bash"
         case ".env", ".editorconfig", ".npmrc": return "ini"
         case "nginx.conf": return "nginx"

@@ -1,3 +1,4 @@
+import TermioShared
 import AppKit
 import SwiftUI
 
@@ -8,8 +9,8 @@ import SwiftUI
 /// TextKit view holding the whole diff (`DiffTextPane`): code keeps its syntax colors
 /// (the editor's Highlightr pipeline) with the add/delete tint painted as a full-width
 /// wash underneath, raw `@@` plumbing never appears — unchanged runs collapse into
-/// expandable "n lines" bands — selection runs continuously across lines, and ⌘F is
-/// the system find bar. Escape or the close button dismisses it.
+/// expandable "n lines" bands — selection runs continuously across lines, and ⌘F opens the
+/// same `FileFindBar` the code editor uses. Escape or the close button dismisses it.
 struct GitDiffView: View {
     let request: GitDiffRequest
     @ObservedObject var settings: AppSettings
@@ -18,6 +19,10 @@ struct GitDiffView: View {
     /// without dropping back to the list (Quick Look's arrow-key walk; ↑ ↓ stay with
     /// scrolling, and the same keys in the focused Changes list walk via selection).
     var onNavigate: ((GitDiffRequest) -> Void)? = nil
+
+    /// For the right-click "Add to Chat": the gate and the prompt insertion live
+    /// on the store.
+    @EnvironmentObject private var store: TermioStore
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -30,8 +35,21 @@ struct GitDiffView: View {
     /// Syntax-colored line content per row id, filled by a background pass after the
     /// rows land; the document renders plain until then.
     @State private var styledLines: [Int: NSAttributedString] = [:]
-    /// Ids (first hidden row) of the collapsed bands the user has expanded.
-    @State private var expanded: Set<Int> = []
+    /// How much of each collapsed run the reader has revealed.
+    @State private var expansion = DiffExpansion()
+
+    // Find bar — the same `FileFindBar` the code editor uses, over the diff's read-only text.
+    @State private var findBarVisible = false
+    @State private var findQuery = ""
+    @State private var findOptions = FindOptions()
+    @State private var findFocusedIndex = 0
+    @State private var findMatchCount = 0
+    /// The query at the last Return press; a second Return on the same query advances.
+    @State private var findLastSubmittedQuery = ""
+    /// Bumped on every ⌘F so the field re-focuses even when the bar is already open.
+    @State private var findFocusTrigger = 0
+    /// Bumped when the bar closes so the text view reclaims first responder.
+    @State private var findReclaim = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +65,52 @@ struct GitDiffView: View {
         .onKeyPress(.rightArrow) { walk(+1) ? .handled : .ignored }
         .onExitCommand(perform: onClose)
         .task(id: request) { await load() }
+        // Appearance flips change both the wash palette and the highlighter theme.
+        .task(id: colorScheme) {
+            guard !rows.isEmpty else { return }
+            rebuildDocument()
+            await buildStyledLines(rows)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .termioShowFindBar)) { _ in
+            openFindBar()
+        }
+    }
+
+    // MARK: Find
+
+    /// ⌘F: reveal the find bar (only over a loaded diff — nothing to search otherwise).
+    private func openFindBar() {
+        guard document != nil else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 1)) { findBarVisible = true }
+        // The text view holds first responder; drop it so the find field can take the keyboard.
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        findFocusTrigger &+= 1
+    }
+
+    private func closeFindBar() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 1)) { findBarVisible = false }
+        findQuery = ""
+        findLastSubmittedQuery = ""
+        findMatchCount = 0
+        findFocusedIndex = 0
+        findOptions = FindOptions()
+        findReclaim &+= 1
+    }
+
+    /// Return: fresh query → match 1; same query → next match.
+    private func submitFind() {
+        guard !findQuery.isEmpty else { return }
+        if findQuery == findLastSubmittedQuery, findMatchCount > 0 {
+            advanceFind(by: 1)
+        } else {
+            findLastSubmittedQuery = findQuery
+            findFocusedIndex = 0
+        }
+    }
+
+    private func advanceFind(by offset: Int) {
+        guard findMatchCount > 0 else { return }
+        findFocusedIndex = ((findFocusedIndex + offset) % findMatchCount + findMatchCount) % findMatchCount
     }
 
     // MARK: Walking
@@ -71,31 +135,35 @@ struct GitDiffView: View {
                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundStyle(request.change.status.tint)
                 .frame(width: 16)
-            Text(request.name)
-                .font(.system(size: 12.5, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
+            // Name and directory as one text run with a single truncation point: as two
+            // flexible texts a narrow pane split the width between them and truncated
+            // both into noise. Tail truncation keeps the name (the head) readable longest.
             let directory = (request.change.path as NSString).deletingLastPathComponent
-            if !directory.isEmpty {
-                Text(directory)
+            let name = Text(request.name).font(.system(size: 12.5, weight: .medium))
+            (directory.isEmpty
+                ? name
+                : name + Text("  \(directory)")
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-            }
+                    .foregroundStyle(.secondary))
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 8)
             // "n of m" (Mail's message-walk wording) whenever there is a set to walk.
             if request.siblings.count > 1, let index = walkIndex {
-                Text("\(index + 1) of \(request.siblings.count)")
+                Text(localized("\(index + 1) of \(request.siblings.count)"))
                     .font(.system(size: 10.5, weight: .medium).monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .fixedSize()
                     .padding(.trailing, 2)
             }
             // For a history diff, tag the header with the commit it belongs to.
+            // `fixedSize` (as on the ± counts) keeps the tag on one line in a narrow
+            // pane — the flexible path is the only element that gives up width.
             if let commit = request.commit {
                 Text("@ \(commit.prefix(7))")
                     .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(.secondary)
+                    .fixedSize()
                     .padding(.trailing, 2)
             }
             HStack(spacing: 5) {
@@ -108,8 +176,9 @@ struct GitDiffView: View {
             }
             .font(.system(size: 11, weight: .medium, design: .monospaced))
             .fixedSize()
-            // Close lives in the toolbar (a bordered button hugging the terminal|inspector
-            // divider) — see `setCloseOverlayVisible` in App.swift.
+            // The content-area window controls (hide list / maximize / close) ride the header's
+            // trailing edge, after the diff's own stats.
+            InspectorDetailChromeButtons()
         }
         .padding(.horizontal, 12)
         // Fixed height + inset hairline shared with the git pane's mode switch, so this
@@ -139,22 +208,57 @@ struct GitDiffView: View {
                 document: document,
                 styled: styledLines,
                 font: settings.resolvedTerminalFont(),
+                thickenGlyphs: settings.fontThicken,
                 backgroundColor: settings.terminalBackgroundColor,
                 numberColor: settings.gutterInk(for: colorScheme),
-                onExpand: { id in
-                    expanded.insert(id)
-                    self.document = DiffDocument.build(
-                        rows: rows, expanded: expanded,
-                        codeFont: settings.resolvedTerminalFont())
+                onExpand: { anchor, direction in
+                    expansion.reveal(anchor, direction)
+                    rebuildDocument()
                 },
                 onWalk: { walk($0) },
-                onClose: onClose
+                onClose: onClose,
+                findQuery: findBarVisible ? findQuery : "",
+                findOptions: findOptions,
+                findFocusedIndex: findFocusedIndex,
+                onMatchesChanged: { count in
+                    findMatchCount = count
+                    if count > 0, findFocusedIndex >= count { findFocusedIndex = 0 }
+                },
+                reclaimFocus: findReclaim,
+                // Cursor's split, like the editor: a selection goes over as the pasted
+                // snippet; no selection means the diffed file, which lands as its path.
+                addToChat: { selection in
+                    if let selection {
+                        _ = store.addSnippetToSelectedSessionPrompt(selection)
+                    } else {
+                        let url = URL(fileURLWithPath: request.repoRoot)
+                            .appendingPathComponent(request.change.path)
+                        _ = store.addPathToSelectedSessionPrompt(url)
+                    }
+                },
+                canAddToChat: { store.selectedSessionRunsAgent }
             )
+            .overlay(alignment: .topTrailing) {
+                if findBarVisible {
+                    FileFindBar(
+                        query: $findQuery,
+                        options: $findOptions,
+                        currentMatch: findMatchCount == 0 ? 0 : findFocusedIndex + 1,
+                        totalMatches: findMatchCount,
+                        onSubmit: submitFind,
+                        onNext: { advanceFind(by: 1) },
+                        onPrevious: { advanceFind(by: -1) },
+                        onClose: closeFindBar,
+                        focusTrigger: findFocusTrigger
+                    )
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
         } else {
-            ContentUnavailableView(
-                "No Diff",
-                systemImage: "doc",
-                description: Text("No textual changes to show.")
+            PaneEmptyState(
+                localized("No Diff"),
+                icon: .fileDoc,
+                message: localized("No textual changes to show.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -163,14 +267,25 @@ struct GitDiffView: View {
     // MARK: Loading + syntax colors
 
     private func load() async {
-        let parsed = await GitService.diffRows(for: request.change, in: request.repoRoot, commit: request.commit)
+        let parsed = await GitService.diffRows(
+            for: request.change, in: request.repoRoot, commit: request.commit, range: request.range)
         rows = parsed
-        document = parsed.isEmpty
-            ? nil
-            : DiffDocument.build(rows: parsed, expanded: expanded,
-                                 codeFont: settings.resolvedTerminalFont())
+        rebuildDocument()
         isLoading = false
         await buildStyledLines(parsed)
+    }
+
+    /// Lays the rows out again with the palette that applies *now*. The tints are opaque,
+    /// pre-mixed against the terminal background and baked into the document's emphasis
+    /// spans, so unlike the dynamic system colors they replaced they do not re-resolve on
+    /// their own when the appearance flips — the document has to be rebuilt.
+    private func rebuildDocument() {
+        document = rows.isEmpty
+            ? nil
+            : DiffDocument.build(rows: rows, expansion: expansion,
+                                 palette: settings.diffPalette(for: colorScheme),
+                                 codeFont: settings.resolvedTerminalFont(),
+                                 lineSpacing: settings.codeLineSpacing(for: settings.resolvedTerminalFont()))
     }
 
     /// Colors the code through `DiffHighlighter` (the editor's Highlightr pipeline
@@ -190,7 +305,7 @@ struct GitDiffView: View {
             font: settings.resolvedTerminalFont()
         )
         guard !Task.isCancelled else { return }
-        styledLines = styled
+        styledLines = styled.byRow
     }
 }
 
@@ -206,7 +321,7 @@ extension GitDiffRequest {
             let url = URL(fileURLWithPath: repoRoot).appendingPathComponent(candidate.path)
             if !FileActivation.previewsRatherThanDiff(url) {
                 return GitDiffRequest(repoRoot: repoRoot, change: candidate,
-                                      commit: commit, siblings: siblings)
+                                      commit: commit, range: range, siblings: siblings)
             }
             next += delta
         }

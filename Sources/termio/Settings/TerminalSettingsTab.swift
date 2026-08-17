@@ -9,21 +9,21 @@ struct TerminalSettingsTab: View {
         Form {
             Section {
                 Stepper(value: $settings.scrollbackMegabytes, in: 1...500, step: 1) {
-                    Text("Scrollback: \(settings.scrollbackMegabytes) MB")
+                    Text(localized("Scrollback: \(settings.scrollbackMegabytes) MB"))
                 }
             } header: {
-                SectionHeaderLabel(title: "History")
+                SectionHeaderLabel(title: localized("History"))
             } footer: {
-                Text("How much output each session keeps for scrolling back. Agents are verbose, so the default is generous.")
+                Text(localized("How much output each session keeps for scrolling back. Agents are verbose, so the default is generous."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Section {
-                Toggle("Copy on select", isOn: $settings.copyOnSelect)
+                Toggle(localized("Copy on select"), isOn: $settings.copyOnSelect)
             } header: {
-                SectionHeaderLabel(title: "Selection")
+                SectionHeaderLabel(title: localized("Selection"))
             } footer: {
-                Text("When on, selecting text copies it straight to the clipboard.")
+                Text(localized("When on, selecting text copies it straight to the clipboard."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

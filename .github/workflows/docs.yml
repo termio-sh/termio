@@ -1,0 +1,53 @@
+name: Docs
+
+# The docs site rots in two mechanical ways, so both are checked rather than
+# remembered: the changelog falling behind the shipped releases (it once stopped
+# twelve releases back, which reads as an abandoned project), and a translation
+# drifting from the English page it was made from. The keyboard-shortcut table is
+# generated from the app's own command catalog and checked here too — the docs
+# described a pane gesture for two releases after it was replaced.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/landing/content/docs/**"
+      - "web/landing/src/data/**"
+      - "web/landing/scripts/**"
+      - "web/landing/src/lib/i18n.ts"
+      - "Sources/termio/Keybindings/KeyCommand.swift"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "web/landing/content/docs/**"
+      - "web/landing/src/data/**"
+      - "web/landing/scripts/**"
+      - "web/landing/src/lib/i18n.ts"
+      - "Sources/termio/Keybindings/KeyCommand.swift"
+      - ".github/workflows/docs.yml"
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The changelog check compares against the newest release tag, and tags
+          # aren't in a shallow clone.
+          fetch-depth: 0
+          fetch-tags: true
+
+      # Both scripts use only Node built-ins, so there is nothing to install.
+      - name: Check the shortcut table against the app catalog
+        working-directory: web/landing
+        run: node scripts/sync-keybindings.mjs --check
+
+      - name: Check the changelog and the translations
+        working-directory: web/landing
+        run: node scripts/docs-check.mjs

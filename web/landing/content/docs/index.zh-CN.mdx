@@ -1,0 +1,55 @@
+---
+title: 简介
+description: Termio 是一款原生 Mac 应用，为你的 AI 编程 Agent 提供工作台——Claude Code、Codex 以及其他 Agent 并排运行，各自待在真实终端里，所有数据都不离开你的机器。
+x-i18n:
+  source_path: index.mdx
+  source_hash: 235aef706d21f5800c19b7656fda34bf060c0f899bb202651793a82eedaa4e6a
+  generated_at: 2026-08-10
+---
+
+Termio 是一款原生 Mac 应用，为你的 AI 编程 Agent 安了个家。你不必再在零散的终端
+标签页之间来回倒腾，而是让它们并排运行——每个都在真实终端里——并且瞬间切换。
+一切都在你自己的 Mac 上运行，也只留在这里。
+
+## Termio 给你什么
+
+- **每个 Agent 一个真实终端。** Claude Code、Codex、Gemini、Amp、Pi、OpenCode、
+  Copilot 和 Cursor 都跑在真正的 PTY 里，而不是被重新渲染的聊天记录。你在 iTerm
+  里看到的样子，在这里一模一样。
+- **一条会话侧栏。** 每个 Agent 和 shell 都只需一次点击。状态实时更新，哪个在
+  工作、哪个空闲、哪个需要你，一眼就知道。
+- **拆分窗格。** 把 Agent、开发服务器和 shell 放进同一个窗口，按你的思路排布。
+- **内置检查器。** 浏览工作目录、带语法高亮地编辑文件、读 git 差异、在整个项目
+  里搜索——全都不用离开窗口。
+- **一套编排 API。** `termio sessions` 命令行让一个 Agent（或你的脚本）通过本地
+  套接字派生同伴、回答它们的提问、监督整支队伍，JSON 结构固定，退出码诚实。
+- **把手机当遥控器。** iPhone 应用配对一次，之后随时随地查看正在运行的会话——
+  走你自己的网络，或你自己掌控的隧道。
+
+## 始终本地优先
+
+Termio 没有账号、没有登录、没有遥测。你的终端、代码和 Agent 对话不会经过我们的
+服务器——产品的数据路径里根本没有我们的服务器。你运行的 Agent 用你自己的账号与
+它们各自的服务商通信，和在普通终端里完全一样。
+
+Termio **免费使用**——没有账号，没有许可证密钥，也没有支付后端。
+
+## 从这里开始
+
+<Cards>
+  <Card href="/zh-CN/docs/installation" title="安装">
+    下载 Mac 应用并让它自动更新。无需注册账号。
+  </Card>
+  <Card href="/zh-CN/docs/first-session" title="你的第一个会话">
+    打开项目，在真实终端里启动 Agent，然后拆分窗口。
+  </Card>
+  <Card href="/zh-CN/docs/agents" title="同时运行多个 Agent">
+    让一支队伍并排工作，一眼读出每个 Agent 的实时状态。
+  </Card>
+  <Card href="/zh-CN/docs/session-control" title="编排与命令行">
+    用 `termio sessions` 让 Agent 互相派生、驱动与监督。
+  </Card>
+  <Card href="/zh-CN/docs/iphone" title="iPhone 伴侣应用">
+    配对手机，随时随地查看正在运行的 Agent。
+  </Card>
+</Cards>

@@ -1,4 +1,77 @@
+import AppKit
 import SwiftUI
+import TermioShared
+
+/// Renders an agent's brand mark as an `NSImage` for AppKit menu rows by reusing
+/// `AgentIconView`, so menus show the exact same glyphs as the sidebar. Rasterized
+/// lazily in a drawing-handler image: AppKit re-invokes the handler under the menu's
+/// own appearance at display time, so the monochrome marks (Codex, Grok) resolve
+/// to the right ink. Resolving eagerly against the caller's appearance is wrong —
+/// the menu bar tints from the wallpaper and can be dark while the dropdown menu
+/// (system theme) is light, which baked those marks in as invisible white-on-white.
+@MainActor
+func agentMenuImage(for agent: AgentPreset, side: CGFloat = 15) -> NSImage? {
+    NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+        let appearance = NSAppearance.currentDrawing()
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let renderer = ImageRenderer(
+            content: AgentIconView(agent: agent, size: side - 2)
+                .frame(width: side, height: side)
+                .environment(\.colorScheme, isDark ? .dark : .light)
+        )
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let rendered = renderer.nsImage else { return false }
+        rendered.draw(in: rect)
+        return true
+    }
+}
+
+/// A session row title for AppKit menus — the menu-bar tray and the Session
+/// menu share it, so both speak the sidebar's exact dot vocabulary: a trailing
+/// green dot for a session that just finished, amber for one blocked on you.
+/// Working rows carry the comet mark in place of a dot and idle rows a plain
+/// title, so neither trails one.
+@MainActor
+func sessionMenuRowTitle(_ title: String, status: SessionStatus) -> NSAttributedString {
+    let result = NSMutableAttributedString(
+        string: title,
+        attributes: [.font: NSFont.menuFont(ofSize: 0)]
+    )
+    let color: NSColor
+    switch status {
+    case .idle, .working: return result
+    case .done: color = .systemGreen
+    case .needsAttention: color = .systemOrange
+    }
+    result.append(NSAttributedString(
+        string: "  ●",
+        attributes: [.foregroundColor: color, .font: NSFont.systemFont(ofSize: 8)]
+    ))
+    return result
+}
+
+/// The sidebar's orbiting-comet working mark, rasterised at a fixed phase so menu
+/// rows can show it (and the tray's timer can advance it frame by frame). Mirrors
+/// `agentMenuImage`'s deferred drawing-handler trick so the ink resolves under the
+/// menu's appearance (menu bar tint and menu theme can differ), passing the
+/// resolved black/white as the comet tint rather than relying on its adaptive-ink
+/// default.
+@MainActor
+func sessionCometImage(phase: Double) -> NSImage {
+    let side: CGFloat = 15
+    return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+        let appearance = NSAppearance.currentDrawing()
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let renderer = ImageRenderer(
+            content: WorkingIndicator(tint: isDark ? .white : .black, phase: phase)
+                .frame(width: side, height: side)
+        )
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let rendered = renderer.nsImage else { return false }
+        rendered.draw(in: rect)
+        return true
+    }
+}
 
 /// Renders an `AgentPreset`'s glyph: a muted SF Symbol for the plain terminal, or
 /// a vendor's real brand mark for the coding agents, painted in that vendor's
@@ -28,6 +101,8 @@ struct AgentIconView: View {
             // paint it at full label strength (`.primary`) — anything less looks
             // washed out next to the row text and the opaque vendor marks.
             HugeIconView(icon: .terminal, size: size, color: .primary)
+        case .huge(let icon):
+            HugeIconView(icon: icon, size: size, color: .primary)
         case .vector(let logo):
             // A brand mark fills its whole box, where an SF Symbol's glyph sits
             // inside cap height with breathing room; shrinking the box a touch
@@ -46,8 +121,22 @@ struct AgentImageView: View {
     let url: URL
     var size: CGFloat
 
+    /// Decoded icons, keyed by file URL. A working session's sidebar row re-renders
+    /// about once a second (spinner/liveness), and without this every pass re-reads
+    /// and re-decodes the icon file from disk — synchronous I/O inside `body`. An
+    /// icon *swap* re-keys by URL and shows immediately; editing the file in place
+    /// shows its new art on the next launch.
+    private static let decoded = NSCache<NSURL, NSImage>()
+
+    private static func image(at url: URL) -> NSImage? {
+        if let hit = decoded.object(forKey: url as NSURL) { return hit }
+        guard let loaded = NSImage(contentsOf: url) else { return nil }
+        decoded.setObject(loaded, forKey: url as NSURL)
+        return loaded
+    }
+
     var body: some View {
-        if let image = NSImage(contentsOf: url) {
+        if let image = Self.image(at: url) {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)
@@ -84,6 +173,16 @@ extension Color {
     })
 }
 
+extension NSImage {
+    /// PNG-encodes via the TIFF → bitmap round-trip AppKit requires. Shared by
+    /// the notification attachment and the companion icon wire format.
+    func pngData() -> Data? {
+        guard let tiff = tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
+    }
+}
+
 /// A `Shape` that draws a `BrandLogo` from its embedded SVG path, scaled to fit
 /// the available rect (preserving the source 24×24 aspect, centered).
 struct BrandLogoShape: Shape {
@@ -94,56 +193,48 @@ struct BrandLogoShape: Shape {
     }
 }
 
-/// Renders a `HugeIcon` as a rounded stroke (Hugeicons' native line style) in the
-/// given color, sized to a square `size`-point box. The stroke width tracks the
-/// source's 1.5px-on-24 ratio so the line stays optically right at any size, with
-/// a small floor so it never thins to a hairline at sidebar sizes.
-struct HugeIconView: View {
+/// The empty state every pane shows when it has nothing to list.
+///
+/// `ContentUnavailableView` is proportioned for a full window: a `.title2` headline
+/// over a stroke glyph, with the stack spacing to match. In a 240pt inspector that
+/// headline is wider than most of the pane's own rows, so the pane reads as an error
+/// page rather than as a quiet state. This is the same composition — glyph, title,
+/// one sentence — sized to the pane it sits in, and grouped tightly enough that the
+/// three parts read as one object.
+struct PaneEmptyState: View {
+    let title: String
     let icon: HugeIcon
-    var size: CGFloat
-    var color: Color
-    /// Overrides the size-derived stroke width. Used where a mark reads too thin at a
-    /// small size (e.g. the section disclosure chevron), so it can be bumped heavier
-    /// without also growing the glyph.
-    var lineWidthOverride: CGFloat? = nil
+    let message: String?
+
+    init(_ title: String, icon: HugeIcon, message: String? = nil) {
+        self.title = title
+        self.icon = icon
+        self.message = message
+    }
 
     var body: some View {
-        HugeIconShape(icon: icon)
-            .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
-            .frame(width: size, height: size)
-    }
-
-    private var lineWidth: CGFloat {
-        lineWidthOverride ?? max(1.1, size * 1.5 / icon.viewBox)
-    }
-}
-
-/// A `Shape` that draws a `HugeIcon`'s SVG path scaled to fit the rect, to be
-/// stroked (not filled) by `HugeIconView`.
-struct HugeIconShape: Shape {
-    let icon: HugeIcon
-
-    func path(in rect: CGRect) -> Path {
-        // Fit by the mark's actual ink box, not the nominal 24 viewBox: Hugeicons'
-        // marks fill their viewBox by different amounts across (the terminal glyph
-        // spans 18 of 24, a folder 20), so plain viewBox-fitting left them visibly
-        // unequal in width in the sidebar's shared icon column. Normalizing every
-        // mark's ink width to a fixed fraction of the box — the terminal mark's own
-        // 18/24 fill — keeps the terminal identical while pulling the wider folder
-        // marks in to match it, so same-`size` HugeIcons line up.
-        let glyph = SVGPath(icon.pathData).cgPath
-        let ink = glyph.boundingBoxOfPath
-        guard ink.width > 0, ink.height > 0 else { return Path(glyph) }
-        let targetWidth = rect.width * (18.0 / 24.0)
-        let scale = min(targetWidth / ink.width, rect.height / ink.height)
-        var transform = CGAffineTransform(
-            translationX: rect.midX - scale * ink.midX,
-            y: rect.midY - scale * ink.midY
-        )
-        .scaledBy(x: scale, y: scale)
-        return Path(glyph.copy(using: &transform) ?? glyph)
+        VStack(spacing: 0) {
+            HugeIconView(icon: icon, size: 26, color: .secondary)
+                .opacity(0.5)
+                .padding(.bottom, 9)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+            if let message {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 240)
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+
+// `HugeIconView` / `HugeIconShape` live in `TermioShared` (shared with iOS);
+// see the typealiases in `Models.swift`.
 
 /// VS Code's "codicon" glyphs, used for the file-explorer header actions so termio's
 /// toolbar reads like VS Code's. The SVG path data is lifted verbatim from Microsoft's
@@ -270,271 +361,3 @@ private func scaledVectorPath(_ glyph: CGPath, viewBox: CGFloat, in rect: CGRect
     return Path(scaled)
 }
 
-/// A small parser for the subset of SVG path syntax used by the embedded brand
-/// marks — moveto/lineto/horizontal/vertical, cubic and quadratic curves (with
-/// their smooth variants), elliptical arcs, and close. The SVG and Core
-/// Graphics coordinate spaces both run y-downward, so no axis flip is needed.
-private struct SVGPath {
-    let pathData: String
-
-    init(_ pathData: String) { self.pathData = pathData }
-
-    var cgPath: CGPath {
-        let path = CGMutablePath()
-        var scanner = Scanner(pathData)
-
-        var current = CGPoint.zero
-        var subpathStart = CGPoint.zero
-        var lastCubicControl: CGPoint?
-        var lastQuadControl: CGPoint?
-        var previousCommand: Character = " "
-
-        func reflectedCubic() -> CGPoint {
-            guard let last = lastCubicControl, "CcSs".contains(previousCommand) else { return current }
-            return CGPoint(x: 2 * current.x - last.x, y: 2 * current.y - last.y)
-        }
-        func reflectedQuad() -> CGPoint {
-            guard let last = lastQuadControl, "QqTt".contains(previousCommand) else { return current }
-            return CGPoint(x: 2 * current.x - last.x, y: 2 * current.y - last.y)
-        }
-
-        while !scanner.isAtEnd {
-            // A bare number means "repeat the previous command"; after a moveto
-            // the implicit repeat is a lineto, per the SVG spec.
-            var command: Character
-            if let explicit = scanner.readCommand() {
-                command = explicit
-            } else if previousCommand != " " {
-                command = previousCommand
-                if command == "M" { command = "L" }
-                if command == "m" { command = "l" }
-            } else {
-                break
-            }
-
-            let relative = command.isLowercase
-            func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-                relative ? CGPoint(x: current.x + x, y: current.y + y) : CGPoint(x: x, y: y)
-            }
-
-            switch command.uppercased() {
-            case "M":
-                current = point(scanner.readNumber(), scanner.readNumber())
-                path.move(to: current)
-                subpathStart = current
-            case "L":
-                current = point(scanner.readNumber(), scanner.readNumber())
-                path.addLine(to: current)
-            case "H":
-                let x = scanner.readNumber()
-                current = relative ? CGPoint(x: current.x + x, y: current.y) : CGPoint(x: x, y: current.y)
-                path.addLine(to: current)
-            case "V":
-                let y = scanner.readNumber()
-                current = relative ? CGPoint(x: current.x, y: current.y + y) : CGPoint(x: current.x, y: y)
-                path.addLine(to: current)
-            case "C":
-                let c1 = point(scanner.readNumber(), scanner.readNumber())
-                let c2 = point(scanner.readNumber(), scanner.readNumber())
-                current = point(scanner.readNumber(), scanner.readNumber())
-                path.addCurve(to: current, control1: c1, control2: c2)
-                lastCubicControl = c2
-            case "S":
-                let c1 = reflectedCubic()
-                let c2 = point(scanner.readNumber(), scanner.readNumber())
-                current = point(scanner.readNumber(), scanner.readNumber())
-                path.addCurve(to: current, control1: c1, control2: c2)
-                lastCubicControl = c2
-            case "Q":
-                let c = point(scanner.readNumber(), scanner.readNumber())
-                current = point(scanner.readNumber(), scanner.readNumber())
-                path.addQuadCurve(to: current, control: c)
-                lastQuadControl = c
-            case "T":
-                let c = reflectedQuad()
-                current = point(scanner.readNumber(), scanner.readNumber())
-                path.addQuadCurve(to: current, control: c)
-                lastQuadControl = c
-            case "A":
-                let rx = scanner.readNumber()
-                let ry = scanner.readNumber()
-                let rotation = scanner.readNumber()
-                let largeArc = scanner.readFlag()
-                let sweep = scanner.readFlag()
-                let end = point(scanner.readNumber(), scanner.readNumber())
-                addArc(to: path, from: current, to: end, rx: rx, ry: ry,
-                       rotationDegrees: rotation, largeArc: largeArc, sweep: sweep)
-                current = end
-            case "Z":
-                path.closeSubpath()
-                current = subpathStart
-            default:
-                break
-            }
-
-            if command.uppercased() != "C" && command.uppercased() != "S" { lastCubicControl = nil }
-            if command.uppercased() != "Q" && command.uppercased() != "T" { lastQuadControl = nil }
-            previousCommand = command
-        }
-        return path
-    }
-
-    /// Appends an SVG elliptical arc to `path` as a sequence of cubic Béziers,
-    /// using the endpoint-to-center conversion from the SVG implementation notes.
-    private func addArc(
-        to path: CGMutablePath, from start: CGPoint, to end: CGPoint,
-        rx rxIn: CGFloat, ry ryIn: CGFloat, rotationDegrees: CGFloat,
-        largeArc: Bool, sweep: Bool
-    ) {
-        var rx = abs(rxIn), ry = abs(ryIn)
-        if rx == 0 || ry == 0 { path.addLine(to: end); return }
-        if start == end { return }
-
-        let phi = rotationDegrees * .pi / 180
-        let cosPhi = cos(phi), sinPhi = sin(phi)
-
-        let dx = (start.x - end.x) / 2, dy = (start.y - end.y) / 2
-        let x1 = cosPhi * dx + sinPhi * dy
-        let y1 = -sinPhi * dx + cosPhi * dy
-
-        let radiiCheck = (x1 * x1) / (rx * rx) + (y1 * y1) / (ry * ry)
-        if radiiCheck > 1 {
-            let scale = sqrt(radiiCheck)
-            rx *= scale
-            ry *= scale
-        }
-
-        let rx2 = rx * rx, ry2 = ry * ry, x1Sq = x1 * x1, y1Sq = y1 * y1
-        let numerator = max(0, rx2 * ry2 - rx2 * y1Sq - ry2 * x1Sq)
-        let denominator = rx2 * y1Sq + ry2 * x1Sq
-        var coefficient = denominator == 0 ? 0 : sqrt(numerator / denominator)
-        if largeArc == sweep { coefficient = -coefficient }
-
-        let cxPrime = coefficient * (rx * y1 / ry)
-        let cyPrime = coefficient * (-ry * x1 / rx)
-        let centerX = cosPhi * cxPrime - sinPhi * cyPrime + (start.x + end.x) / 2
-        let centerY = sinPhi * cxPrime + cosPhi * cyPrime + (start.y + end.y) / 2
-
-        func angle(_ ux: CGFloat, _ uy: CGFloat, _ vx: CGFloat, _ vy: CGFloat) -> CGFloat {
-            let dot = ux * vx + uy * vy
-            let length = sqrt((ux * ux + uy * uy) * (vx * vx + vy * vy))
-            let clamped = max(-1, min(1, length == 0 ? 0 : dot / length))
-            let result = acos(clamped)
-            return ux * vy - uy * vx < 0 ? -result : result
-        }
-
-        let ux = (x1 - cxPrime) / rx, uy = (y1 - cyPrime) / ry
-        let vx = (-x1 - cxPrime) / rx, vy = (-y1 - cyPrime) / ry
-        let startAngle = angle(1, 0, ux, uy)
-        var sweepAngle = angle(ux, uy, vx, vy)
-        if !sweep && sweepAngle > 0 { sweepAngle -= 2 * .pi }
-        if sweep && sweepAngle < 0 { sweepAngle += 2 * .pi }
-
-        let segments = max(1, Int(ceil(abs(sweepAngle) / (.pi / 2))))
-        let delta = sweepAngle / CGFloat(segments)
-        let controlScale = 4.0 / 3.0 * tan(delta / 4)
-
-        func onEllipse(_ cosA: CGFloat, _ sinA: CGFloat) -> CGPoint {
-            let ex = rx * cosA, ey = ry * sinA
-            return CGPoint(x: cosPhi * ex - sinPhi * ey + centerX,
-                           y: sinPhi * ex + cosPhi * ey + centerY)
-        }
-        func tangent(_ cosA: CGFloat, _ sinA: CGFloat) -> CGPoint {
-            let ex = -rx * sinA, ey = ry * cosA
-            return CGPoint(x: cosPhi * ex - sinPhi * ey,
-                           y: sinPhi * ex + cosPhi * ey)
-        }
-
-        var a = startAngle
-        for _ in 0..<segments {
-            let cosA = cos(a), sinA = sin(a)
-            let cosB = cos(a + delta), sinB = sin(a + delta)
-            let p1 = onEllipse(cosA, sinA)
-            let p2 = onEllipse(cosB, sinB)
-            let t1 = tangent(cosA, sinA)
-            let t2 = tangent(cosB, sinB)
-            path.addCurve(
-                to: p2,
-                control1: CGPoint(x: p1.x + controlScale * t1.x, y: p1.y + controlScale * t1.y),
-                control2: CGPoint(x: p2.x - controlScale * t2.x, y: p2.y - controlScale * t2.y)
-            )
-            a += delta
-        }
-    }
-}
-
-/// A forgiving number/command scanner for SVG path data. Handles the quirks the
-/// brand marks rely on: implicit separators, signs that start a new number, a
-/// second decimal point that ends one (`.686.0608` is two numbers), and arc
-/// flags packed as single digits.
-private struct Scanner {
-    private let characters: [Character]
-    private var index = 0
-
-    init(_ string: String) { characters = Array(string) }
-
-    var isAtEnd: Bool {
-        var probe = index
-        while probe < characters.count, isSeparator(characters[probe]) { probe += 1 }
-        return probe >= characters.count
-    }
-
-    private func isSeparator(_ c: Character) -> Bool {
-        c == " " || c == "," || c == "\n" || c == "\t" || c == "\r"
-    }
-
-    private mutating func skipSeparators() {
-        while index < characters.count, isSeparator(characters[index]) { index += 1 }
-    }
-
-    mutating func readCommand() -> Character? {
-        skipSeparators()
-        guard index < characters.count, characters[index].isLetter else { return nil }
-        defer { index += 1 }
-        return characters[index]
-    }
-
-    mutating func readNumber() -> CGFloat {
-        skipSeparators()
-        var text = ""
-        if index < characters.count, characters[index] == "+" || characters[index] == "-" {
-            text.append(characters[index])
-            index += 1
-        }
-        var seenDot = false
-        var seenExponent = false
-        while index < characters.count {
-            let c = characters[index]
-            if c.isNumber {
-                text.append(c)
-                index += 1
-            } else if c == "." && !seenDot && !seenExponent {
-                seenDot = true
-                text.append(c)
-                index += 1
-            } else if (c == "e" || c == "E") && !seenExponent {
-                seenExponent = true
-                text.append(c)
-                index += 1
-                if index < characters.count, characters[index] == "+" || characters[index] == "-" {
-                    text.append(characters[index])
-                    index += 1
-                }
-            } else {
-                break
-            }
-        }
-        return CGFloat(Double(text) ?? 0)
-    }
-
-    mutating func readFlag() -> Bool {
-        skipSeparators()
-        guard index < characters.count else { return false }
-        let c = characters[index]
-        if c == "0" || c == "1" {
-            index += 1
-            return c == "1"
-        }
-        return readNumber() != 0
-    }
-}

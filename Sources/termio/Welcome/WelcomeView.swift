@@ -45,9 +45,9 @@ struct WelcomeView: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 96, height: 96)
             VStack(spacing: 4) {
-                Text("termio")
+                Text("Termio")
                     .font(.system(size: 32, weight: .bold))
-                Text("Start an agent in a project.")
+                Text(localized("Start an agent in a project."))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
@@ -60,12 +60,12 @@ struct WelcomeView: View {
         VStack(spacing: 8) {
             WelcomeActionRow(
                 icon: HugeIconView(icon: .folder, size: 16, color: .secondary),
-                title: "Open Project…",
+                title: localized("Open Project…"),
                 shortcut: "⌘O"
             ) { store.presentOpenProjectPanel() }
             WelcomeActionRow(
                 icon: HugeIconView(icon: .terminal, size: 16, color: .secondary),
-                title: "New Terminal",
+                title: localized("New Terminal"),
                 shortcut: "⌘T"
             ) { store.addScratchTerminal() }
 
@@ -88,7 +88,7 @@ struct WelcomeView: View {
     private var recentColumn: some View {
         if !recentEntries.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                sectionLabel("Recent")
+                sectionLabel(localized("Recent"))
                 ForEach(recentEntries) { entry in
                     WelcomeRecentRow(entry: entry) {
                         store.addProject(at: URL(fileURLWithPath: entry.path))

@@ -24,14 +24,71 @@ final class GitPanelModel: ObservableObject {
     @Published var isLoadingHistory = false
     private var didLoadHistory = false
 
+    /// The branch and the refs it can be compared against, for the Compare tab's base
+    /// picker. Nil until that tab is first opened; re-read whenever the git dir changes,
+    /// so a checkout in the terminal moves the picker with it.
+    @Published var compareContext: GitService.CompareContext?
+    /// The base the Compare tab is measuring the branch against.
+    @Published private(set) var compareBase: String?
+    /// `nil` while a comparison is loading — the Compare tab shows a spinner then, so no
+    /// separate loading flag is needed.
+    @Published private(set) var compare: GitService.BranchCompare?
+    /// Why the comparison couldn't be made, when it couldn't. Held as its own state so the
+    /// pane can say so — an empty file list would read as "nothing to review".
+    @Published private(set) var compareProblem: GitService.CompareProblem?
+
     private var watcher: FolderEventStream?
     private var appActiveObserver: AnyCancellable?
     private var refreshDebounce: Task<Void, Never>?
     /// Monotonic ticket for `load()` — only the newest pass may publish.
     private var loadGeneration = 0
+    /// One `git status` in flight at a time: `load()` sets `loading` while it runs,
+    /// and any call that lands mid-pass (the FSEvents debounce *or* a direct
+    /// `model.load()` from the view) sets `loadReentered` to request a single
+    /// replay instead of spawning an overlapping, expensive status — the way VS
+    /// Code serializes its own status.
+    private var loading = false
+    private var loadReentered = false
 
-    init(repoRoot: String) {
+    /// Whether the pane is actually on screen, read live at refresh time. A collapsed
+    /// inspector keeps this model alive (the hosting view stays in the hierarchy), and
+    /// before this gate the file-system watch kept re-running `git status` — four git
+    /// spawns a burst — for a pane nobody could see. `nil` when the caller has no
+    /// visibility signal; treated as visible.
+    private let isPaneVisible: (() -> Bool)?
+    /// A refresh that arrived while hidden, replayed on the next `flushDeferredRefresh`.
+    /// Deferred, not dropped — the pane must be correct the moment it shows.
+    private var deferredRefreshIncludesHistory: Bool?
+
+    /// Directory names whose events can't change what the pane shows: build products
+    /// and package caches that are gitignored in practice. An agent's `swift build`
+    /// writes thousands of files under `.build`, and every burst was a full change-list
+    /// pass; dropping these keeps the watch quiet through builds. Only components
+    /// *below a watched root* count — a repo that itself lives under a directory
+    /// named like a build product must not go deaf to every event. A repo that
+    /// actually tracks one of these still stays honest — any event outside the list,
+    /// and app re-activation, reload from git, the source of truth.
+    private nonisolated static let ignoredEventComponents: Set<String> = [
+        ".build", "node_modules", "DerivedData", ".venv", ".gradle", ".turbo", ".next",
+    ]
+
+    /// Whether an event path sits under a build-product directory *inside* one of the
+    /// watched roots. The roots' own ancestry is deliberately not inspected.
+    /// `nonisolated` because the FSEvents handler calls it on the watcher's own queue —
+    /// it is pure string work over its arguments and touches no actor state.
+    private nonisolated static func isBuildProductEvent(_ path: String, underAny roots: [String]) -> Bool {
+        for root in roots where path == root || path.hasPrefix(root + "/") {
+            return path.dropFirst(root.count).split(separator: "/")
+                .contains { ignoredEventComponents.contains(String($0)) }
+        }
+        // An event outside every watched root (FSEvents shouldn't produce one)
+        // stays relevant rather than being silently swallowed.
+        return false
+    }
+
+    init(repoRoot: String, isPaneVisible: (() -> Bool)? = nil) {
         self.repoRoot = repoRoot
+        self.isPaneVisible = isPaneVisible
         // Re-activation catches whatever happened while termio was in the background
         // (a rebase in another app, a pull on another machine's shared folder…).
         appActiveObserver = NotificationCenter.default
@@ -45,16 +102,42 @@ final class GitPanelModel: ObservableObject {
 
     /// Reloads the working-tree change list. The first successful pass also arms the
     /// file-system watch, so from then on the pane refreshes itself.
+    ///
+    /// Serialized: only one `git status` runs at a time. Every refresh path funnels
+    /// through here — the watcher and the view's direct `model.load()` calls alike —
+    /// so a call that arrives mid-pass flags a replay rather than spawning an
+    /// overlapping status. (Runs on the main actor, so the flags need no lock.)
+    ///
+    /// Immediate replays are capped at one. The first pass is suppressed if a reentry
+    /// superseded it (its snapshot predates whatever change triggered the reentry —
+    /// a discard, ignore, checkout); the single replay always publishes best-effort.
+    /// If events *still* arrive through that replay — a continuously churning tree —
+    /// we publish anyway and hand off to a debounced refresh instead of looping here,
+    /// so the pane can never livelock (spinning `git status`, `isLoading` stuck on).
     func load() async {
-        // Loads overlap (explicit reload racing the FSEvents debounce); the generation
-        // guard keeps a slow older pass from publishing a stale snapshot over a newer one.
-        loadGeneration += 1
-        let generation = loadGeneration
-        let loaded = await GitService.changes(in: repoRoot)
-        guard generation == loadGeneration else { return }
-        changes = loaded
-        isLoading = false
-        if watcher == nil { await armWatcher() }
+        if loading {
+            loadReentered = true
+            loadGeneration += 1   // supersede the in-flight pass's stale snapshot
+            return
+        }
+        loading = true
+        defer { loading = false }
+        for attempt in 0...1 {
+            loadReentered = false
+            loadGeneration += 1
+            let generation = loadGeneration
+            let loaded = await GitService.changes(in: repoRoot)
+            if generation == loadGeneration || attempt == 1 {
+                changes = loaded
+                isLoading = false
+            }
+            if watcher == nil { await armWatcher() }
+            if !loadReentered { break }
+        }
+        if loadReentered {
+            loadReentered = false
+            scheduleRefresh(includeHistory: false)   // still churning: catch up off-stack
+        }
     }
 
     /// Loads the commit history on demand (first time the History tab opens); re-run
@@ -65,6 +148,53 @@ final class GitPanelModel: ObservableObject {
         isLoadingHistory = commits.isEmpty
         commits = await GitService.log(in: repoRoot)
         isLoadingHistory = false
+    }
+
+    // MARK: Branch compare
+
+    /// Re-reads the branch and the bases it can be compared against. Cheap enough to run
+    /// on every history refresh: three `git` reads of refs, no diff.
+    func loadCompareContext() async {
+        compareContext = await GitService.compareContext(in: repoRoot)
+    }
+
+    /// Points the Compare tab at a base branch (or `nil` for none) and loads the
+    /// comparison. The base itself is remembered by the view, per branch.
+    func setCompareBase(_ base: String?) async {
+        guard base != compareBase else { return }
+        compareBase = base
+        compare = nil
+        compareProblem = nil
+        await loadCompare()
+    }
+
+    /// Loads the diff and commits between the branch and its base. A base picked while a
+    /// load is in flight wins: the stale result is dropped rather than published under the
+    /// new base's label.
+    func loadCompare() async {
+        guard let base = compareBase else {
+            compare = nil
+            compareProblem = nil
+            return
+        }
+        let outcome = await GitService.branchCompare(base: base, in: repoRoot)
+        guard compareBase == base else { return }
+        switch outcome {
+        case .ready(let loaded):
+            compare = loaded
+            compareProblem = nil
+        case .problem(let problem):
+            compare = nil
+            compareProblem = problem
+        }
+    }
+
+    /// Replays a refresh that was deferred while the pane was hidden. Called by the
+    /// view when the pane (re)appears, so the shown list is never stale.
+    func flushDeferredRefresh() {
+        guard let includeHistory = deferredRefreshIncludesHistory else { return }
+        deferredRefreshIncludesHistory = nil
+        scheduleRefresh(includeHistory: includeHistory)
     }
 
     // MARK: Auto-refresh
@@ -79,13 +209,20 @@ final class GitPanelModel: ObservableObject {
         let (tree, gitDirs) = await GitService.watchPaths(for: repoRoot)
         guard watcher == nil, !gitDirs.isEmpty else { return }
         // The primary checkout's `.git` sits inside the tree and needs no second watch.
-        var paths = [tree]
-        paths += gitDirs.filter { !$0.hasPrefix(tree + "/") }
+        // Immutable, because the handler below runs off the main actor and captures it.
+        let paths = [tree] + gitDirs.filter { !$0.hasPrefix(tree + "/") }
         watcher = FolderEventStream(
             paths: paths, latency: 0.4,
             queue: DispatchQueue(label: "sh.termio.gitpane.fsevents", qos: .utility)
-        ) { [weak self] eventPaths in
-            let touchesGitDir = eventPaths.contains { path in
+        ) { [weak self] eventPaths, _ in
+            // Runs on the FSEvents queue: everything up to the hop below must stay
+            // off the main actor. Build-product churn can't change the pane; don't
+            // let it spawn git.
+            let relevant = eventPaths.filter { path in
+                !Self.isBuildProductEvent(path, underAny: paths)
+            }
+            guard !relevant.isEmpty else { return }
+            let touchesGitDir = relevant.contains { path in
                 gitDirs.contains { path.hasPrefix($0) } || path.contains("/.git/") || path.hasSuffix("/.git")
             }
             Task { @MainActor [weak self] in
@@ -95,15 +232,30 @@ final class GitPanelModel: ObservableObject {
     }
 
     /// Coalesces a burst of events (FSEvents latency already batches most) into one
-    /// reload a beat later. `git status` itself may refresh the index once, which
-    /// echoes back as a git-dir event — the second pass reads clean and the chain ends.
+    /// reload a beat later. `git status` no longer echoes back as a git-dir event —
+    /// `GIT_OPTIONAL_LOCKS=0` keeps it from writing the index — so the chain ends
+    /// after one pass. While the pane is hidden the reload is parked instead (see
+    /// `flushDeferredRefresh`).
     private func scheduleRefresh(includeHistory: Bool) {
+        if let isPaneVisible, !isPaneVisible() {
+            deferredRefreshIncludesHistory = (deferredRefreshIncludesHistory ?? false) || includeHistory
+            return
+        }
         refreshDebounce?.cancel()
         refreshDebounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard let self, !Task.isCancelled else { return }
             await self.load()
             if includeHistory, self.didLoadHistory { await self.loadHistory(force: true) }
+            // A commit, a checkout, or a fetch all land as git-dir events, and each one
+            // moves the comparison: new commits ahead, a different branch, a base that
+            // just gained commits. Gated on the Compare tab having been opened at least
+            // once (which is what fills `compareContext`), like the log above — a
+            // Changes-only session must not pay four `git` spawns an event.
+            if includeHistory, self.compareContext != nil {
+                await self.loadCompareContext()
+                await self.loadCompare()
+            }
         }
     }
 }

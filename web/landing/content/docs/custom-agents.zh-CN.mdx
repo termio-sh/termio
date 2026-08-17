@@ -1,0 +1,100 @@
+---
+title: 自定义 Agent
+description: 往 ~/.termio/config/agents 里放一个小小的 JSON 清单，就能让 Termio 认识任何命令行工具——给它名字、图标和实时状态识别，它就和内置 Agent 一样是一等公民。
+x-i18n:
+  source_path: custom-agents.mdx
+  source_hash: 36b5baf646e8763d991681d0e60e28fea955d3e20afe03d506eb907f0faeef00
+  generated_at: 2026-08-16
+---
+
+Termio 内置了常见的编程 Agent，但这个目录是开放的：任何命令行工具都能成为一等 Agent。
+你用一个小小的 JSON 清单描述它，从此它就出现在新建会话菜单、**设置 ▸ Agent** 列表和
+侧栏里，带着自己的名字、图标和实时状态——和 Claude Code 或 Codex 别无二致。
+
+<Callout type="note">
+  要运行任意命令行工具，你其实*不需要*清单——随时可以起一个普通 shell 在里面跑。清单的
+  作用是把它提升为真正的 Agent，带图标和状态识别。
+</Callout>
+
+## 添加一个 Agent
+
+把一个 JSON 文件放进你的配置文件夹，以该 Agent 的 `id` 命名：
+
+```
+~/.termio/config/agents/<id>.json
+```
+
+一份最小的清单只需要 `id`、`name` 和启动用的 `command`：
+
+```json
+{
+  "id": "myagent",
+  "name": "My Agent",
+  "command": "myagent --fancy"
+}
+```
+
+Termio **只在启动时读取一次**这个文件夹，所以添加或修改清单后请重启应用。之后你在任何
+新建会话的地方都能看到它；像其他 Agent 一样，从 **设置 ▸ Agent** 里启用、排序或调整
+它的命令。
+
+<DocsImage
+  src="/screenshots/docs/26-custom-agent.png"
+  alt="Termio Agent 设置选中自定义 Review Agent，并显示由清单提供的命令、状态模式和删除操作"
+  width={1664}
+  height={1288}
+/>
+
+<Callout type="tip">
+  用内置 Agent 的 `id`（例如 `claudeCode`）作为文件名可以**覆盖**它——想通过包装脚本
+  启动 Claude Code、同时保留它的图标和 hooks 时很方便。
+</Callout>
+
+## 清单字段
+
+| 字段 | 必填 | 含义 |
+| --- | --- | --- |
+| `id` | ✓ | 稳定的标识与持久化键（字母、数字、`-`、`_`、`.`）。 |
+| `name` | ✓ | 菜单和侧栏里显示的名字。 |
+| `command` | | 启动的程序与参数。省略则打开你的登录 shell。可执行文件必须在 `PATH` 上。 |
+| `icon` | | 图标——见下文。默认是一个通用字形。 |
+| `status` | | 用于实时状态的屏幕匹配规则——见下文。 |
+| `resume` | | 重新打开的会话如何续上原来那段对话——一个由启动参数模板和会话存储描述组成的对象。参见 [Agent 终端协议](/zh-CN/docs/atp#resume)。省略则每次启动都是全新的。 |
+| `permissionBypassFlag` | | 当你为该 Agent 打开「跳过权限确认」时追加的参数。 |
+| `tint` | | 一个十六进制颜色（例如 `"#14B8A6"`），用于给「工作中」指示器上色。 |
+
+### 图标
+
+指向一个 SF Symbol，或者一张和清单放在一起的图片：
+
+```json
+"icon": { "symbol": "sparkles" }
+```
+
+```json
+"icon": { "path": "myagent.png" }
+```
+
+用 `path` 时，把图片文件放在同一个文件夹里、`.json` 的旁边。
+
+### 实时状态
+
+如果你的 Agent 没有 hook 机制，Termio 仍然可以用正则匹配终端画面来读它的状态。把表示
+「忙」的模式列在 `working` 下，把表示「在等你」的模式列在 `attention` 下：
+
+```json
+"status": {
+  "working": ["thinking", "Running"],
+  "attention": ["approve\\?", "Continue\\? \\(y/n\\)"]
+}
+```
+
+命中 `attention` 的行会把会话切到 **需要你**（键名沿用协议里的叫法；它优先于 `working`，
+因为提示可能出现在仍在转的标题下面）；命中 `working` 的行把它标为 **工作中**。每种状态的
+含义见 [侧栏状态参考](/zh-CN/docs/sidebar#status)。
+
+<Callout type="note">
+  自带 hook 机制的 Agent（比如那些内置的）通过 hooks 获得更精确的状态，而不是靠扫屏幕。
+  那条路径见 [会话控制](/zh-CN/docs/session-control)——对自定义 Agent 来说，上面的
+  `status` 正则是最省事的方案。
+</Callout>

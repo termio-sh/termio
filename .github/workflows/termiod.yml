@@ -1,0 +1,186 @@
+name: termiod
+
+# termiod is the session host: a Rust daemon whose VT engine is built by Zig
+# from our libghostty fork. Until this workflow existed, nothing in CI compiled
+# a line of it — the ghostty pin in termiod/vt/Cargo.toml and the Zig toolchain
+# it needs were verified on one laptop and nowhere else, so a bad pin or a
+# toolchain drift would have surfaced on a VPS rather than on the PR.
+# Path-filtered: Swift-only or landing-only changes never spin these runners.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "termiod/**"
+      - ".github/workflows/termiod.yml"
+  pull_request:
+    paths:
+      - "termiod/**"
+      - ".github/workflows/termiod.yml"
+
+concurrency:
+  group: termiod-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # `libghostty-vt-sys` invokes `zig` by name and honours no env override, so
+  # the toolchain has to land on PATH under exactly that name. Pinned with its
+  # published checksum: this Zig is what decides whether the VT engine we link
+  # is the one we think it is.
+  ZIG_VERSION: "0.16.0"
+  ZIG_SHA256_AARCH64_MACOS: "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489"
+  ZIG_SHA256_AARCH64_LINUX: "ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The developer-machine path: build, test, and cross-compile the binary that
+  # ships to a Linux VPS. macOS is also the only host where the Zig SDK problem
+  # below exists, which is reason enough to keep it covered.
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: termiod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Xcode 26's libSystem.tbd advertises arm64e only and Zig cannot link
+      # against it: the Zig build runner dies in a wall of "undefined symbol:
+      # _malloc / _fork / ...". The Command Line Tools SDK is the fix, so this
+      # is deliberately NOT the DEVELOPER_DIR the Swift workflows pin. Asserted
+      # rather than assumed — a missing SDK should say so, not produce that wall.
+      - name: Point the Zig build at the Command Line Tools SDK
+        run: |
+          sdk=/Library/Developer/CommandLineTools
+          if [ ! -d "$sdk/SDKs/MacOSX.sdk" ]; then
+            echo "::error::$sdk/SDKs/MacOSX.sdk is missing; Zig cannot link against Xcode's arm64e-only libSystem"
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$sdk" >> "$GITHUB_ENV"
+
+      - name: Install Zig
+        run: |
+          url="https://ziglang.org/download/${ZIG_VERSION}/zig-aarch64-macos-${ZIG_VERSION}.tar.xz"
+          curl -fsSL "$url" -o "$RUNNER_TEMP/zig.tar.xz"
+          echo "${ZIG_SHA256_AARCH64_MACOS}  $RUNNER_TEMP/zig.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/zig"
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+
+      # What ships is a static musl binary for the VPS, cross-linked by the
+      # rust-lld that comes with the toolchain (see termiod/.cargo/config.toml).
+      - name: Add the Linux musl target
+        run: rustup target add aarch64-unknown-linux-musl
+
+      - name: Report the toolchain
+        run: |
+          zig version
+          rustc --version
+          cargo --version
+
+      # target/ is deliberately not cached: the Zig build stages a full ghostty
+      # clone and a ReleaseFast archive per target, which runs to gigabytes.
+      # Caching the registry and the git checkout of the libghostty-rs fork is
+      # the cheap half; rebuilding the engine every run is the point.
+      - name: Cache cargo downloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: termiod-cargo-${{ runner.os }}-${{ hashFiles('termiod/Cargo.lock') }}
+          restore-keys: termiod-cargo-${{ runner.os }}-
+
+      - name: Build
+        run: cargo build
+
+      # Unit tests plus the integration suites: join_invariant (byte delivery
+      # never blocks on the VT parse), snapshot_prologue, stdio_bridge.
+      - name: Test
+        run: cargo test
+
+      # A daemon auto-starts on the first client op and keeps running the binary
+      # image it was launched from, so a leftover one serves stale code and
+      # collides on the fixed socket paths. Cheap insurance between suites.
+      # The brackets keep the pattern from matching the shell running it.
+      - name: Smoke test
+        run: |
+          pkill -9 -f "target/debug/[t]ermiod|deps/[t]ermiod-" || true
+          python3 smoke_test.py
+
+      - name: Remote smoke test
+        run: |
+          pkill -9 -f "target/debug/[t]ermiod|deps/[t]ermiod-" || true
+          python3 remote_smoke_test.py
+
+      - name: Cross-compile the Linux release binary
+        run: |
+          pkill -9 -f "target/debug/[t]ermiod|deps/[t]ermiod-" || true
+          cargo build --release --target aarch64-unknown-linux-musl
+
+      # A binary that links is not a binary that runs on the VPS: assert it is
+      # actually static ARM ELF and not, say, a host build that slipped through.
+      - name: Verify the cross-compiled binary
+        run: |
+          out="$(file target/aarch64-unknown-linux-musl/release/termiod)"
+          echo "$out"
+          echo "$out" | grep -q "ELF 64-bit"
+          echo "$out" | grep -q "ARM aarch64"
+          echo "$out" | grep -q "statically linked"
+
+  # The deployment platform. termiod's whole job is to outlive the connection on
+  # someone's Linux box, and everything above proves that only by cross-compiling
+  # — this job actually runs the suite there. Same arch as the VPSes we target.
+  linux:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: termiod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Zig
+        run: |
+          url="https://ziglang.org/download/${ZIG_VERSION}/zig-aarch64-linux-${ZIG_VERSION}.tar.xz"
+          curl -fsSL "$url" -o "$RUNNER_TEMP/zig.tar.xz"
+          echo "${ZIG_SHA256_AARCH64_LINUX}  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/zig"
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+
+      - name: Report the toolchain
+        run: |
+          zig version
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo downloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: termiod-cargo-${{ runner.os }}-${{ hashFiles('termiod/Cargo.lock') }}
+          restore-keys: termiod-cargo-${{ runner.os }}-
+
+      - name: Build
+        run: cargo build
+
+      - name: Test
+        run: cargo test
+
+      - name: Smoke test
+        run: |
+          pkill -9 -f "target/debug/[t]ermiod|deps/[t]ermiod-" || true
+          python3 smoke_test.py
+
+      - name: Remote smoke test
+        run: |
+          pkill -9 -f "target/debug/[t]ermiod|deps/[t]ermiod-" || true
+          python3 remote_smoke_test.py

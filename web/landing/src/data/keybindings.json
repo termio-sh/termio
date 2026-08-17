@@ -1,0 +1,170 @@
+{
+  "generatedFrom": "Sources/termio/Keybindings/KeyCommand.swift",
+  "categories": [
+    {
+      "title": "File",
+      "commands": [
+        {
+          "id": "newTerminal",
+          "title": "New Terminal",
+          "shortcut": "⌘T"
+        },
+        {
+          "id": "newTerminalAtHome",
+          "title": "New Terminal at Home",
+          "shortcut": null
+        },
+        {
+          "id": "newChat",
+          "title": "New Chat",
+          "shortcut": "⌘N"
+        },
+        {
+          "id": "openProject",
+          "title": "Open Project…",
+          "shortcut": "⌘O"
+        }
+      ]
+    },
+    {
+      "title": "Navigation",
+      "commands": [
+        {
+          "id": "openQuickly",
+          "title": "Open Quickly…",
+          "shortcut": "⇧⌘O"
+        },
+        {
+          "id": "commandPalette",
+          "title": "Command Palette…",
+          "shortcut": "⇧⌘P"
+        }
+      ]
+    },
+    {
+      "title": "Session",
+      "commands": [
+        {
+          "id": "nextSession",
+          "title": "Next Session",
+          "shortcut": "⇧⌘]"
+        },
+        {
+          "id": "previousSession",
+          "title": "Previous Session",
+          "shortcut": "⇧⌘["
+        }
+      ]
+    },
+    {
+      "title": "Branch",
+      "commands": [
+        {
+          "id": "newWorktree",
+          "title": "New Worktree…",
+          "shortcut": "⇧⌘N"
+        },
+        {
+          "id": "newPullRequest",
+          "title": "New Pull Request",
+          "shortcut": "⌘R"
+        }
+      ]
+    },
+    {
+      "title": "Panes",
+      "commands": [
+        {
+          "id": "splitRight",
+          "title": "Split Right",
+          "shortcut": "⌘D"
+        },
+        {
+          "id": "splitLeft",
+          "title": "Split Left",
+          "shortcut": null
+        },
+        {
+          "id": "splitDown",
+          "title": "Split Down",
+          "shortcut": "⇧⌘D"
+        },
+        {
+          "id": "splitUp",
+          "title": "Split Up",
+          "shortcut": null
+        },
+        {
+          "id": "splitZoom",
+          "title": "Zoom Split",
+          "shortcut": "⇧⌘↩"
+        },
+        {
+          "id": "ungroup",
+          "title": "Ungroup",
+          "shortcut": "⌘W"
+        },
+        {
+          "id": "focusPaneLeft",
+          "title": "Focus Pane Left",
+          "shortcut": "⌥⌘←"
+        },
+        {
+          "id": "focusPaneRight",
+          "title": "Focus Pane Right",
+          "shortcut": "⌥⌘→"
+        },
+        {
+          "id": "focusPaneUp",
+          "title": "Focus Pane Up",
+          "shortcut": "⌥⌘↑"
+        },
+        {
+          "id": "focusPaneDown",
+          "title": "Focus Pane Down",
+          "shortcut": "⌥⌘↓"
+        }
+      ]
+    },
+    {
+      "title": "Font",
+      "commands": [
+        {
+          "id": "increaseFontSize",
+          "title": "Increase Font Size",
+          "shortcut": "⌘="
+        },
+        {
+          "id": "decreaseFontSize",
+          "title": "Decrease Font Size",
+          "shortcut": "⌘-"
+        },
+        {
+          "id": "resetFontSize",
+          "title": "Reset Font Size",
+          "shortcut": "⌘0"
+        }
+      ]
+    },
+    {
+      "title": "Window",
+      "commands": [
+        {
+          "id": "closeWindow",
+          "title": "Close Window",
+          "shortcut": "⇧⌘W"
+        }
+      ]
+    },
+    {
+      "title": "Interface",
+      "commands": [
+        {
+          "id": "toggleProjectFiles",
+          "title": "Show Project Files",
+          "shortcut": "⌥⌘0"
+        }
+      ]
+    }
+  ]
+}

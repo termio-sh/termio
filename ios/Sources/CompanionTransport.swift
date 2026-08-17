@@ -59,6 +59,10 @@ final class CompanionTransport: NSObject {
     /// terminal didn't). So grid and keystroke frames stay suppressed until
     /// `didOpen` has queued the auth preamble and set this true. Guarded by `gridLock`.
     private var authSent = false
+    /// Raw PTY input stays closed until the Mac acknowledges auth with its
+    /// roster. Control messages remain optimistic because their version-0
+    /// meanings are stable. Guarded by `gridLock`.
+    private var authAccepted = false
 
     /// Remote PTY bytes for the terminal. Fired on a URLSession queue.
     var onOutput: ((Data) -> Void)?
@@ -106,9 +110,12 @@ final class CompanionTransport: NSObject {
 
     func send(_ data: Data) {
         gridLock.lock()
-        let ready = authSent
+        let ready = authAccepted
         gridLock.unlock()
         guard ready else { return }
+        // Binary frames are raw PTY bytes permanently. Compression, encryption,
+        // or multiplexing needs a separately negotiated mechanism and Wire gate
+        // so a stale Mac can never interpret framing as keystrokes.
         task?.send(.data(data)) { _ in }
     }
 
@@ -173,6 +180,7 @@ final class CompanionTransport: NSObject {
         // keystroke frames until `didOpen` does, so nothing precedes `auth`.
         gridLock.lock()
         authSent = false
+        authAccepted = false
         gridLock.unlock()
         task.resume()
         receive(on: task)
@@ -217,15 +225,26 @@ final class CompanionTransport: NSObject {
                 case .data(let data):
                     onOutput?(data)
                 case .string(let text):
-                    switch CompanionControl.decode(text) {
-                    case .exit:
-                        finish(.closed)
-                    case .error(let message):
-                        finish(.failed(message))
-                    case .traceHTML(_, let html):
-                        DispatchQueue.main.async { [onTrace] in onTrace?(html) }
-                    default:
-                        break // roster frames and echoes are not for this link
+                    if let roster = CompanionRoster.decode(text) {
+                        if roster.wire < Wire.minimumServer {
+                            task.cancel(with: .policyViolation, reason: nil)
+                            finish(.failed(localized("Update Termio on your Mac to connect this phone.")))
+                        } else {
+                            gridLock.lock()
+                            authAccepted = true
+                            gridLock.unlock()
+                        }
+                    } else {
+                        switch CompanionControl.decode(text) {
+                        case .exit:
+                            finish(.closed)
+                        case .error(let message):
+                            finish(.failed(message))
+                        case .traceHTML(_, let html):
+                            DispatchQueue.main.async { [onTrace] in onTrace?(html) }
+                        default:
+                            break
+                        }
                     }
                 @unknown default:
                     break
@@ -256,7 +275,9 @@ extension CompanionTransport: URLSessionWebSocketDelegate {
         // Auth precedes the attach on the same socket — the server refuses
         // the bridge (and everything else) until the token lands.
         if let token = CompanionLink.token(of: url) {
-            task.send(.string(CompanionControl.auth(token: token).encoded())) { _ in }
+            task.send(
+                .string(CompanionControl.auth(token: token, wire: Wire.current).encoded())
+            ) { _ in }
         } else {
             // No `?t=` on the URL: the Mac drops this socket after its ~10s
             // auth grace window, so the session just churns "Reconnecting…"

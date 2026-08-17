@@ -64,6 +64,45 @@ public enum FileTypeIcon {
         }
     }
 
+    /// The non-code resource categories, for hosts that draw these in their own
+    /// icon language instead of the tinted SF Symbol (the Mac file tree renders
+    /// them as Hugeicons line glyphs; iOS keeps the symbols). `nil` means the file
+    /// is code-shaped and should use `icon(for:)`. Extension sets mirror
+    /// `icon(for:)` — keep the two switches in sync.
+    public enum ResourceKind {
+        case image, pdf, audio, video, plainText, generic
+    }
+
+    public static func resourceKind(for url: URL) -> ResourceKind? {
+        switch url.lastPathComponent.lowercased() {
+        case "license", "license.md", "license.txt", "dockerfile", "containerfile",
+             "makefile", "gnumakefile", ".gitignore", ".dockerignore", ".npmignore",
+             ".env", ".editorconfig", ".npmrc":
+            return nil
+        default: break
+        }
+        switch url.pathExtension.lowercased() {
+        case "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tiff", "bmp", "ico", "icns":
+            return .image
+        case "pdf": return .pdf
+        case "mp3", "wav", "aif", "aiff", "m4a", "flac", "mid": return .audio
+        case "mp4", "mov", "avi", "mkv", "webm": return .video
+        case "md", "markdown", "mdx", "txt", "rst", "rtf": return .plainText
+        case "swift", "js", "mjs", "cjs", "ts", "mts", "cts", "jsx", "tsx",
+             "json", "jsonc", "json5", "resolved", "yml", "yaml", "lock",
+             "py", "pyw", "pyi", "rb", "go", "rs", "c", "h",
+             "cpp", "cc", "cxx", "hpp", "hh", "hxx", "m", "mm",
+             "java", "kt", "kts", "cs", "php", "dart", "vue",
+             "html", "htm", "xhtml", "xml", "plist", "svg",
+             "css", "scss", "sass", "less", "sql", "graphql", "gql",
+             "sh", "bash", "zsh", "fish", "ksh", "ps1", "bat", "cmd",
+             "toml", "ini", "conf", "cfg", "properties", "env", "xcconfig",
+             "strings", "entitlements":
+            return nil
+        default: return .generic
+        }
+    }
+
     // CodeEdit's named tints (its asset-catalog colors), as close sRGB equivalents.
     private static let amber = Color(.sRGB, red: 0.95, green: 0.66, blue: 0.13)
     private static let scarlet = Color(.sRGB, red: 0.88, green: 0.22, blue: 0.17)

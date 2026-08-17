@@ -144,11 +144,11 @@ export default function TermsPage() {
               <p>
                 Questions about these terms? Open an issue at{" "}
                 <a
-                  href="https://github.com/jiweiyuan/termio/issues"
+                  href="https://github.com/termio-sh/termio/issues"
                   target="_blank"
                   rel="noreferrer"
                 >
-                  github.com/jiweiyuan/termio
+                  github.com/termio-sh/termio
                 </a>
                 .
               </p>

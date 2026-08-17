@@ -14,11 +14,11 @@ updated: 2026-07-02
 
 ## Motivation
 
-termio can already drive agents programmatically — the `termio sessions`
+Termio can already drive agents programmatically — the `termio sessions`
 control plane types prompts into live PTYs and reads replies from transcripts.
 What's missing is the *user-facing* layer: a way for a person to say "run this
 prompt in this project every morning at 9" without scripting anything. Sibling
-products (sarea) ship this as a first-class feature; for termio it is a natural
+products (sarea) ship this as a first-class feature; for Termio it is a natural
 extension of machinery that already exists (session spawning, hooks-based
 status, the menu-bar tray).
 
@@ -33,7 +33,7 @@ status, the menu-bar tray).
 - `--dangerously-skip-permissions` (= `--permission-mode bypassPermissions`)
   works in both interactive and `-p` mode. It refuses to start as root and
   keeps circuit breakers (`rm -rf /`). Docs recommend isolated environments —
-  termio's per-project Seatbelt sandbox is exactly that.
+  Termio's per-project Seatbelt sandbox is exactly that.
 - Read-only pre-approval: `--allowedTools "Read,Grep,Glob,WebFetch,WebSearch"`.
 - Billing: with a Pro/Max subscription login, headless and interactive runs
   both draw from the plan's quota at no per-token charge (the planned June 2026
@@ -66,14 +66,14 @@ Sarea ships a complete automation engine worth mining:
   database, gateway credential routing, per-tool permission matrices.
 
 The load-bearing lesson: sarea runs automations as **visible sessions**, not
-invisible background jobs. That fits termio even better — sessions *are* the
+invisible background jobs. That fits Termio even better — sessions *are* the
 product.
 
 ## Design
 
 ### Execution: fire a real session, reuse the send machinery
 
-An automation run is an ordinary termio session:
+An automation run is an ordinary Termio session:
 
 1. At fire time, create a session in the automation's project (existing
    `TermioStore` session creation, including `SandboxLauncher` wrapping when
@@ -111,7 +111,7 @@ CI-style/batch use, not for this feature.
 `once | hourly | daily | weekly` + time-of-day + weekday set (for weekly).
 System timezone, `Calendar`-based next-occurrence computation. No RRULE, no
 intervals, no end conditions — that is most of sarea's form complexity for a
-sliver of its usage. If termio is closed at fire time the run is skipped and
+sliver of its usage. If Termio is closed at fire time the run is skipped and
 `nextRunAt` advances to the next future occurrence (sessions don't survive app
 quit anyway; a launchd story is out of scope).
 

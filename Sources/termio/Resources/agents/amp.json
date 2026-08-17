@@ -6,6 +6,7 @@
   "command": "amp",
   "icon": { "asset": "amp-favicon" },
   "install": "https://ampcode.com/manual",
+  "skills": { "dir": "~/.config/agents/skills" },
   "hooks": {
     "type": "plugin",
     "dir": "~/.config/amp/plugins",

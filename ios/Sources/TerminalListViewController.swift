@@ -7,9 +7,9 @@ import UIKit
 /// section, and the exact mirror of the Chats tab for shells instead of agents.
 /// Loose terminals used to fall through as a project *folder* you had to tap
 /// into; promoting them to their own tab keeps a live shell one tap away, the
-/// same shape Chats already got. A row goes straight to its terminal. ＋ opens a
-/// new plain shell at `~` — no agent to pick, so (unlike Chats) it carries no
-/// per-agent menu.
+/// same shape Chats already got. A row goes straight to its terminal. The
+/// title-bar ＋ opens a new plain shell at `~` — no agent to pick, so (unlike
+/// Chats) it carries no per-agent menu.
 final class TerminalListViewController: UIViewController {
     private let store: RosterStore
 
@@ -19,6 +19,7 @@ final class TerminalListViewController: UIViewController {
     private let tableView = UITableView(frame: .zero, style: .grouped)
     private let emptyState = ListEmptyStateView()
     private var rosterObserver: NSObjectProtocol?
+    private var themeObserver: NSObjectProtocol?
 
     init(store: RosterStore) {
         self.store = store
@@ -29,12 +30,12 @@ final class TerminalListViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        themeObserver = installThemeBackdrop()
+        configureNewTerminalButton()
         let topBar = configureTopBar()
         configureTable(below: topBar)
         configureEmptyState(below: topBar)
-        // Added last so it floats over the list, opposite the home tab pill.
-        configureNewTerminalButton()
+        configureFab()
         refilter()
         rosterObserver = NotificationCenter.default.addObserver(
             forName: RosterStore.didChange, object: nil, queue: .main
@@ -47,6 +48,9 @@ final class TerminalListViewController: UIViewController {
         if let rosterObserver {
             NotificationCenter.default.removeObserver(rosterObserver)
         }
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
     }
 
     func refresh() {
@@ -57,7 +61,7 @@ final class TerminalListViewController: UIViewController {
 
     private func configureTopBar() -> UIView {
         let pageTitle = UILabel()
-        pageTitle.text = "Terminals"
+        pageTitle.text = localized("Terminals")
         pageTitle.font = .systemFont(ofSize: 34, weight: .bold)
         pageTitle.textColor = .label
 
@@ -77,29 +81,61 @@ final class TerminalListViewController: UIViewController {
         return bar
     }
 
-    /// ＋ floats bottom-right, opposite the home tab pill — the compose corner.
-    /// A TAP is one new terminal: a plain login shell at `~`, which the Mac
-    /// gathers into the loose `.terminals` funnel. There is no agent to choose,
-    /// so — unlike the Chats ＋ — no long-press menu. Hidden until the Mac has a
-    /// terminals container to land in (mirrors the Chats ＋), and while unpaired.
-    private func configureNewTerminalButton() {
-        newTerminalButton.applyGlassIcon(.add, boxSize: 26)
-        newTerminalButton.tintColor = .label
-        newTerminalButton.accessibilityLabel = "New Terminal"
-        newTerminalButton.addAction(
-            UIAction { [weak self] _ in self?.store.startDefaultTerminal() },
-            for: .touchUpInside
-        )
+    /// The compose ＋ floats in the bottom-right corner as a glass FAB, above the
+    /// native tab bar — thumb-reachable and clear of the large title. Added
+    /// after the table so it sits above the rows.
+    private func configureFab() {
         newTerminalButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(newTerminalButton)
         NSLayoutConstraint.activate([
-            newTerminalButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            // The tab pill's own scale (64pt, 8pt above the safe area), so the
-            // two ends of the bottom edge read as one balanced bar.
-            newTerminalButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            newTerminalButton.widthAnchor.constraint(equalToConstant: 64),
-            newTerminalButton.heightAnchor.constraint(equalToConstant: 64),
+            newTerminalButton.trailingAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            newTerminalButton.bottomAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            newTerminalButton.widthAnchor.constraint(equalToConstant: 52),
+            newTerminalButton.heightAnchor.constraint(equalToConstant: 52),
         ])
+    }
+
+    /// The compose menu: New Terminal (a plain login shell the Mac gathers into
+    /// the loose `.terminals` funnel) and New SSH. New SSH is a read-only pick
+    /// from the Mac's `~/.ssh/config` aliases — the phone never types a host —
+    /// so it's deferred to reflect the current config.
+    private func configureNewTerminalButton() {
+        newTerminalButton.applyGlassIcon(.add, boxSize: 24)
+        newTerminalButton.tintColor = .label
+        newTerminalButton.accessibilityLabel = localized("New Terminal")
+        newTerminalButton.showsMenuAsPrimaryAction = true
+        newTerminalButton.menu = UIMenu(children: [
+            UIAction(
+                title: localized("New Terminal"),
+                image: HugeIcon.terminal.strokeImage(boxSize: 22)
+            ) { [weak self] _ in self?.store.startNewTerminal() },
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                completion([self?.sshMenu() ?? UIMenu()])
+            },
+        ])
+    }
+
+    /// The "New SSH" submenu: one entry per `~/.ssh/config` host the Mac knows.
+    /// Read-only by design — the phone chooses a known alias, it never authors a
+    /// host. An empty config shows a disabled hint pointing back to the Mac, so
+    /// the item never dead-ends on a tap.
+    private func sshMenu() -> UIMenu {
+        let icon = HugeIcon.network.strokeImage(boxSize: 22)
+        let hosts = store.sshHosts
+        guard !hosts.isEmpty else {
+            let hint = UIAction(title: localized("Add hosts in ~/.ssh/config on your Mac")) { _ in }
+            hint.attributes = .disabled
+            return UIMenu(title: localized("New SSH"), image: icon, children: [hint])
+        }
+        let items = hosts.map { host in
+            UIAction(
+                title: host.alias,
+                subtitle: host.user.isEmpty ? host.hostName : "\(host.user)@\(host.hostName)"
+            ) { [weak self] _ in self?.store.startSSH(host: host.alias) }
+        }
+        return UIMenu(title: localized("New SSH"), image: icon, children: items)
     }
 
     // MARK: - Table
@@ -115,10 +151,8 @@ final class TerminalListViewController: UIViewController {
         tableView.keyboardDismissMode = .onDrag
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
         tableView.translatesAutoresizingMaskIntoConstraints = false
-        // The floating pill/＋ sit over the list; reserve room so the last
-        // rows scroll clear of them (64pt pill + margins).
-        tableView.contentInset.bottom = 80
-        tableView.verticalScrollIndicatorInsets.bottom = 80
+        // The native tab controller contributes the correct safe-area and
+        // adjusted scroll insets for both the classic and Liquid Glass bars.
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 16),
@@ -130,7 +164,9 @@ final class TerminalListViewController: UIViewController {
 
     private func refilter() {
         terminals = store.terminalSessions
-        newTerminalButton.isHidden = store.terminalsProject?.rosterID == nil
+        // Shown whenever paired: New Terminal is project-less, so it no longer
+        // needs an existing terminals container to land in (it seeds the first).
+        newTerminalButton.isHidden = store.companionURL == nil
         tableView.reloadData()
         updateEmptyState()
     }
@@ -150,19 +186,19 @@ final class TerminalListViewController: UIViewController {
     }
 
     /// Link-state nuance lives on the Projects tab (the pairing home); this
-    /// zero state only answers "no terminals yet". When the ＋ is visible it is
-    /// the next step; when it's hidden (no container yet) the message points at
-    /// the Mac, since the phone can't seed the first one over the wire.
+    /// zero state only answers "no terminals yet". Whenever paired the ＋ can
+    /// seed the first terminal, so it's the next step; only while unpaired (＋
+    /// hidden) does the message fall back to pointing at the Mac.
     private func updateEmptyState() {
         emptyState.isHidden = !terminals.isEmpty
         guard !emptyState.isHidden else { return }
-        let canStart = store.terminalsProject?.rosterID != nil
+        let canStart = store.companionURL != nil
         emptyState.configure(
-            symbol: "terminal",
-            title: "No terminals yet",
+            icon: .terminal,
+            title: localized("No terminals yet"),
             message: canStart
-                ? "Terminals are plain shells that aren't tied to a project. Start one with ＋, or on your Mac."
-                : "Terminals are plain shells that aren't tied to a project. Start one on your Mac and it appears here.",
+                ? localized("Terminals are plain shells that aren't tied to a project. Start one with ＋, or on your Mac.")
+                : localized("Terminals are plain shells that aren't tied to a project. Start one on your Mac and it appears here."),
             actionTitle: nil,
             busy: false
         )
@@ -207,7 +243,7 @@ extension TerminalListViewController: UITableViewDataSource, UITableViewDelegate
         guard store.companionURL != nil,
               let sessionID = terminals[indexPath.row].rosterID
         else { return nil }
-        let close = UIContextualAction(style: .destructive, title: "Close") { [weak self] _, _, done in
+        let close = UIContextualAction(style: .destructive, title: localized("Close")) { [weak self] _, _, done in
             self?.store.stopSession(sessionID)
             done(true)
         }
