@@ -1586,7 +1586,7 @@ final class TermioStore: ObservableObject {
 
     /// The working directory of the selected session (its worktree, else the project root), used as
     /// the fall-back base for resolving a relative path when the surface hasn't reported an OSC 7 cwd.
-    var selectedSessionWorkspace: String? {
+    private var selectedSessionWorkspace: String? {
         guard let id = selectedSessionID, let session = session(id), let project = project(for: id)
         else { return nil }
         return session.worktreePath ?? project.path

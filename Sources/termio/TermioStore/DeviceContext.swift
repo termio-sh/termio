@@ -151,7 +151,7 @@ extension TermioStore {
     /// so it must not move the selection back — it changes the context only.
     func enterDevice(of id: Session.ID) {
         guard let session = session(id) else { return }
-        let alias = session.termiodRemoteHost ?? session.sshHost
+        let alias = deviceAlias(of: session)
         guard alias != currentDeviceAlias else { return }
         currentDeviceAlias = alias
         settings.currentDeviceAlias = alias
@@ -211,11 +211,24 @@ extension TermioStore {
         isAuthored(session, for: currentDevice)
     }
 
+    /// Which machine a session is *about*, as a `~/.ssh/config` alias, or `nil` for
+    /// this Mac. A durable termiod session names its box directly; a plain `ssh`
+    /// terminal runs its PTY here but exists to put the user on that box, so it
+    /// belongs to the same place. This is the single spelling of that rule — anything
+    /// that asks "whose machine is this session's world?" must come through here, or
+    /// it will answer for only one of the two ways of being elsewhere.
+    func deviceAlias(of session: Session) -> String? {
+        session.termiodRemoteHost ?? session.sshHost
+    }
+
+    /// Whether this session's filesystem is this Mac's. The gate for anything that
+    /// reads local disk on a session's behalf: a path printed by a shell on another
+    /// box names a file *there*, and `src/main.rs` exists on both machines, so
+    /// resolving it here would quietly open a different file than the one clicked.
+    func isOnThisMac(_ session: Session) -> Bool { deviceAlias(of: session) == nil }
+
     private func isAuthored(_ session: Session, for device: KnownDevice) -> Bool {
-        // Which machine the session is *about*. A durable termiod session names
-        // it directly; a plain `ssh` terminal runs its PTY here but exists to put
-        // the user on that box, so it belongs to the same place. `nil` is this Mac.
-        let alias = session.termiodRemoteHost ?? session.sshHost
+        let alias = deviceAlias(of: session)
         // Matched by device identity once both ends know it, so a box reached by
         // a second alias is still the same machine — and by alias until the first
         // handshake resolves one, the bootstrap/stable split `KnownDevice` carries.

@@ -256,11 +256,13 @@ extension TermioStore {
         guard let (terminal, state) = terminalSurface(at: windowPoint, in: window) else {
             return false
         }
-        let surfaceID = surfaces.first(where: { $0.value === state })?.key
-        // The paths an `ssh` session prints live on the remote box. Resolving them
-        // against the local filesystem is worse than doing nothing: `src/main.rs`
-        // exists on both machines, so the click would quietly open the wrong file.
-        if let surfaceID, session(surfaceID)?.sshHost != nil { return false }
+        // Only this Mac's own sessions may be resolved, and the surface has to be
+        // identified before that can be asked — a surface we cannot name is a surface
+        // whose device we do not know, so it is declined rather than assumed local.
+        // Every surface is registered under its session id when it is built, so this
+        // costs nothing in practice.
+        guard let surfaceID = surfaces.first(where: { $0.value === state })?.key,
+              let owner = session(surfaceID), isOnThisMac(owner) else { return false }
         guard let metrics = state.surfaceSize,
               metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0 else {
             return false
@@ -328,18 +330,20 @@ extension TermioStore {
     /// project root. The project root is the reliable anchor — the terminal cwd can be
     /// stale or unreported (no OSC 7), which is why a bare `package.json` must still
     /// resolve against the project the surface belongs to.
-    private func pathBaseDirectories(surfaceID: UUID?, state: TerminalViewState) -> [String] {
+    ///
+    /// Every root here belongs to the *clicked* session. The selected session is
+    /// deliberately not consulted as a last resort: on a multi-device window it can be
+    /// a session on another machine, and its project root would resolve the path
+    /// against a tree the clicked terminal has never been in.
+    private func pathBaseDirectories(surfaceID: UUID, state: TerminalViewState) -> [String] {
         var bases: [String] = []
-        if let surfaceID {
-            // Live cwd straight from the kernel (`PROC_PIDVNODEPATHINFO`), the reliable
-            // anchor: it tracks a plain `cd` even when the shell never emits OSC 7 — the
-            // exact case where the OSC 7 `workingDirectory` read is stale (still `~`).
-            if let liveCwd = ptyProcesses[surfaceID]?.currentWorkingDirectory() { bases.append(liveCwd) }
-            if let worktree = session(surfaceID)?.worktreePath { bases.append(worktree) }
-            if let project = project(for: surfaceID) { bases.append(project.path) }
-        }
+        // Live cwd straight from the kernel (`PROC_PIDVNODEPATHINFO`), the reliable
+        // anchor: it tracks a plain `cd` even when the shell never emits OSC 7 — the
+        // exact case where the OSC 7 `workingDirectory` read is stale (still `~`).
+        if let liveCwd = ptyProcesses[surfaceID]?.currentWorkingDirectory() { bases.append(liveCwd) }
+        if let worktree = session(surfaceID)?.worktreePath { bases.append(worktree) }
+        if let project = project(for: surfaceID) { bases.append(project.path) }
         if let cwd = state.workingDirectory { bases.append(cwd) }
-        if let workspace = selectedSessionWorkspace { bases.append(workspace) }
         return bases
     }
 }
