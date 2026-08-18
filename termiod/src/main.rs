@@ -19,6 +19,7 @@ mod resource;
 mod service;
 mod session;
 mod tombstone;
+mod wss;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
