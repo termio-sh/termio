@@ -1,0 +1,31 @@
+{
+  "name": "termio-web-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser Replica for termiod: framed Session Protocol over WSS, official ghostty-vt.wasm as the VT.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "wasm": "../../scripts/ghostty-wasm.sh fetch",
+    "webroot": "../../scripts/stage-web-root.sh"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5",
+    "jsdom": "^26",
+    "typescript": "^6",
+    "vite": "^7",
+    "vitest": "^3"
+  }
+}

@@ -1,0 +1,380 @@
+/* The chrome only. Terminal pixels come from the canvas, and no terminal text
+   ever reaches the DOM as markup.
+
+   Every colour here is a custom property set by `chromeTokens()` from the
+   terminal palette — there are no literal colours in this file. That is the
+   rule `ChromeTheme.swift` enforces on the Mac, and the reason the chrome sits
+   flush with the terminal instead of clashing with it at every theme. */
+
+:root {
+  color-scheme: var(--scheme, dark);
+
+  /* One spacing step, so nothing is a magic number. */
+  --gap: 4px;
+
+  /* Continuous corners, matching the Mac's 5/6/7/8pt ladder. Small radii read
+     as precise; large ones read as a consumer app and fight the terminal grid. */
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 10px;
+
+  /* Critically damped, no overshoot — the default for anything that did not
+     follow a gesture. Overshoot on a menu that merely appeared feels wrong. */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --fast: 120ms;
+  --slow: 260ms;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* The platform font ships optical sizing and tracking tables already. */
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ── Sidebar ───────────────────────────────────────────────────────────── */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  /* A hairline of ink, not a grey bar. The panel step already separates the
+     columns; this only sharpens the seam. */
+  box-shadow: inset -1px 0 0 var(--line);
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 10px 12px;
+  /* No divider. The scroll edge below does the separating, and only where
+     content actually passes under the header. */
+}
+
+.brand {
+  font-size: 12px;
+  font-weight: 590;
+  /* Small text wants a touch of positive tracking; large text wants negative.
+     A single letter-spacing for everything is wrong somewhere. */
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.sessions {
+  list-style: none;
+  margin: 0;
+  padding: 2px 8px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Fade content into the header instead of drawing a rule under it. */
+  mask-image: linear-gradient(to bottom, transparent, #000 10px);
+}
+
+.session {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 1px 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: default;
+  font: inherit;
+  transition: background var(--fast) var(--ease);
+}
+
+.session:hover {
+  background: var(--hover);
+}
+
+/* Feedback belongs on the press, not the release. */
+.session:active {
+  background: var(--line-strong);
+}
+
+.session-active,
+.session-active:hover {
+  background: var(--accent-soft);
+}
+
+.session-active .session-name {
+  color: var(--text);
+  font-weight: 590;
+}
+
+.session-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-cwd {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  grid-row: 1 / span 2;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-dead);
+}
+
+.status-working {
+  background: var(--status-working);
+}
+.status-needs_you {
+  background: var(--status-needs-you);
+  /* The one thing in the app allowed to ask for attention. Slow enough not to
+     nag, and it is the only animation that loops. */
+  animation: pulse 2s var(--ease) infinite;
+}
+.status-done {
+  background: var(--status-done);
+}
+.status-failed {
+  background: var(--status-failed);
+}
+.status-dead {
+  background: var(--status-dead);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* ── Main ──────────────────────────────────────────────────────────────── */
+
+.main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.toolbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  /* A translucent layer the terminal passes under, not an opaque strip that
+     eats a band of the window. */
+  background: var(--material);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+
+.title {
+  font-weight: 590;
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dims {
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 510;
+  letter-spacing: 0.01em;
+}
+
+.badge-writer {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.spacer {
+  flex: 1;
+}
+
+button {
+  padding: 4px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-weight: 510;
+  cursor: default;
+  transition:
+    background var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+
+button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  opacity: 0.4;
+}
+
+button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.notice {
+  margin: 0;
+  padding: 7px 12px;
+  background: var(--panel);
+  box-shadow: inset 0 -1px 0 var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.notice-error {
+  color: var(--status-failed);
+}
+
+.stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.surface {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.surface-canvas {
+  display: block;
+  outline: none;
+}
+
+.empty,
+.gate {
+  margin: auto;
+  padding: 32px;
+  max-width: 44ch;
+  color: var(--muted);
+}
+
+.empty {
+  text-align: center;
+  text-wrap: balance;
+}
+
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--hover);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+}
+
+/* ── Accessibility ─────────────────────────────────────────────────────── */
+
+/* Reduced motion is not "no feedback" — it is the same feedback without the
+   vestibular part. The press scale and the attention pulse go; colour stays. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  button:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* Frost the material rather than removing the layer, so hierarchy survives. */
+@media (prefers-reduced-transparency: reduce) {
+  .toolbar {
+    background: var(--panel);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .toolbar,
+  .notice {
+    background: var(--panel);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .session-active,
+  .session-active:hover {
+    outline: 1px solid var(--accent);
+  }
+
+  .badge {
+    outline: 1px solid var(--line-strong);
+  }
+}

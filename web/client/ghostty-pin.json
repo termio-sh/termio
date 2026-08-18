@@ -1,0 +1,74 @@
+{
+  "$comment": [
+    "The one declared ghostty commit for the browser Replica's VT.",
+    "",
+    "The browser must run the SAME state machine as the host sidecar and the Mac,",
+    "or the Replica contract is a lie: three parsers disagreeing on grapheme width,",
+    "autowrap, and kitty keyboard, with no test catching it. Three places pin that",
+    "commit today and none of them can see the other two:",
+    "",
+    "  termiod/vt/Cargo.toml  -> libghostty-rs rev -> build.rs GHOSTTY_COMMIT",
+    "  Package.resolved       -> libghostty-swift version -> release body sha",
+    "  this file              -> the ghostty-vt.wasm the web root serves",
+    "",
+    "scripts/check-ghostty-pin.sh resolves all three and fails when they disagree.",
+    "Bumping the host VT means bumping this file in the same change.",
+    "",
+    "artifact.url is content-addressed by the FULL commit sha, so it is stable even",
+    "though the `tip` release tag it was cut from is not. Ghostty publishes no",
+    "minisign signature under that path (only under the moving tag), so integrity",
+    "here is artifact.sha256, recorded once and verified on every fetch.",
+    "",
+    "The artifact was checked against a from-source build at the same commit:",
+    "identical export table (180 entries) and byte-identical ghostty_type_json."
+  ],
+
+  "ghostty_sha": "56e1f3a62e26407e8c020ef5881df3e8584be20f",
+  "ghostty_describe": "v1.3.1-2067-g56e1f3a",
+
+  "artifact": {
+    "name": "ghostty-vt.wasm",
+    "url": "https://tip.files.ghostty.org/56e1f3a62e26407e8c020ef5881df3e8584be20f/ghostty-vt.wasm",
+    "sha256": "2efd051d15cf45974cfcabde7582c5b4a520ead5259544826338ef1d2a07bff8",
+    "bytes": 902275,
+    "optimize": "ReleaseFast",
+    "content_type": "application/wasm"
+  },
+
+  "source_build": {
+    "$comment": [
+      "The fallback, for a commit whose blob has aged out of the tip bucket.",
+      "Reproduces ghostty's own release-tip.yml wasm job. zig 0.16.0 is what",
+      "ghostty's flake.nix pins and what .github/workflows/termiod.yml installs;",
+      "wasm-opt comes from binaryen (`brew install binaryen`) and is what turns a",
+      "4.2 MB debug-info build into the 902,275-byte artifact above.",
+      "",
+      "Measured: this build is REPRODUCIBLE. zig 0.16.0 + binaryen 132 on an",
+      "arm64 Mac produced sha256 2efd051d… — byte for byte the artifact ghostty's",
+      "Linux CI published. That is the integrity proof standing in for the",
+      "minisign signature that the content-addressed path does not carry.",
+      "Reproducibility is a property of those two toolchain versions, so a",
+      "mismatch under different ones is toolchain drift, not tampering; fall back",
+      "to comparing the export table and ghostty_type_json in that case."
+    ],
+    "repo": "https://github.com/ghostty-org/ghostty.git",
+    "zig": "0.16.0",
+    "wasm_opt": "132",
+    "reproduced_by": "zig 0.16.0 + binaryen 132, aarch64-macos, 2026-08-18",
+    "zig_build_args": [
+      "-Demit-lib-vt",
+      "-Dtarget=wasm32-freestanding",
+      "-Doptimize=ReleaseFast"
+    ],
+    "wasm_opt_args": [
+      "-O3",
+      "--strip-dwarf",
+      "--enable-simd",
+      "--enable-bulk-memory",
+      "--enable-sign-ext",
+      "--enable-nontrapping-float-to-int",
+      "--enable-multivalue",
+      "--enable-reference-types"
+    ]
+  }
+}
