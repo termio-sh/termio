@@ -43,7 +43,31 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Run the session host in the foreground (usually auto-started).
-    Serve,
+    Serve {
+        /// Also accept browsers on this loopback address (for example
+        /// `127.0.0.1:8790`). Refused for anything reachable from the network:
+        /// put Tailscale Serve or Caddy in front, since termiod does not
+        /// terminate TLS. Remembered in `wss.bind` so a restart keeps it.
+        #[arg(long, value_name = "ADDR")]
+        wss: Option<String>,
+        /// Origin allowed to open a WebSocket. Repeatable. Required behind a
+        /// TLS terminator, whose Host header is not the browser's origin.
+        #[arg(long, value_name = "ORIGIN")]
+        wss_origin: Vec<String>,
+        /// Serve the web client's static files from this directory.
+        #[arg(long, value_name = "DIR")]
+        web_root: Option<std::path::PathBuf>,
+    },
+
+    /// Print the pairing token browsers use, minting it if it does not exist.
+    Pair {
+        /// Replace the token. Open web attachments detach; sessions live on.
+        #[arg(long)]
+        rotate: bool,
+        /// Forget the remembered WSS bind. The next `serve` is Unix-only.
+        #[arg(long)]
+        wss_off: bool,
+    },
 
     /// Create a new session and print its id.
     Create {
@@ -168,7 +192,20 @@ enum Cmd {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Serve => daemon::serve().await,
+        Cmd::Serve {
+            wss,
+            wss_origin,
+            web_root,
+        } => {
+            daemon::serve(wss::ServeOptions {
+                wss,
+                origins: wss_origin,
+                web_root,
+            })
+            .await
+        }
+
+        Cmd::Pair { rotate, wss_off } => wss::pair(rotate, wss_off),
 
         Cmd::Create { name, cwd, argv } => {
             let (rows, cols) = client::term_size();

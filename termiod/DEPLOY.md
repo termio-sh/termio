@@ -5,6 +5,11 @@ own OpenSSH, and SSH is also the access-control boundary. The remote daemon
 listens on a **Unix socket only** — never a TCP port, never `0.0.0.0`. This
 covers issues **#171** (deploy + remote attach) and **#172** (`remote open`).
 
+There is one opt-in exception, off unless you ask for it: a **loopback**
+WebSocket listener so a browser on the box (or behind your own TLS terminator)
+can attach to the same sessions. See
+[Reaching a session from a browser](#optional-reaching-a-session-from-a-browser).
+
 ## Hands-on: test the remote terminal from a Mac, step by step
 
 Everything below assumes an SSH alias in `~/.ssh/config` (the examples use
@@ -160,6 +165,90 @@ ssh my-vps systemctl --user enable --now termiod
 
 This is strictly optional; on-demand start is the supported default.
 
+## Optional: reaching a session from a browser
+
+Off by default. Without `--wss`, `TERMIOD_WSS`, or a `wss.bind` file, nothing
+below is running and the Unix-socket contract above is unchanged.
+
+The listener is **loopback only** and there is no TLS in termiod: anything not
+`127.0.0.0/8` or `::1` is refused when the flag is parsed. TLS and the public
+name come from Tailscale Serve or your own Caddy, which you already trust with
+the rest of the box.
+
+```sh
+ssh my-vps loginctl enable-linger $USER
+ssh my-vps ~/.local/bin/termiod pair       # mint and print the pairing token
+```
+
+The token is 24 random bytes at `state_dir()/pair.token`, mode 0600, beside the
+socket. It authenticates the *pipe*, not the write token — attaching as
+`interact` is what claims input. `termiod pair` prints the current one,
+`termiod pair --rotate` replaces it and drops every open web attachment
+(a detach; the sessions keep running), and `termiod pair --wss-off` forgets the
+remembered bind so the next start is Unix-only.
+
+Then the unit. Both lines matter: `ExecStart` is what a `systemctl restart`
+runs, and `Environment=` is what a daemon auto-started by a client inherits,
+since that path execs a bare `termiod serve`.
+
+```ini
+# ~/.config/systemd/user/termiod.service
+[Unit]
+Description=termiod session host
+[Service]
+ExecStart=%h/.local/bin/termiod serve --wss 127.0.0.1:8790 --wss-origin https://box.tailnet.ts.net --web-root %h/.local/share/termiod/web/current
+Environment=TERMIOD_WSS=127.0.0.1:8790
+Restart=on-failure
+[Install]
+WantedBy=default.target
+```
+
+`serve --wss` remembers the address in `state_dir()/wss.bind` (0600) so a crash
+restart brings the browser pipe back. Two unpaired cases, deliberately
+different: an explicit `--wss` with no `pair.token` refuses the whole start and
+writes nothing, while an *inherited* bind with no token logs
+`wss skipped: no pair.token`, skips TCP, and keeps serving the Unix socket —
+a missing token must not cost you the Mac and the CLI.
+
+Put TLS in front. Tailscale Serve is the recommended one: borrowed tailnet
+identity, no certificate of your own, and it proxies only `http://127.0.0.1`,
+which is exactly what termiod binds.
+
+```sh
+tailscale serve --bg --https=443 --set-path=/termio http://127.0.0.1:8790
+```
+
+Serve publishes the mount rather than stripping it, so requests arrive as
+`/termio/` and `/termio/ws`; Caddy's `handle_path` strips it and they arrive as
+`/` and `/ws`. termiod accepts both, so neither recipe needs a rewrite:
+
+```
+# Caddyfile — Caddy is your choice, not a termiod dependency
+box.example {
+    handle_path /termio/* {
+        reverse_proxy 127.0.0.1:8790
+    }
+}
+```
+
+Either way, pass `--wss-origin https://<public-host>`. A terminator rewrites
+`Host`, so the default same-origin check would reject the browser's real
+Origin.
+
+Open `https://<host>/termio/#t=<token>` — with the trailing slash; `/termio`
+redirects to it. The token rides the URL fragment, which is never sent to a
+server, and then the WebSocket subprotocol; it is never a query parameter,
+because a query parameter is a credential in every access log. Closing the tab
+is a detach, not a kill.
+
+| Concern | Position |
+| --- | --- |
+| Bind | Loopback only, enforced at parse. Default 8790 — not the companion ports (8787 / 8788), which are a different protocol. |
+| Auth | Pairing token (`Sec-WebSocket-Protocol`) plus an Origin allowlist. Both checked before a byte reaches a session. |
+| TLS | Tailscale Serve or your Caddy. termiod ships no CA, pins no certificate, and speaks no HTTPS. |
+| Other local users | The socket is 0600 in a 0700 directory; a TCP port is not. On a shared box the token is the only ACL — rotate it. |
+| Blast radius | The token plus a route to the port is shell access as that uid, the same sentence as the Unix socket above. |
+
 ## Reconnect workflow
 
 ```sh
@@ -175,7 +264,7 @@ Session survives: SSH disconnects, laptop sleep, network drops. It ends only on
 
 | Concern | Position |
 | --- | --- |
-| Listener | Unix socket under `$XDG_RUNTIME_DIR/termiod/` (or uid-tmp), mode 0600. **No TCP, no public port.** |
+| Listener | Unix socket under `$XDG_RUNTIME_DIR/termiod/` (or uid-tmp), mode 0600. **No public port** — the optional `--wss` listener is loopback only and token-gated. |
 | Auth / ACL | **SSH.** Whoever can `ssh my-vps` as your user can reach your daemon — same trust as a shell. |
 | Credentials | Your ssh-agent / `~/.ssh` keys. termiod stores and transmits none. |
 | Multi-user | Socket is per-uid and 0600; another user on the box can't connect. |
