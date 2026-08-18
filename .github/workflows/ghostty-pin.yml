@@ -1,0 +1,66 @@
+name: ghostty pin
+
+# One ghostty across the host, the Mac, and the browser.
+#
+# The Replica contract says the browser runs the same VT state machine as
+# termiod's sidecar and as the Mac app. Three files assert that, none of them
+# can see the other two, and every one of them is a hop away from the sha it
+# implies: a libghostty-rs rev whose build.rs carries GHOSTTY_COMMIT, a
+# libghostty-swift version whose release body records the sha it built, and the
+# wasm the web root serves. Bump one and miss another and everything still
+# builds — the browser just disagrees with the host about grapheme width,
+# autowrap, or a kitty keyboard sequence, on a VPS, in front of a user.
+#
+# Deliberately its own workflow rather than a job in termiod.yml: path filters
+# are per workflow, and Package.resolved has no business spinning up the Zig and
+# musl runners.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "web/client/ghostty-pin.json"
+      - "termiod/vt/Cargo.toml"
+      - "Package.swift"
+      - "Package.resolved"
+      - "scripts/check-ghostty-pin.sh"
+      - "scripts/ghostty-wasm.sh"
+      - ".github/workflows/ghostty-pin.yml"
+  pull_request:
+    paths:
+      - "web/client/ghostty-pin.json"
+      - "termiod/vt/Cargo.toml"
+      - "Package.swift"
+      - "Package.resolved"
+      - "scripts/check-ghostty-pin.sh"
+      - "scripts/ghostty-wasm.sh"
+      - ".github/workflows/ghostty-pin.yml"
+
+concurrency:
+  group: ghostty-pin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pins-agree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Resolves all three pins to a ghostty sha and diffs them. Reads the
+      # libghostty-rs build.rs from raw.githubusercontent and the
+      # libghostty-swift release body from the API — the Swift side records its
+      # ghostty sha nowhere else.
+      - name: Check the pins agree
+        run: scripts/check-ghostty-pin.sh
+
+      # The artifact is content-addressed by the full commit sha, so this URL is
+      # stable while the `tip` tag it was cut from is not. Fetching it here means
+      # a blob aged out of the bucket surfaces on a PR rather than on the box at
+      # deploy time, and that the recorded sha256 still describes what is served.
+      - name: Fetch and verify the pinned ghostty-vt.wasm
+        run: |
+          scripts/ghostty-wasm.sh fetch
+          scripts/ghostty-wasm.sh verify
