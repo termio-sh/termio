@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# The pinned ghostty-vt.wasm is fetched into the public root by the build
+# tooling, not committed here; the versioned web root on the box is what ships.
+# scripts/ghostty-wasm.sh puts it there and verifies its sha256 against
+# ghostty-pin.json, which IS committed — the pin is the artifact's identity.
+public/ghostty-vt.wasm
+
+# The assembled versioned web root (`<termiod-version>-g<sha7>/` + `current`),
+# built by scripts/stage-web-root.sh and rsync'd to the box. Deploy output.
+webroot/

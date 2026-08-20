@@ -1,0 +1,5 @@
+# pnpm 10 blocks package build scripts by default. Vite's bundler needs
+# esbuild's, so it is allowed explicitly rather than by turning the guard off —
+# the same shape web/landing uses.
+allowBuilds:
+  esbuild: true

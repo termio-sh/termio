@@ -306,8 +306,11 @@ impl Manager {
 }
 
 /// Run the daemon: bind the socket and accept forever.
-pub async fn serve() -> Result<()> {
+pub async fn serve(wss_options: crate::wss::ServeOptions) -> Result<()> {
     paths::ensure_runtime_dir()?;
+    // Decided before anything binds: an explicit `--wss` that cannot
+    // authenticate refuses the whole start rather than coming up half-armed.
+    let wss_config = crate::wss::plan(&wss_options)?;
     let sock_path = paths::socket_path()?;
 
     if sock_path.exists() {
@@ -366,6 +369,25 @@ pub async fn serve() -> Result<()> {
     }
 
     eprintln!("termiod listening on {}", sock_path.display());
+
+    // The browser's pipe. It authenticates and then connects to the socket above
+    // like any other client, so `handle_conn` stays Unix-only and the accept
+    // path the bridge tests already cover does not fork.
+    //
+    // The watcher is held here for the life of the process: dropping it stops
+    // the watch, and a rotate would then not drop live splices.
+    let _token_watcher = match wss_config {
+        Some(config) => {
+            let (rotate, watcher) = crate::wss::watch_token()?;
+            tokio::spawn(async move {
+                if let Err(error) = crate::wss::serve(config, rotate).await {
+                    eprintln!("termiod: wss error: {error:#}");
+                }
+            });
+            Some(watcher)
+        }
+        None => None,
+    };
 
     {
         let sock_path = sock_path.clone();

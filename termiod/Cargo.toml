@@ -27,6 +27,14 @@ sha2 = "0.10"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+# WebSocket framing for the browser pipe, and nothing else: no `connect`, no
+# `native-tls`, no `rustls`. TLS stays in Tailscale Serve or Caddy, because
+# "never embed crypto" is the trust story, not a performance opinion.
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["handshake"] }
+# The Sink/Stream halves of that socket. Already in the tree underneath
+# tokio-tungstenite; named here only because splitting the stream needs the
+# extension traits. No executor, no io, no compat shims.
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [profile.release]
 opt-level = "z"
