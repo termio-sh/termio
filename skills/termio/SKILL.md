@@ -1,6 +1,7 @@
 ---
 name: termio
 description: See and drive the sibling agent sessions running alongside you in this Termio project via the `termio sessions` CLI — list and watch their status, spawn new agent or plain-terminal sessions, send a prompt or an answer into a session, and read an agent's reply from its transcript. Use when delegating work to another session, checking on or supervising what other sessions are doing, or starting a command the user should see in its own visible pane. Do not use merely because a task could run in parallel. Requires running inside Termio (TERMIO_SESSION set).
+compatibility: Requires Termio (TERMIO_SESSION set in the environment)
 ---
 
 # Driving sibling sessions (Termio)
