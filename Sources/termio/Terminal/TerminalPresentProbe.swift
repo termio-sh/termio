@@ -205,6 +205,23 @@ enum TerminalPresentProbe {
         // `display` is ghostty's own override — the entry point of the inline,
         // main-thread render. Replacing it in place marks the presents that happen
         // underneath as synchronous.
+        // Who marks the layer dirty. `display` — the inline render — only runs
+        // because something invalidated the layer, and one run logged over two
+        // hundred of them with no explanation. The caller is the answer, so this
+        // captures a backtrace rather than another count.
+        let setNeedsDisplay = #selector(CALayer.setNeedsDisplay as (CALayer) -> () -> Void)
+        if let inherited = class_getMethodImplementation(CALayer.self, setNeedsDisplay) {
+            originalSetNeedsDisplay = unsafeBitCast(inherited, to: DisplayIMP.self)
+            let trampoline: DisplayIMP = { layer, selector in
+                TerminalPresentProbe.state.recordInvalidation(layer: layer)
+                originalSetNeedsDisplay?(layer, selector)
+            }
+            _ = class_addMethod(
+                layerClass, setNeedsDisplay,
+                unsafeBitCast(trampoline, to: IMP.self), "v@:"
+            )
+        }
+
         let display = #selector(CALayer.display)
         if let method = class_getInstanceMethod(layerClass, display) {
             originalDisplay = unsafeBitCast(
@@ -249,6 +266,7 @@ enum TerminalPresentProbe {
 // rather than an actor hop that would change the timing the probe measures.
 private nonisolated(unsafe) var originalSetContents: TerminalPresentProbe.SetContentsIMP?
 private nonisolated(unsafe) var originalDisplay: TerminalPresentProbe.DisplayIMP?
+private nonisolated(unsafe) var originalSetNeedsDisplay: TerminalPresentProbe.DisplayIMP?
 private nonisolated(unsafe) var originalLayout: TerminalPresentProbe.DisplayIMP?
 private nonisolated(unsafe) var originalSetFrameSize: TerminalPresentProbe.SetFrameSizeIMP?
 
@@ -273,6 +291,7 @@ private final class ProbeState: @unchecked Sendable {
         var lastSurfaceSize: String?
         var presents = 0
         var displays = 0
+        var invalidations = 0
         var resizes = 0
         var maxGapMilliseconds: Double = 0
     }
@@ -296,6 +315,7 @@ private final class ProbeState: @unchecked Sendable {
     private var lastTraceFlushAt: TimeInterval = 0
     private var autoDumps = 0
     private var tracedLines = 0
+    private var distinctCallers: Set<String> = []
 
     /// Automatic dumps stop after this many. A repeating fault would otherwise
     /// write ~38 lines every cooldown for as long as the app runs, which is how an
@@ -306,6 +326,9 @@ private final class ProbeState: @unchecked Sendable {
     /// Roughly 20 MB. At 120 Hz across three panes the trace writes ~360 lines a
     /// second, so a trace left on overnight would otherwise fill the disk.
     private static let traceLineBudget = 300_000
+
+    /// Distinct invalidation backtraces to resolve before falling back to counting.
+    private static let callerBudget = 12
 
     private static let traceFlushThreshold = 512
     /// Also flush on a timer, so a quiet capture is readable while it is still
@@ -372,6 +395,48 @@ private final class ProbeState: @unchecked Sendable {
         // The per-layer counter in a dump stays accurate either way.
         if shouldEmit {
             TerminalPresentProbe.emit("L\(tag) display pass #\(count) (inline sync render)")
+        }
+    }
+
+    /// Records who invalidated a terminal's render layer. Backtraces are not cheap,
+    /// so only the first few distinct callers are resolved — the same caller firing
+    /// two hundred times only needs naming once.
+    func recordInvalidation(layer: AnyObject) {
+        let now = Self.now()
+        lock.lock()
+        let key = ObjectIdentifier(layer)
+        let tag = layers[key]?.tag ?? layers.count
+        layers[key, default: LayerState(tag: tag)].invalidations += 1
+        let count = layers[key]?.invalidations ?? 0
+        guard tracing else {
+            lock.unlock()
+            return
+        }
+        let budgetLeft = distinctCallers.count < Self.callerBudget
+        lock.unlock()
+
+        var caller: String?
+        if budgetLeft {
+            // Drop this probe's own frames and the objc trampoline, then keep the
+            // few that name the invalidating code.
+            let frames = Thread.callStackSymbols.dropFirst(2).prefix(6)
+                .map { $0.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression) }
+            let signature = frames.joined(separator: " | ")
+            lock.lock()
+            let isNew = distinctCallers.insert(signature).inserted
+            if isNew {
+                traceBuffer.append(
+                    "\(Self.format(now * 1000)) L\(tag) invalidated #\(count) by:"
+                )
+                for frame in frames { traceBuffer.append("        \(frame)") }
+            }
+            lock.unlock()
+            if isNew { caller = signature }
+        }
+        if caller == nil {
+            lock.lock()
+            traceBuffer.append("\(Self.format(now * 1000)) L\(tag) invalidated #\(count)")
+            lock.unlock()
         }
     }
 
@@ -516,6 +581,7 @@ private final class ProbeState: @unchecked Sendable {
             report.append(
                 "L\(layerState.tag): presents=\(layerState.presents) "
                     + "displays=\(layerState.displays) "
+                    + "invalidations=\(layerState.invalidations) "
                     + "sizeChanges=\(layerState.resizes) "
                     + "targets=\(layerState.knownSurfaces.count) "
                     + "size=\(layerState.lastSurfaceSize ?? "?") "
