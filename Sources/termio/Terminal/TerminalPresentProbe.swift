@@ -288,7 +288,7 @@ private final class ProbeState: @unchecked Sendable {
     private static let eventCapacity = 256
     private static let dumpWindow = 32
     private static let dumpCooldown: TimeInterval = 2
-    private static let displayLineCap = 200
+    private static let displayLineCap = 40
 
     private let lock = NSLock()
     private var layers: [ObjectIdentifier: LayerState] = [:]
@@ -341,13 +341,19 @@ private final class ProbeState: @unchecked Sendable {
         let tag = layers[key]?.tag ?? layers.count
         layers[key, default: LayerState(tag: tag)].displays += 1
         let count = layers[key]?.displays ?? 0
+        // The inline, main-thread render is the only path that can present out of
+        // order, so it belongs on the same timeline as the presents rather than only
+        // in the dump log — a burst of these is meaningless until you can see what
+        // it landed between.
+        if tracing {
+            traceBuffer.append("\(Self.format(Self.now() * 1000)) L\(tag) display #\(count)")
+        }
         let shouldEmit = count <= Self.displayLineCap
         lock.unlock()
 
-        // The inline, main-thread render is the only path that can present out of
-        // order, and it is expected to be rare — so each one gets a line. Capped so
-        // a pathological case cannot fill the disk; the per-layer counter in a dump
-        // stays accurate either way.
+        // Standalone lines are capped: they exist to make a display pass visible
+        // without a trace running, and a pathological case must not fill the disk.
+        // The per-layer counter in a dump stays accurate either way.
         if shouldEmit {
             TerminalPresentProbe.emit("L\(tag) display pass #\(count) (inline sync render)")
         }
