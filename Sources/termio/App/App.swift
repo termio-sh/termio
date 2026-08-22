@@ -138,6 +138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Dev-only: focus-independent window snapshot for automated UI debugging
         // (see DebugWindowSnapshot).
         if AppChannel.isDev { DebugWindowSnapshot.installTrigger() }
+        // Dev-only: registers the present probe's triggers. It stays inert — and
+        // interposes on nothing — until a trace is started from the palette.
+        TerminalPresentProbe.install()
         // Sweep up session processes a previous instance stranded (crash,
         // force-quit, dev rebuild's kill -9) before this run adds its own.
         StraySessionReaper.reapStrayOrphans()
