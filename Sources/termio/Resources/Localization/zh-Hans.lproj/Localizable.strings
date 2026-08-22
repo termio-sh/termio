@@ -544,6 +544,8 @@
 	<string>本地</string>
 	<key>Login shell</key>
 	<string>登录 shell</string>
+	<key>Lost the connection to %@. The session is still running there.</key>
+	<string>与 %@ 的连接已断开。会话仍在那台机器上运行。</string>
 	<key>Match Case</key>
 	<string>区分大小写</string>
 	<key>Match Whole Word</key>
@@ -912,6 +914,8 @@
 	<string>选择一个会话以浏览其文件。</string>
 	<key>Select a session to see its info.</key>
 	<string>选择一个会话以查看其信息。</string>
+	<key>Select it again to reattach.</key>
+	<string>重新选中它即可接回。</string>
 	<key>Selection</key>
 	<string>选择</string>
 	<key>Session</key>
@@ -1198,6 +1202,8 @@ Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks
 	<string>termio 可以教你运行的 Agent（Claude Code、Codex 等）使用 `termio sessions` 命令，让它们在项目中查看、驱动并读取彼此的会话。
 
 启用后会在你的 ~/.claude/CLAUDE.md 中添加一段简短说明并安装状态 hooks。你可以随时在“设置 ▸ Agents”中将其关闭。</string>
+	<key>this Mac</key>
+	<string>本机</string>
 	<key>· resets %@</key>
 	<string>· 重置于 %@</string>
 	<key>“%@” already exists.</key>

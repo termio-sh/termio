@@ -5994,6 +5994,36 @@
           }
         }
       }
+    },
+    "this Mac": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本机"
+          }
+        }
+      }
+    },
+    "Select it again to reattach.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新选中它即可接回。"
+          }
+        }
+      }
+    },
+    "Lost the connection to %@. The session is still running there.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "与 %@ 的连接已断开。会话仍在那台机器上运行。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

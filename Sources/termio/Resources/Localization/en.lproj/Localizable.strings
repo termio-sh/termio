@@ -544,6 +544,8 @@
 	<string>Local</string>
 	<key>Login shell</key>
 	<string>Login shell</string>
+	<key>Lost the connection to %@. The session is still running there.</key>
+	<string>Lost the connection to %@. The session is still running there.</string>
 	<key>Match Case</key>
 	<string>Match Case</string>
 	<key>Match Whole Word</key>
@@ -912,6 +914,8 @@
 	<string>Select a session to browse its files.</string>
 	<key>Select a session to see its info.</key>
 	<string>Select a session to see its info.</string>
+	<key>Select it again to reattach.</key>
+	<string>Select it again to reattach.</string>
 	<key>Selection</key>
 	<string>Selection</string>
 	<key>Session</key>
@@ -1198,6 +1202,8 @@ Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks
 	<string>termio can teach the agents you run (Claude Code, Codex, …) a `termio sessions` command so they can see, drive, and read each other's sessions in a project.
 
 Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks. You can turn it off anytime in Settings ▸ Agents.</string>
+	<key>this Mac</key>
+	<string>this Mac</string>
 	<key>· resets %@</key>
 	<string>· resets %@</string>
 	<key>“%@” already exists.</key>

@@ -1507,6 +1507,7 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// daemon crash.
     private var closed = false
     private var exitDelivered = false
+    private var connectionLostDelivered = false
 
     /// What the reader thread needs to judge an arriving `S` against: the grid
     /// the surface is currently laid out at, and whether this client is the one
@@ -1559,6 +1560,13 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// session actually runs on. A session knows its *route* from the start but
     /// cannot know its *device* until something answers — this is that moment.
     var onDevice: ((TermiodDevice) -> Void)?
+    /// Fired once on the main queue when the *connection* ends without the
+    /// session having ended: the daemon went away, the SSH pipe broke, the
+    /// network dropped. Deliberately not `onExit` — the child is almost
+    /// certainly still running, which is the entire point of it living in a
+    /// daemon, and reporting an exit for it invents a status the process never
+    /// produced and parks the pane over an error that does not exist.
+    var onConnectionLost: (() -> Void)?
     /// Fired once on the main queue with the exit status, elapsed milliseconds
     /// since this link started (the daemon does not report the child's true
     /// runtime; elapsed-since-attach serves ghostty's abnormal-exit heuristic the
@@ -2160,15 +2168,32 @@ final class TermiodSessionLink: @unchecked Sendable {
     }
 
     /// EOF or read error. After a deliberate detach/kill this is expected and
-    /// silent; otherwise the daemon went away, and the session is marked
-    /// exited so the pane doesn't sit live-looking but dead.
+    /// silent; otherwise the transport died under a session that is very
+    /// probably still running.
+    ///
+    /// This used to deliver `exit 1`. A transport failure and a process exit
+    /// are different events and only one of them carries a status: the child
+    /// never produced that 1, and the exit policy would park the pane over an
+    /// error with no error output behind it. A session surviving the loss of
+    /// its viewer is what the daemon is for, so the pane says the connection
+    /// went, not that the work did.
     private func handleStreamEnd() {
         workQueue.async { [self] in
             let wasDeliberate = closed
             teardownLocked()
-            guard !wasDeliberate else { return }
+            guard !wasDeliberate, !exitDelivered else { return }
             Log.termiod.error("connection to \(self.sessionName, privacy: .public) ended unexpectedly")
-            deliverExitLocked(status: 1)
+            deliverConnectionLostLocked()
         }
+    }
+
+    /// Announces the transport's death exactly once, and only when no exit has
+    /// already been delivered — a session that ended normally closes its stream
+    /// straight afterwards, and that EOF must not be reported a second time as
+    /// a disconnection.
+    private func deliverConnectionLostLocked() {
+        guard !exitDelivered, !connectionLostDelivered else { return }
+        connectionLostDelivered = true
+        DispatchQueue.main.async { [self] in onConnectionLost?() }
     }
 }

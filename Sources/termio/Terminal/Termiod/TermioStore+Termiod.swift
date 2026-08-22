@@ -135,6 +135,9 @@ extension TermioStore {
                 identifiesAgent: isPlainTerminal,
                 followsWorkingDirectory: followsWorkingDirectory)
         }
+        link.onConnectionLost = { [weak self, weak inMemory] in
+            self?.applyTermiodConnectionLost(for: session.id, surface: inMemory)
+        }
         link.onExit = { [weak self, weak inMemory] code, runtimeMilliseconds, information in
             self?.applyTermiodExit(
                 for: session.id, code: code, runtimeMilliseconds: runtimeMilliseconds,
@@ -246,6 +249,43 @@ extension TermioStore {
     ///     and a poll that ran seconds earlier answers a different question.
     ///   - isAgentSession: snapshotted when the link was wired, so a row promoted
     ///     mid-life still exits as what it was launched as.
+    /// The transport died under a session that is still running.
+    ///
+    /// Deliberately not `applyTermiodExit`: no exit policy runs, because there
+    /// was no exit — running it would park the pane over an error that does not
+    /// exist, and for a plain terminal `.close` would take the row away while
+    /// the shell it names is still alive on the device.
+    ///
+    /// The attachment is dropped, since it is dead, but nothing else about the
+    /// session is: no tombstone, no status change, no row removal. Selecting
+    /// the session again builds a fresh surface, and `attach` resolves the same
+    /// name back to the same process.
+    func applyTermiodConnectionLost(for id: Session.ID, surface: InMemoryTerminalSession?) {
+        termiodLinks[id] = nil
+        guard let session = session(id) else { return }
+        let place = session.termiodRemoteHost ?? localized("this Mac")
+        Log.termiod.error("""
+        lost the connection to \(session.id.uuidString, privacy: .public) on \
+        \(place, privacy: .public); the session keeps running there
+        """)
+        // Said on the screen the user is looking at, because a pane that simply
+        // stops updating is indistinguishable from an agent that went quiet.
+        surface?.receive(Data((
+            "\r\n\u{1B}[33m"
+            + localized("Lost the connection to \(place). The session is still running there.")
+            + "\u{1B}[0m\r\n"
+            + localized("Select it again to reattach.")
+            + "\r\n").utf8))
+        // Dropped *after* the message is on it, and this is what makes the
+        // message true: `surface(for:)` returns the cached surface before it
+        // considers building one, and the cached surface's write closure holds
+        // the link that just died. Without this the pane comes back looking
+        // alive and types into nothing. `relaunchSession` clears both for the
+        // same reason.
+        surfaces[id] = nil
+        monitors[id] = nil
+    }
+
     func applyTermiodExit(for id: Session.ID,
                           code: Int32,
                           runtimeMilliseconds: UInt64,
