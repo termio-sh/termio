@@ -22,11 +22,14 @@ import ObjectiveC
 /// depends on how deep the main queue is at that moment, which is why the glitch
 /// comes and goes.
 ///
-/// The probe answers that empirically. ghostty's swap chain is three targets used
-/// strictly round-robin, so every present should advance exactly one slot; a
-/// present that lands on any other slot is a frame arriving out of order. Each
-/// `display` pass is recorded too, since a sync present is the only thing that can
-/// break the ordering.
+/// The probe records rather than judges. Every present is written with the raw
+/// identity of the surface that landed, so the frame order can be rebuilt exactly,
+/// offline — an earlier version inferred the swap chain's cycle live and was wrong
+/// three different ways, because presents that arrive within the same millisecond
+/// can land in any order and naming the cycle from them records a permutation.
+/// Each `display` pass goes on the same timeline, since the inline render is the
+/// only path that can break the ordering, as do layout passes on the terminal
+/// views, which is where two other embedders traced their own flicker.
 ///
 /// Dev channel only, and inert until the palette's "Debug: Start Present Trace"
 /// arms it — nothing is interposed before that. Once armed it costs a lock and a
@@ -128,21 +131,17 @@ enum TerminalPresentProbe {
     fileprivate typealias DisplayIMP = @convention(c) (AnyObject, Selector) -> Void
     fileprivate typealias SetFrameSizeIMP = @convention(c) (AnyObject, Selector, NSSize) -> Void
 
-    /// `renderer/Metal.zig`'s `swap_chain_count`. Once this many distinct targets
-    /// have been seen the cycle is fully known, and a surface ghostty rebuilt takes
-    /// over the slot the cycle expected instead of extending it.
-    fileprivate static let swapChainDepth = 3
-
-    /// A present this far from the previous one on the same layer is treated as
-    /// isolated, and therefore safe to name a swap-chain slot from.
-    fileprivate static let learnGapMilliseconds: Double = 2
-
     fileprivate static let state = ProbeState()
 
     fileprivate static func emit(_ message: String) {
-        let line = "[termio][present] \(message)"
-        print(line)
-        append(line)
+        emit(block: [message])
+    }
+
+    fileprivate static func emit(block: [String]) {
+        guard !block.isEmpty else { return }
+        let text = block.map { "[termio][present] \($0)" }.joined(separator: "\n")
+        print(text)
+        append(text + "\n", to: logPath)
     }
 
     private static func swizzle() -> Bool {
@@ -225,10 +224,6 @@ enum TerminalPresentProbe {
         return true
     }
 
-    private static func append(_ line: String) {
-        append(line + "\n", to: logPath)
-    }
-
     fileprivate static func append(_ text: String, to path: String) {
         guard let data = text.data(using: .utf8) else { return }
         let url = URL(fileURLWithPath: path)
@@ -263,7 +258,6 @@ private final class ProbeState: @unchecked Sendable {
     private struct Event {
         let at: TimeInterval
         let layer: Int
-        let slot: Int?
         let isSync: Bool
         let isMainThread: Bool
         let gapMilliseconds: Double
@@ -274,13 +268,11 @@ private final class ProbeState: @unchecked Sendable {
     /// own round-robin cycle.
     private struct LayerState {
         let tag: Int
-        var slots: [UnsafeRawPointer: Int] = [:]
-        var lastSlot: Int?
+        var knownSurfaces: Set<UnsafeRawPointer> = []
         var lastPresentAt: TimeInterval?
         var lastSurfaceSize: String?
         var presents = 0
         var displays = 0
-        var anomalies = 0
         var resizes = 0
         var maxGapMilliseconds: Double = 0
     }
@@ -302,6 +294,18 @@ private final class ProbeState: @unchecked Sendable {
     private var viewTags: [ObjectIdentifier: Int] = [:]
     private var layoutPasses = 0
     private var lastTraceFlushAt: TimeInterval = 0
+    private var autoDumps = 0
+    private var tracedLines = 0
+
+    /// Automatic dumps stop after this many. A repeating fault would otherwise
+    /// write ~38 lines every cooldown for as long as the app runs, which is how an
+    /// earlier log reached thousands of lines and became unreadable. The trace keeps
+    /// running, and the palette can still take a dump by hand.
+    private static let autoDumpBudget = 8
+
+    /// Roughly 20 MB. At 120 Hz across three panes the trace writes ~360 lines a
+    /// second, so a trace left on overnight would otherwise fill the disk.
+    private static let traceLineBudget = 300_000
 
     private static let traceFlushThreshold = 512
     /// Also flush on a timer, so a quiet capture is readable while it is still
@@ -321,6 +325,7 @@ private final class ProbeState: @unchecked Sendable {
     func setTracing(_ enabled: Bool) {
         lock.lock()
         tracing = enabled
+        if enabled { tracedLines = 0 }
         let pending = enabled ? [] : traceBuffer
         traceBuffer = []
         lock.unlock()
@@ -332,6 +337,17 @@ private final class ProbeState: @unchecked Sendable {
         TerminalPresentProbe.append(
             lines.joined(separator: "\n") + "\n", to: TerminalPresentProbe.tracePath
         )
+        lock.lock()
+        tracedLines += lines.count
+        let overBudget = tracing && tracedLines >= Self.traceLineBudget
+        if overBudget { tracing = false }
+        let total = tracedLines
+        lock.unlock()
+        if overBudget {
+            TerminalPresentProbe.emit(
+                "trace stopped at \(total) lines — budget reached, start it again if needed"
+            )
+        }
     }
 
     func beginDisplay(layer: AnyObject) {
@@ -405,56 +421,30 @@ private final class ProbeState: @unchecked Sendable {
         layerState.maxGapMilliseconds = max(layerState.maxGapMilliseconds, gap)
         layerState.presents += 1
 
-        let depth = TerminalPresentProbe.swapChainDepth
+        // Deliberately no frame-order judgement here. Naming the swap chain's
+        // targets by the order their surfaces first appear is an inference, and it
+        // is wrong whenever presents arrive close enough together to land in any
+        // order — which is exactly when the interesting things happen. Three
+        // attempts at it produced three flavours of false positive and nothing
+        // real. The trace records raw surface identity, so the order can be
+        // rebuilt exactly, offline, with no premise about the cycle at all.
+        //
+        // What is recorded here is only what needs no inference: a target rebuilt
+        // at a new size, which is a genuine geometry event.
         var note: String?
-        var slot = layerState.slots[pointer]
-        if slot == nil {
-            // ghostty rebuilds a target only when the frame it is about to draw no
-            // longer matches its size, so a *different* size here is the other way
-            // a pane can flash: the surface briefly not matching the layer. A resize
-            // retires all three targets, so the cycle has to be relearned.
+        if layerState.knownSurfaces.insert(pointer).inserted {
             let size = Self.describe(contents)
             if let previous = layerState.lastSurfaceSize, previous != size {
                 layerState.resizes += 1
                 note = "SIZE CHANGE \(previous) → \(size)"
-                layerState.slots = [:]
-                layerState.lastSlot = nil
             }
             layerState.lastSurfaceSize = size
-
-            // Labels are only trustworthy when taken from *isolated* presents.
-            // Several frames landing inside the same millisecond can arrive in any
-            // order, and naming the slots from such a burst records a permutation
-            // of the cycle rather than the cycle — after which every later present
-            // looks out of order. Surfaces first seen in a burst stay unlabelled
-            // until they turn up on their own.
-            let isolated = layerState.lastPresentAt == nil
-                || gap > TerminalPresentProbe.learnGapMilliseconds
-            if isolated, layerState.slots.count < depth {
-                let learned = layerState.slots.count
-                layerState.slots[pointer] = learned
-                slot = learned
-                if note == nil { note = "learned \(size) as slot \(learned)" }
-            } else if note == nil {
-                note = "unlabelled \(size) (first seen inside a burst)"
-            }
         }
-
-        // Judge only once the whole cycle is known, and only against labels learned
-        // the trustworthy way.
-        if layerState.slots.count == depth, let slot, let last = layerState.lastSlot {
-            let expected = (last + 1) % depth
-            if slot != expected {
-                layerState.anomalies += 1
-                note = "OUT OF ORDER — expected slot \(expected)"
-            }
-        }
-        if let slot { layerState.lastSlot = slot }
         layerState.lastPresentAt = now
         layers[key] = layerState
 
         events.append(Event(
-            at: now, layer: layerState.tag, slot: slot, isSync: isSync,
+            at: now, layer: layerState.tag, isSync: isSync,
             isMainThread: onMain, gapMilliseconds: gap, note: note
         ))
         if events.count > Self.eventCapacity {
@@ -482,14 +472,14 @@ private final class ProbeState: @unchecked Sendable {
             }
         }
 
-        let isAnomaly = note?.hasPrefix("OUT OF ORDER") == true
-            || note?.hasPrefix("SIZE CHANGE") == true
+        let isAnomaly = note?.hasPrefix("SIZE CHANGE") == true
         var shouldDump = false
         if isAnomaly {
-            if now - lastDumpAt < Self.dumpCooldown {
+            if now - lastDumpAt < Self.dumpCooldown || autoDumps >= Self.autoDumpBudget {
                 suppressedDumps += 1
             } else {
                 lastDumpAt = now
+                autoDumps += 1
                 shouldDump = true
             }
         }
@@ -514,41 +504,50 @@ private final class ProbeState: @unchecked Sendable {
         let pending = traceBuffer
         traceBuffer = []
         suppressedDumps = 0
+        let exhausted = autoDumps == Self.autoDumpBudget
         lock.unlock()
         flush(pending)
 
-        TerminalPresentProbe.emit("---- \(reason) ----")
-        TerminalPresentProbe.emit("layout passes on terminal views so far: \(layouts)")
+        var report = [
+            "---- \(reason) ----",
+            "layout passes on terminal views so far: \(layouts)",
+        ]
         for layerState in snapshot {
-            TerminalPresentProbe.emit(
+            report.append(
                 "L\(layerState.tag): presents=\(layerState.presents) "
                     + "displays=\(layerState.displays) "
-                    + "outOfOrder=\(layerState.anomalies) "
                     + "sizeChanges=\(layerState.resizes) "
-                    + "targets=\(layerState.slots.count) "
+                    + "targets=\(layerState.knownSurfaces.count) "
                     + "size=\(layerState.lastSurfaceSize ?? "?") "
                     + "maxGap=\(Self.format(layerState.maxGapMilliseconds))ms"
             )
         }
         if suppressed > 0 {
-            TerminalPresentProbe.emit(
-                "(\(suppressed) further out-of-order presents inside the cooldown)"
+            report.append("(\(suppressed) further size changes inside the cooldown)")
+        }
+        if let first = window.first {
+            for event in window {
+                let offset = (event.at - first.at) * 1000
+                var line = "+\(Self.format(offset))ms L\(event.layer)"
+                line += event.isSync ? " sync(display)" : " async"
+                if !event.isMainThread { line += " OFF-MAIN" }
+                line += " gap=\(Self.format(event.gapMilliseconds))ms"
+                if let note = event.note { line += "  \(note)" }
+                report.append(line)
+            }
+        } else {
+            report.append("no presents recorded")
+        }
+        if exhausted {
+            report.append(
+                "automatic dumps are done — the rest of this run is trace-only, "
+                    + "take further snapshots from the palette"
             )
         }
-        guard let first = window.first else {
-            TerminalPresentProbe.emit("no presents recorded")
-            return
-        }
-        for event in window {
-            let offset = (event.at - first.at) * 1000
-            var line = "+\(Self.format(offset))ms L\(event.layer)"
-                + " slot=\(event.slot.map(String.init) ?? "?")"
-            line += event.isSync ? " sync(display)" : " async"
-            if !event.isMainThread { line += " OFF-MAIN" }
-            line += " gap=\(Self.format(event.gapMilliseconds))ms"
-            if let note = event.note { line += "  \(note)" }
-            TerminalPresentProbe.emit(line)
-        }
+        // One write, not one per line: an automatic dump is ~38 lines and can fire
+        // every couple of seconds, and re-opening the file that often is both slow
+        // and the reason an earlier log grew unreadable.
+        TerminalPresentProbe.emit(block: report)
     }
 
     /// The low bytes of the surface's address — enough to tell ghostty's three
