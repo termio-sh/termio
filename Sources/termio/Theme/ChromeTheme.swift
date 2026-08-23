@@ -68,12 +68,17 @@ struct ChromeTheme {
             ?? definition.selectionBackground.flatMap(Color.init(hex:))
             ?? foreground
         self.isDark = dark
-        // Green, yellow, blue, magenta, cyan — the bright half (palette 10-14),
-        // which is the half that survives a dark background. A slot the theme
-        // leaves undefined drops out rather than becoming a default hue that
-        // belongs to no theme; if every one is missing, the accent stands in so a
-        // workspace always has a mark.
-        let tints = [10, 11, 12, 13, 14]
+        // Six hues at two intensities: the bright half first (palette 9-14, the
+        // half that survives a dark background), then the normal half (1-6) under
+        // it, so a picker laid out six to a row reads as a hue per column and an
+        // intensity per row.
+        //
+        // Black and white are left out at both intensities: those are the slots a
+        // theme spends on its own background and foreground, so as a mark they
+        // read as "no colour". A slot the theme leaves undefined drops out rather
+        // than becoming a default hue that belongs to no theme; if every one is
+        // missing, the accent stands in so a workspace always has a mark.
+        let tints = [9, 10, 11, 12, 13, 14, 1, 2, 3, 4, 5, 6]
             .compactMap { definition.palette[$0] }
             .compactMap(Color.init(hex:))
         self.workspaceTints = tints.isEmpty ? [self.accent] : tints
@@ -256,6 +261,26 @@ extension AppSettings {
                     ?? NSColor(srgbRed: 0x21 / 255.0, green: 0x21 / 255.0, blue: 0x21 / 255.0, alpha: 1)
             }
             return lightBackground.map(NSColor.init) ?? NSColor.white
+        }
+    }
+
+    /// `terminalBackgroundColor`'s companion for a sidebar column: `ChromeTheme.panel-
+    /// Background` when a theme is selected, and the same lift off the no-theme fallback
+    /// otherwise, so a window paints one coherent pair either way. The main window can
+    /// leave its sidebar vibrant — it fills the screen and there is nothing behind it to
+    /// sample — but a small window floating over the app needs an opaque fill, or its
+    /// sidebar reads as whatever window happens to be underneath.
+    var panelBackgroundColor: NSColor {
+        let lightPanel = chromeTheme(for: .light)?.panelBackground
+        let darkPanel = chromeTheme(for: .dark)?.panelBackground
+        return NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            if isDark {
+                return darkPanel.map(NSColor.init)
+                    ?? NSColor(srgbRed: 0x2e / 255.0, green: 0x2e / 255.0, blue: 0x2e / 255.0, alpha: 1)
+            }
+            return lightPanel.map(NSColor.init)
+                ?? NSColor(srgbRed: 0xf5 / 255.0, green: 0xf5 / 255.0, blue: 0xf5 / 255.0, alpha: 1)
         }
     }
 }

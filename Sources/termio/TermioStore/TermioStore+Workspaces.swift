@@ -448,6 +448,16 @@ extension TermioStore {
         if let color { workspaces[index].color = color }
     }
 
+    /// Changes a workspace's mark. Its own verb because Settings ▸ Workspaces sets
+    /// the colour on a row without touching the name, and renaming through this
+    /// would make an unchanged name look like an edit in every observer.
+    func setWorkspaceColor(_ id: Workspace.ID, to color: Int) {
+        guard let index = workspaces.firstIndex(where: { $0.id == id }),
+              workspaces[index].color != color
+        else { return }
+        workspaces[index].color = color
+    }
+
     /// Removes a workspace, closing everything in it. The last workspace is never
     /// removed — the sidebar has to have a scope to show — and the caller confirms
     /// first, since this ends live sessions.
@@ -675,7 +685,13 @@ private final class WorkspaceFields: NSObject {
     private let tints: [Color]
     private var swatches: [NSButton] = []
 
-    private static let swatchSize: CGFloat = 18
+    private static let swatchSize: CGFloat = 26
+    /// The panel's one column width. The field and every swatch row share it, so
+    /// the grid ends where the name field ends instead of trailing off inside it.
+    private static let width: CGFloat = 260
+    /// Six to a row, which is what makes a row of the palette one intensity and a
+    /// column of it one hue (`ChromeTheme.workspaceTints`).
+    private static let swatchesPerRow = 6
 
     init(name: String, color: Int, tints: [Color]) {
         self.color = color
@@ -683,23 +699,36 @@ private final class WorkspaceFields: NSObject {
         super.init()
         field.stringValue = name
 
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.spacing = 6
-        for index in tints.indices {
-            let button = NSButton(
-                frame: NSRect(x: 0, y: 0, width: Self.swatchSize, height: Self.swatchSize))
-            button.isBordered = false
-            button.title = ""
-            button.setButtonType(.momentaryChange)
-            button.target = self
-            button.action = #selector(pick(_:))
-            button.tag = index
-            // A colour has no name to read out, so the position is what a screen
-            // reader can say about it.
-            button.setAccessibilityLabel(localized("Colour \(index + 1)"))
-            swatches.append(button)
-            row.addArrangedSubview(button)
+        let grid = NSStackView()
+        grid.orientation = .vertical
+        grid.alignment = .leading
+        grid.spacing = 10
+        for start in stride(from: 0, to: tints.count, by: Self.swatchesPerRow) {
+            let row = NSStackView()
+            row.orientation = .horizontal
+            // Spread rather than spaced by a fixed gap: the row is as wide as the
+            // field above it, and a short last row keeps its columns under the
+            // full one instead of bunching to the leading edge.
+            row.distribution = .equalSpacing
+            for index in start..<min(start + Self.swatchesPerRow, tints.count) {
+                let button = NSButton(
+                    frame: NSRect(x: 0, y: 0, width: Self.swatchSize, height: Self.swatchSize))
+                button.isBordered = false
+                button.title = ""
+                button.setButtonType(.momentaryChange)
+                button.target = self
+                button.action = #selector(pick(_:))
+                button.tag = index
+                // A colour has no name to read out, so the position is what a
+                // screen reader can say about it.
+                button.setAccessibilityLabel(localized("Colour \(index + 1)"))
+                button.widthAnchor.constraint(equalToConstant: Self.swatchSize).isActive = true
+                button.heightAnchor.constraint(equalToConstant: Self.swatchSize).isActive = true
+                swatches.append(button)
+                row.addArrangedSubview(button)
+            }
+            row.widthAnchor.constraint(equalToConstant: Self.width).isActive = true
+            grid.addArrangedSubview(row)
         }
         redrawSwatches()
 
@@ -707,8 +736,8 @@ private final class WorkspaceFields: NSObject {
         view.alignment = .leading
         view.spacing = 10
         view.addArrangedSubview(field)
-        if !tints.isEmpty { view.addArrangedSubview(row) }
-        field.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        if !tints.isEmpty { view.addArrangedSubview(grid) }
+        field.widthAnchor.constraint(equalToConstant: Self.width).isActive = true
         // NSAlert lays its accessory out by frame, so the stack carries its own
         // measured size rather than a number guessed here.
         view.frame = NSRect(origin: .zero, size: view.fittingSize)
@@ -725,19 +754,27 @@ private final class WorkspaceFields: NSObject {
         }
     }
 
-    /// The selected swatch wears a ring rather than a checkmark: a tick drawn on
-    /// top of a colour has to be light or dark, and either one disappears against
-    /// half the palette.
+    /// The selected swatch is drawn as a ring around a gap around a smaller dot,
+    /// all in its own colour — the treatment every colour picker on this system
+    /// uses, and the one Dia's `ColorSwatch` builds out of a main layer and a
+    /// separate selection layer.
+    ///
+    /// Not a checkmark and not a contrasting outline: a tick or a ring in the
+    /// label colour has to be light or dark, and either choice disappears against
+    /// half of a palette that comes from the user's terminal theme. A shape made
+    /// of the swatch's own colour cannot lose contrast with itself.
     private static func swatch(_ color: NSColor, selected: Bool) -> NSImage {
         NSImage(size: NSSize(width: swatchSize, height: swatchSize), flipped: false) { rect in
             color.setFill()
-            NSBezierPath(ovalIn: rect.insetBy(dx: 3, dy: 3)).fill()
-            if selected {
-                NSColor.labelColor.setStroke()
-                let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 0.75, dy: 0.75))
-                ring.lineWidth = 1.5
-                ring.stroke()
+            guard selected else {
+                NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+                return true
             }
+            NSBezierPath(ovalIn: rect.insetBy(dx: 5, dy: 5)).fill()
+            color.setStroke()
+            let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 1.5, dy: 1.5))
+            ring.lineWidth = 2
+            ring.stroke()
             return true
         }
     }

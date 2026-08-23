@@ -1221,6 +1221,16 @@
         }
       }
     },
+    "Colour": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "颜色"
+          }
+        }
+      }
+    },
     "Couldn’t create worktree session": {
       "localizations": {
         "zh-Hans": {

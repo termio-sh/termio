@@ -212,9 +212,9 @@ enum WorkspaceMigration {
     }
 
     /// The palette is the theme's and its size is not known here, so the index is
-    /// chosen within a fixed span and wrapped by whoever draws it. Five is the
+    /// chosen within a fixed span and wrapped by whoever draws it. Twelve is the
     /// count every built-in theme yields (`ChromeTheme.workspaceTints`).
-    static let colorCount = 5
+    static let colorCount = 12
 
     private static func leastUsedColor(in used: [Int: Int]) -> Int {
         (0..<colorCount).min { left, right in

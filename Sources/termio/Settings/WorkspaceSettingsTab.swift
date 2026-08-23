@@ -12,6 +12,11 @@ import SwiftUI
 /// who already knew to look for it.
 struct WorkspaceSettingsTab: View {
     @ObservedObject var store: TermioStore
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The palette a workspace's mark is an index into. Resolved once here rather
+    /// than per row: every row draws from the same theme.
+    private var chrome: ChromeTheme? { store.settings.chromeTheme(for: colorScheme) }
 
     var body: some View {
         Form {
@@ -22,7 +27,9 @@ struct WorkspaceSettingsTab: View {
                         isCurrent: workspace.id == store.currentWorkspaceID,
                         sessionCount: store.sessions(inWorkspace: workspace.id).count,
                         canRemove: store.hasMultipleWorkspaces,
+                        tints: chrome?.workspaceTints ?? [],
                         rename: { store.presentRenameWorkspacePanel(workspace.id) },
+                        recolor: { store.setWorkspaceColor(workspace.id, to: $0) },
                         remove: { store.confirmRemoveWorkspace(workspace.id) }
                     )
                 }
@@ -93,8 +100,17 @@ private struct WorkspaceSettingsRow: View {
     let isCurrent: Bool
     let sessionCount: Int
     let canRemove: Bool
+    let tints: [Color]
     let rename: () -> Void
+    let recolor: (Int) -> Void
     let remove: () -> Void
+
+    /// The mark this workspace wears in the switcher, wrapped the way the switcher
+    /// wraps it so both surfaces agree under a theme with fewer tints.
+    private var color: Color? {
+        guard !tints.isEmpty else { return nil }
+        return tints[(workspace.color ?? 0) % tints.count]
+    }
 
     /// The machine the workspace is on, and what removing it would cost. Zero
     /// sessions say so by omission rather than reading "0 sessions".
@@ -114,6 +130,15 @@ private struct WorkspaceSettingsRow: View {
                 .frame(width: 12)
                 .accessibilityHidden(!isCurrent)
                 .accessibilityLabel(localized("Current workspace"))
+            // The switcher's own mark, shown here because this is the other place
+            // every workspace is visible at once — and the place it can be
+            // changed. Not a control: the row carries one, and it is the menu.
+            if let color {
+                Circle()
+                    .fill(color)
+                    .frame(width: 10, height: 10)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(workspace.name)
                     .font(.headline)
@@ -151,6 +176,26 @@ private struct WorkspaceSettingsRow: View {
     @ViewBuilder
     private var actionButtons: some View {
         Button(localized("Rename…"), action: rename)
+        if !tints.isEmpty {
+            // A submenu rather than a row of wells: the row's one control is this
+            // menu, and a second chrome beside the name is what the row's shape
+            // exists to avoid. The tick marks the current one, so the colour is
+            // readable without relying on colour alone.
+            Menu(localized("Colour")) {
+                ForEach(tints.indices, id: \.self) { index in
+                    Button {
+                        recolor(index)
+                    } label: {
+                        Label {
+                            Text(localized("Colour \(index + 1)"))
+                        } icon: {
+                            Image(systemName: (workspace.color ?? 0) % tints.count == index
+                                ? "checkmark.circle.fill" : "circle.fill")
+                        }
+                    }
+                }
+            }
+        }
         // The store refuses to remove the last workspace — the sidebar has to have
         // a scope to show — so the row dims rather than answering a click with
         // nothing.

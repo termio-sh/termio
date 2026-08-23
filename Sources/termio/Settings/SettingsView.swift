@@ -9,6 +9,11 @@ import SwiftUI
 /// pane that carries the group's title + subtitle in the toolbar with a grouped
 /// `Form` below. Window chrome (resizable, unified toolbar, saved size) is set up
 /// in `AppDelegate.openSettings`.
+///
+/// Both columns paint the terminal theme's colors rather than the stock window
+/// material, the way every other chrome surface does (see `ChromeTheme`) — the
+/// theme is the app's one source of color truth, and a preferences window in
+/// system grey was the last surface that ignored it.
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var usage: UsageMonitor
@@ -48,6 +53,8 @@ struct SettingsView: View {
                 .tag(tab)
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(Color(nsColor: settings.panelBackgroundColor))
             .navigationSplitViewColumnWidth(min: 184, ideal: 204, max: 240)
         } detail: {
             NavigationStack {
@@ -55,6 +62,8 @@ struct SettingsView: View {
                     .navigationTitle(selection.title)
                     .navigationSubtitle(selection.subtitle)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(nsColor: settings.terminalBackgroundColor))
                     .toolbar {
                         // Without a toolbar item the NavigationStack collapses the
                         // title + subtitle into one inline "Title – Subtitle" line
@@ -62,7 +71,6 @@ struct SettingsView: View {
                         // the full-height two-line chrome on every pane (macOS 26).
                         ToolbarItem(placement: .principal) { Text("") }
                     }
-                    .toolbarBackground(.regularMaterial, for: .windowToolbar)
             }
         }
         .navigationSplitViewStyle(.balanced)

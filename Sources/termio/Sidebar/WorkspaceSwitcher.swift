@@ -50,6 +50,28 @@ enum WorkspaceMenu {
         }
     }
 
+    /// A verb below the rows — New Workspace…, Workspace Settings… — carrying the
+    /// glyph that keeps it on the rows' leading edge.
+    ///
+    /// `NSMenuItem` draws a title with no image in the image column, so a bare verb
+    /// under rows that wear a colour starts further left than every name above it.
+    /// The glyph is what puts them back on one edge, which is why it is decided here
+    /// beside the rows rather than by each menu that adds a verb: the marks are
+    /// conditional on a terminal theme being selected, and under unmarked rows the
+    /// glyph is the thing that would break the alignment.
+    @MainActor
+    static func verb(_ title: String, symbol: String, alignedWith rows: [NSMenuItem]) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        if rows.contains(where: { $0.image != nil }) {
+            // Stepped down from the menu default, which draws a symbol heavier than
+            // the dot it shares a column with: the glyph is here to hold the leading
+            // edge, so it should not out-weigh the marks it is aligning to.
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 11, weight: .regular))
+        }
+        return item
+    }
+
     /// The row's title with the machine trailing it in the secondary colour, so
     /// the name still reads as the name.
     @MainActor
@@ -78,7 +100,10 @@ enum WorkspaceMenu {
 @MainActor
 enum WorkspaceSwatch {
     private static let cache = NSCache<NSString, NSImage>()
-    private static let size = NSSize(width: 10, height: 10)
+    /// Sized to the cap height of the menu font rather than to some fraction of the
+    /// row: the dot sits beside a name and reads as a mark on it, so it is balanced
+    /// against the letters, not against the row's height.
+    private static let size = NSSize(width: 12, height: 12)
 
     static func image(for workspace: Workspace, chrome: ChromeTheme?) -> NSImage? {
         guard let color = resolved(workspace, chrome: chrome) else { return nil }
@@ -93,13 +118,19 @@ enum WorkspaceSwatch {
         return image
     }
 
+    /// The colour a workspace wears, for the surfaces that draw it themselves
+    /// rather than handing an image to AppKit.
+    ///
     /// Wrapped rather than clamped: the index is stored against a palette whose
     /// size is the theme's business, and a theme with fewer tints must still draw
     /// every workspace rather than collapsing the tail onto one colour.
-    private static func resolved(_ workspace: Workspace, chrome: ChromeTheme?) -> NSColor? {
+    static func color(for workspace: Workspace, chrome: ChromeTheme?) -> Color? {
         guard let tints = chrome?.workspaceTints, !tints.isEmpty else { return nil }
-        let index = (workspace.color ?? 0) % tints.count
-        return NSColor(tints[index])
+        return tints[(workspace.color ?? 0) % tints.count]
+    }
+
+    private static func resolved(_ workspace: Workspace, chrome: ChromeTheme?) -> NSColor? {
+        color(for: workspace, chrome: chrome).map(NSColor.init)
     }
 }
 
@@ -234,20 +265,23 @@ private final class WorkspaceMenuHost: NSView {
     private func showMenu() {
         guard let store else { return }
         let menu = NSMenu()
-        for row in WorkspaceMenu.rows(in: store, target: self, action: #selector(switchToWorkspace(_:))) {
+        let rows = WorkspaceMenu.rows(in: store, target: self, action: #selector(switchToWorkspace(_:)))
+        for row in rows {
             menu.addItem(row)
         }
         // This Mac, without asking: the device submenu belongs to the menus that
         // already carry one (File ▸ Workspace and the sidebar `+`), and growing a
         // third here would put a machine list in the switcher, which is the "go to
         // a computer" mode the workspace replaced.
-        addAction(localized("New Workspace…"), to: menu, #selector(newWorkspace))
+        addAction(localized("New Workspace…"), to: menu, #selector(newWorkspace),
+                  symbol: "plus", alignedWith: rows)
         menu.addItem(.separator())
         // Renaming and removing are in Settings ▸ Workspaces. Creating stays here
         // because it is the one verb that does not need the user to pick which
         // workspace it acts on — the other two do, and this menu can only ever
         // offer them for the row it already shows checked.
-        addAction(localized("Workspace Settings…"), to: menu, #selector(openWorkspaceSettings))
+        addAction(localized("Workspace Settings…"), to: menu, #selector(openWorkspaceSettings),
+                  symbol: "gearshape", alignedWith: rows)
         // No device verb here, deliberately. A machine you can *go to* is the
         // mode this scope replaced: it made the sidebar answer "which computer"
         // when the question is "which work". A device is a place a new thing is
@@ -259,8 +293,12 @@ private final class WorkspaceMenuHost: NSView {
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height + 4), in: self)
     }
 
-    private func addAction(_ title: String, to menu: NSMenu, _ action: Selector) {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    private func addAction(
+        _ title: String, to menu: NSMenu, _ action: Selector,
+        symbol: String, alignedWith rows: [NSMenuItem]
+    ) {
+        let item = WorkspaceMenu.verb(title, symbol: symbol, alignedWith: rows)
+        item.action = action
         item.target = self
         menu.addItem(item)
     }

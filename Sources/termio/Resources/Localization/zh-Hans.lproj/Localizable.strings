@@ -238,6 +238,8 @@
 	<string>全部折叠</string>
 	<key>Collapse Results</key>
 	<string>折叠结果</string>
+	<key>Colour</key>
+	<string>颜色</string>
 	<key>Colour %lld</key>
 	<string>颜色 %lld</string>
 	<key>Command</key>

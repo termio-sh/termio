@@ -812,6 +812,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.appearance = appearance
         window?.appearance = appearance
         settingsWindow?.appearance = appearance
+        applySettingsWindowChrome()
+    }
+
+    /// Paints the Settings window in the terminal theme, the same recipe the main window
+    /// uses: an opaque themed background under a transparent titlebar, so the toolbar band
+    /// sits flush with the panes instead of on AppKit's stock grey. Re-run whenever the
+    /// theme changes (`applyChromeAppearance` is on the settings observer), because the
+    /// window paints this itself and won't follow the SwiftUI tree.
+    private func applySettingsWindowChrome() {
+        guard let settingsWindow else { return }
+        settingsWindow.backgroundColor = resolvedTerminalBackground()
+        settingsWindow.titlebarAppearsTransparent = true
     }
 
     /// Installs a real `NSToolbar` carrying CodeEdit's chrome: a leading navigator toggle, the
@@ -890,6 +902,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             if !restored { window.center() }
             settingsWindow = window
+            applySettingsWindowChrome()
         }
         // `.frame(minWidth:minHeight:)` on the root: NSHostingView forwards the
         // SwiftUI tree's small intrinsic minimum up into contentMinSize, which
@@ -1985,7 +1998,8 @@ extension AppDelegate: NSMenuDelegate {
     /// switcher draws the same rows from `WorkspaceMenu.rows`, but AppKit resolves
     /// a key equivalent against the main menu, so only this one claims them.
     private func fillWorkspaceMenu(_ menu: NSMenu) {
-        for row in WorkspaceMenu.rows(in: store, target: self, action: #selector(switchToWorkspace(_:))) {
+        let rows = WorkspaceMenu.rows(in: store, target: self, action: #selector(switchToWorkspace(_:)))
+        for row in rows {
             menu.addItem(row)
         }
         menu.addItem(.separator())
@@ -1993,18 +2007,21 @@ extension AppDelegate: NSMenuDelegate {
         // device submenu on two (`refreshNewWorkspaceItem`). This menu is rebuilt on
         // every open rather than refreshed in place, so the row is shaped here
         // instead of by tag.
-        let new = menu.addItem(withTitle: localized("New Workspace…"),
-                               action: #selector(newWorkspace(_:)), keyEquivalent: "")
+        let new = WorkspaceMenu.verb(localized("New Workspace…"), symbol: "plus", alignedWith: rows)
+        new.action = #selector(newWorkspace(_:))
         new.target = self
+        menu.addItem(new)
         refreshNewWorkspaceItem(new, others: otherDevices(known: DeviceRoster.known(in: store)))
         menu.addItem(.separator())
         // Renaming and removing are in Settings ▸ Workspaces rather than here.
         // Both act on a workspace the user has to pick, and a menu that shows the
         // list one checked row at a time can only offer them for the current one —
         // which is why they read as "Rename Workspace" with no name in them.
-        let settingsItem = menu.addItem(withTitle: localized("Workspace Settings…"),
-                                        action: #selector(openWorkspaceSettings(_:)), keyEquivalent: "")
+        let settingsItem = WorkspaceMenu.verb(
+            localized("Workspace Settings…"), symbol: "gearshape", alignedWith: rows)
+        settingsItem.action = #selector(openWorkspaceSettings(_:))
         settingsItem.target = self
+        menu.addItem(settingsItem)
     }
 
     private func fillConnectToMenu(_ menu: NSMenu) {
