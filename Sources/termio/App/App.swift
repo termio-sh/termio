@@ -374,11 +374,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             stopSession: { [weak store] sessionID in
                 store?.companionStopSession(sessionID: sessionID) ?? false
             },
-            startScratchTerminal: { [weak store] in
-                store?.companionStartScratchTerminal()
+            startScratchTerminal: { [weak store] workspaceID in
+                store?.companionStartScratchTerminal(workspaceID: workspaceID)
             },
-            startSSHSession: { [weak store] host in
-                store?.companionStartSSHSession(host: host)
+            startSSHSession: { [weak store] host, workspaceID in
+                store?.companionStartSSHSession(host: host, workspaceID: workspaceID)
             }
         )
         companionServer = companion

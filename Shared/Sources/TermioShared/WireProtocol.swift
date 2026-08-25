@@ -21,6 +21,18 @@ public enum Wire {
     public static let minimumServer = 2
     /// Oldest phone this Mac will serve.
     public static let minimumClient = 2
+
+    /// The wire id of a workspace's loose section — the Terminals or Chats
+    /// container the Mac finds-or-creates rather than the user opening it.
+    ///
+    /// Derived from the workspace so it survives a relaunch, and suffixed
+    /// because one workspace has two sections. Both ends build it: the id is how
+    /// the phone names a section the Mac has not created yet, which is what lets
+    /// a `.start` seed the first chat in a workspace instead of waiting for one
+    /// to exist on the desktop first.
+    public static func looseSectionID(workspaceID: String, chats: Bool) -> String {
+        "\(workspaceID)-\(chats ? "chats" : "terminals")"
+    }
 }
 
 /// The companion wire protocol, shared by the Mac companion server and the iOS
@@ -63,13 +75,24 @@ public enum CompanionControl: Codable, Sendable, Equatable {
     /// `.start`. It carries no project because the funnel is found-or-created by
     /// kind on the Mac (like ⌘T), so — unlike `.start` — the phone can seed the
     /// very first terminal too. Answered with `.started` (agent `"terminal"`).
-    case startTerminal
+    ///
+    /// `workspaceID` names *which* workspace's funnel, because "the funnel" is
+    /// one per workspace and the Mac would otherwise pick the workspace it
+    /// happens to be showing — a choice made by UI state on a device the phone
+    /// user cannot see. Absent means exactly that older behaviour, so an older
+    /// Mac degrades to "the Mac picks" rather than failing.
+    case startTerminal(workspaceID: String?)
     /// The Terminals tab's ＋ → "New SSH": open a loose terminal that runs
     /// `ssh <host>` instead of a local shell. `host` is a `~/.ssh/config` alias
     /// (see `.sshConfigHosts`) or a bare `user@host`. Like `.startTerminal` it
     /// gathers in the `.terminals` funnel and needs no project. Answered with
     /// `.started`.
-    case startSSH(host: String)
+    ///
+    /// `workspaceID` is the same hint as `.startTerminal`'s, and the same
+    /// optional. It is a preference, not an instruction: an `ssh` shell belongs
+    /// to a workspace on the box it reaches, so the Mac honours it only when the
+    /// named workspace is on `host`.
+    case startSSH(host: String, workspaceID: String?)
     /// The client asks the Mac to close a session (the phone's swipe-to-remove).
     /// No success reply — the next roster push drops the row everywhere.
     case stop(sessionID: String)
@@ -161,10 +184,17 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             var fields: [String: Any] = ["t": "started", "session": sessionID]
             if let agent { fields["agent"] = agent }
             return Self.json(fields)
-        case .startTerminal:
-            return #"{"t":"startTerminal"}"#
-        case .startSSH(let host):
-            return Self.json(["t": "startSSH", "host": host])
+        case .startTerminal(let workspaceID):
+            // A nil workspace omits the key, like `.start`'s agent: the older
+            // shape is still what an older Mac reads, and "absent" is already
+            // the value that means "you pick".
+            var fields: [String: Any] = ["t": "startTerminal"]
+            if let workspaceID { fields["workspace"] = workspaceID }
+            return Self.json(fields)
+        case .startSSH(let host, let workspaceID):
+            var fields: [String: Any] = ["t": "startSSH", "host": host]
+            if let workspaceID { fields["workspace"] = workspaceID }
+            return Self.json(fields)
         case .stop(let sessionID):
             return #"{"t":"stop","session":"\#(sessionID)"}"#
         case .resize(let cols, let rows):
@@ -275,10 +305,12 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             guard let sessionID = obj["session"] as? String else { return nil }
             return .started(sessionID: sessionID, agent: obj["agent"] as? String)
         case "startTerminal":
-            return .startTerminal
+            // Missing workspace = "the Mac picks", which is what every phone
+            // built before the field sends.
+            return .startTerminal(workspaceID: obj["workspace"] as? String)
         case "startSSH":
             guard let host = obj["host"] as? String else { return nil }
-            return .startSSH(host: host)
+            return .startSSH(host: host, workspaceID: obj["workspace"] as? String)
         case "stop":
             guard let sessionID = obj["session"] as? String else { return nil }
             return .stop(sessionID: sessionID)

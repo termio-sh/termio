@@ -416,7 +416,13 @@ extension TermioStore {
     /// that machine's fallback workspace, so an `ssh` shell and a durable termiod
     /// session on the same box sit together rather than scattering among loose
     /// local terminals. `host` is a `~/.ssh/config` alias or a bare `user@host`.
-    func addSSHSession(host: String) {
+    ///
+    /// `preferring` settles which of that box's workspaces when a caller knows —
+    /// the phone names the workspace on its screen, and a box can hold more than
+    /// one. It is only ever a preference: a caller that names a workspace on
+    /// another machine gets the fallback, because the machine rule above is what
+    /// keeps a workspace from claiming a box it isn't on.
+    func addSSHSession(host: String, preferring preferred: Workspace.ID? = nil) {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else { return }
         // Named for what it is, not for the box — the workspace already says which
@@ -430,7 +436,9 @@ extension TermioStore {
         session.givenTitle = session.title
         session.sshHost = host
 
-        let workspaceID = deviceWorkspace(for: host)
+        let workspaceID = preferred.flatMap { id in
+            workspaces.first { $0.id == id && $0.isOn(alias: host, device: nil) }?.id
+        } ?? deviceWorkspace(for: host)
         guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
         workspaces[index].terminals.append(session)
         selectedSessionID = session.id

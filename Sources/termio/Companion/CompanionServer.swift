@@ -185,11 +185,12 @@ final class CompanionServer {
     private let stopSession: (String) -> Bool
     /// Opens a plain shell in the loose terminals funnel for the phone's
     /// Terminals ＋ (`.startTerminal`); returns the `.started` echo, or nil on
-    /// failure. Project-less: the funnel is found-or-created on the Mac.
-    private let startScratchTerminal: () -> (sessionID: String, agentID: String)?
+    /// failure. Project-less: the funnel is found-or-created on the Mac, in the
+    /// workspace the phone named (nil = whichever the Mac is showing).
+    private let startScratchTerminal: (String?) -> (sessionID: String, agentID: String)?
     /// Opens an `ssh <host>` terminal for the phone's Terminals ＋ → SSH
     /// (`.startSSH`); returns the `.started` echo, or nil on failure.
-    private let startSSHSession: (String) -> (sessionID: String, agentID: String)?
+    private let startSSHSession: (String, String?) -> (sessionID: String, agentID: String)?
     /// Called when this server will not be serving after all — the port is
     /// held by someone else, or the listener died. Set by whoever owns the
     /// wiring (`AppDelegate`), because the thing that has to be undone is the
@@ -221,8 +222,8 @@ final class CompanionServer {
         noteInput: @escaping (String) -> Void,
         startSession: @escaping (String, String?) -> (sessionID: String, agentID: String)?,
         stopSession: @escaping (String) -> Bool,
-        startScratchTerminal: @escaping () -> (sessionID: String, agentID: String)?,
-        startSSHSession: @escaping (String) -> (sessionID: String, agentID: String)?
+        startScratchTerminal: @escaping (String?) -> (sessionID: String, agentID: String)?,
+        startSSHSession: @escaping (String, String?) -> (sessionID: String, agentID: String)?
     ) {
         self.port = port
         self.rosterProvider = rosterProvider
@@ -456,10 +457,11 @@ final class CompanionServer {
             } else {
                 sendControl(.error(message: "could not start a session there"), to: connection)
             }
-        case .startTerminal:
-            // "New Terminal": a plain shell in the loose terminals funnel, seeded
-            // on the Mac even if the phone has never seen one there yet.
-            if let started = startScratchTerminal() {
+        case .startTerminal(let workspaceID):
+            // "New Terminal": a plain shell in the loose terminals funnel of the
+            // workspace the phone is showing, seeded on the Mac even if the
+            // phone has never seen one there yet.
+            if let started = startScratchTerminal(workspaceID) {
                 sendControl(
                     .started(sessionID: started.sessionID, agent: started.agentID),
                     to: connection
@@ -467,9 +469,9 @@ final class CompanionServer {
             } else {
                 sendControl(.error(message: "could not open a terminal"), to: connection)
             }
-        case .startSSH(let host):
+        case .startSSH(let host, let workspaceID):
             // "New SSH": a terminal running `ssh <host>` in that same funnel.
-            if let started = startSSHSession(host) {
+            if let started = startSSHSession(host, workspaceID) {
                 sendControl(
                     .started(sessionID: started.sessionID, agent: started.agentID),
                     to: connection
@@ -1213,7 +1215,23 @@ extension TermioStore {
     /// carries no project: `addScratchSession` finds-or-creates the funnel by
     /// kind, so the phone can seed the very first terminal too. Returns the new
     /// session's wire id and the `"terminal"` echo.
-    func companionStartScratchTerminal() -> (sessionID: String, agentID: String)? {
+    ///
+    /// `workspaceID` is the workspace the phone user is looking at. There is one
+    /// funnel per workspace, so without it the destination would be whichever
+    /// workspace this Mac happens to be showing — a decision taken on a screen
+    /// the phone user cannot see. An older phone sends none and keeps that
+    /// behaviour.
+    func companionStartScratchTerminal(
+        workspaceID: String?
+    ) -> (sessionID: String, agentID: String)? {
+        // Switching, not filing directly: `addScratchSession` files against the
+        // current workspace, so moving there first is what makes the row land
+        // where the phone said — the same move `companionStartSession` makes for
+        // a loose-section start. A shell that runs here still cannot be filed
+        // under a workspace on a box, and `addScratchSession` keeps that rule.
+        if let workspace = companionWorkspace(workspaceID) {
+            switchToWorkspace(workspace.id)
+        }
         addScratchSession(agent: .terminal)
         guard let sessionID = selectedSessionID?.uuidString else { return nil }
         return (sessionID, AgentPreset.terminal.wireName)
@@ -1223,12 +1241,29 @@ extension TermioStore {
     /// SSH" (`.startSSH`) — the same `addSSHSession` the desktop's SSH picker
     /// uses. It lands in the `.terminals` funnel too, so it needs no project.
     /// Returns the new session's wire id and the `"terminal"` echo.
-    func companionStartSSHSession(host: String) -> (sessionID: String, agentID: String)? {
+    ///
+    /// `workspaceID` is a preference here rather than a destination: an `ssh`
+    /// shell has to be filed under a workspace on the box it reaches, or that
+    /// workspace claims a machine it isn't on. It settles which of that box's
+    /// workspaces when there is more than one, and is ignored otherwise.
+    func companionStartSSHSession(
+        host: String, workspaceID: String?
+    ) -> (sessionID: String, agentID: String)? {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else { return nil }
-        addSSHSession(host: host)
+        let preferred = companionWorkspace(workspaceID)
+            .flatMap { $0.isOn(alias: host, device: nil) ? $0.id : nil }
+        addSSHSession(host: host, preferring: preferred)
         guard let sessionID = selectedSessionID?.uuidString else { return nil }
         return (sessionID, AgentPreset.terminal.wireName)
+    }
+
+    /// The workspace a phone request names, by the uuid the roster gave it. nil
+    /// for an absent id (an older phone), and for one naming a workspace that is
+    /// gone — both mean "this Mac decides", the behaviour that predates the field.
+    private func companionWorkspace(_ wireID: String?) -> Workspace? {
+        guard let wireID else { return nil }
+        return workspaces.first { $0.id.uuidString.caseInsensitiveCompare(wireID) == .orderedSame }
     }
 
     /// Close a session for a phone `stop` request — the same `closeSession`
@@ -1266,11 +1301,11 @@ extension TermioStore {
         )
     }
 
-    /// The wire id for a workspace's loose section. Derived from the workspace so
-    /// it is stable across launches — the phone sends it back to open a session
-    /// there — and suffixed because one workspace has two sections.
+    /// The wire id for a workspace's loose section. The format is the protocol's
+    /// (`Wire.looseSectionID`), because the phone builds the same id to address a
+    /// section this Mac has not created yet.
     static func looseWireID(workspace: Workspace, chats: Bool) -> String {
-        "\(workspace.id.uuidString)-\(chats ? "chats" : "terminals")"
+        Wire.looseSectionID(workspaceID: workspace.id.uuidString, chats: chats)
     }
 
     /// Snapshot the current projects/sessions as a wire roster, mirroring what

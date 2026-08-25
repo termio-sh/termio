@@ -174,8 +174,44 @@ final class WireProtocolTests: XCTestCase {
     func testUnsupportedDoesNotReEncodeAsARealCommand() {
         let unsupported = CompanionControl.unsupported(type: "startTerminal")
 
-        XCTAssertNotEqual(CompanionControl.decode(unsupported.encoded()), .startTerminal)
+        XCTAssertNotEqual(
+            CompanionControl.decode(unsupported.encoded()), .startTerminal(workspaceID: nil))
         XCTAssertEqual(CompanionControl.decode(unsupported.encoded()), unsupported)
+    }
+
+    /// The workspace a phone-started terminal lands in is additive: a phone that
+    /// predates the field sends the older shape, and it has to keep meaning what
+    /// it meant — "the Mac picks" — rather than failing to decode.
+    func testStartWithoutAWorkspaceStillDecodes() {
+        XCTAssertEqual(
+            CompanionControl.decode(#"{"t":"startTerminal"}"#), .startTerminal(workspaceID: nil))
+        XCTAssertEqual(
+            CompanionControl.decode(#"{"t":"startSSH","host":"vps"}"#),
+            .startSSH(host: "vps", workspaceID: nil))
+    }
+
+    /// And a named workspace survives the round trip, so the Mac resolves the
+    /// funnel where the phone said rather than where its own window is pointed.
+    func testStartCarriesItsWorkspace() {
+        let terminal = CompanionControl.startTerminal(workspaceID: "WS-1")
+        let ssh = CompanionControl.startSSH(host: "vps", workspaceID: "WS-2")
+
+        XCTAssertEqual(CompanionControl.decode(terminal.encoded()), terminal)
+        XCTAssertEqual(CompanionControl.decode(ssh.encoded()), ssh)
+    }
+
+    /// Both ends build a loose section's wire id, so a phone can address the
+    /// Chats funnel of a workspace the Mac has not opened one in yet.
+    @MainActor
+    func testLooseSectionIDMatchesTheMacsOwn() {
+        let workspace = Workspace(name: "Alpha")
+
+        XCTAssertEqual(
+            TermioStore.looseWireID(workspace: workspace, chats: true),
+            Wire.looseSectionID(workspaceID: workspace.id.uuidString, chats: true))
+        XCTAssertEqual(
+            TermioStore.looseWireID(workspace: workspace, chats: false),
+            Wire.looseSectionID(workspaceID: workspace.id.uuidString, chats: false))
     }
 
     /// The tag reaches a `.public` log field and a paired phone picks it, so a
