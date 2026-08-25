@@ -2,16 +2,21 @@ import SwiftUI
 import TermioShared
 import UIKit
 
-/// The Chats tab: the Mac's loose agent sessions (the `chats`-kind container),
-/// listed flat — the phone twin of the desktop sidebar's Chats section. The
-/// sessions ARE the content: no project page in between, a row goes straight
-/// to its terminal, like the ChatGPT chat list. ＋ starts a new chat in one
-/// tap from the title bar — the Mac picks the agent, the same default ⌘N
-/// launches — with the per-agent menu kept behind a long-press.
+/// The Chats tab: the Mac's loose agent sessions (the `chats`-kind container) —
+/// the phone twin of the desktop sidebar's Chats section. The sessions ARE the
+/// content: no project page in between, a row goes straight to its terminal,
+/// like the ChatGPT chat list. ＋ starts a new chat in one tap — the Mac picks
+/// the agent, the same default ⌘N launches.
+///
+/// Sectioned by workspace, like the Projects list and the Terminals tab: there
+/// is one loose funnel per workspace, so with two machines paired a flat list
+/// would show both boxes' chats as one column with nothing saying which is which.
 final class ChatListViewController: UIViewController {
     private let store: RosterStore
 
-    private var chats: [MockSession] = []
+    /// The store's loose chat containers, grouped by workspace in roster order —
+    /// one section each.
+    private var groups: [WorkspaceGroup] = []
 
     private let newChatButton = UIButton(type: .system)
     private let tableView = UITableView(frame: .zero, style: .grouped)
@@ -98,7 +103,8 @@ final class ChatListViewController: UIViewController {
     /// The compose menu: a tap presents the agent picker directly — choosing
     /// which agent to start is the primary action. Deferred so it always
     /// reflects the roster's current enabled agents (and the button hides while
-    /// unpaired).
+    /// unpaired). The agents sit under a header naming the workspace the chat
+    /// will land in, so the destination is stated where the choice is made.
     private func configureNewChatButton() {
         newChatButton.applyGlassIcon(.add, boxSize: 24)
         newChatButton.tintColor = .label
@@ -106,13 +112,32 @@ final class ChatListViewController: UIViewController {
         newChatButton.showsMenuAsPrimaryAction = true
         newChatButton.menu = UIMenu(children: [
             UIDeferredMenuElement.uncached { [weak self] completion in
-                guard let self, let chatsProject = store.chatsProject else {
-                    completion([])
-                    return
-                }
-                completion(store.newSessionActions(in: chatsProject))
+                completion(self?.composeMenuItems() ?? [])
             },
         ])
+    }
+
+    private func composeMenuItems() -> [UIMenuElement] {
+        guard let chatsProject = store.chatsProject else { return [] }
+        var items: [UIMenuElement] = [
+            UIMenu(
+                title: destinationTitle,
+                options: .displayInline,
+                children: store.newSessionActions(in: chatsProject)
+            ),
+        ]
+        if let destinations = store.destinationPickerMenu() { items.append(destinations) }
+        return items
+    }
+
+    /// "New Chat in Alpha" — the destination stated over the agent list. Empty
+    /// when there is only one workspace to land in: naming a choice nobody has
+    /// is noise, and an empty title draws no header.
+    private var destinationTitle: String {
+        guard store.localWorkspaces.count > 1,
+              let name = store.destinationWorkspace?.name, !name.isEmpty
+        else { return "" }
+        return localized("New Chat in \(name)")
     }
 
     // MARK: - Table
@@ -127,6 +152,10 @@ final class ChatListViewController: UIViewController {
         tableView.estimatedSectionFooterHeight = 0
         tableView.keyboardDismissMode = .onDrag
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
+        tableView.register(
+            WorkspaceSectionHeaderView.self,
+            forHeaderFooterViewReuseIdentifier: WorkspaceSectionHeaderView.reuseID
+        )
         tableView.translatesAutoresizingMaskIntoConstraints = false
         // The native tab controller contributes the correct safe-area and
         // adjusted scroll insets for both the classic and Liquid Glass bars.
@@ -140,11 +169,14 @@ final class ChatListViewController: UIViewController {
     }
 
     private func refilter() {
-        chats = store.chatSessions
+        groups = store.chatGroups
         newChatButton.isHidden = store.chatsProject?.rosterID == nil
         tableView.reloadData()
         updateEmptyState()
     }
+
+    /// Every chat on screen, in section order.
+    private var visible: [MockSession] { groups.flatMap(\.sessions) }
 
     // MARK: - Empty state
 
@@ -164,7 +196,7 @@ final class ChatListViewController: UIViewController {
     /// zero state only answers "no chats yet". The ＋ above is the next step,
     /// so no pill button repeats it.
     private func updateEmptyState() {
-        emptyState.isHidden = !chats.isEmpty
+        emptyState.isHidden = !visible.isEmpty
         guard !emptyState.isHidden else { return }
         emptyState.configure(
             icon: .bubbleChat,
@@ -179,21 +211,51 @@ final class ChatListViewController: UIViewController {
 // MARK: - Table data source / delegate
 
 extension ChatListViewController: UITableViewDataSource, UITableViewDelegate {
+    func numberOfSections(in tableView: UITableView) -> Int {
+        groups.count
+    }
+
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        chats.count
+        groups[section].sessions.count
+    }
+
+    func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+        guard groups.namesWorkspaces else { return nil }
+        guard let header = tableView.dequeueReusableHeaderFooterView(
+            withIdentifier: WorkspaceSectionHeaderView.reuseID
+        ) as? WorkspaceSectionHeaderView else { return nil }
+        let group = groups[section]
+        header.configure(title: group.name, detail: group.machineLabel)
+        return header
+    }
+
+    func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        groups.namesWorkspaces ? WorkspaceSectionHeaderView.height : 0
+    }
+
+    /// A whitespace gap below each group — the divider-free separator, matching
+    /// the macOS sidebar's spacing-based grouping.
+    func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
+        12
+    }
+
+    /// An empty (transparent) footer view, so the gap above is just whitespace.
+    func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
+        UIView()
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath)
         cell.selectionStyle = .none
         cell.backgroundColor = .clear
-        let session = chats[indexPath.row]
+        let sessions = groups[indexPath.section].sessions
+        let session = sessions[indexPath.row]
         cell.contentConfiguration = UIHostingConfiguration {
             SessionRow(
                 session: session,
                 isCurrent: session.key == store.currentSessionKey,
                 showsProject: false,
-                showsSeparator: indexPath.row < chats.count - 1
+                showsSeparator: indexPath.row < sessions.count - 1
             )
         }
         .margins(.horizontal, 12)
@@ -203,7 +265,7 @@ extension ChatListViewController: UITableViewDataSource, UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         // The row IS the session — straight to its terminal.
-        store.openSession(chats[indexPath.row])
+        store.openSession(groups[indexPath.section].sessions[indexPath.row])
     }
 
     /// Trailing swipe: the Mac session menu's "Close Session".
@@ -212,7 +274,7 @@ extension ChatListViewController: UITableViewDataSource, UITableViewDelegate {
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
     ) -> UISwipeActionsConfiguration? {
         guard store.companionURL != nil,
-              let sessionID = chats[indexPath.row].rosterID
+              let sessionID = groups[indexPath.section].sessions[indexPath.row].rosterID
         else { return nil }
         let close = UIContextualAction(style: .destructive, title: localized("Close")) { [weak self] _, _, done in
             self?.store.stopSession(sessionID)

@@ -3,17 +3,23 @@ import TermioShared
 import UIKit
 
 /// The Terminals tab: the Mac's loose shell sessions (the `terminals`-kind
-/// container), listed flat — the phone twin of the desktop sidebar's Terminals
-/// section, and the exact mirror of the Chats tab for shells instead of agents.
-/// Loose terminals used to fall through as a project *folder* you had to tap
-/// into; promoting them to their own tab keeps a live shell one tap away, the
-/// same shape Chats already got. A row goes straight to its terminal. The
-/// title-bar ＋ opens a new plain shell at `~` — no agent to pick, so (unlike
-/// Chats) it carries no per-agent menu.
+/// container) — the phone twin of the desktop sidebar's Terminals section, and
+/// the exact mirror of the Chats tab for shells instead of agents. Loose
+/// terminals used to fall through as a project *folder* you had to tap into;
+/// promoting them to their own tab keeps a live shell one tap away, the same
+/// shape Chats already got. A row goes straight to its terminal. The ＋ opens a
+/// new plain shell at `~` — no agent to pick, so (unlike Chats) it carries no
+/// per-agent menu.
+///
+/// Sectioned by workspace, like the Projects list: there is one loose funnel per
+/// workspace, so with two machines paired a flat list would show both boxes'
+/// shells as one column with nothing saying which is which.
 final class TerminalListViewController: UIViewController {
     private let store: RosterStore
 
-    private var terminals: [MockSession] = []
+    /// The store's loose terminal containers, grouped by workspace in roster
+    /// order — one section each.
+    private var groups: [WorkspaceGroup] = []
 
     private let newTerminalButton = UIButton(type: .system)
     private let tableView = UITableView(frame: .zero, style: .grouped)
@@ -98,23 +104,43 @@ final class TerminalListViewController: UIViewController {
     }
 
     /// The compose menu: New Terminal (a plain login shell the Mac gathers into
-    /// the loose `.terminals` funnel) and New SSH. New SSH is a read-only pick
-    /// from the Mac's `~/.ssh/config` aliases — the phone never types a host —
-    /// so it's deferred to reflect the current config.
+    /// the loose `.terminals` funnel) and New SSH. Deferred as a whole because
+    /// both entries read the live roster — New SSH is a read-only pick from the
+    /// Mac's `~/.ssh/config` aliases (the phone never types a host), and New
+    /// Terminal names the workspace it will land in.
     private func configureNewTerminalButton() {
         newTerminalButton.applyGlassIcon(.add, boxSize: 24)
         newTerminalButton.tintColor = .label
         newTerminalButton.accessibilityLabel = localized("New Terminal")
         newTerminalButton.showsMenuAsPrimaryAction = true
         newTerminalButton.menu = UIMenu(children: [
-            UIAction(
-                title: localized("New Terminal"),
-                image: HugeIcon.terminal.strokeImage(boxSize: 22)
-            ) { [weak self] _ in self?.store.startNewTerminal() },
             UIDeferredMenuElement.uncached { [weak self] completion in
-                completion([self?.sshMenu() ?? UIMenu()])
+                completion(self?.composeMenuItems() ?? [])
             },
         ])
+    }
+
+    private func composeMenuItems() -> [UIMenuElement] {
+        var items: [UIMenuElement] = [
+            UIAction(
+                title: newTerminalTitle,
+                image: HugeIcon.terminal.strokeImage(boxSize: 22)
+            ) { [weak self] _ in self?.store.startNewTerminal() },
+            sshMenu(),
+        ]
+        if let destinations = store.destinationPickerMenu() { items.append(destinations) }
+        return items
+    }
+
+    /// "New Terminal in Alpha" — the destination stated on the action itself, so
+    /// starting a shell never means guessing which machine it landed on. Plain
+    /// "New Terminal" when there is only one workspace to land in: naming a
+    /// choice nobody has is noise.
+    private var newTerminalTitle: String {
+        guard store.localWorkspaces.count > 1,
+              let name = store.destinationWorkspace?.name, !name.isEmpty
+        else { return localized("New Terminal") }
+        return localized("New Terminal in \(name)")
     }
 
     /// The "New SSH" submenu: one entry per `~/.ssh/config` host the Mac knows.
@@ -150,6 +176,10 @@ final class TerminalListViewController: UIViewController {
         tableView.estimatedSectionFooterHeight = 0
         tableView.keyboardDismissMode = .onDrag
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "row")
+        tableView.register(
+            WorkspaceSectionHeaderView.self,
+            forHeaderFooterViewReuseIdentifier: WorkspaceSectionHeaderView.reuseID
+        )
         tableView.translatesAutoresizingMaskIntoConstraints = false
         // The native tab controller contributes the correct safe-area and
         // adjusted scroll insets for both the classic and Liquid Glass bars.
@@ -163,13 +193,16 @@ final class TerminalListViewController: UIViewController {
     }
 
     private func refilter() {
-        terminals = store.terminalSessions
+        groups = store.terminalGroups
         // Shown whenever paired: New Terminal is project-less, so it no longer
         // needs an existing terminals container to land in (it seeds the first).
         newTerminalButton.isHidden = store.companionURL == nil
         tableView.reloadData()
         updateEmptyState()
     }
+
+    /// Every terminal on screen, in section order.
+    private var visible: [MockSession] { groups.flatMap(\.sessions) }
 
     // MARK: - Empty state
 
@@ -190,7 +223,7 @@ final class TerminalListViewController: UIViewController {
     /// seed the first terminal, so it's the next step; only while unpaired (＋
     /// hidden) does the message fall back to pointing at the Mac.
     private func updateEmptyState() {
-        emptyState.isHidden = !terminals.isEmpty
+        emptyState.isHidden = !visible.isEmpty
         guard !emptyState.isHidden else { return }
         let canStart = store.companionURL != nil
         emptyState.configure(
@@ -208,21 +241,51 @@ final class TerminalListViewController: UIViewController {
 // MARK: - Table data source / delegate
 
 extension TerminalListViewController: UITableViewDataSource, UITableViewDelegate {
+    func numberOfSections(in tableView: UITableView) -> Int {
+        groups.count
+    }
+
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        terminals.count
+        groups[section].sessions.count
+    }
+
+    func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+        guard groups.namesWorkspaces else { return nil }
+        guard let header = tableView.dequeueReusableHeaderFooterView(
+            withIdentifier: WorkspaceSectionHeaderView.reuseID
+        ) as? WorkspaceSectionHeaderView else { return nil }
+        let group = groups[section]
+        header.configure(title: group.name, detail: group.machineLabel)
+        return header
+    }
+
+    func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        groups.namesWorkspaces ? WorkspaceSectionHeaderView.height : 0
+    }
+
+    /// A whitespace gap below each group — the divider-free separator, matching
+    /// the macOS sidebar's spacing-based grouping.
+    func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
+        12
+    }
+
+    /// An empty (transparent) footer view, so the gap above is just whitespace.
+    func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
+        UIView()
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath)
         cell.selectionStyle = .none
         cell.backgroundColor = .clear
-        let session = terminals[indexPath.row]
+        let sessions = groups[indexPath.section].sessions
+        let session = sessions[indexPath.row]
         cell.contentConfiguration = UIHostingConfiguration {
             SessionRow(
                 session: session,
                 isCurrent: session.key == store.currentSessionKey,
                 showsProject: false,
-                showsSeparator: indexPath.row < terminals.count - 1
+                showsSeparator: indexPath.row < sessions.count - 1
             )
         }
         .margins(.horizontal, 12)
@@ -232,7 +295,7 @@ extension TerminalListViewController: UITableViewDataSource, UITableViewDelegate
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         // The row IS the session — straight to its terminal.
-        store.openSession(terminals[indexPath.row])
+        store.openSession(groups[indexPath.section].sessions[indexPath.row])
     }
 
     /// Trailing swipe: the Mac session menu's "Close Session".
@@ -241,7 +304,7 @@ extension TerminalListViewController: UITableViewDataSource, UITableViewDelegate
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
     ) -> UISwipeActionsConfiguration? {
         guard store.companionURL != nil,
-              let sessionID = terminals[indexPath.row].rosterID
+              let sessionID = groups[indexPath.section].sessions[indexPath.row].rosterID
         else { return nil }
         let close = UIContextualAction(style: .destructive, title: localized("Close")) { [weak self] _, _, done in
             self?.store.stopSession(sessionID)

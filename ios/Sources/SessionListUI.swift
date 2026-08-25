@@ -114,6 +114,134 @@ struct RowSeparator: View {
     }
 }
 
+// MARK: - Workspace grouping
+
+/// One workspace's containers — the group a list draws as a section. The Mac's
+/// tree is Device → Workspace → Project → Session, and a phone list that
+/// flattens it pours every machine's rows into one column, where a VPS clone is
+/// indistinguishable from a local one. The workspace is the group; `deviceAlias`
+/// is the machine it is on, named in the header the way the Mac names it, and
+/// never a level you navigate.
+struct WorkspaceGroup {
+    let id: String
+    let name: String
+    let deviceAlias: String?
+    var projects: [MockProject]
+
+    /// The machine to put after the workspace name, and nil when there is
+    /// nothing to add: this Mac carries no mark — being on the machine you
+    /// paired with is the absence of one — and neither does a workspace already
+    /// named after its box, where the header says it once. Both rules are the
+    /// desktop sidebar's.
+    var machineLabel: String? {
+        guard let deviceAlias,
+              deviceAlias.caseInsensitiveCompare(name) != .orderedSame
+        else { return nil }
+        return deviceAlias
+    }
+
+    /// Every session in the group's containers, in roster order — what the
+    /// session tabs (Terminals, Chats) list under the header, where the
+    /// container itself is the tab and only its sessions are rows.
+    var sessions: [MockSession] { projects.flatMap(\.sessions) }
+
+    /// Containers grouped by workspace. Workspaces keep the order the Mac pushed
+    /// them in — the sidebar's own order — and only the projects inside a group
+    /// re-sort when the caller asks for Name, so switching sort never reshuffles
+    /// the machines out from under the user.
+    static func grouped(_ projects: [MockProject], sortedByName: Bool = false) -> [WorkspaceGroup] {
+        var groups: [WorkspaceGroup] = []
+        var indexByWorkspace: [String: Int] = [:]
+        for project in projects {
+            if let index = indexByWorkspace[project.workspaceID] {
+                groups[index].projects.append(project)
+                continue
+            }
+            indexByWorkspace[project.workspaceID] = groups.count
+            groups.append(WorkspaceGroup(
+                id: project.workspaceID,
+                name: project.workspaceName,
+                deviceAlias: project.deviceAlias,
+                projects: [project]
+            ))
+        }
+        guard sortedByName else { return groups }
+        return groups.map { group in
+            var sorted = group
+            sorted.projects.sort {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            return sorted
+        }
+    }
+}
+
+extension Array where Element == WorkspaceGroup {
+    /// Whether the sections are headed by their workspace. One unnamed local
+    /// workspace is the case almost everyone is in, and the Mac hides its own
+    /// workspace switcher there too — the page title already says what the list
+    /// is. A second workspace, or one that names a machine, is what makes the
+    /// grouping worth a header.
+    var namesWorkspaces: Bool {
+        count > 1 || contains { $0.deviceAlias != nil && !$0.name.isEmpty }
+    }
+}
+
+/// A small gray caps label capping a workspace group, with room for one
+/// trailing detail — the machine that workspace is on. Mail and Files head their
+/// groups the same way: the account or location names the section, and the rows
+/// underneath say nothing more about where they live.
+///
+/// The detail keeps its own case. It is an `~/.ssh/config` alias, a literal the
+/// user typed, and uppercasing it would make it something they can't find again.
+final class WorkspaceSectionHeaderView: UITableViewHeaderFooterView {
+    static let reuseID = "workspaceSectionHeader"
+    /// The height a table should give it — the Projects list's, so the three
+    /// workspace-grouped lists cap their groups identically.
+    static let height: CGFloat = 28
+
+    private let label = UILabel()
+    private let detailLabel = UILabel()
+
+    override init(reuseIdentifier: String?) {
+        super.init(reuseIdentifier: reuseIdentifier)
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.textColor = .secondaryLabel
+        label.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.font = .systemFont(ofSize: 13, weight: .regular)
+        detailLabel.textColor = .tertiaryLabel
+        detailLabel.textAlignment = .right
+        // The workspace name is the section's identity; the machine gives way
+        // when there isn't room for both.
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(label)
+        contentView.addSubview(detailLabel)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 22),
+            label.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+            detailLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: label.trailingAnchor, constant: 8),
+            detailLabel.trailingAnchor.constraint(
+                equalTo: contentView.trailingAnchor, constant: -22),
+            detailLabel.firstBaselineAnchor.constraint(equalTo: label.firstBaselineAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(title: String, detail: String? = nil) {
+        label.text = title.uppercased()
+        detailLabel.text = detail
+        detailLabel.isHidden = detail == nil
+        isAccessibilityElement = true
+        accessibilityTraits = .header
+        // VoiceOver reads the group once, so the machine belongs in the same
+        // breath as the name rather than as a second, orphaned element.
+        accessibilityLabel = detail.map { "\(title), \(localized("on \($0)"))" } ?? title
+    }
+}
+
 // MARK: - Empty state view
 
 /// The centered zero state — a quiet glyph (or spinner), a title, a line of
