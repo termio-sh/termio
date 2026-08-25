@@ -31,6 +31,10 @@ final class RosterStore {
     /// `MockSession.key` of the session filling the screen — its row gets the
     /// current-chat pill wherever session rows render.
     var currentSessionKey: String?
+    /// The workspace the phone is working in: the one holding the session last
+    /// opened, or the one picked in the ＋ menu. See `destinationWorkspace`,
+    /// which resolves it against the live roster.
+    private var destinationWorkspaceID: String?
 
     /// Open a session's terminal; `companionURL` is non-nil when it's live.
     /// Fired for row taps (via `openSession`) and for `.started` replies.
@@ -55,28 +59,78 @@ final class RosterStore {
         projects.flatMap(\.sessions).filter { $0.status == .needsAttention }
     }
 
-    /// The Mac's loose-agent-sessions container — the Chats tab's backing
-    /// project (and the target a phone-started chat lands in). nil when
-    /// paired to an older Mac that doesn't send project kinds.
+    /// The Chats tab's sections: one per workspace that has loose agent
+    /// sessions, in the Mac's push order. Grouped rather than flattened for the
+    /// same reason the Projects list is — two paired machines' loose sessions
+    /// are otherwise one undifferentiated list.
+    var chatGroups: [WorkspaceGroup] {
+        WorkspaceGroup.grouped(projects.filter { $0.kind == "chats" })
+    }
+
+    /// The Terminals tab's sections, the shell twin of `chatGroups`.
+    var terminalGroups: [WorkspaceGroup] {
+        WorkspaceGroup.grouped(projects.filter { $0.kind == "terminals" })
+    }
+
+    /// Every workspace on the roster, in the Mac's push order — what the ＋
+    /// destination is picked from.
+    var workspaceGroups: [WorkspaceGroup] {
+        WorkspaceGroup.grouped(projects)
+    }
+
+    /// The workspace the phone is working in: the one holding the session last
+    /// opened, or the one picked in the ＋. The Mac resolves the loose funnels
+    /// per workspace, so without an answer here every phone-started session
+    /// would land wherever the Mac's own window is pointed — a choice made on a
+    /// screen the phone user cannot see.
+    var currentWorkspace: WorkspaceGroup? {
+        let groups = workspaceGroups
+        return groups.first { $0.id == destinationWorkspaceID } ?? groups.first
+    }
+
+    /// Where a session the phone starts *here* lands — a plain shell or a chat,
+    /// both of which run on the Mac. Only a workspace on the Mac itself
+    /// qualifies: one on a box would be claiming a machine the process isn't on,
+    /// and the Mac files it locally regardless, so offering one would promise
+    /// what it will not do. nil when the roster has no local workspace yet,
+    /// which leaves the choice to the Mac.
+    var destinationWorkspace: WorkspaceGroup? {
+        let local = localWorkspaces
+        return local.first { $0.id == currentWorkspace?.id } ?? local.first
+    }
+
+    /// The workspaces on the paired Mac itself — what ＋ can offer as a
+    /// destination (see `destinationWorkspace`).
+    var localWorkspaces: [WorkspaceGroup] {
+        workspaceGroups.filter { $0.deviceAlias == nil }
+    }
+
+    /// The Mac's loose-agent-sessions container in the destination workspace —
+    /// the target a phone-started chat lands in. A workspace with no chats yet
+    /// gets a stand-in addressed by `Wire.looseSectionID`, so the phone can seed
+    /// the first chat there the way `.startTerminal` seeds the first terminal;
+    /// the Mac finds-or-creates the section behind that id. nil only when no
+    /// local workspace exists to land in.
     var chatsProject: MockProject? {
-        projects.first { $0.kind == "chats" }
+        guard let workspace = destinationWorkspace else { return nil }
+        if let existing = workspace.projects.first(where: { $0.kind == "chats" }) { return existing }
+        return MockProject(
+            name: localized("Chats"),
+            path: "",
+            rosterID: Wire.looseSectionID(workspaceID: workspace.id, chats: true),
+            kind: "chats",
+            workspaceID: workspace.id,
+            workspaceName: workspace.name,
+            sessions: []
+        )
     }
 
-    /// The Chats tab's rows, flat and in roster order.
-    var chatSessions: [MockSession] {
-        projects.filter { $0.kind == "chats" }.flatMap(\.sessions)
-    }
-
-    /// The Mac's loose-terminals container — the Terminals tab's backing
-    /// project (and the target a phone-started terminal lands in). The shell
-    /// twin of `chatsProject`; nil until the Mac has opened a loose shell.
-    var terminalsProject: MockProject? {
-        projects.first { $0.kind == "terminals" }
-    }
-
-    /// The Terminals tab's rows, flat and in roster order.
-    var terminalSessions: [MockSession] {
-        projects.filter { $0.kind == "terminals" }.flatMap(\.sessions)
+    /// The Mac's loose-terminals container in the destination workspace, the
+    /// shell twin of `chatsProject`. Only ever the optimistic row's stand-in:
+    /// `.startTerminal` names the workspace itself and needs no container.
+    private var terminalsProject: MockProject? {
+        guard let workspace = destinationWorkspace else { return nil }
+        return workspace.projects.first { $0.kind == "terminals" }
     }
 
     /// The live project for a stable key (path, falling back to name — see
@@ -112,8 +166,25 @@ final class RosterStore {
     }
 
     /// Row tap on any screen: open the session over whatever link we have.
+    /// Opening one is also how the phone says which workspace it is working in,
+    /// so the next ＋ starts alongside what the user was just looking at.
     func openSession(_ session: MockSession) {
+        if let workspaceID = workspaceID(of: session) { destinationWorkspaceID = workspaceID }
         onOpenSession?(session, companionURL)
+    }
+
+    /// Point the ＋ at another workspace (its "Start in" pick).
+    func chooseDestinationWorkspace(_ id: String) {
+        destinationWorkspaceID = id
+        NotificationCenter.default.post(name: Self.didChange, object: nil)
+    }
+
+    /// The workspace a session is filed under, via the container it belongs to.
+    /// A session carries its container's wire id, and the container names the
+    /// workspace — the roster's own chain, so nothing is inferred here.
+    private func workspaceID(of session: MockSession) -> String? {
+        guard let projectRosterID = session.projectRosterID else { return nil }
+        return projects.first { $0.rosterID == projectRosterID }?.workspaceID
     }
 
     /// Force an immediate reconnect (the zero state's "Try Again").
@@ -142,22 +213,43 @@ final class RosterStore {
         }
     }
 
+    /// The ＋'s "Start in" section: one entry per workspace a phone-started
+    /// session can land in, checkmarked on the destination. An inline section
+    /// rather than a sheet — changing where the next session goes is one tap,
+    /// and never a picker standing in front of the thing the user asked for.
+    /// nil when there is one workspace, which is not a choice.
+    func destinationPickerMenu() -> UIMenu? {
+        let workspaces = localWorkspaces
+        guard workspaces.count > 1 else { return nil }
+        let destination = destinationWorkspace?.id
+        return UIMenu(
+            title: localized("Start in"),
+            options: .displayInline,
+            children: workspaces.map { workspace in
+                UIAction(
+                    title: workspace.name,
+                    state: workspace.id == destination ? .on : .off
+                ) { [weak self] _ in self?.chooseDestinationWorkspace(workspace.id) }
+            }
+        )
+    }
+
     func startSession(agent: RosterAgent, in project: MockProject) {
         guard let projectID = project.rosterID else { return }
         pendingStart = (project, agent)
         client?.startSession(projectID: projectID, agentID: agent.id)
     }
 
-    /// The Terminals tab's ＋: open a plain login shell at `~` in the loose
-    /// `.terminals` funnel. The wire agent token `"terminal"` maps to the Mac's
     /// The Terminals tab's ＋ → "New Terminal": a plain login shell in the Mac's
     /// loose `.terminals` funnel. Project-less on the wire (`.startTerminal`), so
     /// — unlike the old `.start` path — it can seed the very first terminal too,
-    /// no container need pre-exist. Opens attached on the `.started` echo, so a
-    /// placeholder stands in until the roster push carries the real container.
+    /// no container need pre-exist. It carries the destination workspace instead,
+    /// because there is one funnel per workspace. Opens attached on the
+    /// `.started` echo, so a placeholder stands in until the roster push carries
+    /// the real container.
     func startNewTerminal() {
         pendingStart = (terminalsProject ?? .terminalsPlaceholder, nil)
-        client?.startTerminal()
+        client?.startTerminal(workspaceID: destinationWorkspace?.id)
     }
 
     /// The Terminals tab's ＋ → "New SSH": an `ssh <host>` terminal in that same
@@ -168,7 +260,10 @@ final class RosterStore {
         let host = host.trimmingCharacters(in: .whitespaces)
         guard !host.isEmpty else { return }
         pendingStart = (terminalsProject ?? .terminalsPlaceholder, nil)
-        client?.startSSH(host: host)
+        // The raw current workspace, not the local destination: an `ssh` shell
+        // is filed on the box it reaches, so the workspace worth naming is the
+        // one the user is looking at even when that one is over there.
+        client?.startSSH(host: host, workspaceID: currentWorkspace?.id)
     }
 
     /// Close on the Mac; the next roster push drops the row everywhere.

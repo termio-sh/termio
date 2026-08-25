@@ -50,9 +50,13 @@ protocol DeviceClient: AnyObject {
 
     func startSession(projectID: String, agentID: String)
     /// A plain login shell, project-less so it can seed the very first one.
-    func startTerminal()
+    /// `workspaceID` names the workspace it lands in — the one the phone is
+    /// showing, so the destination is never decided by what the Mac's own
+    /// window happens to be pointed at. nil leaves the choice to the device.
+    func startTerminal(workspaceID: String?)
     /// `ssh <host>`, where `host` is always an alias the device already knows.
-    func startSSH(host: String)
+    /// `workspaceID` as above, honoured only when that workspace is on `host`.
+    func startSSH(host: String, workspaceID: String?)
     func stopSession(id: String)
     func requestSSHHosts()
 

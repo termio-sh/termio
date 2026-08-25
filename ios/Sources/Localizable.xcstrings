@@ -651,6 +651,16 @@
         }
       }
     },
+    "New Chat in %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %@ 中新建聊天"
+          }
+        }
+      }
+    },
     "New SSH": {
       "localizations": {
         "zh-Hans": {
@@ -667,6 +677,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "新建终端"
+          }
+        }
+      }
+    },
+    "New Terminal in %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %@ 中新建终端"
           }
         }
       }
@@ -1167,6 +1187,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "在 Mac 上开始一个会话，它就会显示在这里。"
+          }
+        }
+      }
+    },
+    "Start in": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启动于"
           }
         }
       }

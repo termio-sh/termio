@@ -60,9 +60,13 @@ final class CompanionBackend: DeviceClient {
         client.send(.start(projectID: projectID, agent: agentID))
     }
 
-    func startTerminal() { client.send(.startTerminal) }
+    func startTerminal(workspaceID: String?) {
+        client.send(.startTerminal(workspaceID: workspaceID))
+    }
 
-    func startSSH(host: String) { client.send(.startSSH(host: host)) }
+    func startSSH(host: String, workspaceID: String?) {
+        client.send(.startSSH(host: host, workspaceID: workspaceID))
+    }
 
     func stopSession(id: String) { client.send(.stop(sessionID: id)) }
 
