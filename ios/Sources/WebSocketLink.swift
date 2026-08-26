@@ -69,6 +69,10 @@ final class WebSocketLink: NSObject {
     /// close delegate; the first one wins so a drop dials exactly one
     /// reconnect. Main queue only, cleared on every dial.
     private var currentTaskDidDie = false
+    /// Prevents foreground/path/reconnect callbacks from opening overlapping
+    /// sockets while the previous dial is still in flight. Overlapping dials
+    /// make the companion receive competing attach and resize streams.
+    private var dialing = false
     /// Set the moment the socket opens and cleared the moment it dies, on
     /// whichever queue notices — hence the lock.
     private var open = false
@@ -147,7 +151,8 @@ final class WebSocketLink: NSObject {
     // MARK: - Connect
 
     private func connect() {
-        guard !stopped else { return }
+        guard !stopped, !dialing else { return }
+        dialing = true
         currentTaskDidDie = false
         task?.cancel(with: .goingAway, reason: nil)
         let task = session.webSocketTask(with: configuration.url)
@@ -259,6 +264,7 @@ final class WebSocketLink: NSObject {
 
     /// The socket died — from a failed read or from the close delegate.
     private func died(_ deadTask: URLSessionWebSocketTask) {
+        dialing = false
         setOpen(false)
         DispatchQueue.main.async { [weak self] in
             guard let self, !stopped, !currentTaskDidDie, deadTask === task else { return }
@@ -280,6 +286,7 @@ extension WebSocketLink: URLSessionWebSocketDelegate {
         _: URLSession, webSocketTask task: URLSessionWebSocketTask, didOpenWithProtocol _: String?
     ) {
         guard task === self.task else { return }
+        dialing = false
         Log.companion.notice(
             "\(self.configuration.name, privacy: .public) link connected to \(self.configuration.url.host ?? "?", privacy: .public)"
         )

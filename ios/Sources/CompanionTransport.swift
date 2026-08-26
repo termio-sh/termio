@@ -137,13 +137,10 @@ final class CompanionTransport {
     /// screen reset, auth, the attach it gates, and the grid claim the Mac's
     /// repaint is driven by.
     private func sendPreamble() {
-        // On a REconnect the terminal still shows the dead link's screen; a
-        // full reset (RIS) ahead of the server's ring-buffer replay keeps the
-        // two byte streams from interleaving into garbage. Emitted here on the
-        // serial delegate queue so it precedes the replayed bytes.
-        if everConnected {
-            onOutput?(Data("\u{1B}c".utf8))
-        }
+        // The server's attach response is the authoritative snapshot boundary.
+        // Do not emit RIS here: a transient reconnect can otherwise clear the
+        // visible terminal before the snapshot arrives, which reads as a flash
+        // and is especially noticeable during iOS foreground/network churn.
         everConnected = true
         // Auth precedes the attach on the same socket — the server refuses
         // the bridge (and everything else) until the token lands.
