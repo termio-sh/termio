@@ -1055,11 +1055,8 @@ extension TermioStore {
         }
         let deploy = runProcess(localBinary, ["remote", "deploy", host])
         guard let deploy, deploy.exitCode == 0 else {
-            let detail = deploy.map { output in
-                (output.standardError + output.standardOutput)
-                    .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-                    .last(where: { !$0.isEmpty }) ?? "deploy failed"
-            } ?? "couldn't run termiod remote deploy"
+            let detail = deploy.map { deployFailureDetail(from: $0) }
+                ?? "couldn't run termiod remote deploy"
             return .failure(RemoteSetupError(
                 message: "Couldn't deploy termiod to \(host).\n\(detail)"))
         }
@@ -1081,6 +1078,27 @@ extension TermioStore {
                 message: "Deployed termiod to \(host), but it didn't answer.\n"
                     + error.localizedDescription))
         }
+    }
+
+    /// Why a `termiod remote deploy` failed, as the alert should read it.
+    ///
+    /// `remote deploy` reports through anyhow, which prints one multi-line
+    /// `Error:` block at the end of stderr — the headline followed by the fixes,
+    /// one per line. Keeping only the last line put a dangling bullet under the
+    /// alert's title ("• or build on the host and deploy with: …") with nothing
+    /// naming what had gone wrong, so the whole block is kept and cargo's own
+    /// output above it dropped.
+    private nonisolated static func deployFailureDetail(from output: ProcessOutput) -> String {
+        let lines = (output.standardError + output.standardOutput)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let start = lines.lastIndex(where: { $0.hasPrefix("Error:") }) else {
+            return lines.last(where: { !$0.isEmpty }) ?? "deploy failed"
+        }
+        var block = lines[start...].filter { !$0.isEmpty }
+        block[0] = String(block[0].dropFirst("Error:".count))
+            .trimmingCharacters(in: .whitespaces)
+        return block.joined(separator: "\n")
     }
 
     /// A captured subprocess result — exit code plus drained stdout/stderr.
