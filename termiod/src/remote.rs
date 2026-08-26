@@ -309,12 +309,72 @@ fn target_for_uname(uname: &str) -> Result<String> {
     Ok(target.to_string())
 }
 
+/// Where the cross-build's tools are, which this process's own `PATH` cannot be
+/// trusted to say. A deploy is usually started by the app, and an app launched
+/// from Finder inherits launchd's `PATH` — `/usr/bin:/bin:/usr/sbin:/sbin`, which
+/// holds neither cargo (`~/.cargo/bin`) nor anything from Homebrew. The login
+/// shell knows both, so it answers instead.
+///
+/// Homebrew's `zig` prefix is added on top of that because `brew` leaves `zig`
+/// off `PATH` entirely whenever a second `zig@N` formula holds the link — the
+/// same case `scripts/build-app.sh` checks for before building the daemon.
+fn toolchain_path() -> Vec<String> {
+    let mut directories = crate::agent::machine::login_path();
+    for prefix in ["/opt/homebrew/opt/zig/bin", "/usr/local/opt/zig/bin"] {
+        if !directories.iter().any(|seen| seen == prefix) {
+            directories.push(prefix.to_string());
+        }
+    }
+    directories
+}
+
+/// `binary` as an absolute path, looked up across `directories`.
+fn find_tool(directories: &[String], binary: &str) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    directories.iter().find_map(|directory| {
+        let candidate = std::path::Path::new(directory).join(binary);
+        let usable = std::fs::metadata(&candidate)
+            .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false);
+        usable.then(|| candidate.to_string_lossy().into_owned())
+    })
+}
+
 /// `cargo build --release --target <triple>` for this crate; returns the
 /// binary path. Falls back to a clear message if the cross-linker is missing.
 fn cross_compile(target: &str) -> Result<String> {
     let manifest = format!("{}/Cargo.toml", env!("CARGO_MANIFEST_DIR"));
+    let path = toolchain_path();
+    let Some(cargo) = find_tool(&path, "cargo") else {
+        bail!(
+            "cross-compiling for {target} needs cargo, and there is none on this machine.\n  \
+             • install Rust: https://rustup.rs\n  \
+             • or build on the host and deploy with: termiod remote deploy <host> --bin <path>"
+        );
+    };
+    // Checked before cargo runs rather than left to the build script's panic:
+    // the VT engine termiod embeds is built by Zig, and a missing `zig` fails
+    // several minutes in, inside a wall of cargo output, blaming a build script
+    // nobody here wrote.
+    if find_tool(&path, "zig").is_none() {
+        bail!(
+            "cross-compiling for {target} needs zig — the terminal engine termiod embeds\n\
+             is built by it.\n  \
+             • brew install zig\n  \
+             • or build on the host and deploy with: termiod remote deploy <host> --bin <path>"
+        );
+    }
     eprintln!("[deploy] cross-compiling for {target}…");
-    let status = Command::new("cargo")
+    let status = Command::new(cargo)
+        .env("PATH", path.join(":"))
+        // Run *inside* the crate, not merely at it. Cargo discovers
+        // `.cargo/config.toml` by walking up from the working directory —
+        // `--manifest-path` does not move that search. Started from anywhere else
+        // (an app's working directory is `/`), the musl link falls back to Apple's
+        // `cc`, which rejects lld's flags with "ld: unknown options: --as-needed"
+        // and no mention of the config it never read. `termiod/.cargo/config.toml`
+        // is what points the cross-link at the bundled rust-lld.
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
         .args([
             "build",
             "--release",
@@ -324,7 +384,7 @@ fn cross_compile(target: &str) -> Result<String> {
             &manifest,
         ])
         .status()
-        .context("running cargo build (is cargo on PATH?)")?;
+        .context("running cargo build")?;
     if !status.success() {
         bail!(
             "cross-compile for {target} failed.\n\
