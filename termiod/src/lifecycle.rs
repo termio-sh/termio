@@ -352,13 +352,15 @@ async fn detect_supervisor() -> Supervisor {
             Supervisor::None
         };
     }
-    let active = tokio::process::Command::new("systemctl")
-        .args(["--user", "is-active", "--quiet", "termiod"])
-        .output()
+    // Enabled counts as well as active: after a clean `stop` the unit is
+    // inactive (`Restart=on-failure` does not restart a clean exit), but the
+    // next client contact starts it again through systemd, so systemd still
+    // owns whatever runs next. Mirrors "loaded" on launchd, which likewise
+    // says nothing about a pid.
+    let owned = tokio::task::spawn_blocking(crate::service::systemd_unit_owns_daemon)
         .await
-        .map(|output| output.status.success())
         .unwrap_or(false);
-    if active {
+    if owned {
         Supervisor::SystemdUser
     } else {
         Supervisor::None
@@ -715,6 +717,13 @@ async fn run_loop<N: Node>(node: &N, desired: &str, options: Options) -> Result<
             .and_then(Version::parse)
             .map_or(true, |have| have < want);
     if daemon_is_stale {
+        // The bounce is the same under every supervisor: `stop` SIGTERMs the
+        // daemon and waits for the socket to go, and `verify` reconnects, which
+        // autostarts the staged binary. Under launchd `KeepAlive` respawns it;
+        // under systemd a clean exit leaves the unit inactive
+        // (`Restart=on-failure`) and the reconnect's `spawn_daemon` starts the
+        // unit again, so the new daemon comes up supervised rather than as a
+        // `setsid` orphan.
         eprintln!("[deploy] asking the daemon on {label} to stop…");
         let command = format!(
             "{} stop --json{}",

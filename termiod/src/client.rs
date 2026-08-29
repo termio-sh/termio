@@ -73,6 +73,13 @@ pub async fn stdio() -> Result<()> {
 }
 
 fn spawn_daemon() -> Result<()> {
+    // A box whose unit systemd owns gets its daemon back from systemd. After a
+    // clean `termiod stop` the unit is merely inactive, and a `setsid` fork
+    // here would take the socket the unit binds next — leaving the unit
+    // failing at every later start and the daemon unsupervised again.
+    if crate::service::systemd_unit_owns_daemon() {
+        return crate::service::start_systemd_unit();
+    }
     let exe = std::env::current_exe().context("locating termiod binary")?;
     use std::os::unix::process::CommandExt;
     let mut cmd = std::process::Command::new(exe);

@@ -3,7 +3,7 @@ title: termiod lifecycle — install and update as one reconcile loop
 status: in-review
 type: rfc
 created: 2026-08-27
-updated: 2026-08-27
+updated: 2026-08-29
 related:
   - 20260825-agent-integration-moves-to-termiod.md
   - 20260824-agent-integration-on-a-device.md
@@ -144,8 +144,8 @@ stays as a developer fallback and is never reached from the app.
 
 **The daemon is handed to the OS supervisor when there is one.** `service.rs`
 does this for launchd. The Linux half — a systemd `--user` unit plus
-`loginctl enable-linger` — is specified there and not built. This RFC does not
-build it either; it records that `status.supervisor` is the field that will
+`loginctl enable-linger` — is specified there and was built after this RFC
+(2026-08-29); it records that `status.supervisor` is the field that will
 tell the loop whether "restart" means `systemctl --user restart termiod` or
 "stop it and let the next client autostart it". Both paths converge on the same
 loop; only the activate step differs.
@@ -377,9 +377,10 @@ the text above, the code is right and the reason is recorded here:
   itself has the daemon between builds keeps its spinner instead of turning
   into an unreachable row.
 
-Not built here: the systemd `--user` unit (question 4) and the holder
-process (§9). `status.supervisor` is the field that lets both land without
-touching the loop.
+Not built here: the holder process (§9). The systemd `--user` unit (question
+4) landed on 2026-08-29 without touching the loop: `Restart=on-failure` leaves
+a cleanly stopped unit inactive, and the verify handshake's reconnect starts
+the unit again instead of forking a `setsid` daemon beside it.
 
 ## 12. Open questions for review
 

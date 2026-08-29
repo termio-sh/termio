@@ -159,24 +159,50 @@ it survives the SSH channel closing — that's the whole durability trick.
 
 ### Optional: a user systemd unit
 
-If you want the daemon always up (so `list` is instant and sessions predate any
-attach), drop a `--user` unit on the host:
+If you want the daemon always up (so `list` is instant, sessions predate any
+attach, and a crash or a reboot brings it back), let it install its own
+`--user` unit:
+
+```sh
+ssh my-vps ~/.local/bin/termiod service install
+ssh my-vps ~/.local/bin/termiod service status
+```
+
+`service install` writes the unit below to `~/.config/systemd/user/`, runs
+`systemctl --user enable --now` on it, and tries `loginctl enable-linger` for
+you. Linger is what keeps the daemon alive **after you log out**: without it
+systemd stops the user's manager — and every unit in it — when the last
+session closes, so sessions would vanish silently between SSH connections.
+Enabling linger over SSH is sometimes refused by polkit; when that happens the
+install still succeeds and prints the one command left to run:
+
+```sh
+ssh my-vps loginctl enable-linger $USER
+```
+
+The unit is generated from the absolute path of the binary that installed it,
+so it never depends on `PATH`:
 
 ```ini
-# ~/.config/systemd/user/termiod.service
+# ~/.config/systemd/user/termiod.service — what `termiod service install` writes
 [Unit]
 Description=termiod session host
+
 [Service]
-ExecStart=%h/.local/bin/termiod serve
+ExecStart="/home/you/.local/bin/termiod" serve
 Restart=on-failure
+
 [Install]
 WantedBy=default.target
 ```
 
-```sh
-ssh my-vps loginctl enable-linger $USER   # keep it running after you log out
-ssh my-vps systemctl --user enable --now termiod
-```
+`Restart=on-failure` rather than `always`: `termiod stop` (and `deploy`) sends
+`SIGTERM` and waits for the socket to stay gone, and the next client contact
+starts the unit again — a client never forks a second daemon beside a unit
+systemd owns. A dev build (`TERMIO_CHANNEL=dev`) installs `termiod-dev.service`
+with the channel pinned, so it and the release unit never fight over one
+socket. `service uninstall` disables and removes the unit and leaves linger as
+it was.
 
 This is strictly optional; on-demand start is the supported default.
 
@@ -241,27 +267,28 @@ if you do, rotate.
 ### The durable unit
 
 A flag that lives only on one foreground argv dies on the next crash restart —
-the daemon auto-starts as bare `termiod serve`. So an explicit `--wss` with a
-token in place writes `wss.bind` (`0600`) beside the socket, and the unit sets
-`TERMIOD_WSS` as well. Either one alone is enough; the pair is what survives
-both a restart and a client-triggered autostart.
+the daemon auto-starts as bare `termiod serve`, and so does the unit
+`termiod service install` writes. So an explicit `--wss` with a token in place
+writes `wss.bind` (`0600`) beside the socket, and every later bare start reads
+it back. That is the whole durable path; the generated unit deliberately puts
+nothing about WSS on its command line.
+
+To pin the bind in the unit as well, use a drop-in rather than editing the
+generated file — a drop-in survives a later `service install`:
+
+```sh
+ssh my-vps systemctl --user edit termiod
+```
 
 ```ini
-# ~/.config/systemd/user/termiod.service
-[Unit]
-Description=termiod session host
+# ~/.config/systemd/user/termiod.service.d/override.conf
 [Service]
-ExecStart=%h/.local/bin/termiod serve --wss 127.0.0.1:8790 --wss-origin https://box.tailnet.ts.net
 Environment=TERMIOD_WSS=127.0.0.1:8790
 Environment=TERMIOD_WSS_ORIGIN=https://box.tailnet.ts.net
-Restart=on-failure
-[Install]
-WantedBy=default.target
 ```
 
 ```sh
-ssh my-vps loginctl enable-linger $USER
-ssh my-vps systemctl --user enable --now termiod
+ssh my-vps ~/.local/bin/termiod service install
 ```
 
 The bind is resolved in this order, first valid loopback address winning:
