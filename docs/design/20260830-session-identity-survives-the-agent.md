@@ -3,7 +3,7 @@ title: Session identity survives the agent
 status: draft
 type: rfc
 created: 2026-08-30
-updated: 2026-08-30
+updated: 2026-08-31
 related:
   - 20260829-tab-strip-is-the-collapsed-sidebar.md
   - 20260827-termiod-lifecycle-reconcile.md
@@ -11,9 +11,10 @@ related:
 
 # Session identity survives the agent
 
-> A session the app created must never reappear under "Also Running". This RFC
-> fixes issue #528 by making destroy name-addressed, agent exit visible, and the
-> stranger filter honest — following the identity model tmux and herdr both use.
+> A session is a session — there is no second kind. This RFC fixes issue #528
+> by making destroy name-addressed and agent exit visible, and removes the
+> "Also Running" section entirely: external sessions become ordinary rows —
+> following the identity model tmux and herdr both use.
 
 ## The bug (#528)
 
@@ -183,32 +184,60 @@ it preserves scrollback, and it matches "the session lives on the box". A
 setting is surface area we don't need until someone asks for the kill
 behavior.
 
-### D3. "Also Running" shows true strangers only
+### D3. Remove "Also Running" — external sessions become ordinary rows
 
-The app remembers the daemon names of sessions it has closed (the same ring
-that D1's pending kills use — a closed-session journal keyed by daemon name,
-bounded, persisted in `StateFile`). At roster refresh:
+The section is a second concept of "session" the user has to learn: its own
+name, its own close verb ("Close All"), its own gesture (tap to adopt), and
+set-difference semantics ("device roster minus rows") that nobody can predict
+from the UI. #528 is what that costs — a user staring at a bucket whose
+membership rule they were never told. herdr has no orphan bucket; tmux has no
+orphan bucket; neither should we.
 
-- live daemon session whose name matches a **current row** → accounted for
-  (already the case),
-- name matches a **journaled close** → not a stranger: kill it on sight.
-  D1 should have killed it; this sweep is the belt-and-braces that makes the
-  invariant hold even across crashes and offline closes,
-- anything else → a genuine stranger; show it for adoption as designed.
+So the section goes, and its one legitimate job — surfacing a session someone
+started from the `termiod` CLI — is served by making that session an ordinary
+row automatically. The app remembers the daemon names of sessions it has
+closed (the same ring that D1's pending kills use — a closed-session journal
+keyed by daemon name, bounded, persisted in `StateFile`). At roster refresh,
+each live daemon session resolves to exactly one of:
+
+- name matches a **current row** → accounted for (already the case),
+- name matches a **journaled close** → kill it on sight. D1 should have
+  killed it; this sweep is the belt-and-braces that makes the invariant hold
+  even across crashes and offline closes,
+- unknown and adoptable → auto-adopt: run today's manual
+  `adoptDeviceSession` path unprompted. The row lands in the project whose
+  root contains its cwd, else as a loose terminal; it carries
+  `termiodSessionName` and closes like any other row (D1 makes that kill
+  real),
+- unknown, **on this Mac**, with **another client attached** → leave it
+  alone; the local socket is per-uid, so an attached unknown here is a second
+  install's live session, not ours to claim.
+
+The attached-client guard is local-only, deliberately: attachment is
+read-many by design (single writer, many readers), so on a remote device a
+session the phone has open is still one of that box's sessions, and skipping
+it would hide the box's own work from the Mac — the exact mistake the old
+section's filter already scoped to local.
 
 The journal, not name shape, decides "mine": two Termio installs share one
 per-uid daemon roster, so a UUID-shaped name alone proves nothing about whose
 session it is.
 
-### The verdict on the section itself
+UI removal: `alsoRunningSection` and `DeviceOnlySessionRow`
+(`Sidebar/SidebarView.swift:339`, `:1633`) and the section's menu go away;
+`deviceOnlySessions()` stops feeding a view and becomes the auto-adopt
+candidate list. The *Also running* group in the tab-strip RFC
+(`20260829-tab-strip-is-the-collapsed-sidebar.md`) is superseded by this —
+auto-adopted rows appear in the strip as normal rows, which is what that RFC
+wanted anyway ("adopts on click exactly as its row does", minus the click.)
 
-Keep the mechanism, fix its diet. Adopting `termiod`-CLI sessions into the
-sidebar is real product surface — it is the "one roster, any client" half of
-the positioning, and herdr validates external-session detection as the
-category norm. What #528 shows is not that the section is a bad idea but that
-it was fed sessions whose identity the app already owned. After D1–D3 it
-appears only when someone genuinely started a session outside the app — which
-for most users is never, and that is the correct frequency for it.
+One consequence to accept: a second install whose app is quit leaves detached
+sessions with zero attached clients, and this install will adopt them. That is
+the correct reading of "one roster, any client" — a detached session on the
+box *should* be reachable from whichever client is looking at the box. The
+original install reclaims its rows by name on relaunch, same as it does today
+after its own restart; duplicate rows across installs are already possible via
+manual adoption, and the single-writer token arbitrates as it always has.
 
 ## Testing
 
@@ -216,8 +245,10 @@ for most users is never, and that is the correct frequency for it.
   hand (`:104`), so the link-present path is the only one ever exercised — the
   #528 close path has zero coverage. Add the link-less cases: close of a
   restored row, close after `applyTermiodExit`, close from the CLI path.
-- Unit-test the D3 filter with a journaled close: roster row matching a
-  journaled name must be killed, not listed.
+- Unit-test the D3 resolution: a roster row matching a journaled name must be
+  killed, not adopted; an unknown detached row must adopt into the
+  cwd-matching project; an unknown row with an attached client must be left
+  alone on the local device and adopted on a remote one.
 - The D2 demotion streak is pure logic over `SessionInfo` sequences — testable
   without a window, same shape as `StallProbeTests`.
 - Manual: reproduce the issue's tree by shadowing `claude` with a zsh function
