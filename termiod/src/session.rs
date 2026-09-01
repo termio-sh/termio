@@ -86,10 +86,15 @@ pub enum SessionMsg {
         id: ClientId,
         data: Vec<u8>,
     },
+    /// A viewport declaration from any attachment — what its surface renders,
+    /// and whether it is on screen. Not writer-gated: the PTY size is a
+    /// session-level policy over the declared set, not a property of the write
+    /// token (see `apply_viewport_policy`).
     Resize {
         id: ClientId,
         rows: u16,
         cols: u16,
+        rendering: bool,
     },
     /// `termiod send` — inject input without attaching. Always applied.
     Inject {
@@ -171,6 +176,10 @@ struct ClientEntry {
     backlog: Arc<ClientBacklog>,
     role: ClientRole,
     plane: ClientPlane,
+    /// What this attachment's surface renders, from its latest viewport
+    /// declaration. `None` until it declares one. The PTY size is derived from
+    /// these (`apply_viewport_policy`), never from who holds the write token.
+    viewport: Option<Viewport>,
     /// Attach-only history staging. Resize barriers discard any remainder and
     /// deliberately do not restage it; resize/reflow history is a later policy.
     staged_history: VecDeque<Bytes>,
@@ -179,6 +188,17 @@ struct ClientEntry {
     /// already zeroed the count of what the client owes, so a second overflow
     /// means it could not keep up even from a clean start.
     backlog_strikes: u32,
+}
+
+/// One attachment's declared viewport: the grid its surface holds, and whether
+/// that surface is actually on screen. A hidden pane keeps declaring its grid —
+/// so showing it again is a one-bit change — but with `rendering: false` it does
+/// not constrain the PTY.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Viewport {
+    rows: u16,
+    cols: u16,
+    rendering: bool,
 }
 
 /// Whether this attachment can hold the write token.
@@ -630,8 +650,9 @@ impl Session {
         self.sync_grid_diff_interest();
         self.recompute_writer();
         if self.writer != old_writer {
-            self.emit_writer_changed(self.writer.clone());
+            self.emit_writer_changed();
         }
+        self.apply_viewport_policy(None);
     }
 
     /// Send a protocol event to attachments and control-channel subscribers.
@@ -656,22 +677,68 @@ impl Session {
         });
     }
 
-    fn emit_writer_changed(&mut self, resize_claim_target: Option<ClientId>) {
-        if let Some(target) = resize_claim_target {
-            if let Some(entry) = self.clients.get_mut(&target) {
-                Self::queue_non_data(
-                    entry,
-                    ClientEvent::Control(Control::ResizeClaim {
-                        session: self.id.to_string(),
-                        writer: self.writer.as_ref().map(ClientId::to_string),
-                    }),
-                );
-            }
-        }
+    fn emit_writer_changed(&mut self) {
         let writer = self.writer.as_ref().map(ClientId::to_string);
         self.emit_event(Event::WriterChanged {
             session: self.id.to_string(),
             writer,
+        });
+    }
+
+    /// Derives the PTY size from the declared viewports: per-axis min over the
+    /// attachments whose surfaces are actually rendering (rows and cols
+    /// independently, the Zellij 0.45 refinement). With min, every rendering
+    /// surface can hold the whole grid, so no client ever re-wraps bytes
+    /// formatted for a wider screen (§C.5). An empty rendering set keeps the
+    /// last size — a session nobody is looking at has nothing to resize for,
+    /// and the next viewer's declaration is what moves it.
+    ///
+    /// When the min changes this runs the resize barrier unchanged: quiesce,
+    /// resize PTY + VT, fresh `S` to every snapshot attachment, `E resized`.
+    /// `initiator` is the attachment whose declaration triggered the recompute,
+    /// so a PTY resize failure is reported to someone rather than swallowed.
+    fn apply_viewport_policy(&mut self, initiator: Option<&ClientId>) {
+        let mut size: Option<(u16, u16)> = None;
+        for viewport in self
+            .clients
+            .values()
+            .filter_map(|entry| entry.viewport)
+            .filter(|viewport| viewport.rendering)
+        {
+            let (rows, cols) = size.get_or_insert((viewport.rows, viewport.cols));
+            *rows = (*rows).min(viewport.rows);
+            *cols = (*cols).min(viewport.cols);
+        }
+        let Some((rows, cols)) = size else { return };
+        // The child sees no SIGWINCH from an unchanged ioctl, and every
+        // distinct size costs every viewer a barrier repaint — so a size the
+        // PTY already has is a no-op, not a cheap re-assert.
+        if rows == self.rows && cols == self.cols {
+            return;
+        }
+        if let Err(error) = self.pty.resize(rows, cols) {
+            match initiator {
+                Some(id) => self.reject_resize(id, &error),
+                None => eprintln!(
+                    "termiod: resize failed for session {}: {error}",
+                    self.id
+                ),
+            }
+            return;
+        }
+        self.rows = rows;
+        self.cols = cols;
+        // The bytes already in the ring were written into the old grid.
+        // Replaying them into this one would put them in the wrong places,
+        // which only matters where a replay is all there is — the far side of
+        // a handoff.
+        self.ring_reconstructs_screen = false;
+        self.send_sidecar(SidecarCommand::Resize { rows, cols });
+        self.begin_snapshot_barrier();
+        self.emit_event(Event::Resized {
+            session: self.id.to_string(),
+            rows,
+            cols,
         });
     }
 
@@ -782,7 +849,7 @@ impl Session {
     fn reject_resize(&mut self, id: &ClientId, error: &anyhow::Error) {
         let message = format!("resize failed: {error}");
         eprintln!(
-            "termiod: resize failed for writer {id} in session {}: {error}",
+            "termiod: resize failed for client {id} in session {}: {error}",
             self.id
         );
         if let Some(entry) = self.clients.get_mut(id) {
@@ -1035,8 +1102,9 @@ impl Session {
         }
         self.recompute_writer();
         if self.writer != old_writer {
-            self.emit_writer_changed(self.writer.clone());
+            self.emit_writer_changed();
         }
+        self.apply_viewport_policy(None);
     }
 
     fn fallback_snapshot(
@@ -1081,8 +1149,9 @@ impl Session {
         }
         self.sync_grid_diff_interest();
         if self.writer != old_writer {
-            self.emit_writer_changed(self.writer.clone());
+            self.emit_writer_changed();
         }
+        self.apply_viewport_policy(None);
     }
 
     fn fallback_all_pending(&mut self, error: &str) {
@@ -1804,6 +1873,7 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
                     backlog,
                     role,
                     plane,
+                    viewport: None,
                     staged_history: VecDeque::new(),
                     backlog_strikes: 0,
                 },
@@ -1811,14 +1881,12 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
             // Enabling precedes this client's in-band Snapshot request, so
             // later Writes can only produce G results after its S boundary.
             session.sync_grid_diff_interest();
-            // Attaching is a viewer arriving, not a device taking over. Taking
-            // the token here meant a phone merely *looking* at a session pulled
-            // the one shared PTY down to phone width through `run_attach`'s
-            // resize, and the Mac had no answer: its own resizes are gated on
-            // holding the token, so the window sat there rendering a screen
-            // formatted for a grid it does not have. The token travels by
-            // typing — both ends claim on input — so the only attach that takes
-            // it is the one that finds nobody holding it.
+            // Attaching is a viewer arriving, not a device taking over. The
+            // token travels by typing — both ends claim on input — so the only
+            // attach that takes it is the one that finds nobody holding it.
+            // Size is not part of this: the attach's viewport declaration
+            // (which `run_attach` sends for every attachment) joins the min
+            // whether or not this client may type.
             if interactive && session.writer.is_none() {
                 session.grant_writer(&id);
             }
@@ -1834,7 +1902,7 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
             }
 
             if session.writer != old_writer {
-                session.emit_writer_changed(old_writer);
+                session.emit_writer_changed();
             }
             session.emit_roster();
         }
@@ -1846,8 +1914,11 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
                 session.recompute_writer();
             }
             if session.writer != old_writer {
-                session.emit_writer_changed(session.writer.clone());
+                session.emit_writer_changed();
             }
+            // A departed viewport leaves the min; the survivors get their
+            // space back. When the last one leaves, the size stays put.
+            session.apply_viewport_policy(None);
             session.emit_roster();
         }
         SessionMsg::ResendSnapshot { id } => {
@@ -1871,9 +1942,10 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
             if !eligible || held {
                 return None;
             }
-            // The client that just took the token is told its own size claim is
-            // now the one that counts, the same shape `AddClient` uses.
-            session.emit_writer_changed(session.writer.clone());
+            // Only the input gate moves. The PTY size is derived from the
+            // declared viewports and does not care who types — that is what
+            // keeps a token ping-pong from becoming a resize storm.
+            session.emit_writer_changed();
         }
         SessionMsg::Input { id, data } => {
             if session.writer.as_ref() == Some(&id) {
@@ -1882,39 +1954,32 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
                 session.reject_not_writer(&id);
             }
         }
-        SessionMsg::Resize { id, rows, cols } => {
-            if session.writer.as_ref() == Some(&id) {
-                // A resize is a barrier: the session quiesces and every
-                // attachment is handed a fresh keyframe to repaint from. Doing
-                // that for a size the PTY already has buys nothing and costs
-                // each viewer a full repaint — and one arrives on every attach,
-                // because `run_attach` asks unconditionally for the size the
-                // client named. The child would see no SIGWINCH from this
-                // ioctl either, so nothing downstream is waiting on it.
-                if rows == session.rows && cols == session.cols {
-                    return None;
-                }
-                if let Err(error) = session.pty.resize(rows, cols) {
-                    session.reject_resize(&id, &error);
-                    return None;
-                }
-                session.rows = rows;
-                session.cols = cols;
-                // The bytes already in the ring were written into the old grid.
-                // Replaying them into this one would put them in the wrong
-                // places, which only matters where a replay is all there is —
-                // the far side of a handoff.
-                session.ring_reconstructs_screen = false;
-                session.send_sidecar(SidecarCommand::Resize { rows, cols });
-                session.begin_snapshot_barrier();
-                session.emit_event(Event::Resized {
-                    session: session.id.to_string(),
-                    rows,
-                    cols,
-                });
-            } else {
-                session.reject_not_writer(&id);
+        SessionMsg::Resize {
+            id,
+            rows,
+            cols,
+            rendering,
+        } => {
+            // A zero-sized viewport is a surface that has not laid out yet,
+            // not a wish for a zero-sized PTY.
+            if rows == 0 || cols == 0 {
+                return None;
             }
+            // A declaration from a client that never attached — a stale id, a
+            // racing reconnect — has no row in the viewport map to update.
+            let Some(entry) = session.clients.get_mut(&id) else {
+                return None;
+            };
+            let viewport = Viewport {
+                rows,
+                cols,
+                rendering,
+            };
+            if entry.viewport == Some(viewport) {
+                return None;
+            }
+            entry.viewport = Some(viewport);
+            session.apply_viewport_policy(Some(&id));
         }
         SessionMsg::Inject { data } => {
             let _ = session.input_tx.send(data);
@@ -2334,6 +2399,236 @@ mod tests {
         let _ = thread.join();
     }
 
+    /// Attach an interactive client to a *running* session actor, keeping its
+    /// event receiver alive — dropping it closes the channel and the actor
+    /// removes the client on its next send.
+    async fn attach_to_actor(
+        handle: &SessionHandle,
+        id: &str,
+        snapshot: bool,
+    ) -> mpsc::UnboundedReceiver<ClientEvent> {
+        let (client_tx, client_rx) = mpsc::unbounded_channel();
+        let (reply, answer) = oneshot::channel();
+        handle.send(SessionMsg::AddClient {
+            id: ClientId::new(id),
+            interactive: true,
+            out: client_tx,
+            backlog: Arc::new(ClientBacklog::new()),
+            snapshot,
+            scrollback: false,
+            grid_diff: false,
+            reply,
+        });
+        answer.await.expect("attached");
+        client_rx
+    }
+
+    fn declare_viewport(handle: &SessionHandle, id: &str, rows: u16, cols: u16, rendering: bool) {
+        handle.send(SessionMsg::Resize {
+            id: ClientId::new(id),
+            rows,
+            cols,
+            rendering,
+        });
+    }
+
+    async fn next_resized(events: &mut broadcast::Receiver<Event>) -> (u16, u16) {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                match events.recv().await {
+                    Ok(Event::Resized { rows, cols, .. }) => return (rows, cols),
+                    Ok(_) => continue,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(error) => panic!("event stream ended: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("no resized event arrived")
+    }
+
+    async fn actor_info(handle: &SessionHandle) -> SessionInfo {
+        let (tx, rx) = oneshot::channel();
+        assert!(handle.send(SessionMsg::Info { reply: tx }));
+        rx.await.expect("session info")
+    }
+
+    /// §4 of the size-policy RFC: the PTY is the per-axis min over the
+    /// attachments whose surfaces are actually rendering — rows and cols
+    /// independently — and the set changes on attach, detach, hide and show.
+    /// The write token never appears in this test on purpose: nobody types,
+    /// and the size moves anyway.
+    #[tokio::test]
+    async fn the_pty_size_is_the_per_axis_min_over_rendering_viewports() {
+        let (handle, mut events, _on_exit) =
+            start_session(vec!["/bin/cat".to_string()], "/");
+
+        let _mac = attach_to_actor(&handle, "mac", false).await;
+        declare_viewport(&handle, "mac", 40, 100, true);
+        assert_eq!(next_resized(&mut events).await, (40, 100));
+
+        // The phone is taller but narrower: each axis takes its own min.
+        let _phone = attach_to_actor(&handle, "phone", false).await;
+        declare_viewport(&handle, "phone", 50, 38, true);
+        assert_eq!(next_resized(&mut events).await, (40, 38));
+
+        // Hiding the phone's surface takes it out of the min without
+        // detaching it; the Mac gets its width back.
+        declare_viewport(&handle, "phone", 50, 38, false);
+        assert_eq!(next_resized(&mut events).await, (40, 100));
+
+        // Showing it again is a one-bit change with the same declared grid.
+        declare_viewport(&handle, "phone", 50, 38, true);
+        assert_eq!(next_resized(&mut events).await, (40, 38));
+
+        // Detach removes the viewport from the set entirely.
+        handle.send(SessionMsg::RemoveClient {
+            id: ClientId::new("phone"),
+        });
+        assert_eq!(next_resized(&mut events).await, (40, 100));
+
+        handle.send(SessionMsg::Kill {
+            reason: EndReason::Killed,
+        });
+    }
+
+    /// An empty rendering set keeps the last size: a session nobody is looking
+    /// at has nothing to resize for, and resizing it to some default would make
+    /// the child reflow for an audience of zero.
+    #[tokio::test]
+    async fn a_session_nobody_renders_keeps_its_last_size() {
+        let (handle, mut events, _on_exit) =
+            start_session(vec!["/bin/cat".to_string()], "/");
+
+        let viewer = attach_to_actor(&handle, "viewer", false).await;
+        declare_viewport(&handle, "viewer", 30, 90, true);
+        assert_eq!(next_resized(&mut events).await, (30, 90));
+
+        drop(viewer);
+        handle.send(SessionMsg::RemoveClient {
+            id: ClientId::new("viewer"),
+        });
+        let info = actor_info(&handle).await;
+        assert_eq!(
+            (info.rows, info.cols),
+            (30, 90),
+            "an unviewed session must keep the size its last viewer left"
+        );
+
+        handle.send(SessionMsg::Kill {
+            reason: EndReason::Killed,
+        });
+    }
+
+    /// The Zellij #5373 seam: a viewer arriving at a session whose retained
+    /// size differs from its own viewport must end up with a keyframe taken at
+    /// the size its declaration produced — the resize barrier's `S`, not just
+    /// the bootstrap snapshot of the stale grid.
+    #[tokio::test]
+    async fn reattaching_at_a_different_size_delivers_a_barrier_keyframe() {
+        let (handle, mut events, _on_exit) =
+            start_session(vec!["/bin/cat".to_string()], "/");
+
+        let first = attach_to_actor(&handle, "first", false).await;
+        declare_viewport(&handle, "first", 30, 90, true);
+        assert_eq!(next_resized(&mut events).await, (30, 90));
+        drop(first);
+        handle.send(SessionMsg::RemoveClient {
+            id: ClientId::new("first"),
+        });
+
+        let mut second = attach_to_actor(&handle, "second", true).await;
+        declare_viewport(&handle, "second", 24, 80, true);
+        assert_eq!(next_resized(&mut events).await, (24, 80));
+
+        // The declaration lands while the bootstrap snapshot is still pending,
+        // so the barrier supersedes it; whichever snapshots arrive, the last
+        // one must describe the grid this viewer's declaration produced.
+        let seen = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let mut last = None;
+            loop {
+                match second.recv().await {
+                    Some(ClientEvent::Snapshot(snapshot)) => {
+                        last = Some((snapshot.rows, snapshot.cols));
+                    }
+                    Some(ClientEvent::Event(Event::Ready { .. })) => {
+                        if last == Some((24, 80)) {
+                            return last;
+                        }
+                    }
+                    Some(_) => continue,
+                    None => return last,
+                }
+            }
+        })
+        .await
+        .expect("no snapshot at the reattached viewer's size arrived");
+        assert_eq!(
+            seen,
+            Some((24, 80)),
+            "the barrier keyframe must be taken at the new min"
+        );
+
+        handle.send(SessionMsg::Kill {
+            reason: EndReason::Killed,
+        });
+    }
+
+    /// The point of the whole design: the write token moving between two
+    /// devices is not a size event. Under the old rule every grant re-asserted
+    /// the winner's grid — a misclassified byte became a full-speed resize
+    /// loop (the focus-report storm). `E resized` and `SidecarCommand::Resize`
+    /// are emitted by the same block, so asserting no `resized` events is
+    /// asserting the sidecar saw no resize either.
+    #[tokio::test]
+    async fn alternating_typists_move_the_token_but_never_the_size() {
+        let (handle, mut events, _on_exit) =
+            start_session(vec!["/bin/cat".to_string()], "/");
+
+        let _mac = attach_to_actor(&handle, "mac", false).await;
+        declare_viewport(&handle, "mac", 40, 100, true);
+        assert_eq!(next_resized(&mut events).await, (40, 100));
+        let _phone = attach_to_actor(&handle, "phone", false).await;
+        declare_viewport(&handle, "phone", 50, 38, true);
+        assert_eq!(next_resized(&mut events).await, (40, 38));
+
+        for id in ["phone", "mac", "phone", "mac"] {
+            let (reply, answer) = oneshot::channel();
+            handle.send(SessionMsg::ClaimWriter {
+                id: ClientId::new(id),
+                reply,
+            });
+            assert!(answer.await.unwrap_or(false), "{id} could not claim");
+            handle.send(SessionMsg::Input {
+                id: ClientId::new(id),
+                data: b"x".to_vec(),
+            });
+        }
+
+        // An `Info` round trip fences the queue: everything above has been
+        // handled by the time it answers.
+        let _ = actor_info(&handle).await;
+        let mut token_moves = 0;
+        loop {
+            match events.try_recv() {
+                Ok(Event::Resized { rows, cols, .. }) => {
+                    panic!("the token ping-pong resized the PTY to {rows}x{cols}")
+                }
+                Ok(Event::WriterChanged { .. }) => token_moves += 1,
+                Ok(_) => continue,
+                Err(_) => break,
+            }
+        }
+        assert!(
+            token_moves >= 4,
+            "the claims were never processed ({token_moves} writer changes)"
+        );
+
+        handle.send(SessionMsg::Kill {
+            reason: EndReason::Killed,
+        });
+    }
+
     /// What a client got, in the order it got it. `ClientEvent` carries wire
     /// payloads and no `Debug`, so the assertions compare this instead.
     #[derive(Debug, PartialEq, Eq)]
@@ -2610,6 +2905,7 @@ mod tests {
                     backlog,
                     role: ClientRole::Interactive { seq: 1 },
                     plane: ClientPlane::Raw,
+                    viewport: None,
                     staged_history: VecDeque::new(),
                     backlog_strikes: 0,
                 },
@@ -2631,6 +2927,7 @@ mod tests {
                 id: ClientId::new("writer"),
                 rows: 40,
                 cols: 120,
+                rendering: true,
             },
         )
         .is_none());
@@ -2735,6 +3032,7 @@ mod tests {
             id: ClientId::new("writer"),
             rows: 40,
             cols: 120,
+            rendering: true,
         });
         let carried = carry(&resized.handle).await;
         assert!(
@@ -2753,6 +3051,7 @@ mod tests {
             id: ClientId::new("writer"),
             rows: 40,
             cols: 120,
+            rendering: true,
         });
         let mut carried = carry(&session.handle).await;
         assert!(!carried.info.ring_reconstructs_screen);

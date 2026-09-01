@@ -35,6 +35,7 @@ from the real front matter).
 | status | type | title |
 | --- | --- | --- |
 | active | backlog | [Backlog](backlog/backlog.md) |
+| active | bug | [Agent TUIs shake on the phone — focus reports claim the write token](bug/agent-tui-focus-report-resize-storm.md) |
 | active | bug | [iOS libghostty "non-functional" panel + surface-teardown crash — fix journey](bug/ios-ghostty-renderer-panic-and-teardown-uaf.md) |
 | active | design | ["Issue tracker 集成：inspector Issues tab（GitHub / Linear，per-project provider）"](design/20260726-issue-tracker-integration.md) |
 | active | design | ["Remote-access design lessons: sleep reachability, stable domains, identity, monetization"](design/20260705-remote-access-lessons.md) |
@@ -100,6 +101,7 @@ from the real front matter).
 | done | rfc | [Companion Wire Protocol](design/20260810-companion-wire-protocol.md) |
 | done | rfc | [Fork libghostty-spm — own the wrapper, rent the engine?](design/20260703-fork-libghostty-spm.md) |
 | done | rfc | [Loose terminals as first-class entities](design/20260713-loose-terminal-entity.md) |
+| done | rfc | [PTY size is not the write token](design/20260901-pty-size-is-not-the-write-token.md) |
 | done | rfc | [Remote git — the pane's verbs run on the device](design/20260818-remote-git-plane.md) |
 | done | rfc | [Session identity survives the agent](design/20260830-session-identity-survives-the-agent.md) |
 | draft | design | [分享 Agent 会话（带密码的实时分享链接）](design/20260628-session-share.md) |

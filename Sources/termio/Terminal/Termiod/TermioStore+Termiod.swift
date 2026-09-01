@@ -75,6 +75,14 @@ extension TermioStore {
             .compactMap { key in env[key].map { [key, $0] } }
     }
 
+    /// Forwards a pane's on-screen bit to its session's daemon attachment. The
+    /// same signal `setSurfaceVisible` gives ghostty: a mounted pane that is
+    /// not showing keeps its declared grid but stops constraining the PTY-size
+    /// min, so the sessions behind the selected one never pin the grid.
+    func declareTermiodRendering(_ id: Session.ID, rendering: Bool) {
+        termiodLinks[id]?.setRendering(rendering)
+    }
+
     /// Wires the channel to the surface and registers it. Output enters the
     /// surface through `InMemoryTerminalSession.receive` — the same seam the
     /// in-process PTY read pump feeds — so there is exactly one render path.
@@ -123,21 +131,16 @@ extension TermioStore {
         link.onStatus = { [weak self] status in
             self?.applyTermiodStatus(status, for: session.id)
         }
-        // The link itself acts on this (it stops sending `R` frames the daemon
-        // would reject, and re-asserts the grid when the token returns). The
-        // pane acts on it too: a demoted surface is letterboxed at the grid the
-        // other device chose (`SessionRuntime.sharedGrid`), so what it shows is
-        // what the bytes were wrapped for rather than a wide window's reflow of
-        // a phone-width screen.
-        link.onWriter = { [weak self] writer in
+        // Input gating only: the link stops sending `D` frames the daemon would
+        // reject and claims by typing. Size is not part of the token — the
+        // daemon derives the PTY from every attachment's viewport declaration,
+        // and this pane renders whatever grid `E resized` announces inside its
+        // own frame (content narrower than the pane, the rest blank).
+        link.onWriter = { writer in
             Log.termiod.info("""
             session \(session.id.uuidString, privacy: .public) is now \
             \(writer ? "the writer" : "an observer", privacy: .public)
             """)
-            self?.runtime(for: session.id).isWriter = writer
-        }
-        link.onSharedGrid = { [weak self] grid in
-            self?.runtime(for: session.id).sharedGrid = grid
         }
         // What the device knows about the process, gated exactly where the
         // in-process PTY's own kernel poll is gated: that poll is installed only

@@ -1103,13 +1103,13 @@ final class SessionBridge: @unchecked Sendable {
         onInput?()
     }
 
-    /// The phone's grid. Sizing is the writer's to set: the link sends this as
-    /// an `R` frame only while it holds the token, and otherwise keeps it for
-    /// the moment the token arrives, when the grant re-asserts it. Reporting a
-    /// grid used to claim the token, so a phone that merely opened a session —
-    /// or came back to the foreground, or rotated — pulled the shared PTY down
-    /// to its width and repainted every other attachment, and the Mac pulled it
-    /// back on the next keystroke. Both ends now move the token by typing only.
+    /// The phone's grid, forwarded as this attachment's viewport declaration.
+    /// The bridge is a byte forwarder with no surface of its own, so the
+    /// viewport it declares is the phone's — and it goes through regardless of
+    /// who holds the write token, because the daemon sizes the PTY from the
+    /// declared set (per-axis min over rendering attachments), not from the
+    /// token. The phone leaves the min the way it arrived: this bridge detaches
+    /// when the phone stops viewing the session.
     func applyClientResize(cols: Int, rows: Int) {
         link.resize(rows: rows, cols: cols)
     }

@@ -37,14 +37,4 @@ final class SessionRuntime {
     /// foreground-demotion streak (RFC 20260830 §D2), cleared the moment the
     /// foreground stops being the shell or the agent reports working again.
     var agentExitNotice: String?
-    /// Whether this Mac's attachment holds the session's write token. `true`
-    /// until the daemon says otherwise, so a session nothing else is watching
-    /// behaves exactly as it always has.
-    var isWriter = true
-    /// The PTY's real grid, from the daemon. The pane reads it together with
-    /// `isWriter`: while another device is sizing the session, the bytes on the
-    /// wire are wrapped for *this* grid, and the only faithful way to show them
-    /// is a surface laid out at it — letterboxed in the pane, not stretched to
-    /// the window (§C.5 of the session protocol).
-    var sharedGrid: TerminalGrid?
 }

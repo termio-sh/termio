@@ -50,22 +50,16 @@ final class TerminalViewController: UIViewController {
     private var lastFittedSize: CGSize = .zero
     private var fitDebounce: DispatchWorkItem?
     /// The area the surface may occupy, pinned by constraints between the
-    /// header and the keyboard. The surface is framed by hand inside it
-    /// (`layoutTerminalSurface`): while another device sizes the session, the
-    /// surface has to be laid out at that device's grid, not this rectangle.
+    /// header and the keyboard. The surface fills it: the device sizes the PTY
+    /// to the per-axis min over the viewports rendering the session, so this
+    /// screen is never narrower than the shared grid — content another device
+    /// constrained just leaves the remainder blank.
     private let terminalHost: UIView = {
         let host = UIView()
         host.clipsToBounds = true
         host.translatesAutoresizingMaskIntoConstraints = false
         return host
     }()
-    /// The PTY's grid and whether this phone is the one sizing it, from the
-    /// session; `isWriter` starts true so a screen the device has not yet
-    /// described lays out exactly as it always did.
-    private var sharedGrid: TerminalGrid?
-    private var isWriter = true
-    /// The live surface's cell size, from the resize delegate.
-    private var surfaceMetrics: TerminalGridMetrics?
     private lazy var shellSession = ShellSession(shell: defaultSandboxShell)
     private var companion: DeviceSession?
     private var companionSession: InMemoryTerminalSession?
@@ -212,10 +206,9 @@ final class TerminalViewController: UIViewController {
                 if let companion { companion.start() } else { shellSession.start() }
             }
         } else if case .device = backend {
-            // Re-entering a parked session re-sends this phone's grid: if it
-            // still holds the write token the PTY may have moved while the
-            // screen was away, and this view's size didn't change, so no
-            // layout pass would re-send it. An observer sends nothing.
+            // Re-entering a parked session re-declares this phone's viewport;
+            // the device dedupes an unchanged one, and this view's size didn't
+            // change while parked, so no layout pass would re-send it.
             companion?.reassertGrid()
         }
     }
@@ -251,50 +244,17 @@ final class TerminalViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
     }
 
-    /// Frames the surface inside `terminalHost`.
-    ///
-    /// Normally it fills the host. While another device holds the write token
-    /// the PTY is that device's size, and every byte arriving here is wrapped
-    /// for it: a surface at this phone's own grid re-wraps those lines and a TUI
-    /// that repaints incrementally never repairs the result (§C.5 of the
-    /// session protocol). So the surface is laid out at exactly the shared grid
-    /// — the same picture the other device has — and scaled down as a whole to
-    /// fit the host, top-aligned and centred. Typing takes the token, and the
-    /// surface fills the host again at this phone's grid.
-    ///
-    /// Half a cell of slack on each axis: libghostty floors
-    /// `(size − padding) / cell` for its grid, and an exact multiple can round
-    /// to one column short.
+    /// Frames the surface inside `terminalHost` — it always fills it. Under the
+    /// device's per-axis-min size policy the shared grid never exceeds this
+    /// phone's own viewport, so bytes wrapped for another device's smaller grid
+    /// render faithfully here with the remainder blank; the scaled-down
+    /// letterbox that used to sit in this method had nothing left to scale.
     private func layoutTerminalSurface() {
         let host = terminalHost.bounds
         guard host.width > 0, host.height > 0 else { return }
         // A frame set under a transform is undefined; always start from identity.
         terminalView.transform = .identity
-        guard case .device = backend, !isWriter,
-              let grid = sharedGrid, let metrics = surfaceMetrics,
-              grid.cols > 0, grid.rows > 0,
-              metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0
-        else {
-            terminalView.frame = host
-            return
-        }
-        let scale = max(1, traitCollection.displayScale)
-        let cellWidth = CGFloat(metrics.cellWidthPixels) / scale
-        let cellHeight = CGFloat(metrics.cellHeightPixels) / scale
-        let width = CGFloat(grid.cols) * cellWidth + 2 * Self.terminalPaddingX + cellWidth / 2
-        let height = CGFloat(grid.rows) * cellHeight + 2 * Self.terminalPaddingY + cellHeight / 2
-        let fit = min(1, host.width / width, host.height / height)
-        terminalView.bounds = CGRect(x: 0, y: 0, width: width, height: height)
-        terminalView.transform = CGAffineTransform(scaleX: fit, y: fit)
-        terminalView.center = CGPoint(x: host.midX, y: height * fit / 2)
-    }
-
-    /// The session's word on the PTY's grid and this phone's standing.
-    private func applySharedGrid(_ grid: TerminalGrid, writer: Bool) {
-        guard sharedGrid != grid || isWriter != writer else { return }
-        sharedGrid = grid
-        isWriter = writer
-        view.setNeedsLayout()
+        terminalView.frame = host
     }
 
     // MARK: - Header
@@ -404,9 +364,8 @@ final class TerminalViewController: UIViewController {
     /// happen on every return.
     func prepareForReappearance() {
         if !drawerOpen { focusInput() }
-        // Re-entering a parked session re-sends this phone's grid (applied only
-        // while it holds the write token); the view's size didn't change while
-        // parked, so no layout pass would.
+        // Re-entering a parked session re-declares this phone's viewport; the
+        // view's size didn't change while parked, so no layout pass would.
         if case .device = backend { companion?.reassertGrid() }
     }
 
@@ -773,15 +732,11 @@ final class TerminalViewController: UIViewController {
             transport.onOutput = { [weak terminalSession, weak self] data in
                 terminalSession?.receive(data)
                 // The sniffer only decides what the key bar's scroll-edge keys
-                // send; a TUI switching screens changes nothing about the grid,
-                // which is the writer's and already what the PTY is.
+                // send; a TUI switching screens changes nothing about the grid.
                 DispatchQueue.main.async { self?.altScreenSniffer.consume(data) }
             }
             transport.onState = { [weak self] state in
                 self?.companionStateChanged(state)
-            }
-            transport.onSharedGrid = { [weak self] grid, writer in
-                self?.applySharedGrid(grid, writer: writer)
             }
             companion = transport
             companionSession = terminalSession
@@ -802,9 +757,9 @@ final class TerminalViewController: UIViewController {
         case .connected:
             statusLabel.isHidden = true
             contextLabel.isHidden = contextLabel.text?.isEmpty ?? true
-            // The attach snapshot paints the screen. The grid goes out once
-            // more in case this phone is the writer and the PTY moved while the
-            // link was down; an observer's re-send is a no-op by design.
+            // The attach snapshot paints the screen. The viewport goes out
+            // once more in case the layout moved while the link was down; an
+            // unchanged one is a no-op by design.
             companion?.reassertGrid()
         case .failed(let reason):
             statusLabel.text = localized("Connection failed")
@@ -1200,18 +1155,6 @@ extension TerminalViewController: UIImagePickerControllerDelegate, UINavigationC
 
     func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
         picker.dismiss(animated: true)
-    }
-}
-
-extension TerminalViewController: TerminalSurfaceGridResizeDelegate {
-    /// Cell metrics for `layoutTerminalSurface`; they change with the font, so
-    /// a pinch re-frames a letterboxed surface at the same grid.
-    func terminalDidResize(_ size: TerminalGridMetrics) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, surfaceMetrics != size else { return }
-            surfaceMetrics = size
-            view.setNeedsLayout()
-        }
     }
 }
 

@@ -13,8 +13,9 @@ import Foundation
 /// `TermiodClient.swift`, which extends this same namespace.
 ///
 /// Framing is `[kind: u8][length: u32 big-endian][payload]`. Control payloads
-/// are JSON; `D` (data) is raw PTY bytes and `R` (resize) is rows/cols as two
-/// big-endian u16.
+/// are JSON; `D` (data) is raw PTY bytes and `R` (resize) is a viewport
+/// declaration — rows/cols as two big-endian u16, plus an optional rendering
+/// byte (see `resizePayload`).
 public enum Termiod {
     /// What this client offers on an **attach** channel, and — the part that
     /// matters — who consumes each. A capability is a promise to handle the
@@ -227,13 +228,21 @@ public enum Termiod {
         }
     }
 
-    /// `R` payload: rows then cols, each a big-endian u16.
-    public static func resizePayload(_ rows: UInt16, _ cols: UInt16) -> Data {
-        var payload = Data(capacity: 4)
+    /// `R` payload: rows then cols, each a big-endian u16 — a viewport
+    /// declaration, not a command to resize the PTY. The daemon derives the
+    /// PTY size from the declared set (per-axis min over rendering
+    /// attachments). A surface that is not on screen appends a fifth byte of
+    /// `0`; the four-byte form means rendering, so a daemon that predates the
+    /// flag reads the common case unchanged.
+    public static func resizePayload(
+        _ rows: UInt16, _ cols: UInt16, rendering: Bool = true
+    ) -> Data {
+        var payload = Data(capacity: 5)
         var bigEndianRows = rows.bigEndian
         var bigEndianCols = cols.bigEndian
         withUnsafeBytes(of: &bigEndianRows) { payload.append(contentsOf: $0) }
         withUnsafeBytes(of: &bigEndianCols) { payload.append(contentsOf: $0) }
+        if !rendering { payload.append(0) }
         return payload
     }
 
@@ -1341,11 +1350,6 @@ public enum Termiod {
         case fsSearched(FsSearchedPayload)
         /// The reply to `fs_match` — filename hits, whole, in one frame.
         case fsMatched(FsMatchedPayload)
-        /// The addressed half of `writer_changed`: sent to one client to tell it
-        /// who owns size now (§C.5). Same payload shape, so it feeds the same
-        /// handler — a client that only listened to the broadcast would still be
-        /// correct, and one that only listened to this would not.
-        case resizeClaim(WriterChangedPayload)
         /// The agent plane's two replies. The daemon owns the agent config files
         /// on its own box, so the client asks and renders rather than writing.
         case agentsInstalled(AgentsInstalledPayload)
@@ -1391,8 +1395,6 @@ public enum Termiod {
             return .fsSearched(try decoder.decode(FsSearchedPayload.self, from: payload))
         case "fs_matched":
             return .fsMatched(try decoder.decode(FsMatchedPayload.self, from: payload))
-        case "resize_claim":
-            return .resizeClaim(try decoder.decode(WriterChangedPayload.self, from: payload))
         case "agents_installed":
             return .agentsInstalled(try decoder.decode(AgentsInstalledPayload.self, from: payload))
         case "agents_probed":

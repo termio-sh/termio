@@ -261,13 +261,12 @@ final class TermiodEventTests: XCTestCase {
         XCTAssertEqual(name, "approval_requested")
     }
 
-    /// The addressed half of the writer handover. It shares the payload shape
-    /// with the broadcast, and the client feeds both to one handler.
-    func testResizeClaimDecodesLikeAWriterChange() throws {
-        guard case .resizeClaim(let claim) = try control(
+    /// A daemon predating the size-policy change may still address one client
+    /// with `resize_claim`; it decodes as unknown and is ignored, not fatal.
+    func testAResizeClaimFromAnOlderDaemonIsIgnored() throws {
+        guard case .unknown = try control(
             #"{"op":"resize_claim","session":"s_1","writer":"c_41"}"#)
-        else { return XCTFail("expected a resize_claim control") }
-        XCTAssertEqual(claim.writer, "c_41")
+        else { return XCTFail("expected resize_claim to decode as unknown") }
     }
 
     /// A dead session's record. `daemon_lost` is the case tombstones exist for,

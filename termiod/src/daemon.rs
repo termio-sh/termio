@@ -2226,7 +2226,6 @@ async fn process_control(
         | Control::Attached { .. }
         | Control::Exited { .. }
         | Control::WaitResult { .. }
-        | Control::ResizeClaim { .. }
         | Control::Subscribed { .. }
         | Control::FsListed { .. }
         | Control::FsFile { .. }
@@ -2622,13 +2621,17 @@ async fn run_attach(
         re: request.re,
     }));
 
-    if added.writer {
-        handle.send(SessionMsg::Resize {
-            id: client_id.clone(),
-            rows: request.rows,
-            cols: request.cols,
-        });
-    }
+    // Every attachment declares the viewport it named in the attach, writer or
+    // not: the session sizes the PTY from the declared set (per-axis min over
+    // rendering attachments), so an arriving viewer joins the min rather than
+    // waiting to hold the write token. A client whose surface is hidden says so
+    // with its own `R` frame right after this.
+    handle.send(SessionMsg::Resize {
+        id: client_id.clone(),
+        rows: request.rows,
+        cols: request.cols,
+        rendering: true,
+    });
 
     let supports_events = connection.capabilities.contains("events");
     let supports_snapshot = connection.capabilities.contains("snapshot");
@@ -2722,11 +2725,16 @@ async fn run_attach(
                     break;
                 }
             }
-            Ok(Some(Frame::Resize { rows, cols })) => {
+            Ok(Some(Frame::Resize {
+                rows,
+                cols,
+                rendering,
+            })) => {
                 handle.send(SessionMsg::Resize {
                     id: client_id.clone(),
                     rows,
                     cols,
+                    rendering,
                 });
             }
             Ok(Some(Frame::Snapshot(_))) => {

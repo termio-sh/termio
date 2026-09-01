@@ -612,7 +612,6 @@ pub async fn attach(
     // Reader: daemon frames → stdout. Signals the main loop via `done_tx` when
     // the stream ends (session exited or closed), carrying any exit status.
     let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<Option<i32>>();
-    let (resize_claim_tx, mut resize_claim_rx) = tokio::sync::mpsc::unbounded_channel();
     let scrollback_rows = Arc::new(AtomicUsize::new(0));
     let reader_scrollback_rows = scrollback_rows.clone();
     let reader_holds_token = holds_token.clone();
@@ -656,12 +655,6 @@ pub async fn attach(
                     reader_scrollback_rows
                         .fetch_add(usize::from(history.row_count), Ordering::Relaxed);
                 }
-                Ok(Some(Frame::Control(Control::ResizeClaim {
-                    writer: Some(writer),
-                    ..
-                }))) if negotiated_client_id.as_deref() == Some(writer.as_str()) => {
-                    let _ = resize_claim_tx.send(());
-                }
                 Ok(Some(Frame::Event(Event::WriterChanged { writer, .. }))) => {
                     let mine = matches!((&writer, &reader_client_id), (Some(w), Some(id)) if w == id);
                     reader_holds_token.store(mine, Ordering::Relaxed);
@@ -693,10 +686,6 @@ pub async fn attach(
     loop {
         tokio::select! {
             _ = winch.recv() => {
-                let (r, c) = term_size();
-                let _ = write_resize(&mut wr, r, c).await;
-            }
-            Some(()) = resize_claim_rx.recv() => {
                 let (r, c) = term_size();
                 let _ = write_resize(&mut wr, r, c).await;
             }

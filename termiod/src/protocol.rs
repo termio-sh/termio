@@ -79,7 +79,14 @@ pub const MAX_UPLOAD_FRAME_SIZE: usize = 64 * 1024;
 pub enum Frame {
     Control(Control),
     Data(Vec<u8>),
-    Resize { rows: u16, cols: u16 },
+    /// A viewport declaration: what this attachment's surface renders, and
+    /// whether it is currently rendering at all. Not a command to resize the
+    /// PTY — the session derives the PTY size from the declared set (§C.5).
+    Resize {
+        rows: u16,
+        cols: u16,
+        rendering: bool,
+    },
     Event(Event),
     Snapshot(Snapshot),
     History(HistoryChunk),
@@ -1104,11 +1111,6 @@ pub enum Control {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         re: Option<u64>,
     },
-    ResizeClaim {
-        session: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        writer: Option<String>,
-    },
     Error {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         re: Option<u64>,
@@ -1909,12 +1911,20 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Option<Fra
         }
         KIND_DATA => Ok(Some(Frame::Data(payload))),
         KIND_RESIZE => {
-            if payload.len() != 4 {
+            // Four bytes is the v0 shape and means "rendering"; the optional
+            // fifth byte lets a client declare a viewport it is *not* showing
+            // (a hidden pane), which the size policy leaves out of the min.
+            if payload.len() != 4 && payload.len() != 5 {
                 bail!("malformed resize frame");
             }
             let rows = u16::from_be_bytes([payload[0], payload[1]]);
             let cols = u16::from_be_bytes([payload[2], payload[3]]);
-            Ok(Some(Frame::Resize { rows, cols }))
+            let rendering = payload.get(4).copied().unwrap_or(1) != 0;
+            Ok(Some(Frame::Resize {
+                rows,
+                cols,
+                rendering,
+            }))
         }
         KIND_EVENT => {
             let event: Event = serde_json::from_slice(&payload)

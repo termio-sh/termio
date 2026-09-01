@@ -3,7 +3,7 @@ title: termiod Session Protocol
 status: draft
 type: design
 created: 2026-07-30
-updated: 2026-08-31
+updated: 2026-09-01
 related:
   - 20260730-termiod-session-mux.md
   - 20260708-session-daemon-architecture.md
@@ -196,7 +196,7 @@ stay valid.
 | --- | --- | --- | --- | --- |
 | Control | `C` | JSON object (`op`-tagged) | control | v0 |
 | Data | `D` | raw PTY bytes, both directions | terminal | v0 |
-| Resize | `R` | rows u16 BE · cols u16 BE | terminal | v0 |
+| Resize | `R` | rows u16 BE · cols u16 BE · optional rendering u8 (absent ⇒ rendering; `0` ⇒ hidden) | terminal | v0 |
 | Event | `E` | JSON object (`ev`-tagged) | events | v0.1 |
 | Snapshot | `S` | binary: header + packed vt cells (§C.6) | terminal | v1 |
 | History | `H` | binary: newest-first scrollback rows (§C.6) | terminal | v1 |
@@ -260,7 +260,6 @@ makes one control channel safely multiplexable. Ops marked ✦ exist in POC v0.
 | `subscribe` | c→h | `{events:["roster","status"]}` on a control channel → stream of `E` frames for all sessions |
 | `subscribe_resource` / `subscribed` | c→h / h→c | §C.10. `{resource, since?}` → `{resource, seq, gap}`; replayed `E` frames follow the reply. Gated on the `resources` capability |
 | `unsubscribe_resource` | c→h | Release interest; the resource lingers for other subscribers and for this client's own return |
-| `resize_claim` | h→c | Informs a demoted client who owns size now (§C.5) |
 | `ok` ✦ / `error` ✦ | h→c | §C.7 |
 
 ### C.5 Attach flow, writer policy, resize policy
@@ -317,23 +316,24 @@ a different size than the PTY will wrap the identical byte stream differently
 and diverge — the synchronized-state-machine guarantee silently breaks. So:
 `attached` (and the v1 `S` snapshot) **carry `rows`/`cols`**, and a smart client
 maintains an internal grid at *authoritative PTY dimensions* with its own
-*local* viewport layered on top (letterbox / scale / scroll) — never by parsing
-at its own window size. *(`Attached` carries `rows`/`cols` as of Phase 1c. As
-of 2026-08-29 both app clients conform: the Mac pane letterboxes a demoted
-surface at the shared grid (`SharedGridLetterbox`) and the phone lays its
-surface out at that grid and scales it to fit, both driven by `E resized` and
-`writer_changed`. The keyframe that announces a new grid reaches an observer
-before its surface has moved, so it is parsed at the old grid; the first
-resize that lands on the shared grid sends `request_snapshot`, and that
-keyframe paints right. The reference CLI client still parses at its own size
-— acceptable for a single same-size CLI.)*
+*local* viewport layered on top (blank margins, scroll) — never by parsing at
+its own window size. *(`Attached` carries `rows`/`cols` as of Phase 1c. Under
+the per-axis-min size policy of RFC 20260901 the PTY never outgrows any
+rendering viewport, so both app clients satisfy this by construction: a surface
+always holds the whole shared grid, content another device constrained renders
+with the remainder blank, and the client-side letterbox/scale-down layers were
+deleted. A keyframe that overflows the surface — possible only while that
+client's own shrinking declaration is in flight — is dropped, because the
+declaration's barrier will push one that fits. The reference CLI client still
+parses at its own size — acceptable for a single same-size CLI.)*
 
 **Writer policy — single writer, follows the device being used, observable.**
 A `mode:"interact"` attach takes the write token only when nobody holds it;
 after that the token moves on `claim_writer` alone, which every client sends
 when its user actually shows up — that is, types. Opening a session on a phone,
-bringing it to the foreground, or rotating it is *looking*, and takes nothing;
-a phone's grid report is remembered and applied only once it holds the token.
+bringing it to the foreground, or rotating it is *looking*, and takes nothing.
+The token gates input alone — size is a session-level policy over the declared
+viewports (below), so a token move is never a resize.
 The previous writer stays attached but demoted, and *everyone* on the session
 gets `E {ev:"writer_changed", writer:"c_41"}`. Observers' `D`/`R` frames are
 answered with `error {code:"not_writer"}` rather than dropped. A client's own
@@ -351,11 +351,20 @@ correct it. Promotion has to be a verb, not a side effect of arriving. CRDT/mult
 explicitly rejected (§H); the write token is also the natural place a future
 share ACL plugs in without new message shapes.
 
-**Resize policy — the PTY has one size and the writer owns it.** `R` from the
-writer resizes PTY + vt and fan-outs `E {ev:"resized"}`; in v1 a resize is a
-barrier: quiesce, resize, emit fresh `S`, resume deltas (the ghostty-web
-lesson). `R` from observers → `not_writer`; observer UIs letterbox or scale
-client-side. Per-client server-side reflow is rejected — it means one vt per
+**Resize policy — the PTY has one size and the session derives it** (RFC
+20260901, "PTY size is not the write token"). `R` is a *viewport declaration*
+accepted from any attachment: the grid its surface holds, plus an optional
+rendering byte for a surface that is hidden without detaching. The daemon keeps
+a per-attachment viewport map and sizes the PTY to the per-axis min (rows and
+cols independently, Zellij 0.45-style) over the attachments currently
+rendering; an empty rendering set keeps the last size, and the next viewer's
+declaration is what moves it. When the min changes, the resize is a barrier:
+quiesce, resize PTY + vt, emit fresh `S`, resume deltas, fan out
+`E {ev:"resized"}` (the ghostty-web lesson). The attach itself counts as the
+attachment's first declaration, at the grid it named, rendering. The companion
+bridge is a byte forwarder with no surface of its own: the viewport it declares
+is the phone's, and it leaves the min by detaching when the phone stops viewing
+the session. Per-client server-side reflow is rejected — it means one vt per
 viewer per session, which is a nested-window-manager tax in disguise.
 
 ### C.6 Terminal plane staging
@@ -1098,7 +1107,7 @@ impossible retroactively.
 5. **CRDT multiplayer typing** — single writer with an observable claim;
    sharing, if it comes, builds on the token, not on merged input.
 6. **Per-client PTY size / server-side per-viewer reflow** — one PTY, one
-   size, writer owns it; observers adapt client-side.
+   size, derived from the declared viewports; clients adapt client-side.
 7. **Nested window manager in the host** — no panes/tabs/layout in `termiod`,
    ever; that's the tmux dead end both we and Superlogical (**Announced**)
    are escaping.

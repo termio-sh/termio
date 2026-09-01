@@ -150,13 +150,17 @@ struct TerminalPane: View {
                 // ungrouped session has no split geometry and fills the pane.
                 let rect = zoomed && isSelected ? bounds : (paneFrames[id] ?? bounds)
                 let context = store.surface(for: item.session)
-                SharedGridLetterbox(
-                    runtime: store.runtime(for: id),
-                    context: context,
-                    paneSize: rect.size,
-                    paddingX: CGFloat(settings.windowPadding),
-                    background: paneBackground
-                ) {
+                // The surface always fills its pane. Under the daemon's
+                // per-axis-min size policy the PTY never outgrows any rendering
+                // viewport, so a pane wider than the shared grid shows the
+                // content with the remainder blank — no letterbox, and no
+                // second grid for the surface to be laid out at. (The
+                // `SharedGridLetterbox` that used to sit here shrank the
+                // surface to the shared grid, which turned this pane's
+                // viewport declaration into the shared grid itself and pinned
+                // the min at the smallest size any viewer ever had.)
+                ZStack {
+                    paneBackground
                     ManagedTerminalSurface(
                         context: context,
                         isSelected: isSelected,
@@ -164,6 +168,9 @@ struct TerminalPane: View {
                         onFocused: { selectFocusedSurface(id) },
                         requestFocus: { reason in
                             requestTerminalFocus(for: id, reason: reason)
+                        },
+                        declareRendering: { visible in
+                            store.declareTermiodRendering(id, rendering: visible)
                         }
                     )
                 }
@@ -417,58 +424,6 @@ private enum TerminalFocusReason {
 /// terminal background around it — the same picture the phone has, at the Mac's
 /// font. Typing takes the token back, and the surface returns to the pane.
 ///
-/// The surface is sized to the grid plus half a cell: libghostty floors
-/// `(size − padding) / cell` to get its column count, and an exact multiple can
-/// round to one column short. A shared grid the pane cannot hold is still laid
-/// out at that grid, anchored top-left and clipped: a surface at any other
-/// width wraps the bytes wrong, and a correct screen with its edge cut off
-/// beats a complete one that is scrambled. It also keeps the promise the
-/// resync depends on — the surface *reaches* the shared grid, so the link can
-/// ask for the keyframe that paints it (`observerRepaintPending`).
-private struct SharedGridLetterbox<Content: View>: View {
-    let runtime: SessionRuntime
-    @ObservedObject var context: TerminalViewState
-    let paneSize: CGSize
-    let paddingX: CGFloat
-    let background: Color
-    @ViewBuilder let content: () -> Content
-
-    @Environment(\.displayScale) private var displayScale
-
-    var body: some View {
-        // One structure whether letterboxed or not: a branch here would give
-        // the surface a new identity each time the token moved and remount its
-        // NSView, which is the repaint this file exists to avoid. A nil frame
-        // dimension is "no constraint", so the surface fills the pane.
-        let size = letterboxSize
-        let fits = size.map { $0.width <= paneSize.width && $0.height <= paneSize.height } ?? true
-        ZStack(alignment: fits ? .center : .topLeading) {
-            background
-            content()
-                .frame(width: size?.width, height: size?.height)
-        }
-        .frame(width: paneSize.width, height: paneSize.height, alignment: .topLeading)
-        .clipped()
-    }
-
-    private var letterboxSize: CGSize? {
-        // Not conditioned on the surface's current grid differing from the
-        // shared one: once letterboxed, the surface *is* at the shared grid,
-        // and that condition would take the letterbox away again.
-        guard !runtime.isWriter,
-              let grid = runtime.sharedGrid,
-              let metrics = context.surfaceSize,
-              metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0
-        else { return nil }
-        let cellWidth = CGFloat(metrics.cellWidthPixels) / displayScale
-        let cellHeight = CGFloat(metrics.cellHeightPixels) / displayScale
-        let paddingY = CGFloat(TermioStore.terminalWindowPaddingY)
-        let width = CGFloat(grid.cols) * cellWidth + 2 * paddingX + cellWidth / 2
-        let height = CGFloat(grid.rows) * cellHeight + 2 * paddingY + cellHeight / 2
-        return CGSize(width: width, height: height)
-    }
-}
-
 /// One focus state per terminal, matching Ghostty's SurfaceView model. The Boolean
 /// binding is retained only to report a clicked split pane back to the store; moving
 /// focus is handled from AppKit by TerminalFocusDriver, never by waiting for this value
@@ -479,6 +434,7 @@ private struct ManagedTerminalSurface: View {
     let isVisible: Bool
     let onFocused: () -> Void
     let requestFocus: (TerminalFocusReason) -> Void
+    let declareRendering: (Bool) -> Void
 
     @FocusState private var surfaceFocus: Bool
 
@@ -513,6 +469,10 @@ private struct ManagedTerminalSurface: View {
             .onChange(of: isVisible, initial: true) { _, visible in
                 applySurfaceVisibility(visible, for: context)
                 DispatchQueue.main.async { applySurfaceVisibility(visible, for: context) }
+                // The same bit, declared to the session's daemon: a hidden
+                // pane's viewport leaves the PTY-size min so fifteen background
+                // panes cannot pin the grid (`TermiodSessionLink.setRendering`).
+                declareRendering(visible)
             }
             // A relaunched session gets a fresh TerminalViewState (see
             // `relaunchSession`); keying the mounted view on the state's identity
