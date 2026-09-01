@@ -66,8 +66,34 @@ impl SidecarQueue {
     }
 }
 
+/// How often the sidecar samples the screen for the status engine. The Swift
+/// tap throttled to the same second, for the same reason: the promotion streak
+/// counts ticks, and a quiet terminal is the "turn ended" signal at roughly
+/// this granularity.
+pub(crate) const STATUS_TICK: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// One second of a session's own output, as the status engine reads it.
+pub(crate) struct ScreenTick {
+    /// Whether the live screen differs from the previous tick's. The primary
+    /// liveness key: a finished agent still dribbles output at an idle prompt,
+    /// which the byte stream alone reads as activity.
+    pub(crate) changed: bool,
+    /// Bytes the VT was fed since the last tick — the secondary signal, and the
+    /// stall suppressor's numerator.
+    pub(crate) bytes: u64,
+    /// The screen itself, carried only when the session's agent declared screen
+    /// rules. A row nobody matches against is a string nobody needs.
+    pub(crate) text: Option<String>,
+}
+
 pub(crate) enum SidecarCommand {
     Write(Bytes),
+    /// What the status engine wants sampled. `screen` off stops the once-a-second
+    /// grid walk entirely, which is what a plain shell costs.
+    SetStatusWatch {
+        screen: bool,
+        text: bool,
+    },
     Resize {
         rows: u16,
         cols: u16,
@@ -92,6 +118,10 @@ pub(crate) enum SidecarResult {
     },
     Grid(GridDiff),
     Keyframe(termiod_vt::Snapshot),
+    /// The two in-band status channels, as they arrive. Not throttled: a turn
+    /// boundary is an edge, not something to sample once a second.
+    Osc(Vec<crate::session::status::OscSignal>),
+    Screen(ScreenTick),
 }
 
 pub(crate) struct SidecarCapture {

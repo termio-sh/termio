@@ -238,6 +238,10 @@ enum GitService {
         /// point sits above where the branches diverged. There is no merge base to diff
         /// from, so any file list here would be the whole tree rather than a change.
         case noCommonHistory
+        /// A device checkout's comparison could not be read — the request
+        /// failed, or the device named a problem this build has never heard of.
+        /// Never produced by the local path.
+        case unreadable
     }
 
     enum CompareOutcome: Sendable {

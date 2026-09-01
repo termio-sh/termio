@@ -251,7 +251,7 @@ extension TermioStore {
         let argv = Self.launchArgv(command: agentCommand)
         var env = Self.sanitizedEnvironment()
         // Stamp the session id so any agent hook running inside can echo it back,
-        // letting `HookListener` correlate events to this exact session.
+        // letting `termio agent report` name this exact session.
         env["TERMIO_SESSION"] = session.id.uuidString
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
@@ -287,7 +287,7 @@ extension TermioStore {
         let termiodLink = makeTermiodLink(
             for: session, argv: argv, cwd: spawnPath, env: env)
         let inMemory = InMemoryTerminalSession(
-            write: { [weak self] data in
+            write: { data in
                 // libghostty answers the host's terminal queries through this
                 // same closure. Those are not the user, so they must not claim
                 // the token — and only the writer's surface may answer at all
@@ -299,12 +299,10 @@ extension TermioStore {
                 // Typing on the Mac reclaims the write token, and with it the
                 // winsize, from an attached phone — the size follows the device
                 // being used. `send` does the claiming.
+                // The daemon stamps the keystroke itself, on the write path
+                // every client crosses, so the screen-streak promotion stands
+                // down for a phone's typing as well as this window's.
                 termiodLink.send(data)
-                // Straight to the guard's own state, on the actor that owns it.
-                // This closure is `@Sendable`, so it does not inherit main-actor
-                // isolation and the hop is real.
-                let now = Date()
-                Task { @MainActor in self?.noteUserInput(session.id, at: now) }
             },
             resize: { [weak self] viewport in
                 let columns = Int(viewport.columns)
@@ -333,140 +331,6 @@ extension TermioStore {
         // writing them here is fine; only the `projects` write must be deferred.)
         DispatchQueue.main.async { [self] in recordLaunch(session.id, resumeID: launch.resumeID) }
         return state
-    }
-
-    /// Builds the status half of a session's byte stream — the tap both backends
-    /// install on their output, so a session behaves identically whether its PTY is
-    /// in this process or inside `termiod`. It was written for the in-process PTY
-    /// and lived inside that branch, which quietly meant a daemon-hosted session had
-    /// no screen liveness, no screen-rule classification and no `OSC 9;4` scan at
-    /// all: its only surviving channel was the title, and one channel is not enough
-    /// to keep a spinner honest.
-    ///
-    /// What the tap reads (see `noteOutputActivity` for the full model): a *changing*
-    /// rendered screen keeps a working session's `lastWorkingAt` fresh — and, when
-    /// hooks have gone quiet, can promote an idle session back to working — while a
-    /// static screen lets the stale sweep clear the spinner. The screen, not raw
-    /// bytes, is the primary key: an agent parked at an idle prompt still dribbles
-    /// output (a redraw, a blinking cursor) that the byte stream alone reads as
-    /// activity, which is what pins a finished agent's spinner on forever. The
-    /// per-tick byte count rides along as a secondary liveness signal for a viewport
-    /// the user scrolled away from the live tail. `readViewportText` is thread-safe
-    /// (its own lock), so the compare runs on the delivering thread; only the
-    /// changed-flag and byte count hop to the main actor. Throttled to once a second.
-    /// Both backends deliver serially, so the captured `lastPoke` /
-    /// `lastScreenSignature` / `pendingBytes` need no lock.
-    ///
-    /// A user agent may declare `status` regex rules in its `agent.json`; the same
-    /// viewport read that feeds the liveness sweep is classified against them to
-    /// drive working / needs-attention / done for agents that ship no hook system
-    /// (see `AgentStatusRules`). Built-ins carry no rules (they use hooks), so this
-    /// is `nil` for them and the classify step is skipped.
-    ///
-    /// Caveat: `readViewportText` returns the *displayed* viewport, which follows the
-    /// user's scrollback — so scrolling an inline agent's pane up feeds stale rows to
-    /// the classifier until it snaps back to the bottom (self-healing; the byte-count
-    /// signal covers working-liveness meanwhile). herdr avoids this by reading the
-    /// live bottom (active) buffer; the clean fix here needs a `readActiveText()` on
-    /// the libghostty wrapper (its blessed read serializes against the PTY write
-    /// under a private lock we can't hold, and a raw unsynchronized
-    /// `GHOSTTY_POINT_ACTIVE` read from this pump thread would race
-    /// `inMemory.receive` — the exact libghostty threading hazard termio has been
-    /// bitten by). Tracked as an upstream ask, not worked around unsafely.
-    ///
-    /// - Parameters:
-    ///   - backend: the object delivering the bytes (the `PTYProcess` or the
-    ///     `TermiodSessionLink`), held weakly and used to drop events a dead
-    ///     backend queued for a session that has since relaunched.
-    ///   - onPoke: backend-specific work for the throttled tick.
-    func makeStatusTap(
-        for session: Session,
-        surface inMemory: InMemoryTerminalSession,
-        backend: AnyObject,
-        onPoke: @escaping () -> Void = {}
-    ) -> (Data) -> Void {
-        let statusRules = session.agent.statusRules
-        let agentID = session.agent.id
-        let statusTrace = ProcessInfo.processInfo.environment["TERMIO_STATUS_TRACE"] != nil
-        // Reads this session's ConEmu `OSC 9;4` progress out of the raw stream as
-        // a busy/idle signal (Grok emits it natively). Scanned on every chunk
-        // *before* the 1 s status throttle below — an agent's turn boundary is an
-        // edge, not something to sample once a second. The scan runs for every
-        // session (a plain terminal can be promoted to a hand-started Grok, whose
-        // sink was built while the row was still a shell); whether a transition is
-        // *acted on* is gated in `applyProgressActivity` by the session's live
-        // agent, so an unrelated shell's `wget`/`npm` progress bar can't move a dot.
-        var progressScanner = OSCProgressScanner()
-        var lastPoke = Date.distantPast
-        var lastScreenSignature: Int?
-        // Bytes seen since the last poke, so the throttled tick can report the
-        // stream's volume alongside the screen compare — the scroll-frozen-
-        // viewport liveness signal (see `noteOutputActivity`).
-        var pendingBytes = 0
-        return { [weak self, weak inMemory, weak backend] data in
-            pendingBytes += data.count
-            for progress in progressScanner.scan(data) {
-                if statusTrace {
-                    AgentStatusRules.trace(
-                        agent: "\(agentID).progress", session: session.id,
-                        activity: progress, matched: "OSC 9;4")
-                }
-                // Tie the event to the backend that produced it. Unlike the title
-                // channel — whose Combine subscription is torn down with the view
-                // state on relaunch — this tap is only session-id-keyed, so a
-                // same-agent relaunch could otherwise let a dead PTY's queued
-                // `working` mark the replacement process. Applying only while this
-                // backend is still the session's live one drops that stale event.
-                DispatchQueue.main.async { [weak backend] in
-                    guard let self, let backend,
-                          self.isLiveBackend(backend, for: session.id) else { return }
-                    self.applyProgressActivity(progress, for: session.id)
-                }
-            }
-            let now = Date()
-            guard now.timeIntervalSince(lastPoke) >= 1 else { return }
-            lastPoke = now
-            let bytes = pendingBytes
-            pendingBytes = 0
-            onPoke()
-            // The backend timestamps every stdin write (Mac keystrokes, phone
-            let text = inMemory?.readViewportText()
-            let screenChanged: Bool
-            if let text {
-                let signature = text.hashValue
-                screenChanged = signature != lastScreenSignature
-                lastScreenSignature = signature
-            } else {
-                // No surface to read (e.g. detached) — fall back to treating
-                // output as activity rather than risk clearing a live turn.
-                screenChanged = true
-            }
-            let detected: AgentStatusRules.Activity?
-            if let statusRules {
-                let (activity, matched) = statusRules.explain(text ?? "")
-                detected = activity
-                if statusTrace {
-                    AgentStatusRules.trace(
-                        agent: agentID, session: session.id, activity: activity, matched: matched)
-                }
-            } else {
-                detected = nil
-            }
-            DispatchQueue.main.async {
-                self?.noteOutputActivity(session.id, screenChanged: screenChanged, bytes: bytes)
-                if let detected {
-                    self?.applyScreenDetectedActivity(detected, for: session.id)
-                }
-            }
-        }
-    }
-
-    /// Whether this object is still the daemon link the store holds for the
-    /// session. A tap that outlived its backend answers `false` and its queued
-    /// events are dropped.
-    func isLiveBackend(_ backend: AnyObject, for id: Session.ID) -> Bool {
-        if let link = termiodLinks[id] { return link === backend }
-        return false
     }
 
     /// The app's environment minus identity claims that belong to whatever launched
@@ -1002,9 +866,9 @@ extension TermioStore {
     /// (its unfocused-delay default), which would repaint the green "finished"
     /// as the orange "waiting for you" on every tool-using turn. Once a turn has
     /// ended, nothing can be blocked on the user, so the flag is meaningless.
-    /// The title channel keeps its right to override `done` (see
-    /// `applyTitleActivity`): a title is a *level* signal of the agent's current
-    /// state, so "Action Required" after a turn ends is a real question to you.
+    /// The title channel keeps its right to override `done` (the device's
+    /// `StatusEngine::note_title`): a title is a *level* signal of the agent's
+    /// current state, so "Action Required" after a turn ends is a real question.
     private func monitor(_ state: TerminalViewState, for id: Session.ID) {
         let flag: () -> Void = { [weak self] in
             guard let self, !self.isViewing(id), self.status(for: id) != .done
@@ -1016,24 +880,12 @@ extension TermioStore {
             state.$lastDesktopNotificationAt.dropFirst().compactMap { $0 }.sink { _ in flag() },
             // The surface already publishes the program's live `OSC 0/2` title;
             // classify it as a status signal, then adopt the meaningful values as
-            // the agent session's display label. Classification sees the RAW
-            // title — the working/idle marks (Claude's braille spinner prefix,
-            // Codex's "Action Required") are exactly what the label sanitizer
-            // strips as noise. Every frame of a ticking title spinner republishes
-            // here; `applyTitleActivity` collapses them on its own transition
-            // guard, so per-frame work is one regex over a short string.
+            // the agent session's display label. The status half of this channel
+            // is the device's now — it reads the same `OSC 0/2` out of the byte
+            // stream, against the same manifest rules, for every client at once
+            // (`termiod/src/session/status.rs`). What is left here is the label.
             state.$title.removeDuplicates().sink { [weak self] title in
                 guard let self, let session = self.session(id) else { return }
-                let agent = self.effectiveAgent(for: session)
-                if let rules = agent.titleRules {
-                    let (activity, matched) = rules.explain(title)
-                    if ProcessInfo.processInfo.environment["TERMIO_STATUS_TRACE"] != nil {
-                        AgentStatusRules.trace(
-                            agent: "\(agent.id).title", session: id,
-                            activity: activity, matched: matched)
-                    }
-                    self.applyTitleActivity(activity, for: id)
-                }
                 let cleaned = LiveTerminalTitle.sanitized(title)
                 guard self.isMeaningfulLiveTitle(cleaned, for: session),
                       self.runtimes[id]?.liveTitle != cleaned else { return }

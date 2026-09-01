@@ -377,6 +377,44 @@ fn write_new_secret(path: &std::path::Path, value: &str) -> Result<()> {
     Ok(())
 }
 
+/// Whether a failure is "the file was already there" rather than a real IO
+/// fault. The context layers `publish_new_secret` adds are transparent to
+/// `downcast_ref`, so the original `io::Error` is still the one asked.
+fn is_already_exists(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|error| error.kind() == std::io::ErrorKind::AlreadyExists)
+}
+
+/// Create a 0600 file that must not already exist, publishing it atomically.
+///
+/// `write_new_secret` alone is not enough for a file other processes read by
+/// name. `create_new` publishes the name before the contents, so a concurrent
+/// reader that opens it in between finds it empty — which `read_pair_token`
+/// rejects, correctly, as an empty secret. Two `termiod pair` invocations
+/// racing each other is exactly that: one mints while the other reads.
+///
+/// Staging the contents and publishing them with `link` closes the window. The
+/// name appears already complete, and `link` refuses to replace an existing
+/// file, so the loser of a minting race still gets `AlreadyExists` and can read
+/// the winner's token — the contract `load_or_create_pair_token` depends on,
+/// and the reason this is not a `rename`.
+fn publish_new_secret(path: &std::path::Path, value: &str) -> Result<()> {
+    // Named for this process, because the racing writer is another `pair` with
+    // the same idea. A shared staging name would have them overwrite each
+    // other's contents before either published.
+    let staged = path.with_file_name(format!(
+        "{}.{}.staged",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&staged);
+    write_new_secret(&staged, value)?;
+    let published = std::fs::hard_link(&staged, path);
+    let _ = std::fs::remove_file(&staged);
+    published.with_context(|| format!("publishing {}", path.display()))
+}
+
 /// Replace a 0600 file through a rename, so a concurrent reader sees either the
 /// old value or the new one and never a truncated file.
 pub fn replace_secret(path: &std::path::Path, value: &str) -> Result<()> {
@@ -415,10 +453,17 @@ pub fn load_or_create_pair_token() -> Result<String> {
     }
     let token = encode_base64url(&random_bytes(24)?);
     let path = pair_token_path()?;
-    match write_new_secret(&path, &token) {
+    match publish_new_secret(&path, &token) {
         Ok(()) => Ok(token),
-        // Another `pair` won the race; its token is the one on disk.
-        Err(_) if path.exists() => read_pair_token()?
+        // Another `pair` won the race; its token is the one on disk, and it was
+        // published whole, so reading it back cannot see a half-written secret.
+        //
+        // Only that one failure is recoverable. Testing `path.exists()` alone
+        // would also swallow a full disk or a read-only state dir and answer
+        // with whatever happens to sit at the path, so the error has to say
+        // `AlreadyExists` — which, now that the contents are staged, only the
+        // publishing link can raise.
+        Err(error) if is_already_exists(&error) => read_pair_token()?
             .ok_or_else(|| anyhow::anyhow!("pairing token vanished during minting")),
         Err(error) => Err(error),
     }
@@ -597,8 +642,107 @@ mod serve_lock_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::durable_state_base;
+    use super::{durable_state_base, is_already_exists, publish_new_secret};
     use std::path::Path;
+
+    /// Losing the minting race is recoverable; a full disk is not. Both arrive
+    /// as an `Err` from the same call, so only the kind separates them — and
+    /// answering a write fault with whatever sits at the path would hand back
+    /// someone else's file as this host's pairing token.
+    #[test]
+    fn only_a_lost_race_counts_as_already_existing() {
+        let directory =
+            std::env::temp_dir().join(format!("termiod-mint-kind-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("test directory");
+        let path = directory.join("pair.token");
+        let _ = std::fs::remove_file(&path);
+
+        publish_new_secret(&path, "first").expect("first mint");
+        let lost_race = publish_new_secret(&path, "second").expect_err("second mint");
+        assert!(
+            is_already_exists(&lost_race),
+            "a lost minting race was not recognised: {lost_race:#}"
+        );
+
+        // A write that cannot happen at all must not read as a lost race.
+        let missing = directory.join("absent").join("pair.token");
+        let fault = publish_new_secret(&missing, "third").expect_err("mint into a missing dir");
+        assert!(
+            !is_already_exists(&fault),
+            "an IO fault was mistaken for a lost race: {fault:#}"
+        );
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// A secret is published whole or not at all. `create_new` followed by a
+    /// write leaves the name visible and empty in between, and a reader that
+    /// lands there — a second `termiod pair`, which is what
+    /// `wss_off_wins_against_a_concurrent_adopter` runs — rejects it as an
+    /// empty pairing token.
+    #[test]
+    fn a_minted_secret_is_never_visible_empty() {
+        const TOKEN: &str = "a-token-nobody-should-see-half-of";
+        let directory =
+            std::env::temp_dir().join(format!("termiod-mint-race-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("test directory");
+        let path = directory.join("pair.token");
+
+        for round in 0..500 {
+            let _ = std::fs::remove_file(&path);
+            let target = path.clone();
+            let writer = std::thread::spawn(move || publish_new_secret(&target, TOKEN));
+            // Spin until the name exists, then judge what it held the instant
+            // it appeared. An empty read here is the defect.
+            loop {
+                match std::fs::read_to_string(&path) {
+                    Ok(contents) => {
+                        assert_eq!(
+                            contents, TOKEN,
+                            "round {round}: a reader saw a partially written secret"
+                        );
+                        break;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => panic!("round {round}: reading the secret: {error}"),
+                }
+            }
+            writer.join().expect("writer thread").expect("publishing");
+        }
+
+        // The staging copy is not left behind to be mistaken for a credential.
+        let strays: Vec<_> = std::fs::read_dir(&directory)
+            .expect("listing the test directory")
+            .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+            .filter(|name| name.to_string_lossy().ends_with(".staged"))
+            .collect();
+        assert!(strays.is_empty(), "staging copies survived: {strays:?}");
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// Minting must still refuse to replace a token another process published,
+    /// or the loser of the race overwrites the winner's secret and the two
+    /// disagree about what the pairing token is.
+    #[test]
+    fn minting_never_replaces_an_existing_secret() {
+        let directory =
+            std::env::temp_dir().join(format!("termiod-mint-exclusive-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("test directory");
+        let path = directory.join("pair.token");
+        let _ = std::fs::remove_file(&path);
+
+        publish_new_secret(&path, "first").expect("first mint");
+        let second = publish_new_secret(&path, "second");
+        assert!(second.is_err(), "minting replaced an existing secret");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("reading the secret"),
+            "first",
+            "the loser of a minting race overwrote the winner's token"
+        );
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
 
     /// One durable dir per channel, or the dev daemon's identity overwrites the
     /// release one's — the same two-axis scoping the socket and the unit have.

@@ -1,6 +1,5 @@
-//! The Mac app's session-control socket, spoken the way `scripts/termio`
-//! speaks it: one-line JSON requests over
-//! `~/Library/Application Support/<channel dir>/session-control.sock`, with
+//! The Mac app's own socket, spoken the way `scripts/termio` speaks it: one-line
+//! JSON requests over `~/Library/Application Support/<channel dir>/app.sock`, with
 //! the shell client's exact request shape, error taxonomy, and exit-code
 //! semantics. This module exists so the Rust client can replace the script
 //! wholesale at parity; verbs migrate off this socket onto the daemon's
@@ -9,8 +8,9 @@
 
 use crate::channel::Channel;
 use std::io::{Read, Write};
+use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// How a one-shot request ended. `Timeout` is `--wait`'s "still running"
@@ -23,12 +23,46 @@ pub enum Outcome {
     Timeout,
 }
 
+/// The name this socket carried before it was named for the process that binds it.
+/// An app older than that rename answers only here. Delete this and `resolve_in`'s
+/// second branch once the rename has shipped in a release: from then on every
+/// installed app binds `app.sock`, since the app rewrites its own CLI copy on launch
+/// and Sparkle keeps the app current.
+const LEGACY_SOCKET_NAME: &str = "session-control.sock";
+
 pub fn socket_path(channel: &Channel) -> PathBuf {
     let home = std::env::var_os("HOME").unwrap_or_default();
-    PathBuf::from(home)
-        .join("Library/Application Support")
-        .join(&channel.support_dir_name)
-        .join("session-control.sock")
+    resolve_in(
+        &PathBuf::from(home)
+            .join("Library/Application Support")
+            .join(&channel.support_dir_name),
+    )
+}
+
+/// Prefer the current name, but fall back rather than fail: this client ships ahead
+/// of the app it drives (a checkout on `$PATH`, a dev build talking to a released
+/// app), so a missing `app.sock` means an older app, not a missing one. With neither
+/// present the current name is returned, so the connect error names the path a
+/// current app would have bound.
+fn resolve_in(dir: &Path) -> PathBuf {
+    let current = dir.join("app.sock");
+    if is_socket(&current) {
+        return current;
+    }
+    let legacy = dir.join(LEGACY_SOCKET_NAME);
+    if is_socket(&legacy) {
+        return legacy;
+    }
+    current
+}
+
+/// `[ -S ]`, which is what `scripts/termio` asks — not "does a path exist". A plain
+/// file where a socket belongs is not an older app to fall back to, and the two
+/// clients must answer that the same way or they report different paths.
+fn is_socket(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|data| data.file_type().is_socket())
+        .unwrap_or(false)
 }
 
 /// The one-shot read bound in seconds: `TERMIO_CLI_TIMEOUT`, default 15.
@@ -307,6 +341,54 @@ pub fn watch(channel: &Channel, format: &str, states: &str, extra: &str) -> i32 
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn bind(path: &std::path::Path) {
+        std::os::unix::net::UnixListener::bind(path).expect("bind");
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "termiod-app-socket-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    #[test]
+    fn prefers_the_current_socket_name() {
+        let dir = scratch("current");
+        bind(&dir.join("app.sock"));
+        bind(&dir.join("session-control.sock"));
+        assert_eq!(resolve_in(&dir), dir.join("app.sock"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn falls_back_to_the_pre_rename_name_for_an_older_app() {
+        let dir = scratch("legacy");
+        bind(&dir.join("session-control.sock"));
+        assert_eq!(resolve_in(&dir), dir.join("session-control.sock"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plain_file_is_not_an_older_app() {
+        let dir = scratch("plain");
+        std::fs::write(dir.join("session-control.sock"), b"").unwrap();
+        assert_eq!(resolve_in(&dir), dir.join("app.sock"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn names_the_current_socket_when_no_app_is_running() {
+        let dir = scratch("absent");
+        assert_eq!(resolve_in(&dir), dir.join("app.sock"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]

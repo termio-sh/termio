@@ -83,6 +83,11 @@ pub const MAX_UPLOAD_FRAME_SIZE: usize = 64 * 1024;
 #[derive(Debug)]
 pub enum Frame {
     Control(Control),
+    /// A control frame whose `op` this build has never heard of. Kept apart
+    /// from `Control` so an op from a newer peer degrades to a per-request
+    /// error instead of killing the connection — before this, one unknown verb
+    /// tore down the channel and every subscription riding it.
+    UnknownControl { op: String, seq: Option<u64> },
     Data(Vec<u8>),
     /// A viewport declaration: what this attachment's surface renders, and
     /// whether it is currently rendering at all. Not a command to resize the
@@ -236,6 +241,15 @@ pub struct DirEntry {
     pub mtime: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symlink_target: Option<String>,
+    /// For a `symlink`, what it resolves to — and only when the target stays
+    /// inside the workspace root. A tree draws a link to a directory as a
+    /// directory (the Finder's and the VS Code explorer's rule), and it may
+    /// only offer that when descending would actually be answered: `confine`
+    /// canonicalises before it lists, so a link out of the root is refused.
+    /// `None` means "do not descend this" — dangling, outside the root, or a
+    /// host too old to say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_kind: Option<EntryKind>,
 }
 
 /// The listing for one requested path inside an `fs_listed` reply. A path
@@ -246,8 +260,13 @@ pub struct PathListing {
     pub path: String,
     #[serde(default)]
     pub entries: Vec<DirEntry>,
+    /// The last name served, when more entries follow — pass it back as
+    /// `after`. Absent when the listing is complete, which is every ordinary
+    /// directory. A client that never sees this field is talking to a host too
+    /// old to continue a listing and must say so rather than treat one page as
+    /// the whole directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_page: Option<u64>,
+    pub next_after: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -361,6 +380,19 @@ pub struct GitCommitFile {
     /// lie rather than a zero.
     #[serde(default)]
     pub binary: bool,
+}
+
+/// Why a `git_compare` could not compare — each a different instruction to the
+/// user, so folding them into an empty file list (which reads as "this branch
+/// changes nothing") is the one thing this must never do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitCompareProblem {
+    /// The base no longer resolves: its branch was deleted since it was picked.
+    MissingBase,
+    /// No merge base connects the two — unrelated histories, or a shallow
+    /// clone grafted above the divergence point.
+    NoCommonHistory,
 }
 
 /// One ref in a `git.branches` reply (§C.13 read tier).
@@ -684,8 +716,12 @@ pub enum Control {
     FsList {
         root: String,
         paths: Vec<String>,
+        /// Resume a directory larger than one page at the entry *after* this
+        /// name — a keyset cursor rather than an offset, so a directory being
+        /// written while it is read cannot serve one entry twice and skip
+        /// another (`files.rs` `list`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        page: Option<u64>,
+        after: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         seq: Option<u64>,
     },
@@ -720,8 +756,9 @@ pub enum Control {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         seq: Option<u64>,
     },
-    /// Content search (§C.12, capability `files`): the host runs `git grep`
-    /// and streams `search_results` events tagged with this request's `seq`,
+    /// Content search (§C.12, capability `files`): the host walks the root
+    /// itself — ripgrep's searcher over the ignore rules, no subprocess and no
+    /// git — and streams `search_results` events tagged with this request's `seq`,
     /// then closes with one `fs_searched` reply. Cancellable mid-stream with
     /// `cancel {request: <seq>}`.
     FsSearch {
@@ -802,6 +839,19 @@ pub enum Control {
     /// tab's base picker in one hop, rather than a `git` per field.
     GitBranches {
         root: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seq: Option<u64>,
+    },
+    /// The branch measured against a base (§C.13 read tier, capability `git`):
+    /// the three-dot file list and how far the base has moved on — the halves
+    /// of the Compare tab that `git.log`'s range cannot compose. `path` narrows
+    /// to one file's ranged diff, the row a compare entry expands to, exactly
+    /// as `git.show`'s `path` does for a commit.
+    GitCompare {
+        root: String,
+        base: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         seq: Option<u64>,
     },
@@ -1058,6 +1108,33 @@ pub enum Control {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         re: Option<u64>,
     },
+    /// Reply to `git_compare`. `problem` set means no comparison could be made
+    /// and the other fields are empty — stated as its own field rather than an
+    /// `error`, because "this base is gone" is an answer about the checkout,
+    /// not a failed request. `behind` counts commits on the base this branch
+    /// lacks (two-dot, tips apart), while `files` is three-dot from the merge
+    /// base — the change a merge would introduce.
+    GitCompareResult {
+        files: Vec<GitCommitFile>,
+        /// The commits the merge would bring, newest first — carried here
+        /// rather than composed from a separate `git_log` so the file list,
+        /// the commits and the behind count all describe one pinned head.
+        #[serde(default)]
+        commits: Vec<GitCommitEntry>,
+        #[serde(default)]
+        behind: u64,
+        diff: String,
+        #[serde(default)]
+        truncated: bool,
+        #[serde(default)]
+        files_truncated: bool,
+        #[serde(default)]
+        commits_truncated: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        problem: Option<GitCompareProblem>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        re: Option<u64>,
+    },
     /// Reply to `fs_match`: workspace-relative paths, best first. `coverage`
     /// is how much of the tree the index has walked (0.0–1.0); the index is
     /// evictable state, never correctness-bearing.
@@ -1191,6 +1268,33 @@ pub enum Event {
     Status {
         session: String,
         status: String,
+        /// Which channel produced this status: `hook`, `title`, `progress`,
+        /// `screen`, or `streak`. Additive, and absent from an older daemon —
+        /// which a client reads as `hook`, because that is the only channel an
+        /// older daemon had.
+        ///
+        /// A client needs it for exactly one decision: `done` from a hook is the
+        /// agent's own word and reads `done` everywhere, while a turn this host
+        /// concluded on its own is judged against the viewer's own selection
+        /// (§3.3 of the retirement RFC). Nothing else about presentation is
+        /// carried here.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        /// This status is the end of a turn that the host derived rather than
+        /// was told about. The one bit a viewer needs to apply its own focus.
+        #[serde(default, skip_serializing_if = "is_false")]
+        turn_ended: bool,
+        /// The session is blocked on a person, from an observable condition with
+        /// a matching resolved transition — not a one-shot bell. A viewer keeps
+        /// the dot through a selection change, because reading a permission
+        /// prompt is not answering it.
+        ///
+        /// Always serialized, unlike the other additive fields: absent means an
+        /// older daemon, and every `needs_you` such a daemon sent was blocking.
+        /// A client reads a missing field as `true`, so the field can only ever
+        /// *narrow* the claim — which is what makes it safe to add.
+        #[serde(default)]
+        blocking: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1201,6 +1305,19 @@ pub enum Event {
         tool: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prompt_title: Option<String>,
+    },
+    /// A session has been working for a full window with no sign of progress
+    /// (device architecture §4.7). Watch-plane only: the session's status stays
+    /// `working`, because from outside an agent a quiet long build and a wedged
+    /// loop are indistinguishable — which is exactly why this plane signals and
+    /// never kills. Edge-triggered: one event per quiet window, re-armed by
+    /// progress.
+    Stalled {
+        session: String,
+        /// How long the turn has been running, for the evidence line a client
+        /// words itself.
+        working_seconds: u64,
+        transcript_lines_grown: u64,
     },
     WriterChanged {
         session: String,
@@ -1265,6 +1382,33 @@ pub enum Event {
     SearchResults {
         request: u64,
         matches: Vec<SearchMatch>,
+    },
+    /// A status delta for the `status:` resource — the third consumer of
+    /// §C.10's one mechanism, and the one whose producer is the host's own
+    /// status engine rather than a filesystem watch.
+    ///
+    /// Carries the same facts as `Event::Status` plus the cursor. Both exist on
+    /// purpose: the event is how an attached client hears about its *own*
+    /// session without a second subscription; the resource is how a roster
+    /// hears about every session and can resume at a cursor after a reconnect.
+    StatusChanged {
+        resource: String,
+        seq: u64,
+        session: String,
+        status: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        turn_ended: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        blocking: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        /// Present only on the one `stalled` signal per quiet window.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stalled_working_seconds: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stalled_transcript_lines_grown: Option<u64>,
     },
     /// A status delta for a `git:` resource (§C.13) — the second consumer of
     /// §C.10's one mechanism. `updated_statuses` and `removed_paths` are a
@@ -1917,9 +2061,28 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Option<Fra
     r.read_exact(&mut payload).await?;
     match kind {
         KIND_CONTROL => {
-            let ctrl: Control = serde_json::from_slice(&payload)
-                .map_err(|e| anyhow::anyhow!("invalid control JSON: {e}"))?;
-            Ok(Some(Frame::Control(ctrl)))
+            match serde_json::from_slice::<Control>(&payload) {
+                Ok(ctrl) => Ok(Some(Frame::Control(ctrl))),
+                Err(decode_error) => {
+                    // An op this build doesn't know is version skew, not a
+                    // broken pipe: answer it, don't hang up on it. Only a frame
+                    // that names an op qualifies — anything else really is
+                    // malformed JSON and keeps failing the read.
+                    #[derive(serde::Deserialize)]
+                    struct Tagged {
+                        op: String,
+                        #[serde(default)]
+                        seq: Option<u64>,
+                    }
+                    match serde_json::from_slice::<Tagged>(&payload) {
+                        Ok(tagged) => Ok(Some(Frame::UnknownControl {
+                            op: tagged.op,
+                            seq: tagged.seq,
+                        })),
+                        Err(_) => Err(anyhow::anyhow!("invalid control JSON: {decode_error}")),
+                    }
+                }
+            }
         }
         KIND_DATA => Ok(Some(Frame::Data(payload))),
         KIND_RESIZE => {

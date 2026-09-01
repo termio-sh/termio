@@ -76,8 +76,8 @@ struct GitChangesView: View {
                 topBar
                 switch mode {
                 case .changes: changesBody
-                case .compare: GitCompareView(model: model, repoRoot: repoRoot, chrome: chrome, font: settings.interfaceFont)
-                case .history: GitHistoryView(model: model, repoRoot: repoRoot, chrome: chrome, font: settings.interfaceFont)
+                case .compare: GitCompareView(model: model, repoRoot: repoRoot, device: device, chrome: chrome, font: settings.interfaceFont)
+                case .history: GitHistoryView(model: model, repoRoot: repoRoot, device: device, chrome: chrome, font: settings.interfaceFont)
                 }
                 // Only Changes has a real total to report ("N files +A −D"). History's
                 // count would just echo the fetch limit — meaningless, so no bar.
@@ -212,14 +212,8 @@ struct GitChangesView: View {
     private var modeSwitch: some View {
         HStack(spacing: 0) {
             segment(localized("Changes"), .changes)
-            // Compare and History are the device's read tier (`git.log`,
-            // `git.branches`), which this pane does not ask for yet. Hidden
-            // rather than shown empty: a tab that answers nothing is worse than
-            // a tab that isn't there.
-            if device == nil {
-                segment(localized("Compare"), .compare)
-                segment(localized("History"), .history)
-            }
+            segment(localized("Compare"), .compare)
+            segment(localized("History"), .history)
         }
         // The selection pill rides behind the active segment and slides across on switch.
         .background { selectionPill }

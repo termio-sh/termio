@@ -12,7 +12,7 @@ enum SearchScope {
     /// Another machine: that device's own `fs.search`, and a hit opens the
     /// read-only preview the device's file tree already uses. `root` is a path on
     /// **that** box, so it is carried as a string; the `URL`s the rows build from
-    /// it are synthetic (names and icons only), exactly like `RemoteFileNode`.
+    /// it are synthetic (names and icons only), exactly like `DeviceFileNode`.
     case device(DeviceFileProvider, host: String, root: String)
 }
 
@@ -336,8 +336,8 @@ struct FileSearchView: View {
 
     /// Runs one query on whichever machine holds the root. The device's search is
     /// a network round trip, so its failures are shown rather than swallowed —
-    /// `git grep` outside a repo, a daemon too old for `fs.search`, a box that
-    /// stopped answering.
+    /// a root that no longer resolves, a daemon too old for `fs.search`, a box
+    /// that stopped answering.
     private func find(_ query: String, limit: Int) async -> [ContentMatch] {
         switch scope {
         case .thisMac(let root):

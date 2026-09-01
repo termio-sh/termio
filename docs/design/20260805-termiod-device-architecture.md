@@ -3,8 +3,9 @@ title: Device Architecture — one server per device, every UI a client
 status: draft
 type: design
 created: 2026-08-05
-updated: 2026-08-19
+updated: 2026-08-31
 related:
+  - 20260831-companion-second-protocol-retires.md
   - 20260730-termiod-session-protocol.md
   - 20260730-termiod-session-mux.md
   - 20260708-session-daemon-architecture.md
@@ -502,7 +503,7 @@ reply threads, and superlogical.com.
 | Legacy terminals | **compat mode**: a libghostty in the middle | not built |
 | Wire protocol | custom binary, *"predominantly part of libghostty"*, called an **open protocol** | our own framed protocol. **Checked 2026-08-08: no spec, no OSS release — beta waitlist only.** Nothing to adopt yet; re-evaluate when it lands |
 | Remote transport | **WebSockets over HTTP** (browser is first-class); "not at all guaranteed to be final" | **SSH only** — a trust choice (§H #8). WS as a *second binding* of the same protocol is §8.7 |
-| Phone client | attaches to the session like any other client | **mirrors the Mac** over the companion channel — the live exception to §H #4, closed by §8.7 |
+| Phone client | attaches to the session like any other client | **mirrors the Mac** over the companion channel — the live exception to §H #4. The exception now has an expiry: [`20260831-companion-second-protocol-retires.md`](20260831-companion-second-protocol-retires.md) Stage 8 |
 | Live human sharing | day one | not a v1 goal |
 | Where compute lives | **Unknown** | **the user's own machines, never ours** |
 | Agent status in the protocol | **Unknown** | first-class workstream object |

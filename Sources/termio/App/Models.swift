@@ -407,7 +407,7 @@ enum BrandLogo: Hashable {
 /// A session's live activity, shown as a dot in the sidebar and aggregated into
 /// the menu-bar pulse. Driven by two layers: the zero-config libghostty surface
 /// signals the `TerminalViewState` publishes (bell / desktop notification), and,
-/// when enabled, the per-agent hooks reported into `HookListener`.
+/// when enabled, the per-agent hooks that call `termio agent report`.
 ///
 /// The four states follow the cleanest model among the reference tools
 /// (open-vibe-island): a finished turn is `done`, *not* "needs you" —

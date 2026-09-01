@@ -717,6 +717,26 @@ extension Termiod {
         guard status == 0 else {
             throw TermiodClientError.daemonSpawnFailed(status)
         }
+        reapWhenItExits(pid)
+    }
+
+    /// Collect the daemon's exit status whenever it comes.
+    ///
+    /// `POSIX_SPAWN_SETSID` detaches the session, not the parentage: the daemon
+    /// stays this app's child, and a child nobody waits on becomes a zombie the
+    /// moment it exits — one whose pid `kill(pid, 0)` keeps answering for. That
+    /// is what `termiod stop` used to read as a daemon refusing to leave (#571),
+    /// and it lasted as long as the app did. The daemon this waits on outlives
+    /// most launches, so the wait cannot be a parked thread.
+    private static func reapWhenItExits(_ pid: pid_t) {
+        let source = DispatchSource.makeProcessSource(
+            identifier: pid, eventMask: .exit, queue: .global(qos: .utility))
+        source.setEventHandler {
+            var ignored: Int32 = 0
+            _ = waitpid(pid, &ignored, WNOHANG)
+            source.cancel()
+        }
+        source.resume()
     }
 
     // MARK: - Handshake and control channel
@@ -1159,6 +1179,9 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// names the state and nothing more — which dot, which words, and whether a
     /// notification fires stay entirely on this side.
     var onStatus: ((Termiod.StatusPayload) -> Void)?
+    /// The device's one `stalled` signal for this session. Watch-plane only —
+    /// the status stays `working`, and the sidebar and menu bar are untouched.
+    var onStalled: ((Termiod.StalledPayload) -> Void)?
     /// Whether this client currently holds the write token, on the main queue,
     /// on every genuine change. The link already gates its own `R` frames on
     /// this; the callback is for the UI that has to say "read-only" out loud.
@@ -1751,6 +1774,8 @@ final class TermiodSessionLink: @unchecked Sendable {
         switch event {
         case .status(let status):
             DispatchQueue.main.async { [self] in onStatus?(status) }
+        case .stalled(let stall):
+            DispatchQueue.main.async { [self] in onStalled?(stall) }
         case .writerChanged(let change):
             applyWriter(change.writer)
         case .resized(let size):
@@ -1783,10 +1808,12 @@ final class TermiodSessionLink: @unchecked Sendable {
             // asked reads its own hits (`Termiod.searchContents`). Nothing on a
             // session's channel can have asked, so there is nobody to give it to.
             break
-        case .fsChanged:
+        case .fsChanged, .statusChanged:
             // Addressed to a *channel*, not to a session: only a channel
             // carrying a resource subscription can have asked, and a session's
-            // link never does (`Termiod.ResourceWatch`).
+            // link never does (`Termiod.ResourceWatch`). This link hears about
+            // its own session's status through `E status` on this very channel,
+            // which is what that event is for.
             break
         case .unknown(let name):
             Log.termiod.debug("""

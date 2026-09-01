@@ -70,7 +70,7 @@ Seven steps, each verified against source.
    the reply was classified as **typing**.
 5. Typing claims the write token (`TermiodClient.send`).
 6. `applyWriter` re-asserts the new writer's grid
-   (`TermiodClient.swift:1752`, `TermiodSession.swift:327`). That is a resize,
+   (`TermiodClient.swift:1779`, `TermiodSession.swift:327`). That is a resize,
    which is a host-side barrier, which pushes a fresh keyframe **to every
    attachment**.
 7. Go to 3, at the other client.
@@ -79,7 +79,7 @@ Nothing here is probabilistic. The loop runs as fast as the IO threads carry it.
 
 ## 3. Fix
 
-`Shared/Sources/TermioShared/TerminalDeviceReport.swift:86` classifies the bare
+`Shared/Sources/TermioShared/TerminalDeviceReport.swift:92` classifies the bare
 three-byte `ESC [ I` / `ESC [ O` as a device report:
 
 ```swift
@@ -91,14 +91,17 @@ case 0x49, 0x4F: // I O
 
 One classifier, three call sites — the Mac pane
 (`TermioStore+TerminalSurface.swift:295`), the companion bridge
-(`CompanionServer.swift:1098`), and iOS
+(`CompanionServer.swift:1091`), and iOS
 (`TerminalViewController.swift:763`) — so one edit covers every path.
 Parameterised forms (`ESC [ 2 I`) stay input; no key encodes to the bare form.
 `swift build` and `TerminalDeviceReportTests` pass, with assertions both ways.
 
-An audit of every other unsolicited write ghostty emits on mode-enable found no
-second gap: `?2048` in-band size reports end in `t`, `?998` visibility reports
-end in `n`, both already classified.
+The mode-enable audit found no second gap: `?2048` in-band size reports end in
+`t`, `?998` visibility reports end in `n`, and both are already classified. The
+broader generated-write audit did find kitty graphics and glyph APC replies plus
+kitty clipboard `OSC 5522` status replies; they are now classified too. An
+unsolicited kitty paste event has the same status shape but carries `:pw=`; it
+stays input so an observer's Paste action is never swallowed.
 
 **Residual, not fixed.** The writer still emits a spurious focus-in on every
 keyframe, because a replayed mode is indistinguishable from the host setting it.

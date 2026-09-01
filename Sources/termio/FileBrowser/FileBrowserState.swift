@@ -10,7 +10,13 @@ import Foundation
 /// An `NSObject` so it can also be the outline view's action target — see `rowClicked`.
 @MainActor
 final class FileBrowserState: NSObject, ObservableObject {
-    @Published var selection: URL?
+    /// The selected row, as the path on whichever device the checkout lives on.
+    /// A path rather than a URL because the tree is the device's: only a
+    /// checkout on this Mac has a `URL` that addresses anything.
+    @Published var selection: String?
+    /// The selection as a file on *this* Mac, or nil for a checkout on another
+    /// device. Quick Look previews a local file or nothing.
+    @Published var selectedLocalURL: URL?
     /// The `NSOutlineView` backing the tree, captured by `FileTreeList` so
     /// `FileBrowserView` can expand a folder on the click that selected it. Not
     /// `@Published` — it's an AppKit escape hatch, not view state.

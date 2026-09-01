@@ -88,7 +88,17 @@ pub async fn stdio() -> Result<()> {
 /// Whether a connect failure proves nothing is serving the socket. `ENOENT`
 /// (no file) and `ECONNREFUSED` (a file no listener backs) do; every other
 /// errno describes this client's situation, not the daemon's.
-fn absent_daemon(errno: Option<i32>) -> bool {
+/// Whether a failed connect licenses *acting on* the path: starting a daemon
+/// that will bind it, or — in [`crate::daemon`] — unlinking it first.
+///
+/// Narrower than [`crate::lifecycle::nothing_is_serving`] by exactly one errno,
+/// and the difference is the point. `ENOTSOCK` says a plain file holds the
+/// path. That proves no daemon is serving, which is all a stop needs to
+/// conclude; it is not permission to delete a file this daemon did not create,
+/// nor to spawn one that would fail to bind over it. That state needs a human,
+/// and the two questions are different enough that folding them would answer
+/// one of them wrongly.
+pub(crate) fn absent_daemon(errno: Option<i32>) -> bool {
     matches!(errno, Some(libc::ENOENT) | Some(libc::ECONNREFUSED))
 }
 
@@ -121,10 +131,26 @@ fn spawn_daemon() -> Result<()> {
         cmd.pre_exec(|| {
             // Detach from the client's session so the daemon survives us.
             libc::setsid();
-            Ok(())
+            // Then fork once more, so the daemon's parent is pid 1 rather than
+            // whichever client happened to autostart it. Clients here outlive
+            // the daemon routinely — the app, and the long-lived `termiod
+            // stdio` an SSH attach runs — and none of them waits on it, so its
+            // exit used to leave a zombie whose pid still answered `kill(pid,
+            // 0)`. Supervised hosts never had this: systemd is the parent
+            // there, and it reaps (#571).
+            match libc::fork() {
+                -1 => Err(std::io::Error::last_os_error()),
+                0 => Ok(()),
+                _ => libc::_exit(0),
+            }
         });
     }
-    cmd.spawn().context("starting termiod daemon")?;
+    // Waits on the intermediate, which exits the instant it has forked — never
+    // on the daemon, which is no longer a child of this process at all.
+    cmd.spawn()
+        .context("starting termiod daemon")?
+        .wait()
+        .context("waiting for the daemon to detach")?;
     Ok(())
 }
 
@@ -883,6 +909,10 @@ mod autostart_tests {
     fn only_a_provably_absent_daemon_recovers_by_spawning() {
         assert!(super::absent_daemon(Some(libc::ENOENT)));
         assert!(super::absent_daemon(Some(libc::ECONNREFUSED)));
+        // Proof that nothing is serving, but not permission to unlink a file
+        // this daemon did not create or to spawn one that cannot bind over it.
+        assert!(!super::absent_daemon(Some(libc::ENOTSOCK)));
+        assert!(crate::lifecycle::nothing_is_serving(Some(libc::ENOTSOCK)));
         assert!(!super::absent_daemon(Some(libc::EPERM)));
         assert!(!super::absent_daemon(Some(libc::EACCES)));
         assert!(!super::absent_daemon(Some(libc::ETIMEDOUT)));

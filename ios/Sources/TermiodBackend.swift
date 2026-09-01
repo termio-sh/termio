@@ -38,6 +38,35 @@ final class TermiodBackend: DeviceClient {
     /// Status the device revised since its row was last delivered whole. Held
     /// beside the rows so a fresh row can retire the delta standing in for it.
     private var statusOverrides: [String: StatusDelta] = [:]
+    /// Where a reconnect resumes from, which is the whole point of status being
+    /// a resource rather than a broadcast: a screen that locked through three
+    /// turns resumes at its cursor instead of rescanning (§C.10). The rule, and
+    /// why the ack is not an input to it, is `ResourceCursor`.
+    private var statusCursor = ResourceCursor()
+    /// Holds batches that arrive while a subscribe handshake is in flight, so
+    /// nothing applies against a baseline the ack has not installed yet, and
+    /// nothing overtakes what is already waiting. The same ledger the Mac's
+    /// `fs:` and `git:` watches use — one copy, in `Shared/`.
+    private var statusLedger = DeviceWatchLedger<Termiod.StatusChangedPayload>()
+    private var statusGeneration = 0
+    /// The session filling the screen, or nil on a list. The one piece of
+    /// status arbitration that belongs to a viewer: a turn the *device*
+    /// concluded reads `idle` on the row you are looking at and `done` on one
+    /// you are not, and the Mac and this phone each answer for themselves.
+    /// A hook's own `done` is not this rule's business — it means done
+    /// everywhere.
+    var viewingSessionID: String? {
+        didSet {
+            guard viewingSessionID != oldValue else { return }
+            // Opening a session clears the "you have not seen this" mark the
+            // way looking at it on the Mac does.
+            if let opened = viewingSessionID,
+               let delta = statusOverrides[opened], delta.status == "done" {
+                statusOverrides[opened] = StatusDelta(status: "idle", title: delta.title)
+                publishRoster()
+            }
+        }
+    }
     private var hostID: String?
     /// Requests in flight, keyed by the `re` each was sent with.
     ///
@@ -320,14 +349,14 @@ final class TermiodBackend: DeviceClient {
             return
         }
         // `fs_match` and not `fs_search`: this field searches *names*, and
-        // `fs_search` is the device's content search (`git grep`).
+        // `fs_search` is the device's content search.
         //
         // Nothing is cancelled when a query is abandoned, and nothing needs to
         // be: `fs_match` is one reply off an index the host already holds, and
         // only `fs_search` registers a cancellable request (`daemon.rs`, the
         // `Control::Cancel` arm). That changes the day this pane gains content
-        // search — an abandoned `fs_search` leaves `git grep` running until the
-        // connection drops, and `Termiod.CancelOperation` is what stops it.
+        // search — an abandoned `fs_search` keeps walking the checkout until
+        // the connection drops, and `Termiod.CancelOperation` is what stops it.
         let request = nextSeq()
         pendingSearches[request] = query
         do {
@@ -366,15 +395,31 @@ final class TermiodBackend: DeviceClient {
 
     // MARK: - Roster
 
-    private func handshakeLanded(_ handshake: Termiod.HelloOkPayload) {
+    /// Not private, for the same reason `receive` is not: what this end asks
+    /// for at handshake time — a `roster` subscription and a `status:` cursor —
+    /// is the contract with the device, and a test that cannot see it sent
+    /// cannot notice it stop being sent.
+    func handshakeLanded(_ handshake: Termiod.HelloOkPayload) {
         // The roster is keyed by this and never by `client_id`, which names the
         // connection and changes on every reconnect.
         hostID = handshake.hostId
         do {
             // `roster` also carries `writer_changed` and `session_exited`, so
-            // two names cover everything the list needs.
+            // one name covers everything the list needs.
             channel.send(kind: .control, payload: try Termiod.subscribePayload(
-                events: ["roster", "status"], seq: nextSeq()))
+                events: ["roster"], seq: nextSeq()))
+            // Status comes from the resource and *not* from the `status` event
+            // name, deliberately: one path, and one that carries a cursor. The
+            // `stalled` signal rides the same batches, so nothing is lost by
+            // dropping the broadcast. A daemon too old to know `status:`
+            // answers `error`, and `resourceRefused` falls back to the
+            // broadcast so an older device still lights its dots.
+            // Everything from here until the ack is held, not applied.
+            statusGeneration = statusLedger.begin()
+            statusCursor.beginAttempt()
+            channel.send(kind: .control, payload: try Termiod.subscribeResourcePayload(
+                resource: Termiod.statusResource, since: statusCursor.resumeFrom,
+                seq: nextSeq(statusSubscription: true)))
             channel.send(kind: .control, payload: try Termiod.listPayload(seq: nextSeq()))
         } catch {
             report(error, doing: localized("Couldn't read this device's sessions."))
@@ -406,7 +451,28 @@ final class TermiodBackend: DeviceClient {
             receiveUploadAck(ack)
         case .uploadCommitted(let committed):
             receiveUploadCommitted(committed, responseID: reply.responseID)
+        case .subscribed(let subscription):
+            guard subscription.resource == Termiod.statusResource else { break }
+            statusSubscriptionSeq = nil
+            settleStatusSubscription(subscription)
         case .error(let failure):
+            if reply.responseID != nil, reply.responseID == statusSubscriptionSeq {
+                // A device that predates the `status:` resource, or one that did
+                // not grant `resources`. Fall back to the broadcast: fewer
+                // guarantees, same facts, and a dot that moves beats a correct
+                // cursor into nothing.
+                statusSubscriptionSeq = nil
+                statusCursor.reset()
+                // No resource, so nothing will ever settle the ledger: stop it
+                // rather than leave the broadcast's batches held forever.
+                statusLedger.stop()
+                statusGeneration = statusLedger.generation
+                if let payload = try? Termiod.subscribePayload(
+                    events: ["roster", "status"], seq: nextSeq()) {
+                    channel.send(kind: .control, payload: payload)
+                }
+                break
+            }
             failInFlight(failure.message, responseID: reply.responseID)
         default:
             break
@@ -425,7 +491,10 @@ final class TermiodBackend: DeviceClient {
         return waiting.count == 1 ? waiting.keys.first : nil
     }
 
-    private func receive(_ event: Termiod.IncomingEvent) {
+    /// Not private, for the same reason `receive(_ reply:)` is not: which of
+    /// two status channels a batch arrived on, and what a viewer then makes of
+    /// it, is exactly the kind of thing that goes wrong silently.
+    func receive(_ event: Termiod.IncomingEvent) {
         switch event {
         case .roster(let update):
             if let information = update.info {
@@ -443,10 +512,12 @@ final class TermiodBackend: DeviceClient {
             }
             publishRoster()
         case .status(let status):
-            guard sessionsByID[status.session] != nil else { return }
-            statusOverrides[status.session] = StatusDelta(
-                status: status.status, title: status.title)
-            publishRoster()
+            // The fallback path only — a device too old for `status:`.
+            applyStatus(status)
+        case .statusChanged(let change):
+            guard let admitted = statusLedger.admit(change, generation: statusGeneration)
+            else { return }
+            applyStatusBatch(admitted)
         case .sessionExited(let exit):
             forget(exit.session)
             publishRoster()
@@ -454,6 +525,78 @@ final class TermiodBackend: DeviceClient {
             break
         }
     }
+
+    /// The ack landed: install the baseline it decided, then hand back every
+    /// batch that raced it, in arrival order, before anything newer applies.
+    ///
+    /// Draining one at a time rather than as an array is the point — a batch
+    /// arriving mid-drain queues behind what is left instead of overtaking it,
+    /// which is the window a live batch used to slip through.
+    private func settleStatusSubscription(_ subscription: Termiod.SubscribedPayload) {
+        guard statusLedger.settle(generation: statusGeneration) else { return }
+        if subscription.gap {
+            // The cursor aged out of the ring, or this is a first subscribe.
+            // Only the roster says what is true *now*, so the deltas standing
+            // in for rows are dropped and the `list` already in flight behind
+            // this is what re-establishes them. The cursor restarts at the
+            // baseline the host named, because there is no continuity left to
+            // preserve — that is what a gap *is*.
+            statusOverrides.removeAll()
+            // A gap has no continuity to preserve, and the `list` behind this
+            // rebuilds every row — so the host's baseline is adopted outright
+            // rather than walked to.
+            statusCursor.adoptBaseline(subscription.seq)
+            publishRoster()
+        }
+        while let held = statusLedger.releaseNext(generation: statusGeneration) {
+            applyStatusBatch(held)
+        }
+    }
+
+    /// Apply one `status:` batch, unless the cursor says it is already old
+    /// news. A dropped batch is one that would roll a session's status
+    /// backwards — a finished agent reading `working` again.
+    private func applyStatusBatch(_ change: Termiod.StatusChangedPayload) {
+        guard statusCursor.admit(seq: change.seq) != .drop else { return }
+        applyStatus(change.report)
+    }
+
+    /// One interpretation of a status, whichever channel carried it.
+    ///
+    /// The device says what happened and which of its channels said so; this
+    /// applies the one rule that is the viewer's. A turn the device derived
+    /// (`turnEnded`) reads `idle` on the session filling the screen and `done`
+    /// on one that is not — the same call `TermioStore.applyTermiodStatus`
+    /// makes on the Mac, so two devices watching one session agree.
+    private func applyStatus(_ report: Termiod.StatusPayload) {
+        guard sessionsByID[report.session] != nil else { return }
+        var status = report.status
+        if report.turnEnded, status == "idle", report.session != viewingSessionID {
+            status = "done"
+        }
+        statusOverrides[report.session] = StatusDelta(status: status, title: report.title)
+        publishRoster()
+    }
+
+    /// Republish the roster on demand, so a test can read what the phone would
+    /// draw rather than assert on the backend's private bookkeeping.
+    func forcePublishForTests() { publishRoster() }
+
+    /// Seed the durable cursor, so a test can start from a phone that has
+    /// already applied batches rather than build that state through the wire.
+    func setStatusCursorForTests(_ seq: UInt64?) {
+        statusCursor.reset()
+        if let seq { statusCursor.adoptBaseline(seq) }
+    }
+
+    /// The link going down, without a socket to drop. What matters to the
+    /// status plane is the generation bump, and this is the door it goes
+    /// through in production too.
+    func simulateLinkDropForTests() { forgetInFlight() }
+
+    /// The cursor this phone would resume from. Read by tests; the resume
+    /// itself happens in `handshakeLanded`.
+    var statusResumeCursor: UInt64? { statusCursor.resumeFrom }
 
     private func publishRoster() {
         // A workspace id that churned between pushes would reshuffle every list
@@ -693,6 +836,14 @@ final class TermiodBackend: DeviceClient {
         pendingSearches.removeAll()
         readsInProgress.removeAll()
         transfers.removeAll()
+        // The link went down mid-handshake: an ack that arrives on the *next*
+        // connection must not settle this attempt, and batches held for it must
+        // not be applied against a baseline that never landed. The generation
+        // bump is what makes both impossible. `statusCursor` deliberately
+        // survives — it is the whole point of resuming.
+        statusSubscriptionSeq = nil
+        statusLedger.stop()
+        statusGeneration = statusLedger.generation
     }
 
     private func forget(_ sessionID: String) {
@@ -711,6 +862,17 @@ final class TermiodBackend: DeviceClient {
     private func nextSeq() -> UInt64 {
         seq &+= 1
         return seq
+    }
+
+    /// The request id the `status:` subscription went out with, so its reply —
+    /// a cursor, a `gap`, or a refusal from a device too old to know the
+    /// resource — can be told from every other reply on this channel.
+    private var statusSubscriptionSeq: UInt64?
+
+    private func nextSeq(statusSubscription: Bool) -> UInt64 {
+        let id = nextSeq()
+        if statusSubscription { statusSubscriptionSeq = id }
+        return id
     }
 
     /// Join a project root and a root-relative path. "" is the root itself,

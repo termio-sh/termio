@@ -475,9 +475,14 @@ final class DeclaredAgentDemotionTests: XCTestCase {
     /// The full resume sequence, including the self-heal for a `ctrl-z`d or
     /// hand-restarted agent that never fires a hook: the returning foreground
     /// clears the notice but honestly leaves the row idle (a resumed agent
-    /// sitting at its prompt IS idle), and the screen-liveness streak — which
-    /// the daemon link's status tap feeds for these rows exactly like the
-    /// in-process PTY's — promotes it back to working once it produces output.
+    /// sitting at its prompt IS idle), and the screen-liveness streak promotes
+    /// it back to working once it produces output.
+    ///
+    /// The streak itself is the device's — its rules and their guards are
+    /// asserted in `termiod/src/session/status.rs` — so what this covers is the
+    /// half that stayed here: the verdict arriving as `working` from the
+    /// `streak` channel must clear the exit notice and light the spinner, on a
+    /// row this app had written off as back at its shell.
     func testTheAgentComingBackClearsTheNoticeAndScreenActivityPromotes() {
         let session = Session(title: "agent", agent: .claudeCode)
         let store = makeStore(with: session)
@@ -491,13 +496,14 @@ final class DeclaredAgentDemotionTests: XCTestCase {
         XCTAssertEqual(store.status(for: session.id), .idle,
                        "the return alone is not evidence of work — no status is invented")
 
-        store.noteOutputActivity(session.id, screenChanged: true, bytes: 512)
-        XCTAssertEqual(store.status(for: session.id), .idle,
-                       "one changed tick is a repaint, not a turn")
-        store.noteOutputActivity(session.id, screenChanged: true, bytes: 512)
+        store.applyTermiodStatus(
+            Termiod.StatusPayload(
+                session: session.id.uuidString, status: "working", title: nil, source: "streak"),
+            for: session.id)
 
         XCTAssertEqual(store.status(for: session.id), .working,
                        "a resumed agent producing output must light its spinner again")
+        XCTAssertNil(store.agentExitNotice(for: session.id))
     }
 
     /// An agent that came back can finish a turn without ever passing through

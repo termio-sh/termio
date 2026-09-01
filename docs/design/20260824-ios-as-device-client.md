@@ -3,8 +3,9 @@ title: iOS as a device client
 status: draft
 type: rfc
 created: 2026-08-24
-updated: 2026-08-26
+updated: 2026-08-31
 related:
+  - 20260831-companion-second-protocol-retires.md
   - 20260814-remote-to-device.md
   - 20260824-settings-that-know-which-machine.md
   - 20260818-termiod-web-client-ghostty-wasm.md
@@ -286,6 +287,10 @@ The remaining two:
   UI.
 - **The companion wire is not deleted here.** It is retired when the phone and
   the browser both attach directly; this RFC only stops it being the *only* path.
+  The retirement has its own ladder:
+  [`20260831-companion-second-protocol-retires.md`](20260831-companion-second-protocol-retires.md),
+  which picks up the state-ownership questions this document's §Open-questions
+  leaves open.
 
 ## Open questions
 

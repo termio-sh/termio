@@ -2,23 +2,26 @@ import XCTest
 import TermioShared
 @testable import termio
 
-/// What a refresh of a device's file tree asks for, and what it does with the
-/// answer.
+/// What the file tree asks a device for, and what it does with the answer —
+/// pinned without a device, because every claim here is about the model's own
+/// bookkeeping.
 ///
 /// The tree used to drop every node it held and re-list the root alone, leaving
 /// each still-expanded folder to fetch itself from the `children` getter — one
 /// SSH round trip per open folder, on every app focus. It now names them all in
-/// one `fs.list` and grafts the replies onto the nodes already on screen. Both
-/// halves are checkable without a device: the paths it asks for, and whether the
-/// subtree under an open folder survives.
+/// one `fs.list` and grafts the replies onto the nodes already on screen.
+///
+/// One model serves every machine, this Mac included. What still divides is
+/// what may be *written*, and that divides on one fact per node — whether it
+/// has a URL this process can open.
 @MainActor
-final class RemoteFileTreeRefreshTests: XCTestCase {
+final class DeviceFileTreeTests: XCTestCase {
     private let root = "/srv/api"
 
-    private func model() -> RemoteFileBrowserModel {
+    private func model() -> DeviceFileTreeModel {
         // A route nothing will answer on: every assertion here is about what the
         // model does with listings it is handed, never about fetching them.
-        RemoteFileBrowserModel(
+        DeviceFileTreeModel(
             checkout: Checkout(
                 device: KnownDevice(alias: "test-box", deviceID: nil), root: root),
             root: root)
@@ -28,7 +31,7 @@ final class RemoteFileTreeRefreshTests: XCTestCase {
     /// which titled every project on one box with the box's name.
     func testHeaderNamesTheRootFolderNotTheDevice() {
         XCTAssertEqual(model().rootName, "api")
-        let home = RemoteFileBrowserModel(
+        let home = DeviceFileTreeModel(
             checkout: Checkout(
                 device: KnownDevice(alias: "test-box", deviceID: nil), root: "/"),
             root: "/")
@@ -36,12 +39,14 @@ final class RemoteFileTreeRefreshTests: XCTestCase {
     }
 
     private func listing(
-        _ path: String, _ entries: [(String, FileEntry.Kind)], error: String? = nil
+        _ path: String, _ entries: [(String, FileEntry.Kind)], error: String? = nil,
+        isShortened: Bool = false
     ) -> Termiod.DirectoryListing {
         Termiod.DirectoryListing(
             path: path,
             entries: entries.map { FileEntry(name: $0.0, kind: $0.1) },
-            error: error)
+            error: error,
+            isShortened: isShortened)
     }
 
     /// The ask: the root plus every directory whose contents the tree is holding,
@@ -206,19 +211,36 @@ final class RemoteFileTreeRefreshTests: XCTestCase {
         let tree = model()
         tree.apply([listing(root, [("src", .directory)])])
         XCTAssertTrue(
-            tree.needsReconcileOnEstablish,
+            tree.needsReconcile(atWatchCursor: 0),
             "nothing has stamped these rows, so they may already be stale")
     }
 
     /// The opposite, which is the common case and must not cost a second full
-    /// listing: the load happened while a watch was already running, so the
-    /// cursor on it proves what the rows include.
-    func testATreeListedUnderARunningWatchNeedsNoReconcile() {
+    /// listing: the load happened under this subscription's own cursor, so it
+    /// already reflects everything the watch could replay.
+    func testATreeListedUnderThisWatchNeedsNoReconcile() {
         let tree = model()
         tree.noteListed(at: 42)
         XCTAssertFalse(
-            tree.needsReconcileOnEstablish,
-            "a stamped listing already reflects everything up to its cursor")
+            tree.needsReconcile(atWatchCursor: 42),
+            "a listing at the watch's own cursor already reflects it")
+        XCTAssertFalse(
+            tree.needsReconcile(atWatchCursor: 7),
+            "and one taken after it is newer still")
+    }
+
+    /// A stamped listing is not automatically a *current* one. The `fs:` cursor
+    /// moves for any watcher on the device — another pane's, or one this pane
+    /// held a moment ago — so a listing can carry a real, nonzero stamp and
+    /// still sit behind the batches this subscription begins past. Reading the
+    /// stamp as "somebody was watching, so this is fresh" is what left the tree
+    /// permanently stale.
+    func testAListingOlderThanTheWatchsCursorStillReconciles() {
+        let tree = model()
+        tree.noteListed(at: 5)
+        XCTAssertTrue(
+            tree.needsReconcile(atWatchCursor: 9),
+            "batches 6…9 raised no event this watch will replay")
     }
 
     /// A tree with no subscription — a daemon too old to grant `resources` —
@@ -245,5 +267,117 @@ final class RemoteFileTreeRefreshTests: XCTestCase {
         XCTAssertTrue(
             tree.refreshQueued,
             "the second refresh is held for after the first, not discarded")
+    }
+
+    // MARK: - Which rows this Mac may write
+
+    private func localModel(root: String) -> DeviceFileTreeModel {
+        DeviceFileTreeModel(
+            checkout: Checkout(device: .thisMac, root: root), root: root)
+    }
+
+    /// The gate every write-shaped control hangs off. A checkout on this Mac
+    /// addresses real files, so a row drags, opens in the editor and carries the
+    /// row menu; one on another device has no URL this process could act on, and
+    /// the controls are absent rather than present and refusing (Stage 9's gate:
+    /// unsupported controls hidden, not inert).
+    func testOnlyACheckoutOnThisMacGivesItsRowsAURL() {
+        let here = localModel(root: "/Users/me/code/api")
+        here.apply([listing("/Users/me/code/api", [("README.md", .file)])])
+        let local = here.node(at: "/Users/me/code/api/README.md")
+        XCTAssertEqual(local?.localURL?.path, "/Users/me/code/api/README.md")
+
+        let there = model()
+        there.apply([listing(root, [("README.md", .file)])])
+        let device = there.node(at: "\(root)/README.md")
+        XCTAssertNil(device?.localURL, "this Mac has no such file to drag, reveal or rename")
+        XCTAssertEqual(
+            device?.url.lastPathComponent, "README.md",
+            "the name still reaches the icon, which is all the synthetic URL is for")
+    }
+
+    /// A link to a directory browses as the directory it points at — the Finder's
+    /// and the VS Code explorer's rule, and what this repo's own
+    /// `.claude/skills → ../skills` needs. The row still knows it is a link, which
+    /// is what swaps its glyph and arms its tooltip.
+    func testASymlinkedFolderIsAFolderAndStillReadsAsALink() {
+        let tree = localModel(root: "/Users/me/code/api")
+        tree.apply([Termiod.DirectoryListing(
+            path: "/Users/me/code/api",
+            entries: [
+                FileEntry(
+                    name: "skills", kind: .symlink,
+                    target: .directory, symlinkTarget: "../skills"),
+                FileEntry(name: "loose", kind: .symlink, target: nil, symlinkTarget: "/etc"),
+            ],
+            error: nil)])
+
+        let linked = tree.node(at: "/Users/me/code/api/skills")
+        XCTAssertEqual(linked?.isDirectory, true, "it expands like what it points at")
+        XCTAssertEqual(linked?.isSymbolicLink, true)
+        XCTAssertEqual(linked?.symbolicLinkTarget, "../skills")
+
+        let loose = tree.node(at: "/Users/me/code/api/loose")
+        XCTAssertEqual(
+            loose?.isDirectory, false,
+            "a link the device would refuse to list offers no disclosure triangle")
+    }
+
+    /// Folders sort above files, and a symlinked folder sorts with the folders —
+    /// the ordering follows what a row *browses as*, not what kind the host
+    /// stamped on it.
+    func testASymlinkedFolderSortsWithTheFolders() {
+        let tree = localModel(root: "/r")
+        tree.apply([Termiod.DirectoryListing(
+            path: "/r",
+            entries: [
+                FileEntry(name: "a.txt", kind: .file),
+                FileEntry(name: "zlink", kind: .symlink, target: .directory),
+            ],
+            error: nil)])
+        XCTAssertEqual(tree.rootNodes.map(\.name), ["zlink", "a.txt"])
+    }
+
+    // MARK: - A listing that stopped short
+
+    /// A directory the device could only answer part of says so, in itself.
+    ///
+    /// Only an old daemon produces one — it pages by offset, which the keyset
+    /// cursor replaced, so the listing stops at its first page. Logging that was
+    /// not enough: the flag died at the client boundary and the tree drew two
+    /// thousand entries as a folder. On screen a prefix of a directory is a
+    /// directory, and the rows themselves can never say otherwise.
+    func testAShortenedListingCarriesANoteIntoTheTree() {
+        let tree = localModel(root: "/r")
+        tree.apply([listing(
+            "/r", [("a", .file), ("b", .file)], isShortened: true)])
+
+        let rows = tree.rootNodes
+        XCTAssertEqual(rows.map(\.name).prefix(2).map { $0 }, ["a", "b"])
+        let note = try? XCTUnwrap(rows.last)
+        XCTAssertNotNil(note?.notice, "the folder has to say its listing stopped short")
+        XCTAssertEqual(note?.isDirectory, false)
+        XCTAssertEqual(note?.canPreview, false)
+        XCTAssertNil(note?.localURL, "there is no file here to drag, reveal or open")
+    }
+
+    /// The ordinary complete listing carries no note — every row is a real one.
+    func testACompleteListingCarriesNoNote() {
+        let tree = localModel(root: "/r")
+        tree.apply([listing("/r", [("a", .file)])])
+        XCTAssertEqual(tree.rootNodes.count, 1)
+        XCTAssertNil(tree.rootNodes.first?.notice)
+    }
+
+    /// And the note goes away once the device can answer the whole directory —
+    /// a re-list must not leave the previous answer's note behind.
+    func testTheNoteClearsWhenTheListingComesBackWhole() {
+        let tree = localModel(root: "/r")
+        tree.apply([listing("/r", [("a", .file)], isShortened: true)])
+        XCTAssertNotNil(tree.rootNodes.last?.notice)
+
+        tree.apply([listing("/r", [("a", .file), ("b", .file)])])
+        XCTAssertEqual(tree.rootNodes.map(\.name), ["a", "b"])
+        XCTAssertTrue(tree.rootNodes.allSatisfy { $0.notice == nil })
     }
 }

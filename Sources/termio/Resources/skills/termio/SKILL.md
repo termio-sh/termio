@@ -59,7 +59,9 @@ id-prefix works too).
   single-line payload arrives verbatim, exactly as typed; a multi-line one is
   wrapped in bracketed paste so a TUI takes it as one block instead of
   submitting each line as its own turn. Add `--no-enter` when a gate wants a
-  bare keypress and no Return — the lone `t` that trusts a folder.
+  bare keypress and no Return — the lone `t` that trusts a folder. Text that
+  itself begins with a dash goes after `--`, which ends the flags:
+  `termio sessions send <link> -- --force`.
 - `termio sessions send <link> --key <name>` — press a named key in that
   session: `--key escape` to back out of a menu, `--key up --key enter` to
   rerun its last entry, `--key ctrl-c` to interrupt. Repeatable and pressed
@@ -94,6 +96,9 @@ id-prefix works too).
 
 - Copy links verbatim from `list` or a `send` reply; never guess or
   construct one.
+- An unknown flag is an error, never text. Exit 2 means the command was
+  malformed and never reached Termio — fix it rather than retry.
+  `--agent codex` and `--agent=codex` are both accepted.
 - One request, one target. Never send the same prompt to several siblings,
   and never run multiple `send` commands in parallel — delegate to ONE
   session.

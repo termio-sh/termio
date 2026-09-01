@@ -12,6 +12,9 @@ struct GitHistoryView: View {
     @ObservedObject var model: GitPanelModel
 
     let repoRoot: String
+    /// The machine `repoRoot` lives on, when it is not this Mac — commit files
+    /// and diffs are then that box's answers, over the same views.
+    let device: TermiodRoute?
     let chrome: ChromeTheme?
     let font: Font
 
@@ -30,7 +33,8 @@ struct GitHistoryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView(.vertical) {
-                    CommitList(commits: model.commits, repoRoot: repoRoot, chrome: chrome, font: font)
+                    CommitList(commits: model.commits, repoRoot: repoRoot, device: device,
+                               chrome: chrome, font: font)
                         .padding(.vertical, 6)
                 }
             }
@@ -54,6 +58,8 @@ struct GitCompareView: View {
     @ObservedObject var model: GitPanelModel
 
     let repoRoot: String
+    /// The machine `repoRoot` lives on, when it is not this Mac.
+    let device: TermiodRoute?
     let chrome: ChromeTheme?
     let font: Font
 
@@ -114,6 +120,13 @@ struct GitCompareView: View {
                     message: localized("This branch and the base branch share no commits.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .unreadable:
+                PaneEmptyState(
+                    localized("Can’t Compare"),
+                    icon: .serverStack,
+                    message: localized("The device couldn’t read this comparison.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else if model.compareContext != nil, model.compareBase == nil {
             PaneEmptyState(
@@ -140,7 +153,8 @@ struct GitCompareView: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         compareFiles(compare)
                         SectionLabel(title: localized("Commits"), count: compare.commits.count)
-                        CommitList(commits: compare.commits, repoRoot: repoRoot, chrome: chrome, font: font)
+                        CommitList(commits: compare.commits, repoRoot: repoRoot, device: device,
+                                   chrome: chrome, font: font)
                     }
                     // No top inset: the summary row is the file list's header and butts
                     // against the compare bar's hairline. Inset it and the gap reads as a
@@ -206,7 +220,7 @@ struct GitCompareView: View {
                         || (store.openDiff == nil && lastOpenedPath == file.path)
                 ) {
                     lastOpenedPath = file.path
-                    store.openDiff = GitDiffRequest(repoRoot: repoRoot, change: file,
+                    store.openDiff = GitDiffRequest(repoRoot: repoRoot, device: device, change: file,
                                                     range: range, siblings: compare.files)
                 }
             }
@@ -223,6 +237,8 @@ private struct CommitList: View {
 
     let commits: [GitCommit]
     let repoRoot: String
+    /// The machine `repoRoot` lives on, when it is not this Mac.
+    let device: TermiodRoute?
     let chrome: ChromeTheme?
     let font: Font
 
@@ -278,7 +294,7 @@ private struct CommitList: View {
                                 && lastOpenedFile?.path == file.path)
                     ) {
                         lastOpenedFile = (commit.sha, file.path)
-                        store.openDiff = GitDiffRequest(repoRoot: repoRoot, change: file,
+                        store.openDiff = GitDiffRequest(repoRoot: repoRoot, device: device, change: file,
                                                         commit: commit.sha, siblings: files)
                     }
                 }
@@ -299,8 +315,15 @@ private struct CommitList: View {
         expanded = commit.sha
         if filesByCommit[commit.sha] == nil {
             Task {
-                let files = await GitService.commitChanges(commit.sha, in: repoRoot)
-                filesByCommit[commit.sha] = files
+                if let device {
+                    // Degrades to "No file changes" on failure, like the local
+                    // path does when `git show` exits non-zero.
+                    filesByCommit[commit.sha] = (try? await Termiod.gitCommitFiles(
+                        route: device, root: repoRoot, commit: commit.sha)) ?? []
+                } else {
+                    filesByCommit[commit.sha] = await GitService.commitChanges(
+                        commit.sha, in: repoRoot)
+                }
             }
         }
     }

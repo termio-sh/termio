@@ -49,8 +49,8 @@ open ./termio-dev.app
 ```
 
 The dev channel gets its own bundle id (`sh.termio.app.dev`), its own state dir
-(`~/.termio-dev`), its own companion port (8788), a `termio-dev` CLI, and has
-Sparkle stripped so it can never auto-update itself onto the release channel.
+(`~/.termio-dev`), its own companion port (8788), a `termio-dev` CLI, and no
+Sparkle update feed, so it can never auto-update itself onto the release channel.
 
 ### iOS companion
 

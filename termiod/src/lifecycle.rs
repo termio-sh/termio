@@ -36,6 +36,16 @@ pub const BUILD_VERSION: &str = env!("TERMIOD_VERSION");
 /// after `SIGTERM` has to bury every session first.
 const SETTLE: Duration = Duration::from_secs(15);
 
+/// How long one liveness probe may take. A connect to a Unix socket on the same
+/// machine either completes at once or is queued behind a listener that is not
+/// accepting; a probe that outlives this has learned what it is going to learn,
+/// and the settle budget belongs to the next one.
+const PROBE: Duration = Duration::from_secs(1);
+
+/// How long to wait between probes. Sized from what is left of the deadline
+/// each time, so the last one never sleeps past it.
+const POLL: Duration = Duration::from_millis(100);
+
 /// Exit code for a stop the daemon declined because it holds work someone is
 /// using. Distinct from failure: the state is named, and running again after
 /// the sessions close is the whole recovery.
@@ -452,7 +462,7 @@ pub struct StopOutcome {
 /// it is success rather than an error.
 pub async fn stop(force: bool) -> Result<StopOutcome> {
     let socket = paths::socket_path()?;
-    let Some(mut stream) = connect_existing(&socket).await else {
+    let Some(mut stream) = connect_if_serving(&socket).await? else {
         return Ok(StopOutcome {
             stopped: true,
             busy: Vec::new(),
@@ -505,22 +515,94 @@ pub async fn stop(force: bool) -> Result<StopOutcome> {
             std::io::Error::last_os_error()
         );
     }
-    // The daemon removes its socket last, after burying every session, so the
-    // socket going away is the drain having finished — not merely begun.
+    // What was asked for is that `pid` stop serving this socket, and that is
+    // what is waited on. The two proxies this loop used to read instead each
+    // answer a different question: `kill(pid, 0)` succeeds for a *zombie*, so a
+    // daemon nobody reaped reads as one that refuses to leave, and the socket
+    // file existing says only that a path is occupied — a client autostarting
+    // its replacement re-creates it in milliseconds. Together they turned a
+    // stop that had already worked into a failed upgrade (#571).
     let deadline = Instant::now() + SETTLE;
     loop {
-        let process_gone = unsafe { libc::kill(pid, 0) } != 0;
-        if process_gone || !socket.exists() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            bail!(
+                "pid {pid} was asked to stop and is still serving {} after {}s; \
+                 its log says what it is waiting on",
+                socket.display(),
+                SETTLE.as_secs()
+            );
+        }
+        if !still_serving(&socket, pid, remaining.min(PROBE)).await {
             return Ok(StopOutcome {
                 stopped: true,
                 busy: Vec::new(),
                 message: format!("stopped pid {pid}"),
             });
         }
-        if Instant::now() >= deadline {
-            bail!("pid {pid} was asked to stop and is still holding {} after {}s", socket.display(), SETTLE.as_secs());
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let left = deadline.saturating_duration_since(Instant::now());
+        tokio::time::sleep(left.min(POLL)).await;
+    }
+}
+
+/// Whether `pid` is still the process behind `socket`.
+///
+/// The daemon holds its listener bound through the whole drain, on purpose, so
+/// that nothing can place a replacement over state still being buried: while it
+/// answers here it really is still working, and waiting is right. Nothing
+/// answering, or a different pid answering, both mean this daemon let the
+/// socket go — which is the postcondition, whatever became of its process
+/// table entry afterwards.
+///
+/// Connect to a daemon that may not be there.
+///
+/// `Ok(None)` is the one answer that proves nothing is: a connection this
+/// process was denied, or one that never completed, is a daemon it could not
+/// reach. Reporting that as "no daemon is running" would answer a stop that
+/// never happened with success, and the caller would go on to replace a binary
+/// under a daemon still serving every session it had.
+async fn connect_if_serving(socket: &Path) -> Result<Option<UnixStream>> {
+    match tokio::time::timeout(Duration::from_secs(5), UnixStream::connect(socket)).await {
+        Ok(Ok(stream)) => Ok(Some(stream)),
+        Ok(Err(error)) if nothing_is_serving(error.raw_os_error()) => Ok(None),
+        Ok(Err(error)) => Err(anyhow::Error::new(error)
+            .context(format!("reaching the daemon at {}", socket.display()))),
+        Err(_elapsed) => bail!(
+            "the daemon at {} did not accept a connection within 5s",
+            socket.display()
+        ),
+    }
+}
+
+/// Whether a failed connect proves nothing is behind the path.
+///
+/// Three errnos do. `ENOENT` and `ECONNREFUSED` are the socket gone and the
+/// socket unserved; `ENOTSOCK` is a plain file where the socket was, which is
+/// no daemon either. Everything else is a daemon this process could not reach
+/// rather than one that left — `EPERM` from a sandbox, `EAGAIN` from a listener
+/// whose backlog is full, `EINTR`, `ETIMEDOUT` — and reading any of those as
+/// absence is how a stop reports success over a daemon still holding every
+/// session it had.
+///
+/// This licenses a conclusion, never an action on the path — see
+/// [`crate::client::absent_daemon`] for the narrower rule that does.
+pub(crate) fn nothing_is_serving(errno: Option<i32>) -> bool {
+    matches!(
+        errno,
+        Some(libc::ENOENT) | Some(libc::ECONNREFUSED) | Some(libc::ENOTSOCK)
+    )
+}
+
+/// Whether `pid` is still the process behind `socket`, within `budget`.
+///
+/// Anything short of proof that the path is unserved keeps waiting, and the
+/// deadline decides — including a probe that ran out of budget, and a daemon
+/// that answers but whose pid the kernel will not name.
+async fn still_serving(socket: &Path, pid: i32, budget: Duration) -> bool {
+    match tokio::time::timeout(budget, UnixStream::connect(socket)).await {
+        Ok(Ok(stream)) => peer_pid(&stream).is_none_or(|serving| serving == pid),
+        Ok(Err(error)) => !nothing_is_serving(error.raw_os_error()),
+        Err(_elapsed) => true,
     }
 }
 
@@ -1196,6 +1278,55 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::collections::VecDeque;
+
+    /// Which answers a liveness probe is allowed to end the wait on. An
+    /// unserved path is the daemon having let it go; a path this process merely
+    /// could not reach is not, and ending a stop on that would report an
+    /// upgrade over a daemon still holding every session it had.
+    ///
+    /// The other unserved shape — a socket file the daemon could not unlink on
+    /// the way out, which answers `ECONNREFUSED` — is the one #571 was reported
+    /// on, and `stop_succeeds_when_the_daemon_left_its_socket_and_its_pid_behind`
+    /// covers it end to end against a real daemon.
+    #[tokio::test]
+    async fn only_an_unserved_socket_ends_the_wait() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let ours = std::process::id() as i32;
+        let dir = std::path::PathBuf::from(format!("/tmp/tss-{ours}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir).expect("test directory");
+
+        // Nothing at the path at all: ENOENT.
+        let missing = dir.join("missing.sock");
+        assert!(!still_serving(&missing, ours, PROBE).await);
+
+        // A plain file where the socket was: no daemon, and one that cannot be
+        // autostarted over either — which is why the two rules differ.
+        let occupied = dir.join("occupied.sock");
+        std::fs::write(&occupied, b"not a socket").expect("occupying file");
+        assert!(!still_serving(&occupied, ours, PROBE).await);
+
+        // Someone is serving it. The same pid means the daemon is still there
+        // — mid-drain, which is what the settle budget is for — and a different
+        // pid means it went and something else took the path over.
+        let live = dir.join("live.sock");
+        let listener = tokio::net::UnixListener::bind(&live).expect("bind");
+        assert!(still_serving(&live, ours, PROBE).await);
+        assert!(!still_serving(&live, ours + 1, PROBE).await);
+        drop(listener);
+
+        // Denied, not absent. The daemon may be serving perfectly well behind a
+        // sandbox this process cannot cross, so the wait continues.
+        let denied = dir.join("denied.sock");
+        let listener = tokio::net::UnixListener::bind(&denied).expect("bind");
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o000))
+            .expect("deny the socket");
+        assert!(still_serving(&denied, ours + 1, PROBE).await);
+        drop(listener);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn versions_order_by_release_then_build() {

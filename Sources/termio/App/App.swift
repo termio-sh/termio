@@ -378,9 +378,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             attachSession: { [weak store] id in
                 store?.companionAttachment(for: id)
             },
-            noteInput: { [weak store] wireID in
-                store?.noteCompanionInput(wireID)
-            },
             startSession: { [weak store] projectID, agent in
                 store?.companionStartSession(projectID: projectID, agent: agent)
             },

@@ -224,6 +224,8 @@
 	<string>内置</string>
 	<key>Cancel</key>
 	<string>取消</string>
+	<key>Can’t Compare</key>
+	<string>无法对比</string>
 	<key>Can’t Search</key>
 	<string>无法搜索</string>
 	<key>Can’t browse %@</key>
@@ -920,6 +922,8 @@
 	<string>在 iPhone 上轻点 Mac 胶囊按钮 ▸ 扫描二维码。流量经由你自己运行的中继，路径中没有第三方。</string>
 	<key>Only regular files can be previewed.</key>
 	<string>只能预览普通文件。</string>
+	<key>Only the first %lld items are shown — update termio on this device to list them all.</key>
+	<string>仅显示前 %lld 项——请更新此设备上的 termio 以列出全部。</string>
 	<key>Opacity</key>
 	<string>不透明度</string>
 	<key>Opacity below 100% lets the desktop show through; blur softens it. The window stays solid at full opacity.</key>
@@ -1258,6 +1262,8 @@
 	<string>载入该仓库时出错。请稍后重试。</string>
 	<key>Sort</key>
 	<string>排序</string>
+	<key>Special files can’t be previewed</key>
+	<string>特殊文件无法预览</string>
 	<key>Split Down</key>
 	<string>向下拆分</string>
 	<key>Split Left</key>
@@ -1336,6 +1342,8 @@
 	<string>新建会话时可以选用的编程 Agent</string>
 	<key>The device couldn’t read this checkout.</key>
 	<string>该设备无法读取这个检出。</string>
+	<key>The device couldn’t read this comparison.</key>
+	<string>该设备无法读取这个对比。</string>
 	<key>The devices in your ~/.ssh/config, and the keys that reach them</key>
 	<string>~/.ssh/config 里的设备，以及连上它们的密钥</string>
 	<key>The folder was removed, but git couldn’t prune its stale worktree metadata.</key>

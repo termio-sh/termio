@@ -83,15 +83,58 @@ fn confine(root: &Path, requested: &str) -> Result<PathBuf> {
     Ok(canonical)
 }
 
+/// What a symlink resolves to, but only while the target stays under the root.
+///
+/// The listing itself never follows a link — `lstat`, not `stat`, because
+/// following is how a listing walks out of the workspace. This is the one fact
+/// about the target a tree still needs: the Finder and the VS Code explorer
+/// both draw a link to a directory as a directory, and a client that could not
+/// tell would draw this repo's own `.claude/skills` as an inert row.
+///
+/// Confined for the same reason the answer is useful: `confine` canonicalises
+/// before it lists, so a link pointing out of the root would be refused on the
+/// click that followed the disclosure triangle. Reporting `None` there is what
+/// keeps the tree from offering a control the device will not honour.
+fn confined_target_kind(root: &Path, link: &Path) -> Option<EntryKind> {
+    let resolved = std::fs::canonicalize(link).ok()?;
+    if !resolved.starts_with(root) {
+        return None;
+    }
+    let metadata = std::fs::metadata(&resolved).ok()?;
+    if metadata.is_dir() {
+        let unloaded = resolved
+            .file_name()
+            .is_some_and(|name| is_unloaded_dir_name(&name.to_string_lossy()));
+        Some(if unloaded {
+            EntryKind::UnloadedDir
+        } else {
+            EntryKind::Dir
+        })
+    } else if metadata.is_file() {
+        Some(EntryKind::File)
+    } else {
+        None
+    }
+}
+
 /// List a batch of directories under `root`, one page per path.
-pub fn list(root: &str, paths: &[String], page: Option<u64>) -> Result<Vec<PathListing>> {
-    list_with_page_size(root, paths, page, LIST_PAGE_SIZE)
+///
+/// `after` resumes a directory too large for one page at the entry following
+/// that name — a **keyset** cursor, not an offset. A directory being written
+/// while it is read is the ordinary case here (an agent is working in it), and
+/// an offset shifts under every insert and delete before it: the client would
+/// see one entry twice and never see another, with nothing in the reply saying
+/// so. Resuming at a name cannot shift. What a concurrent write can still cost
+/// is an entry that appeared *behind* the cursor, and that is what the `fs:`
+/// batch the same write raises is for.
+pub fn list(root: &str, paths: &[String], after: Option<&str>) -> Result<Vec<PathListing>> {
+    list_with_page_size(root, paths, after, LIST_PAGE_SIZE)
 }
 
 fn list_with_page_size(
     root: &str,
     paths: &[String],
-    page: Option<u64>,
+    after: Option<&str>,
     page_size: usize,
 ) -> Result<Vec<PathListing>> {
     let root = canonical_root(root)?;
@@ -99,12 +142,12 @@ fn list_with_page_size(
     // that vanished between render and click fails alone.
     Ok(paths
         .iter()
-        .map(|requested| match list_one(&root, requested, page, page_size) {
+        .map(|requested| match list_one(&root, requested, after, page_size) {
             Ok(listing) => listing,
             Err(error) => PathListing {
                 path: requested.clone(),
                 entries: Vec::new(),
-                next_page: None,
+                next_after: None,
                 error: Some(format!("{error:#}")),
             },
         })
@@ -114,7 +157,7 @@ fn list_with_page_size(
 fn list_one(
     root: &Path,
     requested: &str,
-    page: Option<u64>,
+    after: Option<&str>,
     page_size: usize,
 ) -> Result<PathListing> {
     let dir = confine(root, requested)?;
@@ -135,19 +178,19 @@ fn list_one(
             continue;
         };
         let mtime = mtime_seconds(&metadata);
-        let (kind, symlink_target) = if metadata.file_type().is_symlink() {
+        let (kind, symlink_target, target_kind) = if metadata.file_type().is_symlink() {
             let target = std::fs::read_link(item.path())
                 .ok()
                 .map(|target| target.display().to_string());
-            (EntryKind::Symlink, target)
+            (EntryKind::Symlink, target, confined_target_kind(root, &item.path()))
         } else if metadata.is_dir() {
             if is_unloaded_dir_name(&name) {
-                (EntryKind::UnloadedDir, None)
+                (EntryKind::UnloadedDir, None, None)
             } else {
-                (EntryKind::Dir, None)
+                (EntryKind::Dir, None, None)
             }
         } else {
-            (EntryKind::File, None)
+            (EntryKind::File, None, None)
         };
         entries.push(DirEntry {
             name,
@@ -155,24 +198,31 @@ fn list_one(
             size: metadata.len(),
             mtime,
             symlink_target,
+            target_kind,
         });
     }
 
-    // A stable order is what makes pages meaningful across two requests.
+    // A stable order is what makes the keyset cursor meaningful across two
+    // requests: `after` names a point in this order, not a count into it.
     entries.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let page = usize::try_from(page.unwrap_or(0)).unwrap_or(usize::MAX);
-    let start = page.saturating_mul(page_size).min(entries.len());
+    // Everything strictly after the cursor. Strictly, so an entry can never be
+    // served twice; and by name, so a delete or an insert ahead of the cursor
+    // moves nothing that has already been read.
+    let start = match after {
+        Some(after) => entries.partition_point(|entry| entry.name.as_str() <= after),
+        None => 0,
+    };
     let end = start.saturating_add(page_size).min(entries.len());
-    let next_page = if end < entries.len() {
-        Some(page as u64 + 1)
+    let next_after = if end < entries.len() {
+        entries.get(end.saturating_sub(1)).map(|entry| entry.name.clone())
     } else {
         None
     };
     Ok(PathListing {
         path: requested.to_string(),
         entries: entries[start..end].to_vec(),
-        next_page,
+        next_after,
         error: None,
     })
 }
@@ -499,55 +549,498 @@ const SEARCH_TEXT_CAP: usize = 512;
 /// sit flush against the left edge of the window.
 const SEARCH_WINDOW_LEAD: usize = 64;
 
-/// One line of `git grep -n -C` output: a match (`path:lineno:text`), a context
-/// line (`path-lineno-text`), or the `--` that separates runs. Colons and
-/// hyphens inside the text are safe — only the first two separators split, and
-/// which separator it is decides the kind.
-pub enum GrepLine {
-    Match { path: String, line: u64, text: String },
-    Context { path: String, line: u64, text: String },
-    Separator,
+/// Matches per `search_results` event — small enough to render as they arrive,
+/// large enough that a big result set is not one event per line.
+pub const SEARCH_BATCH: usize = 50;
+
+/// Lines of context on each side of a hit. Two is what reads as an excerpt
+/// without the results pane turning into the file.
+pub const SEARCH_CONTEXT_LINES: usize = 2;
+
+/// How much of a file decides whether it is binary. `git grep -I` looks at the
+/// first 8000 bytes for a NUL and skips the whole file when it finds one; this
+/// search kept that rule rather than ripgrep's "stop at the first NUL", because
+/// stopping mid-file emits the text that preceded the NUL as ordinary hits.
+const BINARY_PROBE: usize = 8000;
+
+/// Ceiling on what one file may cost the searcher. A line longer than this is
+/// not searched at all — the file is skipped and the walk continues. Without it
+/// a single minified blob with no line terminator decides how much memory the
+/// daemon allocates, and the daemon hosts live sessions.
+const SEARCH_HEAP_LIMIT: usize = 32 * 1024 * 1024;
+
+/// What one `fs.search` run ended up doing. The counts are the daemon's — it
+/// reports them in the terminal `fs_searched` reply.
+pub struct SearchOutcome {
+    pub matches: u64,
+    pub limit_hit: bool,
+    pub canceled: bool,
 }
 
-/// Parses one output line, whichever kind it is.
-///
-/// `git grep` marks a matching line with colons and a context line with
-/// hyphens, which is the only thing that tells them apart — the line number
-/// alone cannot, and getting it wrong would paint context as a hit.
-pub fn parse_grep_output_line(line: &str) -> Option<GrepLine> {
-    if line == "--" {
-        return Some(GrepLine::Separator);
+/// A fixed-string matcher over the query, folded the same ASCII way the spans
+/// are. Fixed strings rather than a regex because that is what the wire has
+/// always promised: a query is text the user typed, not a pattern, so a stray
+/// `(` cannot turn a search into a syntax error.
+struct LiteralMatcher {
+    finder: aho_corasick::AhoCorasick,
+}
+
+impl grep_matcher::Matcher for LiteralMatcher {
+    type Captures = grep_matcher::NoCaptures;
+    type Error = grep_matcher::NoError;
+
+    fn find_at(
+        &self,
+        haystack: &[u8],
+        at: usize,
+    ) -> Result<Option<grep_matcher::Match>, grep_matcher::NoError> {
+        // A plain literal has no anchors and no look-around, so searching the
+        // suffix is the same answer as searching the whole line from `at`.
+        Ok(self
+            .finder
+            .find(&haystack[at..])
+            .map(|found| grep_matcher::Match::new(at + found.start(), at + found.end())))
     }
-    // A match first: a path containing a hyphen is ordinary, and trying the
-    // hyphen split first would tear one apart.
-    if let Some((path, rest)) = line.split_once(':') {
-        if let Some((number, text)) = rest.split_once(':') {
-            if let Ok(number) = number.parse::<u64>() {
-                return Some(GrepLine::Match {
-                    path: path.to_string(),
-                    line: number,
-                    text: text.to_string(),
-                });
+
+    fn new_captures(&self) -> Result<Self::Captures, grep_matcher::NoError> {
+        Ok(grep_matcher::NoCaptures::new())
+    }
+}
+
+/// Search `root` for `query`, handing finished batches to `emit` as they fill.
+///
+/// Blocking by construction — the daemon runs it on a blocking thread, which is
+/// also what keeps a pathological file off the runtime. `cancel` is read at
+/// every file and every reported line, so an abandoned search stops within one
+/// file rather than running the tree to completion.
+///
+/// The domain is what `git grep --untracked` covered: tracked and untracked
+/// files that no ignore rule excludes, `.git` never walked, binary files
+/// skipped. The rules come from the `ignore` crate reading `.gitignore`, the
+/// global excludes file and `.git/info/exclude` — the same inputs git reads,
+/// re-implemented rather than asked, so the two can disagree in corner cases.
+pub fn search(
+    root: &Path,
+    query: &str,
+    limit: u64,
+    cancel: &std::sync::atomic::AtomicBool,
+    emit: &mut dyn FnMut(Vec<crate::protocol::SearchMatch>),
+) -> SearchOutcome {
+    use std::sync::atomic::Ordering;
+
+    // A stall directory makes this search take a fixed time while staying
+    // cancellable — the integration tests' stand-in for the enormous checkout
+    // they cannot afford to create, now that there is no `git grep` subprocess
+    // left to shim. Absent outside a test harness, this costs one env lookup.
+    if let Some(stall) = std::env::var_os("TERMIOD_TEST_SEARCH_STALL") {
+        let stall = Path::new(&stall);
+        let seconds = std::fs::read_to_string(stall.join("seconds"))
+            .ok()
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .unwrap_or(0.0);
+        if seconds > 0.0 {
+            let _ = std::fs::write(stall.join("started"), b"");
+            let deadline =
+                std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds);
+            while std::time::Instant::now() < deadline {
+                if cancel.load(Ordering::Relaxed) {
+                    // The marker is the host's own record that the walk was
+                    // stopped, not merely abandoned by its client.
+                    let _ = std::fs::write(stall.join("canceled"), b"");
+                    return SearchOutcome { matches: 0, limit_hit: false, canceled: true };
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            let _ = std::fs::write(stall.join("finished"), b"");
+        }
+    }
+
+    // An empty query has no literal to look for. `git grep -e ""` answered it
+    // by matching every line in the tree, which is the whole repo streamed back
+    // with nothing to highlight; no result is the more useful reading and the
+    // one clients already assume, since they refuse to send it.
+    // A query spanning lines has nothing a line-oriented literal search can
+    // match, which is also what ripgrep answers without `-U`.
+    if query.is_empty() || limit == 0 || query.contains(['\n', '\r']) {
+        return SearchOutcome { matches: 0, limit_hit: false, canceled: false };
+    }
+
+    // Smart case, the fzf/ripgrep default every client already expects: an
+    // all-lowercase query matches insensitively, and one uppercase letter opts
+    // back into exactness. Decided from the query itself rather than a flag on
+    // the wire, so a client cannot ask two hosts for the same search and get two
+    // different answers.
+    let insensitive = query == query.to_lowercase();
+    let finder = aho_corasick::AhoCorasickBuilder::new()
+        .ascii_case_insensitive(insensitive)
+        .build([query.as_bytes()]);
+    let Ok(finder) = finder else {
+        return SearchOutcome { matches: 0, limit_hit: false, canceled: false };
+    };
+    let matcher = LiteralMatcher { finder };
+
+    let mut searcher = grep_searcher::SearcherBuilder::new()
+        .line_number(true)
+        .before_context(SEARCH_CONTEXT_LINES)
+        .after_context(SEARCH_CONTEXT_LINES)
+        // The probe below already decided the file is text, so the searcher does
+        // not get a second, different opinion about it.
+        .binary_detection(grep_searcher::BinaryDetection::none())
+        // Also what turns memory maps off: a bounded buffer is the point.
+        .heap_limit(Some(SEARCH_HEAP_LIMIT))
+        .build();
+
+    let mut collector = Collector {
+        query,
+        insensitive,
+        limit,
+        cancel,
+        emit,
+        path: String::new(),
+        pending: Vec::new(),
+        before: std::collections::VecDeque::new(),
+        trailing: None,
+        streamed: 0,
+        limit_hit: false,
+        canceled: false,
+    };
+
+    let mut walker = ignore::WalkBuilder::new(root);
+    walker
+        // git has no notion of a hidden file: a tracked `.env` is searched and
+        // an untracked one is too. Only `.git` itself is off limits.
+        .hidden(false)
+        // `.ignore` and `.rgignore` are ripgrep's own files, not git's.
+        .ignore(false)
+        .git_ignore(true)
+        // `.git/info/exclude` stays the crate's job: it resolves `.git` as a
+        // file too (a linked worktree's `commondir`), and its matcher is rooted
+        // at the repository, so an anchored `/target` still anchors.
+        .git_exclude(true)
+        // The global excludes file is not: see `global_excludes`.
+        .git_global(false)
+        .parents(true)
+        .follow_links(false)
+        // Deterministic order, which also means single-threaded. Results stream
+        // as they are found, and a client that renders them in arrival order
+        // should not see a different pane on every keystroke.
+        .sort_by_file_path(|a, b| a.cmp(b))
+        // What `add_ignore` roots its matcher at. Without it the crate reaches
+        // for the *process's* working directory, and a global `/root-only.txt`
+        // would anchor wherever the daemon happened to be launched instead of
+        // at the tree being searched. git anchors it at the top of the working
+        // tree; so does this.
+        .current_dir(root)
+        .filter_entry(|entry| entry.file_name() != ".git");
+    // Lower precedence than every ignore file in the tree, which is where git
+    // puts it (`add_ignore` is the last matcher consulted).
+    if let Some(global) = global_excludes(root) {
+        walker.add_ignore(global);
+    }
+
+    for entry in walker.build() {
+        if cancel.load(Ordering::Relaxed) {
+            collector.canceled = true;
+            break;
+        }
+        // A directory that cannot be read, a file that vanished mid-walk: the
+        // rest of the tree is still worth searching. `git grep` skipped these
+        // onto a stderr nobody read.
+        let Ok(entry) = entry else { continue };
+        if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+            continue;
+        }
+        let path = entry.path();
+        let Some(relative) = path.strip_prefix(root).ok().and_then(|p| p.to_str()) else {
+            continue;
+        };
+        let Some(file) = open_text(path) else { continue };
+        collector.begin_file(relative);
+        // A file the searcher refuses — a line past the heap limit, a read that
+        // failed — is one file, not the search.
+        let _ = searcher.search_file(&matcher, &file, &mut collector);
+        if collector.limit_hit || collector.canceled {
+            break;
+        }
+    }
+
+    collector.finish()
+}
+
+/// The global excludes file git would apply to `root`, or nothing.
+///
+/// Asked of git rather than parsed here, because `core.excludesFile` is not a
+/// value sitting in one file: it comes off a config stack — system, XDG,
+/// `~/.gitconfig`, the repository — that `[include]` and `[includeIf]` can
+/// redirect, and the value itself may be a quoted path with spaces in it
+/// (`"~/Library/Application Support/git/ignore"` is what a Mac writes). The
+/// `ignore` crate reads that with one regex and says so in its own source:
+/// "this is the lazy approach, and isn't technically correct". A path with a
+/// space in it comes back truncated, which silently drops every rule in the
+/// file. `git config --path` resolves the whole stack and expands `~`, and git
+/// is already the authority for the tree being searched.
+///
+/// A root outside a repository gets none: git applies no excludes to a
+/// directory it does not own, and neither does this. Same answer when git is
+/// missing altogether, which is a box this search still has to work on.
+fn global_excludes(root: &Path) -> Option<PathBuf> {
+    resolve_global_excludes(root, default_excludes_file)
+}
+
+/// `global_excludes` with git's default path handed in, so all three answers
+/// can be pinned without a test having to move the process's environment out
+/// from under every other thread in it.
+fn resolve_global_excludes(
+    root: &Path,
+    fallback: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    // Doubles as the repository test: outside one, `rev-parse` fails.
+    git_says(root, &["rev-parse", "--git-dir"])?;
+    match git_says(root, &["config", "--path", "--get", "core.excludesFile"]).as_deref() {
+        // Set to the empty string. git reads that as "no global excludes at
+        // all" and does *not* fall back to its default — the setting exists to
+        // be turned off. `git config` reports it as success with empty output,
+        // which is the only thing separating it from the key being absent.
+        Some("") => None,
+        Some(configured) => Some(PathBuf::from(configured)),
+        // Absent, so git's own default applies.
+        None => fallback(),
+    }
+    // Both answers can come back relative — `git config --path` hands back what
+    // the config holds, and `XDG_CONFIG_HOME` may hold a relative path git will
+    // happily use. Relative to git's working directory, which is `root`: that
+    // is the `-C` this module runs git under. Anchoring it here is what keeps a
+    // relative path from resolving against wherever the daemon was launched.
+    // `join` leaves an absolute path alone, so this costs the normal case
+    // nothing.
+    .map(|path| root.join(path))
+}
+
+/// Where git looks when `core.excludesFile` is not set at all. A fixed path
+/// rather than a parsed value — naming it here reimplements nothing.
+fn default_excludes_file() -> Option<PathBuf> {
+    excludes_default_from(
+        std::env::var_os("XDG_CONFIG_HOME"),
+        std::env::var_os("HOME"),
+    )
+}
+
+/// git's rule, with the environment handed in so it can be pinned without a
+/// test moving the process's own out from under every thread in it.
+///
+/// `XDG_CONFIG_HOME` wins whenever it is set and not empty — *including* when
+/// it holds a relative path, which the XDG spec says to ignore and git uses
+/// anyway (`path.c`, `xdg_config_home`: `if (config_home && *config_home)`,
+/// with no test for absoluteness). `HOME` is consulted only when it is not,
+/// and setting `XDG_CONFIG_HOME` to something relative therefore turns the
+/// `HOME` default off rather than falling back to it. Relative to what is the
+/// caller's problem: `resolve_global_excludes` anchors it where git had its
+/// working directory.
+fn excludes_default_from(
+    xdg_config_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    match xdg_config_home {
+        Some(base) if !base.is_empty() => Some(PathBuf::from(base).join("git/ignore")),
+        _ => Some(PathBuf::from(home?).join(".config/git/ignore")),
+    }
+}
+
+/// What git printed, trimmed of its trailing newline, or nothing if git
+/// refused, is not installed, or was not asked from inside a repository.
+///
+/// An empty string is a real answer here rather than an absence — see
+/// `resolve_global_excludes`, where the difference is the whole point.
+fn git_says(root: &Path, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        // Nothing here may sit waiting for a human: this runs on a search
+        // thread, and a credential prompt would park it until the client's
+        // idle bound gave up.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    Some(text.trim_end_matches(['\n', '\r']).to_string())
+}
+
+/// Opens `path` only if it reads as text, positioned back at the start so the
+/// searcher can have it. One open for both jobs: the probe is the same read the
+/// searcher would have done first anyway.
+fn open_text(path: &Path) -> Option<std::fs::File> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut probe = [0u8; BINARY_PROBE];
+    let mut filled = 0;
+    while filled < probe.len() {
+        match file.read(&mut probe[filled..]) {
+            Ok(0) => break,
+            Ok(read) => filled += read,
+            Err(_) => return None,
+        }
+    }
+    if probe[..filled].contains(&0) {
+        return None;
+    }
+    file.seek(SeekFrom::Start(0)).ok()?;
+    Some(file)
+}
+
+/// Turns the searcher's per-line callbacks into the batches the wire carries.
+///
+/// The state is the shape `git grep -C` output forced and the clients now
+/// expect: context banked before a hit belongs to it, the same lines after a
+/// hit belong to the hit above, and a break between runs retires both.
+struct Collector<'a> {
+    query: &'a str,
+    insensitive: bool,
+    limit: u64,
+    cancel: &'a std::sync::atomic::AtomicBool,
+    emit: &'a mut dyn FnMut(Vec<crate::protocol::SearchMatch>),
+    path: String,
+    pending: Vec<crate::protocol::SearchMatch>,
+    before: std::collections::VecDeque<String>,
+    trailing: Option<usize>,
+    streamed: u64,
+    limit_hit: bool,
+    canceled: bool,
+}
+
+impl Collector<'_> {
+    fn begin_file(&mut self, relative: &str) {
+        self.path.clear();
+        self.path.push_str(relative);
+        // Context never spans files, and the searcher has no break between them.
+        self.before.clear();
+        self.trailing = None;
+    }
+
+    fn keep_going(&mut self) -> bool {
+        if self.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            self.canceled = true;
+            return false;
+        }
+        true
+    }
+
+    fn take_match(&mut self, line: u64, text: &str) -> bool {
+        let mut found =
+            match_from_line(self.path.clone(), line, text, self.query, self.insensitive);
+        found.before = self.before.iter().cloned().collect();
+        self.before.clear();
+        self.trailing = Some(self.pending.len());
+        self.pending.push(found);
+        if self.streamed + self.pending.len() as u64 >= self.limit {
+            self.limit_hit = true;
+            return false;
+        }
+        if self.pending.len() >= SEARCH_BATCH {
+            self.flush();
+        }
+        true
+    }
+
+    fn take_context(&mut self, text: String) {
+        // Context after a match, and context before the next one, are the same
+        // lines — bank them once and let both sides read them.
+        if let Some(index) = self.trailing {
+            let match_at = &mut self.pending[index];
+            if match_at.after.len() < SEARCH_CONTEXT_LINES {
+                match_at.after.push(text.clone());
+            } else {
+                self.trailing = None;
             }
         }
+        self.before.push_back(text);
+        if self.before.len() > SEARCH_CONTEXT_LINES {
+            self.before.pop_front();
+        }
     }
-    let (path, rest) = line.split_once('-')?;
-    let (number, text) = rest.split_once('-')?;
-    Some(GrepLine::Context {
-        path: path.to_string(),
-        line: number.parse().ok()?,
-        text: text.to_string(),
-    })
+
+    fn flush(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+        self.streamed += self.pending.len() as u64;
+        // The batch leaves, so nothing in it can still be collecting its
+        // trailing context.
+        self.trailing = None;
+        (self.emit)(std::mem::take(&mut self.pending));
+    }
+
+    fn finish(mut self) -> SearchOutcome {
+        // A canceled search delivers nothing further: the client that abandoned
+        // it is not waiting for a last partial batch.
+        if !self.canceled {
+            self.flush();
+        }
+        SearchOutcome {
+            matches: self.streamed,
+            limit_hit: self.limit_hit,
+            canceled: self.canceled,
+        }
+    }
 }
 
-/// Kept for the shape its tests pin: one `-n` line into a match, with the
-/// window and spans a client needs to paint it.
-pub fn parse_grep_line(line: &str, query: &str, insensitive: bool) -> Option<crate::protocol::SearchMatch> {
-    match parse_grep_output_line(line)? {
-        GrepLine::Match { path, line, text } => {
-            Some(match_from_line(path, line, &text, query, insensitive))
+/// One line as the searcher hands it over: bytes including the terminator, and
+/// not necessarily UTF-8. Lossy rather than fatal — a single bad byte in one
+/// file used to end the whole search, because the old parser read the subprocess
+/// pipe as lines of `String`.
+fn line_text(bytes: &[u8]) -> String {
+    let mut end = bytes.len();
+    if end > 0 && bytes[end - 1] == b'\n' {
+        end -= 1;
+        if end > 0 && bytes[end - 1] == b'\r' {
+            end -= 1;
         }
-        _ => None,
+    }
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
+}
+
+impl grep_searcher::Sink for Collector<'_> {
+    type Error = std::io::Error;
+
+    fn matched(
+        &mut self,
+        _searcher: &grep_searcher::Searcher,
+        found: &grep_searcher::SinkMatch<'_>,
+    ) -> Result<bool, std::io::Error> {
+        if !self.keep_going() {
+            return Ok(false);
+        }
+        let line = found.line_number().unwrap_or(0);
+        let text = line_text(found.bytes());
+        Ok(self.take_match(line, &text))
+    }
+
+    fn context(
+        &mut self,
+        _searcher: &grep_searcher::Searcher,
+        context: &grep_searcher::SinkContext<'_>,
+    ) -> Result<bool, std::io::Error> {
+        if !self.keep_going() {
+            return Ok(false);
+        }
+        self.take_context(line_text(context.bytes()));
+        Ok(true)
+    }
+
+    fn context_break(
+        &mut self,
+        _searcher: &grep_searcher::Searcher,
+    ) -> Result<bool, std::io::Error> {
+        // A run ended: whatever context was banked belongs to nothing that
+        // follows it.
+        self.before.clear();
+        self.trailing = None;
+        Ok(true)
     }
 }
 
@@ -558,7 +1051,7 @@ pub fn parse_grep_line(line: &str, query: &str, insensitive: bool) -> Option<cra
 /// is the whole point — a client that re-finds the query itself is running a
 /// second matcher, and two matchers eventually disagree (an uppercase query
 /// painting lowercase text, a canonically-equal-but-different byte sequence).
-pub fn match_from_line(
+fn match_from_line(
     path: String,
     line: u64,
     text: &str,
@@ -1025,7 +1518,48 @@ mod tests {
     }
 
     #[test]
-    fn pages_are_stable_and_chain_through_next_page() {
+    fn a_symlink_names_its_target_kind_only_inside_the_root() {
+        let root = scratch("symlink_target_kind");
+        std::fs::create_dir_all(root.join("skills")).unwrap();
+        touch(&root.join("skills/one.md"), b"x");
+        touch(&root.join("note.txt"), b"x");
+        std::os::unix::fs::symlink("skills", root.join("inside_dir")).unwrap();
+        std::os::unix::fs::symlink("note.txt", root.join("inside_file")).unwrap();
+        std::os::unix::fs::symlink("/etc", root.join("outside")).unwrap();
+        std::os::unix::fs::symlink("nowhere", root.join("dangling")).unwrap();
+
+        let listing = list(root.to_str().unwrap(), &[".".to_string()], None).unwrap();
+        let kind_of = |name: &str| {
+            listing[0]
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .map(|entry| (entry.kind, entry.target_kind))
+                .unwrap()
+        };
+        // A link is still reported as a link — the listing never follows one.
+        assert_eq!(
+            kind_of("inside_dir"),
+            (EntryKind::Symlink, Some(EntryKind::Dir)),
+            "a link to a directory under the root is one a tree may expand"
+        );
+        assert_eq!(kind_of("inside_file"), (EntryKind::Symlink, Some(EntryKind::File)));
+        assert_eq!(
+            kind_of("outside"),
+            (EntryKind::Symlink, None),
+            "descending it would be refused by confine, so it is not offered"
+        );
+        assert_eq!(kind_of("dangling"), (EntryKind::Symlink, None));
+
+        // And the offer is honest: the link that named a directory lists.
+        let followed = list(root.to_str().unwrap(), &["inside_dir".to_string()], None).unwrap();
+        assert!(followed[0].error.is_none());
+        assert_eq!(followed[0].entries[0].name, "one.md");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pages_are_stable_and_chain_through_next_after() {
         let root = scratch("pages");
         for index in 0..7 {
             touch(&root.join(format!("f{index}")), b"x");
@@ -1034,20 +1568,92 @@ mod tests {
         let paths = [".".to_string()];
         let first = list_with_page_size(root_str, &paths, None, 3).unwrap();
         assert_eq!(first[0].entries.len(), 3);
-        assert_eq!(first[0].next_page, Some(1));
-        let second = list_with_page_size(root_str, &paths, first[0].next_page, 3).unwrap();
+        assert_eq!(first[0].next_after.as_deref(), Some("f2"));
+        let second =
+            list_with_page_size(root_str, &paths, first[0].next_after.as_deref(), 3).unwrap();
         assert_eq!(second[0].entries.len(), 3);
-        assert_eq!(second[0].next_page, Some(2));
-        let last = list_with_page_size(root_str, &paths, second[0].next_page, 3).unwrap();
+        assert_eq!(second[0].next_after.as_deref(), Some("f5"));
+        let last =
+            list_with_page_size(root_str, &paths, second[0].next_after.as_deref(), 3).unwrap();
         assert_eq!(last[0].entries.len(), 1);
-        assert_eq!(last[0].next_page, None);
+        assert_eq!(last[0].next_after, None);
 
         let mut seen: Vec<String> = [&first, &second, &last]
             .iter()
             .flat_map(|page| page[0].entries.iter().map(|e| e.name.clone()))
             .collect();
+        seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), 7, "pages must partition, not overlap");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The reason the cursor is a name and not an offset.
+    ///
+    /// A directory being written while it is read is the ordinary case here —
+    /// an agent is working in it. With an offset, deleting an entry behind the
+    /// cursor slides everything left: the next page repeats the entry at the
+    /// boundary and the last one falls off the end, and nothing in the reply
+    /// says so. Resuming at a name cannot slide.
+    #[test]
+    fn a_write_behind_the_cursor_neither_repeats_nor_drops_an_entry() {
+        let root = scratch("pages_racing");
+        for index in 0..7 {
+            touch(&root.join(format!("f{index}")), b"x");
+        }
+        let root_str = root.to_str().unwrap();
+        let paths = [".".to_string()];
+
+        let first = list_with_page_size(root_str, &paths, None, 3).unwrap();
+        assert_eq!(
+            first[0].entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["f0", "f1", "f2"]
+        );
+
+        // Two writes behind the cursor between the pages: one entry removed,
+        // one added. An offset of 3 would now point at "f4" and lose "f3".
+        std::fs::remove_file(root.join("f0")).unwrap();
+        touch(&root.join("early"), b"x");
+
+        let second =
+            list_with_page_size(root_str, &paths, first[0].next_after.as_deref(), 3).unwrap();
+        assert_eq!(
+            second[0].entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["f3", "f4", "f5"],
+            "the resume point is a name, so nothing behind it moved this page"
+        );
+        let last =
+            list_with_page_size(root_str, &paths, second[0].next_after.as_deref(), 3).unwrap();
+        assert_eq!(
+            last[0].entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["f6"]
+        );
+        assert_eq!(last[0].next_after, None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A cursor naming an entry that has since been deleted still resumes at
+    /// the right place: `after` is a point in the order, not a row that has to
+    /// still exist.
+    #[test]
+    fn a_cursor_whose_entry_vanished_still_resumes_after_it() {
+        let root = scratch("pages_vanished");
+        for index in 0..5 {
+            touch(&root.join(format!("f{index}")), b"x");
+        }
+        let root_str = root.to_str().unwrap();
+        let paths = [".".to_string()];
+        let first = list_with_page_size(root_str, &paths, None, 2).unwrap();
+        assert_eq!(first[0].next_after.as_deref(), Some("f1"));
+
+        std::fs::remove_file(root.join("f1")).unwrap();
+
+        let second =
+            list_with_page_size(root_str, &paths, first[0].next_after.as_deref(), 2).unwrap();
+        assert_eq!(
+            second[0].entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["f2", "f3"]
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1114,88 +1720,529 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Runs one search to completion, the way the daemon does minus the wire.
+    fn found(root: &Path, query: &str, limit: u64) -> (Vec<crate::protocol::SearchMatch>, SearchOutcome) {
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut all = Vec::new();
+        let outcome = search(root, query, limit, &cancel, &mut |batch| all.extend(batch));
+        (all, outcome)
+    }
+
+    /// A repository marker, which is what makes the ignore rules apply at all —
+    /// outside a repo there is nothing to honour and everything is searched.
+    fn repo(name: &str) -> PathBuf {
+        let root = scratch(name);
+        std::fs::create_dir(root.join(".git")).unwrap();
+        root
+    }
+
+    /// Colons in the text used to be a parsing hazard, because the hit arrived
+    /// as `path:line:text` on a pipe. It arrives as three values now, and the
+    /// context around it arrives as its own callback rather than a `-` line.
     #[test]
-    fn grep_lines_parse_with_colons_in_the_text_and_cap_long_lines() {
-        let hit = parse_grep_line("src/main.rs:42:let url = \"http://x:8080\";", "url", true)
-            .unwrap();
-        assert_eq!(hit.path, "src/main.rs");
-        assert_eq!(hit.line, 42);
-        assert_eq!(hit.text, "let url = \"http://x:8080\";");
+    fn a_hit_carries_its_path_line_text_and_context() {
+        let root = repo("search-basics");
+        std::fs::create_dir(root.join("src")).unwrap();
+        touch(
+            &root.join("src/main.rs"),
+            b"one\ntwo\nlet url = \"http://x:8080\";\nfour\nfive\nsix\n",
+        );
 
-        let long = format!("a.txt:1:{}", "é".repeat(SEARCH_TEXT_CAP));
-        let capped = parse_grep_line(&long, "é", false).unwrap();
-        assert!(capped.text.len() <= SEARCH_TEXT_CAP);
-        assert!(capped.text.chars().all(|c| c == 'é'), "cut on a boundary");
+        let (hits, outcome) = found(&root, "url", 100);
 
-        assert!(parse_grep_line("no line number here", "x", true).is_none());
-        assert!(parse_grep_line("path:notanumber:text", "x", true).is_none());
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "src/main.rs");
+        assert_eq!(hits[0].line, 3);
+        assert_eq!(hits[0].text, "let url = \"http://x:8080\";");
+        assert_eq!(hits[0].before, vec!["one", "two"]);
+        assert_eq!(hits[0].after, vec!["four", "five"]);
+        assert_eq!(outcome.matches, 1);
+        assert!(!outcome.limit_hit && !outcome.canceled);
     }
 
     /// The whole point of reporting spans: they come from the rule that decided
     /// the line matched, so an uppercase query cannot paint lowercase text.
     #[test]
-    fn spans_follow_the_search_case_rule() {
-        let line = "let Widget = widget();";
-        let exact = match_from_line("a.rs".into(), 1, line, "Widget", false);
-        assert_eq!(exact.spans, vec![[4, 10]], "case-sensitive marks one hit");
+    fn spans_follow_the_smart_case_rule() {
+        let root = repo("search-case");
+        touch(&root.join("a.rs"), b"let Widget = widget();\n");
 
-        let loose = match_from_line("a.rs".into(), 1, line, "widget", true);
-        assert_eq!(loose.spans, vec![[4, 10], [13, 19]], "insensitive marks both");
-        for span in &loose.spans {
-            let start = span[0] as usize;
-            let end = span[1] as usize;
-            assert_eq!(line[start..end].to_lowercase(), "widget");
+        let (exact, _) = found(&root, "Widget", 100);
+        assert_eq!(exact[0].spans, vec![[4, 10]], "an uppercase query is exact");
+
+        let (loose, _) = found(&root, "widget", 100);
+        assert_eq!(
+            loose[0].spans,
+            vec![[4, 10], [13, 19]],
+            "an all-lowercase query matches both cases"
+        );
+        for span in &loose[0].spans {
+            let range = span[0] as usize..span[1] as usize;
+            assert_eq!(loose[0].text[range].to_lowercase(), "widget");
         }
     }
 
     /// A hit far down a long line used to arrive with the line truncated in
     /// front of it — a result row with nothing highlighted. The window follows
-    /// the match instead.
+    /// the match instead, and says where it starts so columns still resolve.
     #[test]
-    fn a_long_line_is_windowed_around_its_first_hit() {
+    fn a_long_line_is_windowed_around_its_hit() {
+        let root = repo("search-long-line");
         let mut line = "x".repeat(900);
         line.push_str("needle");
         line.push_str(&"y".repeat(900));
+        line.push('\n');
+        touch(&root.join("bundle.js"), line.as_bytes());
 
-        let found = match_from_line("a.js".into(), 1, &line, "needle", false);
+        let (hits, _) = found(&root, "needle", 100);
 
-        assert!(found.text.len() <= SEARCH_TEXT_CAP);
-        assert!(!found.spans.is_empty(), "the hit survives the window");
-        let span = found.spans[0];
-        assert_eq!(&found.text[span[0] as usize..span[1] as usize], "needle");
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].text.len() <= SEARCH_TEXT_CAP);
+        let span = hits[0].spans[0];
+        assert_eq!(&hits[0].text[span[0] as usize..span[1] as usize], "needle");
+        assert_eq!(hits[0].text_offset as usize + span[0] as usize, 900);
+    }
+
+    /// A window that would cut a character in half must step back to a boundary
+    /// rather than produce a string the client cannot index into.
+    #[test]
+    fn a_long_line_of_multibyte_text_is_cut_on_a_boundary() {
+        let root = repo("search-multibyte");
+        let mut line = "é".repeat(SEARCH_TEXT_CAP);
+        line.push('\n');
+        touch(&root.join("accents.txt"), line.as_bytes());
+
+        let (hits, _) = found(&root, "é", 100);
+
+        assert!(hits[0].text.len() <= SEARCH_TEXT_CAP);
+        assert!(hits[0].text.chars().all(|c| c == 'é'));
+    }
+
+    /// The search domain: tracked and untracked files that no ignore rule
+    /// names, dotfiles included, `.git` never walked, binary files skipped.
+    #[test]
+    fn the_walk_honours_ignore_rules_and_skips_binaries() {
+        let root = repo("search-domain");
+        touch(&root.join(".gitignore"), b"ignored/\n*.log\n");
+        touch(&root.join("keep.txt"), b"needle\n");
+        touch(&root.join(".hidden.txt"), b"needle\n");
+        touch(&root.join("notes.log"), b"needle\n");
+        touch(&root.join("bundle.bin"), b"needle\0trailing\n");
+        touch(&root.join(".git/config"), b"needle\n");
+        std::fs::create_dir(root.join("ignored")).unwrap();
+        touch(&root.join("ignored/deep.txt"), b"needle\n");
+        std::fs::create_dir(root.join("nested")).unwrap();
+        touch(&root.join("nested/.gitignore"), b"skip.txt\n");
+        touch(&root.join("nested/skip.txt"), b"needle\n");
+        touch(&root.join("nested/keep.txt"), b"needle\n");
+
+        let (hits, _) = found(&root, "needle", 100);
+        let paths: Vec<&str> = hits.iter().map(|hit| hit.path.as_str()).collect();
+
+        assert_eq!(paths, vec![".hidden.txt", "keep.txt", "nested/keep.txt"]);
+    }
+
+    /// Runs `git grep --untracked` in a fixture repo and returns the files it
+    /// matched, or `None` when there is no git to ask.
+    fn git_grep_files(root: &Path, query: &str) -> Option<Vec<String>> {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["grep", "-l", "-I", "--no-color", "--untracked", "--fixed-strings", "-e", query])
+            .output()
+            .ok()?;
+        let listed = String::from_utf8_lossy(&output.stdout);
+        let mut files: Vec<String> = listed.lines().map(str::to_string).collect();
+        files.sort();
+        Some(files)
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .expect("run git");
+    }
+
+    /// The differential test: every ignore rule git honours, checked against
+    /// what git itself answers on the same tree rather than against what this
+    /// engine was expected to do.
+    ///
+    /// The global excludes file is the case that pays for the whole test. Its
+    /// path comes off a config stack with quoting rules, and the `ignore`
+    /// crate's own regex reads `excludesFile = "…/with a space/ignore"` as the
+    /// text up to the first space — dropping every rule in the file, silently.
+    /// The path here has spaces and is quoted for exactly that reason. Asking
+    /// git for the value is what makes both sides agree.
+    #[test]
+    fn the_ignore_rules_agree_with_git_grep_file_for_file() {
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let root = scratch("search-differential");
+        git(&root, &["init", "-q"]);
+
+        let excludes = root.join("config dir/global ignore");
+        std::fs::create_dir_all(excludes.parent().expect("a parent")).unwrap();
+        // The anchored pattern is the second half of the point: git matches it
+        // against the top of the working tree, so `root-only.txt` goes and
+        // `sub/root-only.txt` stays. A matcher rooted at the daemon's own
+        // working directory would drop the rule instead.
+        touch(&excludes, b"by-global.txt\n/root-only.txt\n");
+        // Written straight into the config so the value keeps its quotes: this
+        // is the shape a Mac's `~/Library/Application Support/git/ignore` takes,
+        // and the shape the crate's parser truncates. Repo-local rather than
+        // global so the fixture cannot be perturbed by the machine it runs on.
+        let mut config = std::fs::OpenOptions::new()
+            .append(true)
+            .open(root.join(".git/config"))
+            .unwrap();
+        writeln!(
+            config,
+            "[core]\n\texcludesFile = \"{}\"",
+            excludes.display()
+        )
+        .unwrap();
+        drop(config);
+
+        touch(&root.join(".git/info/exclude"), b"by-info-exclude.txt\n");
+        touch(&root.join(".gitignore"), b"*.log\n!keep.log\nbuilt/\n");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        touch(&root.join("sub/.gitignore"), b"*.tmp\n!ok.tmp\n");
+
+        for named in [
+            "plain.txt",
+            "by-global.txt",
+            "by-info-exclude.txt",
+            "drop.log",
+            "keep.log",
+            "sub/ok.tmp",
+            "sub/no.tmp",
+            ".dotfile.txt",
+            "root-only.txt",
+            "sub/root-only.txt",
+        ] {
+            touch(&root.join(named), b"needle\n");
+        }
+        std::fs::create_dir_all(root.join("built")).unwrap();
+        touch(&root.join("built/out.txt"), b"needle\n");
+        // Tracked *and* ignored. `--untracked` implies `--exclude-standard`, so
+        // git skips it too — the case that looked like a divergence and is not.
+        git(&root, &["add", "-f", "drop.log"]);
+
+        let theirs = git_grep_files(&root, "needle").expect("git grep");
+        let (hits, _) = found(&root, "needle", 1000);
+        let mut ours: Vec<String> = hits.into_iter().map(|hit| hit.path).collect();
+        ours.dedup();
+
+        assert_eq!(ours, theirs, "the ignore rules must agree file for file");
         assert_eq!(
-            found.text_offset as usize + span[0] as usize,
-            900,
-            "the window says where it starts, so columns still resolve"
+            theirs,
+            vec![
+                ".dotfile.txt",
+                "keep.log",
+                "plain.txt",
+                "sub/ok.tmp",
+                "sub/root-only.txt",
+            ],
+            "and agree on the right answer, not on a shared mistake"
         );
     }
 
-    /// Context lines are told apart from matches by their separator, not by
-    /// their line number — painting context as a hit is the failure this
-    /// prevents.
+    /// `core.excludesFile` has three states, not two, and the difference is
+    /// invisible in `git config`'s output alone: absent exits non-zero, set to
+    /// a path exits zero with the path, set to the empty string exits zero with
+    /// nothing. The last one means "no global excludes", *not* "use the
+    /// default" — treating it as absent turns a setting someone deliberately
+    /// switched off back on.
     #[test]
-    fn context_lines_are_not_matches() {
-        match parse_grep_output_line("src/a.rs-41-// above").unwrap() {
-            GrepLine::Context { path, line, text } => {
-                assert_eq!(path, "src/a.rs");
-                assert_eq!(line, 41);
-                assert_eq!(text, "// above");
+    fn an_empty_excludes_setting_disables_global_excludes_like_git() {
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let root = scratch("search-excludes-off");
+        git(&root, &["init", "-q"]);
+        git(&root, &["config", "core.excludesFile", ""]);
+
+        // git's default location, populated. Neither side may reach it.
+        let xdg = root.join("xdg");
+        std::fs::create_dir_all(xdg.join("git")).unwrap();
+        touch(&xdg.join("git/ignore"), b"named-by-the-default-file.txt\n");
+        touch(&root.join("plain.txt"), b"needle\n");
+        touch(&root.join("named-by-the-default-file.txt"), b"needle\n");
+
+        let listed = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["grep", "-l", "-I", "--untracked", "--fixed-strings", "-e", "needle"])
+            .env("XDG_CONFIG_HOME", &xdg)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .expect("run git grep");
+        let text = String::from_utf8_lossy(&listed.stdout);
+        let mut theirs: Vec<String> = text.lines().map(str::to_string).collect();
+        theirs.sort();
+
+        let (hits, _) = found(&root, "needle", 1000);
+        let ours: Vec<String> = hits.into_iter().map(|hit| hit.path).collect();
+
+        assert_eq!(ours, theirs);
+        assert_eq!(ours, vec!["named-by-the-default-file.txt", "plain.txt"]);
+        // The walk above cannot prove *why* it agreed: this daemon's own home
+        // is not the fixture's, so a wrong fallback would have reached a file
+        // with none of these names in it and the sets would have matched
+        // anyway. The rule itself is what has to be pinned.
+        assert_eq!(
+            resolve_global_excludes(&root, || Some(xdg.join("git/ignore"))),
+            None,
+            "an empty setting must not reach for the default git would skip"
+        );
+    }
+
+    /// The same three states, pinned at the resolver so the empty case cannot
+    /// be read as the absent one. The default is handed in rather than read
+    /// from the environment: a test that moved `HOME` would move it for every
+    /// other thread in the process too.
+    #[test]
+    fn the_three_states_of_the_excludes_setting_resolve_apart() {
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let root = scratch("search-excludes-states");
+        git(&root, &["init", "-q"]);
+        let default = PathBuf::from("/somewhere/git/ignore");
+        let fallback = || Some(default.clone());
+
+        assert_eq!(
+            resolve_global_excludes(&root, fallback),
+            Some(default.clone()),
+            "absent means git's own default"
+        );
+
+        git(&root, &["config", "core.excludesFile", "/named/ignore"]);
+        assert_eq!(
+            resolve_global_excludes(&root, fallback),
+            Some(PathBuf::from("/named/ignore")),
+            "a path means that path"
+        );
+
+        git(&root, &["config", "core.excludesFile", ""]);
+        assert_eq!(
+            resolve_global_excludes(&root, fallback),
+            None,
+            "empty means off, and must not reach for the default"
+        );
+
+        let outside = scratch("search-excludes-no-repo");
+        assert_eq!(
+            resolve_global_excludes(&outside, fallback),
+            None,
+            "outside a repository git applies none, and neither does this"
+        );
+    }
+
+    /// A relative `XDG_CONFIG_HOME` must not fall through to `$HOME/.config`.
+    ///
+    /// The premise is checked against git rather than read off the spec,
+    /// because the two disagree: XDG says a relative base directory is invalid
+    /// and must be ignored, and git uses it anyway — `xdg_config_home` in
+    /// `path.c` tests only that the variable is set and non-empty. So the
+    /// fixture proves what git does before anything asserts what this matches.
+    #[test]
+    fn a_relative_xdg_config_home_is_used_and_does_not_fall_back_to_home() {
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let root = scratch("search-xdg-relative");
+        git(&root, &["init", "-q"]);
+        touch(&root.join("plain.txt"), b"needle\n");
+        touch(&root.join("named-by-xdg.txt"), b"needle\n");
+        touch(&root.join("named-by-home.txt"), b"needle\n");
+        // Reachable only by resolving "relative-xdg" against the repository,
+        // which is the working directory git runs with here.
+        std::fs::create_dir_all(root.join("relative-xdg/git")).unwrap();
+        touch(&root.join("relative-xdg/git/ignore"), b"named-by-xdg.txt\n");
+        let home = scratch("search-xdg-home");
+        std::fs::create_dir_all(home.join(".config/git")).unwrap();
+        touch(&home.join(".config/git/ignore"), b"named-by-home.txt\n");
+
+        let grep = |xdg: Option<&str>| {
+            let mut command = std::process::Command::new("git");
+            command
+                .arg("-C")
+                .arg(&root)
+                .args(["grep", "-l", "-I", "--untracked", "--fixed-strings", "-e", "needle"])
+                .env("HOME", &home)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env_remove("XDG_CONFIG_HOME");
+            if let Some(xdg) = xdg {
+                command.env("XDG_CONFIG_HOME", xdg);
             }
-            _ => panic!("a hyphen line is context"),
+            let output = command.output().expect("run git grep");
+            let listed = String::from_utf8_lossy(&output.stdout);
+            let mut files: Vec<String> = listed.lines().map(str::to_string).collect();
+            files.sort();
+            files
+        };
+
+        assert_eq!(
+            grep(None),
+            vec!["named-by-xdg.txt", "plain.txt"],
+            "with no XDG set, git reads $HOME/.config/git/ignore"
+        );
+        assert_eq!(
+            grep(Some("relative-xdg")),
+            vec!["named-by-home.txt", "plain.txt"],
+            "a relative XDG_CONFIG_HOME is used, and it displaces the HOME default"
+        );
+
+        // And that is the rule this resolves by.
+        let relative = excludes_default_from(
+            Some("relative-xdg".into()),
+            Some(home.clone().into_os_string()),
+        );
+        assert_eq!(relative, Some(PathBuf::from("relative-xdg/git/ignore")));
+        assert_eq!(
+            resolve_global_excludes(&root, || relative.clone()),
+            Some(root.join("relative-xdg/git/ignore")),
+            "a relative answer anchors where git had its working directory"
+        );
+    }
+
+    /// The rest of the table, which needs no repository to be true.
+    #[test]
+    fn the_default_excludes_path_follows_gits_own_rule() {
+        let home = std::ffi::OsString::from("/home/someone");
+        assert_eq!(
+            excludes_default_from(None, Some(home.clone())),
+            Some(PathBuf::from("/home/someone/.config/git/ignore")),
+            "unset falls back to HOME"
+        );
+        assert_eq!(
+            excludes_default_from(Some("".into()), Some(home.clone())),
+            Some(PathBuf::from("/home/someone/.config/git/ignore")),
+            "empty counts as unset, which is git's own test"
+        );
+        assert_eq!(
+            excludes_default_from(Some("/xdg".into()), Some(home.clone())),
+            Some(PathBuf::from("/xdg/git/ignore")),
+            "set wins over HOME"
+        );
+        assert_eq!(
+            excludes_default_from(Some("relative".into()), Some(home)),
+            Some(PathBuf::from("relative/git/ignore")),
+            "and wins even when relative — no fall back to HOME"
+        );
+        assert_eq!(
+            excludes_default_from(None, None),
+            None,
+            "with neither, git has nowhere to look and neither does this"
+        );
+    }
+
+    /// Where this parts ways with `git grep --untracked`, asserted against real
+    /// git so the day either side moves is not a silent one.
+    ///
+    /// The two mostly agree, and for a reason worth pinning: `--untracked`
+    /// implies `--exclude-standard`, so git was already deciding by the ignore
+    /// files rather than by the index — which is the only thing the `ignore`
+    /// crate can read. A file tracked *and* ignored is skipped by both.
+    ///
+    /// A nested repository is the case that differs. git never descends into
+    /// one without `--recurse-submodules`; this walk treats it as an ordinary
+    /// directory with ignore rules of its own. A vendored checkout becomes
+    /// searchable, and a submodule's working tree becomes something the walk
+    /// pays for. That is the accepted cost of dropping the index.
+    #[test]
+    fn a_nested_repository_is_where_this_parts_ways_with_git_grep() {
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            return;
         }
-        assert!(matches!(
-            parse_grep_output_line("src/a.rs:42:hit").unwrap(),
-            GrepLine::Match { .. }
-        ));
-        assert!(matches!(
-            parse_grep_output_line("--").unwrap(),
-            GrepLine::Separator
-        ));
-        // A path with a hyphen in it is ordinary and must not be torn apart.
-        match parse_grep_output_line("my-crate/src/a.rs:7:hit").unwrap() {
-            GrepLine::Match { path, .. } => assert_eq!(path, "my-crate/src/a.rs"),
-            _ => panic!("still a match"),
-        }
+        let root = scratch("search-divergence");
+        let git = |at: &Path, args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(at)
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        git(&root, &["init", "-q"]);
+        touch(&root.join(".gitignore"), b"secrets.txt\n");
+        touch(&root.join("secrets.txt"), b"needle\n");
+        git(&root, &["add", "-f", "secrets.txt"]);
+        touch(&root.join("plain.txt"), b"needle\n");
+        std::fs::create_dir(root.join("vendor")).unwrap();
+        git(&root.join("vendor"), &["init", "-q"]);
+        touch(&root.join("vendor/inner.txt"), b"needle\n");
+
+        let grep = git(
+            &root,
+            &["grep", "-l", "-I", "--untracked", "--fixed-strings", "-e", "needle"],
+        );
+        let listed = String::from_utf8_lossy(&grep.stdout);
+        let git_saw: Vec<&str> = listed.lines().collect();
+        assert_eq!(git_saw, vec!["plain.txt"]);
+
+        let (hits, _) = found(&root, "needle", 100);
+        let paths: Vec<&str> = hits.iter().map(|hit| hit.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["plain.txt", "vendor/inner.txt"],
+            "the ignored file agrees with git; the nested repository does not"
+        );
+    }
+
+    /// The limit is a cap on matches, not on files, and the run that hits it
+    /// says so — the pane draws "showing the first N" from that flag.
+    #[test]
+    fn the_limit_stops_the_walk_and_is_reported() {
+        let root = repo("search-limit");
+        touch(&root.join("many.txt"), "needle\n".repeat(20).as_bytes());
+
+        let (hits, outcome) = found(&root, "needle", 3);
+
+        assert_eq!(hits.len(), 3);
+        assert_eq!(outcome.matches, 3);
+        assert!(outcome.limit_hit);
+        assert!(!outcome.canceled);
+    }
+
+    /// Cancellation reaches inside a single file, not just between files: a
+    /// client that abandoned the query stops paying for it mid-walk, and gets
+    /// no further batch — including the partial one still in hand.
+    #[test]
+    fn cancelling_mid_file_stops_the_search_and_withholds_the_tail() {
+        let root = repo("search-cancel");
+        touch(&root.join("many.txt"), "needle\n".repeat(SEARCH_BATCH * 3).as_bytes());
+
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let mut delivered = 0usize;
+        let outcome = search(&root, "needle", 10_000, &cancel, &mut |batch| {
+            delivered += batch.len();
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+
+        assert_eq!(delivered, SEARCH_BATCH, "one batch left before the cancel");
+        assert_eq!(outcome.matches, SEARCH_BATCH as u64);
+        assert!(outcome.canceled);
+        assert!(!outcome.limit_hit);
+    }
+
+    /// Outside a repository there are no ignore files to honour, so everything
+    /// under the root is searched. `git grep` refused the same request with
+    /// "not a git repository"; answering it is the friendlier failure.
+    #[test]
+    fn a_root_that_is_not_a_repository_is_still_searched() {
+        let root = scratch("search-no-repo");
+        touch(&root.join("plain.txt"), b"needle\n");
+
+        let (hits, _) = found(&root, "needle", 100);
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "plain.txt");
     }
 
     /// The picker's ranking contract, asserted through the public entry point
@@ -1562,3 +2609,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+

@@ -9,6 +9,10 @@ import TermioShared
 /// the companion protocol reached the leaf views — and a second backend would
 /// have had to impersonate it. Now the wire stops here.
 final class CompanionBackend: DeviceClient {
+    /// Recorded and unused: on this path the Mac has already applied its own
+    /// selection to every row before the roster is sent, so applying a second
+    /// rule here would be two viewers arguing about one Mac's window.
+    var viewingSessionID: String?
     var onRoster: ((DeviceRoster) -> Void)?
     var onConnected: ((Bool) -> Void)?
     var onError: ((String) -> Void)?

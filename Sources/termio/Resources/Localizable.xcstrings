@@ -1062,6 +1062,16 @@
         }
       }
     },
+    "Can’t Compare": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法对比"
+          }
+        }
+      }
+    },
     "Can’t Search": {
       "localizations": {
         "zh-Hans": {
@@ -4537,6 +4547,16 @@
         }
       }
     },
+    "Only the first %lld items are shown — update termio on this device to list them all.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅显示前 %lld 项——请更新此设备上的 termio 以列出全部。"
+          }
+        }
+      }
+    },
     "Opacity": {
       "localizations": {
         "zh-Hans": {
@@ -6218,6 +6238,16 @@
         }
       }
     },
+    "Special files can’t be previewed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "特殊文件无法预览"
+          }
+        }
+      }
+    },
     "Split Down": {
       "localizations": {
         "zh-Hans": {
@@ -6604,6 +6634,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "该设备无法读取这个检出。"
+          }
+        }
+      }
+    },
+    "The device couldn’t read this comparison.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该设备无法读取这个对比。"
           }
         }
       }

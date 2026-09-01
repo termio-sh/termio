@@ -231,11 +231,20 @@ supervisor reads the worker’s transcript, with `watch` as the backstop. A
 
 ### Fail loud
 
-The CLI is built for callers that trust exit codes, not prose. Every one-shot
-command exits `1` on an error or an empty reply, and gives up after a
-15-second client timeout rather than hanging on a busy app (override with the
-`TERMIO_CLI_TIMEOUT` environment variable; a `--wait` call widens the client
-timeout automatically to outlive the server-side wait).
+The CLI is built for callers that trust exit codes, not prose. A command that
+runs and fails — an error reply, an empty one — exits `1`; a command it cannot
+parse exits `2` without contacting the app. Flags take either spelling,
+`--agent codex` or `--agent=codex`, and `--` ends them, which is how text
+beginning with a dash reaches a session:
+
+```sh
+termio sessions send <session> -- --force
+```
+
+One-shot commands give up after a 15-second client timeout rather than hanging
+on a busy app (override with the `TERMIO_CLI_TIMEOUT` environment variable; a
+`--wait` call widens the client timeout automatically to outlive the
+server-side wait).
 
 ## JSON contract
 

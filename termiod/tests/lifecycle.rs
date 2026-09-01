@@ -4,6 +4,7 @@
 
 use serde_json::Value;
 use std::io::Read;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -153,6 +154,155 @@ fn stop_takes_an_idle_daemon_down() {
     let again = termiod(&socket, &["stop", "--json"]);
     assert!(again.status.success());
     assert_eq!(json(&again)["stopped"], true);
+}
+
+/// The stop that #571 reported as a failure: the daemon left, but its socket
+/// file stayed on disk and its process table entry stayed with it.
+///
+/// Both halves are reproduced without any timing to lose. The directory is
+/// made unwritable so the daemon's own `remove_file` fails on the way out,
+/// leaving the same file-still-there state a client autostarting a replacement
+/// produces. And the daemon is this test's child, never waited on before the
+/// stop runs — the shape of every client that autostarts a daemon and outlives
+/// it, and the reason `kill(pid, 0)` kept answering for a process that had
+/// already exited.
+///
+/// `--force` only skips the roster round trip, which the sealed directory would
+/// break; the wait this is about is the same in both paths.
+#[test]
+fn stop_succeeds_when_the_daemon_left_its_socket_and_its_pid_behind() {
+    let dir = TestDir::new();
+    let socket = dir.0.join("d.sock");
+    let mut daemon = Daemon::start(&socket);
+
+    // Owner without write permission cannot unlink from its own directory.
+    let sealed = std::fs::Permissions::from_mode(0o500);
+    std::fs::set_permissions(&dir.0, sealed).expect("seal the daemon's directory");
+
+    let stopped = termiod(&socket, &["stop", "--force", "--json"]);
+    std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o700))
+        .expect("unseal the daemon's directory");
+
+    assert!(stopped.status.success(), "{}", String::from_utf8_lossy(&stopped.stderr));
+    assert_eq!(json(&stopped)["stopped"], true);
+    // The two states that used to be read as "still running", asserted so the
+    // test fails if it stops reproducing them rather than passing vacuously.
+    assert!(socket.exists(), "the daemon removed the socket; this no longer reproduces #571");
+    assert!(
+        unsafe { libc::kill(daemon.child.id() as i32, 0) } == 0,
+        "the daemon's pid was already reaped; this no longer reproduces #571"
+    );
+    assert!(daemon.wait_exit(), "daemon still running after stop");
+}
+
+/// `serve` never deletes a file it did not create.
+///
+/// A plain file where the socket should be proves no daemon is serving — which
+/// is enough for a stop to conclude it stopped, and deliberately not enough to
+/// unlink the file and bind over its name. `TERMIOD_SOCK` can name anywhere,
+/// so the file that would be destroyed is whatever the user pointed it at.
+#[test]
+fn serve_refuses_to_replace_a_file_it_did_not_create() {
+    let dir = TestDir::new();
+    let occupied = dir.0.join("d.sock");
+    std::fs::write(&occupied, b"someone else's file").expect("occupy the socket path");
+
+    // Spawned rather than run to completion: a `serve` that wrongly accepts the
+    // path does not exit, and a test that proves a regression by hanging is not
+    // a test. It gets a bounded window to refuse, and is killed if it does not.
+    let mut child = Command::new(BIN)
+        .arg("serve")
+        .env("TERMIOD_SOCK", &occupied)
+        .env("TERMIOD_KEEP_AWAKE", "off")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("run termiod serve");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let refused = loop {
+        match child.try_wait().expect("poll serve") {
+            Some(status) => break Some(status),
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    };
+
+    let refused = refused.expect("serve bound over a file that was not its socket");
+    assert!(!refused.success(), "serve accepted a socket path that held a plain file");
+    assert_eq!(
+        std::fs::read(&occupied).expect("the file must still be there"),
+        b"someone else's file",
+        "serve destroyed a file it did not create"
+    );
+}
+
+/// The other half of the same rule: a socket the daemon really did leave behind
+/// is still cleaned up. A kill -9 runs no shutdown, so the file survives with
+/// nothing serving it, and the next start must replace it rather than refuse —
+/// otherwise one crash would leave the machine unable to start a daemon at all.
+#[test]
+fn serve_replaces_a_socket_its_daemon_died_holding() {
+    let dir = TestDir::new();
+    let socket = dir.0.join("d.sock");
+    let mut dead = Daemon::start(&socket);
+    let killed = dead.child.kill().and_then(|()| dead.child.wait());
+    assert!(killed.is_ok(), "could not kill the first daemon");
+    assert!(socket.exists(), "kill -9 should leave the socket file behind");
+
+    // Not `Daemon::start`'s wait: that watches for the socket file, which the
+    // dead daemon already left. Serving is the thing being asserted, so serving
+    // is what this waits for.
+    let _replacement = Daemon::start(&socket);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let running = loop {
+        let status = termiod(&socket, &["status", "--json"]);
+        if status.status.success() && json(&status)["daemon"]["running"] == true {
+            break true;
+        }
+        if Instant::now() >= deadline {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(running, "no daemon came up over the socket its predecessor died holding");
+}
+
+/// A daemon this process cannot reach is not a daemon that stopped.
+///
+/// The socket is denied rather than removed, which is what a sandbox does — and
+/// what the fix for #571 must not mistake for absence, since answering a stop
+/// with success here would let an upgrade replace the binary under a daemon
+/// still serving every session it holds. The daemon must survive, and the
+/// refusal must say the connection was denied.
+#[test]
+fn stop_refuses_to_call_an_unreachable_daemon_stopped() {
+    let dir = TestDir::new();
+    let socket = dir.0.join("d.sock");
+    let mut daemon = Daemon::start(&socket);
+    std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o000))
+        .expect("deny the socket");
+
+    let refused = termiod(&socket, &["stop", "--json"]);
+    assert!(!refused.status.success(), "an unreachable daemon was reported stopped");
+    let complaint = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        complaint.contains("reaching the daemon"),
+        "the refusal does not name what went wrong: {complaint}"
+    );
+    assert!(
+        daemon.child.try_wait().expect("poll").is_none(),
+        "the daemon exited on a stop that never reached it"
+    );
+
+    std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))
+        .expect("restore the socket");
+    let stopped = termiod(&socket, &["stop", "--json"]);
+    assert!(stopped.status.success(), "{}", String::from_utf8_lossy(&stopped.stderr));
+    assert!(daemon.wait_exit(), "daemon still running after stop");
 }
 
 /// A session whose agent reports `working` keeps the daemon up, and the

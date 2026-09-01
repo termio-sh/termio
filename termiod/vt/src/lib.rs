@@ -556,6 +556,42 @@ impl VtTerminal {
     /// The active screen's text, one codepoint per cell in row-major order,
     /// read through `grid_ref` like `history_cell` — so nothing here touches
     /// the render state's damage tracking, which `take_damage` owns.
+    /// The live screen as text, one row per line with trailing blanks trimmed.
+    ///
+    /// Reads the **active** area, not a viewport a client has scrolled: the
+    /// host has no scroll position, which is the defect this replaces. The Mac
+    /// classified agent status against `readViewportText()`, so scrolling a
+    /// pane up fed stale rows to the rules; there is nothing here to scroll.
+    ///
+    /// Deliberately not built on `snapshot()`: that clears both layers of
+    /// damage tracking, and a once-a-second status read must not eat a
+    /// `grid_diff` client's frame.
+    pub fn screen_text(&self) -> Result<String> {
+        let cols = usize::from(check(self.terminal.cols(), "Terminal::cols")?);
+        let codepoints = self.active_codepoints()?;
+        let mut text = String::with_capacity(codepoints.len());
+        for (index, row) in codepoints.chunks(cols.max(1)).enumerate() {
+            if index > 0 {
+                text.push('\n');
+            }
+            let end = row
+                .iter()
+                .rposition(|point| *point != 0 && *point != u32::from(b' '))
+                .map_or(0, |last| last + 1);
+            for point in &row[..end] {
+                // A zero codepoint is an unwritten cell, and a wide character's
+                // spacer tail is reported as one too — both are "no glyph here".
+                let glyph = if *point == 0 {
+                    ' '
+                } else {
+                    char::from_u32(*point).unwrap_or(' ')
+                };
+                text.push(glyph);
+            }
+        }
+        Ok(text)
+    }
+
     fn active_codepoints(&self) -> Result<Vec<u32>> {
         let rows = check(self.terminal.rows(), "Terminal::rows")?;
         let cols = check(self.terminal.cols(), "Terminal::cols")?;

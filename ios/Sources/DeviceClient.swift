@@ -14,6 +14,14 @@ import TermioShared
 protocol DeviceClient: AnyObject {
     /// A fresh roster arrived — the whole tree, pushed, never polled.
     var onRoster: ((DeviceRoster) -> Void)? { get set }
+    /// The session filling the screen, or nil on a list.
+    ///
+    /// The device reports a turn ending; whether that reads as a calm "ready
+    /// for you" or as nothing at all depends on whether this person is looking,
+    /// and only this end knows. The Mac makes the same call from its own
+    /// selection, which is what keeps two devices watching one session in
+    /// agreement rather than each inventing a state.
+    var viewingSessionID: String? { get set }
     /// `true` once the link is up, `false` on every drop.
     var onConnected: ((Bool) -> Void)? { get set }
     /// The device refused a request (a failed `start`, an unreadable file).

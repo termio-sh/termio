@@ -235,8 +235,8 @@ final class RemoteFileOpenIntegrationTests: XCTestCase {
 
     // MARK: - The tree
 
-    private func tree() -> RemoteFileBrowserModel {
-        RemoteFileBrowserModel(
+    private func tree() -> DeviceFileTreeModel {
+        DeviceFileTreeModel(
             checkout: Checkout(device: .thisMac, root: root.path), root: root.path)
     }
 

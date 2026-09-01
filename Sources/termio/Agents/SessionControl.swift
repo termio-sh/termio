@@ -113,10 +113,10 @@ enum LocalSocket {
 }
 
 /// One request from the `termio sessions …` CLI, sent as a single JSON object
-/// over `SessionControlListener`'s local socket. This is the write/drive
-/// counterpart to `HookListener`'s read-only status stream: where a hook reports
-/// "this session is now working", a control request *acts on* a sibling session
-/// — listing them, sending a prompt, answering a menu, closing or focusing one.
+/// over `AppSocketListener`'s local socket. Where an agent's hook *reports* ("this
+/// session is now working", via `termio agent report`), a request here *acts on* a
+/// sibling session — listing them, sending a prompt, answering a menu, closing or
+/// focusing one.
 ///
 /// - `op` — `list` / `read` / `send` / `answer` / `close` / `focus`.
 /// - `format` — `text` (human-readable lines, the default) or `json`.
@@ -250,23 +250,33 @@ enum SocketIO {
     }
 }
 
-/// A local Unix-domain socket the `termio sessions` CLI connects to. Unlike
-/// `HookListener` (which only receives), this is request/response: it decodes one
-/// `ControlRequest`, runs the handler on the main actor, and writes the handler's
-/// reply back down the same connection before closing — so the CLI can print it.
+/// A local Unix-domain socket the `termio` CLI connects to. Request/response: it
+/// decodes one `ControlRequest`, runs the handler on the main actor, and writes the
+/// handler's reply back down the same connection before closing — so the CLI can
+/// print it.
 ///
 /// This type owns only the transport. Resolving the caller's project, enforcing
 /// project scope, and acting on sessions all live in `TermioStore` (the handler).
 // @unchecked: the handler closures are immutable @MainActor values, and every
 // mutable property is confined to `queue`; the queue is the synchronization the
 // compiler cannot see.
-final class SessionControlListener: @unchecked Sendable {
-    /// The control socket, alongside the status socket and session tree under
-    /// termio's Application Support directory. Deliberately a *different* file from
-    /// `HookListener.socketURL`: this one accepts drive commands, not status pings.
+final class AppSocketListener: @unchecked Sendable {
+    /// Named for the process that binds it, the way `termiod.sock` is: the daemon
+    /// answers there, the app answers here. Not named for the session verbs it
+    /// carries today — those are migrating to the daemon's framed protocol one at a
+    /// time (unify-server-plane Stage 10), and what is left behind is the work only
+    /// a window can do: focusing a pane, posting a notification, placing a split.
     static var socketURL: URL {
-        AppChannel.supportDirectory.appendingPathComponent("session-control.sock")
+        AppChannel.supportDirectory.appendingPathComponent("app.sock")
     }
+
+    // Deliberately the only path bound. Answering on the pre-rename name too would
+    // mean a second listener with its own defer-and-reclaim state, and `bindAndListen`
+    // yields a path to whoever already holds it — so an app could hold one name while
+    // an older instance held the other, and which app a request reached would depend
+    // on which name the client resolved. One path, one owner. A client older than the
+    // rename gets a connection error naming a socket nobody binds, which is a
+    // diagnosable failure rather than a silently misrouted command.
 
     private let onRequest: @MainActor (ControlRequest) async -> Data
     /// Resolves a `watch` subscription: returns the caller's project id to scope the
@@ -275,7 +285,7 @@ final class SessionControlListener: @unchecked Sendable {
     /// not one-shot — the connection stays open and is handed to `SessionWatchHub`
     /// instead of being answered and closed.
     private let onWatch: @MainActor (ControlRequest) -> (UUID?, Data?, [SessionWatchEvent])
-    private let queue = DispatchQueue(label: "com.termio.session-control")
+    private let queue = DispatchQueue(label: "sh.termio.app-socket")
     private var source: DispatchSourceRead?
     private var listenDescriptor: Int32 = -1
     /// Watches the socket *file* we bound, so an instance that loses the path to
@@ -313,7 +323,7 @@ final class SessionControlListener: @unchecked Sendable {
             // and the reader's next move is usually TERMIO_CHANNEL=<name>
             // ./scripts/build-app.sh — which builds no such channel.
             Self.log("""
-                another termio already answers at \(path) — leaving session control \
+                another termio already answers at \(path) — leaving the app socket \
                 to it (relaunch this process with TERMIO_CHANNEL=dev for a channel of \
                 its own; that steers this run, not how a bundle was built)
                 """)
@@ -362,7 +372,7 @@ final class SessionControlListener: @unchecked Sendable {
     private func watchForReplacement(_ path: String) {
         pathWatch = LocalSocket.watchForReplacement(of: path, on: queue) { [weak self] in
             guard let self else { return }
-            Self.log("session control socket was replaced — rebinding")
+            Self.log("app socket was replaced — rebinding")
             self.pathWatch?.cancel()
             self.pathWatch = nil
             self.source?.cancel()
@@ -500,7 +510,7 @@ final class SessionControlListener: @unchecked Sendable {
     }
 
     private static func log(_ message: String) {
-        FileHandle.standardError.write(Data("termio: session control \(message)\n".utf8))
+        FileHandle.standardError.write(Data("termio: app socket \(message)\n".utf8))
     }
 }
 

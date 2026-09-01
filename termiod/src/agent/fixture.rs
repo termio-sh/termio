@@ -33,11 +33,16 @@
 //!   missing` for a name that does not resolve and this cannot. The record
 //!   therefore carries the icon's *kind*, and an asset and a relative path both
 //!   read as `image` — which is also all `AgentIcon` retains of the difference.
-//! - **Invalid regex is not detected here.** Swift compiles status patterns with
-//!   `NSRegularExpression` and drops the ones that do not compile;
-//!   this carries them as raw strings because the daemon never matches them, and
-//!   choosing a Rust regex engine would mean choosing a *different* accepted
-//!   language, which is a worse kind of disagreement than none. No fixture
+//! - **Invalid regex is not detected here.** Both sides now carry status
+//!   patterns as raw strings, and only the daemon compiles them
+//!   (`session::status::RuleSet`). The paragraph this replaces argued the
+//!   opposite — that choosing a Rust regex engine would mean choosing a
+//!   *different* accepted language, a worse disagreement than none — and it was
+//!   right while both sides matched. It stopped applying when Swift stopped:
+//!   one matcher is one accepted language, and
+//!   `session::status::tests::bundled_status_patterns_compile` is what keeps
+//!   every shipped pattern inside it. See
+//!   `docs/design/20260831-companion-second-protocol-retires.md` §3.4. No fixture
 //!   declares a pattern that fails to compile.
 
 use super::manifest::{AgentDefinition, AgentManifest, IconReference, ManifestError};

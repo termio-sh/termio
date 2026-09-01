@@ -63,8 +63,8 @@ lifecycle. Run it from a macOS GUI session.
 
 Use the dev channel whenever a released termio is installed: it gets its own
 bundle id (`sh.termio.app.dev`), state dir (`~/.termio-dev`), companion port
-(8788), and `termio-dev` CLI, with Sparkle stripped so it can never auto-update
-itself onto the release channel.
+(8788), and `termio-dev` CLI, with no Sparkle update feed, so it can never
+auto-update itself onto the release channel.
 
 The `macos-rebuild-dev` and `ios-rebuild-dev` skills wrap the rebuild-and-
 relaunch loop; prefer them over hand-rolling the commands.

@@ -5,6 +5,7 @@ type: rfc
 created: 2026-08-19
 updated: 2026-08-31
 related:
+  - 20260831-companion-second-protocol-retires.md
   - 20260831-docker-dockerd-lessons.md
   - 20260817-one-path-local-through-termiod.md
   - 20260817-one-path-local-through-termiod.review-claude.md
@@ -311,8 +312,8 @@ this list rather than around it.
 | Area | Lines | Why it stays |
 | --- | --- | --- |
 | libghostty surface, `TerminalPane`, `SplitTree`, every `*View` | `Terminal/` 6,218 · `Sidebar/` 1,971 · `Info/` 5,813 | Rendering, layout and panes are client concerns — invariant #5 |
-| `OSCProgressScanner` (`Agents/`) | — | A byte-stream scan. Every client receives the same bytes; a host opinion of "working" is the host deciding presentation |
-| `AgentStatusRules` — screen-rule agent status | `TermioStore+TerminalSurface.swift:356-366` | Reads the *rendered viewport*, which every client already holds |
+| ~~`OSCProgressScanner`~~ · ~~`AgentStatusRules`~~ | — | **Struck 2026-08-31.** They moved, and the argument is in [`20260831-companion-second-protocol-retires.md`](20260831-companion-second-protocol-retires.md) §3: identical bytes do not produce identical verdicts, because the rules also read *this* client's scroll, keystrokes, tick history and selection. What stays is the presentation half below |
+| `statusDescription`, the done-vs-idle call, argv → glyph | `TermioStore+AgentStatus.swift` | The device sends an enum and a source; the sentence, the dot and "has this person seen it" are the viewer's — §4 |
 | Theme, palette, fonts, keybindings | `Theme/` 527 · `Keybindings/` 628 | The `grid_diff` refusal (`TermiodClient.swift:27`) is the same rule: the host must never resolve a colour |
 | `TaskNotifications`, `MenuBarController`, keychain reads, `NSWorkspace`, Quick Look | `App/` 4,320 · `Companion/Usage/` | This Mac's Notification Center is this Mac's |
 | Encoding a human keypress | `Terminal/Ghostty/` | Needs an `NSEvent` and ghostty's key encoder — invariant #5 wearing a keyboard |
@@ -341,6 +342,7 @@ Ordered by how ready the daemon already is. "Daemon state" is measured today.
 | Fetch / pull / push, askpass | absent | **Absent** — new scope | 11 |
 | Session roster, `read`, `send`, `watch`, `spawn`, `close` | `TermioStore+SessionControl.swift` 1,040 | Verbs exist; the CLI talks to the Swift socket | 10 |
 | Agent hook sink | `HookListener.swift` 944, `agent-status.sock` on this Mac | `set_status` exists; nothing routes a hook into it | 10 |
+| Agent status: screen rules, `OSC 0/2` title, `OSC 9;4` progress, streak promotion, stale sweep, stall probe | `TermioStore+AgentStatus.swift` 793 (deleted) | **Shipped** (`session/status.rs`), published as the `status:` resource | **done — retirement RFC Stage 1** |
 | PTY ownership | `PTYProcess.swift` 996 (deleted in `a8b15bd`) | **Shipped** (`pty.rs`) | **8 — done** |
 
 ### 4.3 Deleted outright
@@ -874,7 +876,9 @@ so nobody reads the absence as an oversight.
   decided; the transport is not, and it is gated on §9.6 — how a phone reaches a
   device without embedding SSH (invariant #3). Until that is answered, the phone
   stays a client of the Mac.
-- **Deleting the companion wire.** It is the one place the repo contradicts
+- **Deleting the companion wire.** Now laddered in its own RFC,
+  [`20260831-companion-second-protocol-retires.md`](20260831-companion-second-protocol-retires.md).
+  It is the one place the repo contradicts
   invariant #4, and it is *not* deletable before the line above: deleting it
   first leaves the phone with nothing to speak. §5 of
   `20260819-device-workspace-project.md` establishes the cost is low when the
@@ -889,7 +893,12 @@ so nobody reads the absence as an oversight.
   failure mode the daemon exists to remove — two processes disagreeing about who
   owns a PTY. Make restarts rare and honest instead.
 - **Merging `termio` and `termiod` into one binary.** §7.8.
-- **Moving `OSCProgressScanner` or `AgentStatusRules` to the host.** §4.1.
+- ~~**Moving `OSCProgressScanner` or `AgentStatusRules` to the host.**~~
+  **Reversed and done**, as Stage 1 of
+  [`20260831-companion-second-protocol-retires.md`](20260831-companion-second-protocol-retires.md).
+  The deferral held only while the Mac was the sole viewer running the rules; a
+  phone attached straight to a device ran none of them, so deferring it made the
+  direct-attach path a regression rather than a step.
 - **A chat / structured-event lens.** Built and reverted three times; the design
   docs record why.
 - **Windows.** ConPTY has no controlling terminal and no `tcgetpgrp`. The

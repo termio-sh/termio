@@ -22,11 +22,21 @@ enum DiffSource {
             return await GitService.diffRows(
                 for: change, in: repoRoot, commit: commit, range: range)
         }
-        // `git.diff` answers the working-tree diff for one path. A commit or a
-        // range is the read tier's `git.show` / `git.log`, which this pane does
-        // not ask a device for yet — and inventing a local answer for a remote
-        // path would diff the wrong machine's file.
-        guard commit == nil, range == nil else { return [] }
+        // Three shapes, three verbs on the box: a commit's file is `git.show`,
+        // a compare row is `git.compare`, and the working tree is `git.diff` —
+        // inventing a local answer for a remote path would diff the wrong
+        // machine's file.
+        if let commit {
+            let text = (try? await Termiod.gitShowDiff(
+                route: device, root: repoRoot, commit: commit, path: change.path)) ?? ""
+            return await GitService.parseDiffText(text)
+        }
+        if let range {
+            guard let base = compareBase(of: range) else { return [] }
+            let text = (try? await Termiod.gitCompareDiff(
+                route: device, root: repoRoot, base: base, path: change.path)) ?? ""
+            return await GitService.parseDiffText(text)
+        }
         // Full context, exactly as the local path asks for it: the overlay holds
         // the whole file and collapses the unchanged runs into bands the reader
         // can expand. `GitService.diffRows` falls back to git's default context
@@ -35,6 +45,16 @@ enum DiffSource {
         let text = await text(
             for: change, in: repoRoot, device: device, context: 999_999)
         return await GitService.parseDiffText(text)
+    }
+
+    /// The base a compare row's range names. Every range this pane builds is
+    /// `<base>...HEAD` (`GitHistoryView`, `GitService.loadBranchCompare`);
+    /// `git.compare` takes the base because the device re-derives the range —
+    /// and the behind count — from it.
+    static func compareBase(of range: String) -> String? {
+        guard range.hasSuffix("...HEAD") else { return nil }
+        let base = String(range.dropLast("...HEAD".count))
+        return base.isEmpty ? nil : base
     }
 
     /// The raw unified-diff text — what "Copy Diff" puts on the pasteboard.

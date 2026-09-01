@@ -33,7 +33,13 @@ final class RosterStore {
     private(set) var deviceEndpoint: DeviceEndpoint?
     /// `MockSession.key` of the session filling the screen — its row gets the
     /// current-chat pill wherever session rows render.
-    var currentSessionKey: String?
+    ///
+    /// For a live row this is the device's own session id, which is why it can
+    /// be forwarded as-is: the backend needs it to answer "has this person seen
+    /// the turn end", the one status call that belongs to a viewer.
+    var currentSessionKey: String? {
+        didSet { client?.viewingSessionID = currentSessionKey }
+    }
     /// The workspace the phone is working in: the one holding the session last
     /// opened, or the one picked in the ＋ menu. See `destinationWorkspace`,
     /// which resolves it against the live roster.
@@ -370,6 +376,9 @@ final class RosterStore {
             CompanionLink.state = .failed(reason)
             NotificationCenter.default.post(name: Self.didChange, object: nil)
         }
+        // A new backend inherits whatever is on screen: a reconnect while a
+        // session is open must not read as nobody looking at it.
+        client.viewingSessionID = currentSessionKey
         client.start()
         self.client = client
     }

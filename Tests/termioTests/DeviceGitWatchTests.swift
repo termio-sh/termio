@@ -18,48 +18,85 @@ final class DeviceGitWatchTests: XCTestCase {
 
     // MARK: - DeviceWatchLedger
 
+    /// Drains the ledger the way both call sites do: one at a time, until it
+    /// says there is nothing left.
+    private func drain(
+        _ ledger: inout DeviceWatchLedger<Termiod.GitChangedPayload>, generation: Int
+    ) -> [UInt64] {
+        var released: [UInt64] = []
+        while let batch = ledger.releaseNext(generation: generation) {
+            released.append(batch.seq)
+        }
+        return released
+    }
+
     func testABatchRacingTheAckIsHeldUntilTheBaselineDecision() {
-        var ledger = DeviceWatchLedger()
+        var ledger = DeviceWatchLedger<Termiod.GitChangedPayload>()
         let generation = ledger.begin()
         // The daemon queues the synthesized full batch right behind the ack;
         // applied immediately, the gap reset that follows would erase it.
         XCTAssertNil(ledger.admit(batch(seq: 7), generation: generation))
-        let held = ledger.settle(generation: generation)
-        XCTAssertEqual(held?.map(\.seq), [7])
-        // Settled: later batches apply as they arrive.
+        XCTAssertTrue(ledger.settle(generation: generation))
+        XCTAssertEqual(drain(&ledger, generation: generation), [7])
+        // Drained: later batches apply as they arrive.
         XCTAssertEqual(ledger.admit(batch(seq: 8), generation: generation)?.seq, 8)
     }
 
     func testHeldBatchesComeBackInArrivalOrder() {
-        var ledger = DeviceWatchLedger()
+        var ledger = DeviceWatchLedger<Termiod.GitChangedPayload>()
         let generation = ledger.begin()
         XCTAssertNil(ledger.admit(batch(seq: 1), generation: generation))
         XCTAssertNil(ledger.admit(batch(seq: 2), generation: generation))
-        XCTAssertEqual(ledger.settle(generation: generation)?.map(\.seq), [1, 2])
+        XCTAssertTrue(ledger.settle(generation: generation))
+        XCTAssertEqual(drain(&ledger, generation: generation), [1, 2])
+    }
+
+    /// A batch arriving *during* the drain queues behind what is still waiting,
+    /// rather than overtaking it.
+    ///
+    /// The release happens outside whatever lock guards the ledger — it calls
+    /// out to the pane — so a live batch can land mid-drain. Letting it through
+    /// would apply it first and move the cursor with it, and the older batch
+    /// still in the queue would then be discarded as old news: a directory only
+    /// that one named stays stale for good.
+    func testABatchArrivingMidDrainQueuesBehindWhatIsStillHeld() {
+        var ledger = DeviceWatchLedger<Termiod.GitChangedPayload>()
+        let generation = ledger.begin()
+        XCTAssertNil(ledger.admit(batch(seq: 8), generation: generation))
+        XCTAssertTrue(ledger.settle(generation: generation))
+
+        // The drain has begun but has not finished: the reader delivers 9 here.
+        XCTAssertNil(
+            ledger.admit(batch(seq: 9), generation: generation),
+            "a live batch must not overtake one already waiting")
+        XCTAssertEqual(drain(&ledger, generation: generation), [8, 9])
+        // And once the queue is empty, arrivals apply as they come again.
+        XCTAssertEqual(ledger.admit(batch(seq: 10), generation: generation)?.seq, 10)
     }
 
     func testStoppingMidHandshakeAbandonsTheAttempt() {
-        var ledger = DeviceWatchLedger()
+        var ledger = DeviceWatchLedger<Termiod.GitChangedPayload>()
         let generation = ledger.begin()
         ledger.stop()
         // The pane went away before the ack: the subscription must not install.
-        XCTAssertNil(ledger.settle(generation: generation))
+        XCTAssertFalse(ledger.settle(generation: generation))
         // And a batch from that attempt must not apply.
         XCTAssertNil(ledger.admit(batch(seq: 3), generation: generation))
     }
 
     func testARestartedWatchDropsTheOldGenerationsBatches() {
-        var ledger = DeviceWatchLedger()
+        var ledger = DeviceWatchLedger<Termiod.GitChangedPayload>()
         let old = ledger.begin()
         let current = ledger.begin()
         XCTAssertNil(ledger.admit(batch(seq: 4), generation: old))
         // The stale batch was dropped, not held for the new attempt.
-        XCTAssertEqual(ledger.settle(generation: current)?.map(\.seq), [])
-        XCTAssertNil(ledger.settle(generation: old))
+        XCTAssertTrue(ledger.settle(generation: current))
+        XCTAssertEqual(drain(&ledger, generation: current), [])
+        XCTAssertFalse(ledger.settle(generation: old))
     }
 
     func testAnInterruptedRetryCannotOutliveAStoppedWatch() {
-        var ledger = DeviceWatchLedger()
+        var ledger = DeviceWatchLedger<Termiod.GitChangedPayload>()
         let interrupted = ledger.begin()
         ledger.stop()
 
@@ -67,7 +104,7 @@ final class DeviceGitWatchTests: XCTestCase {
     }
 
     func testAStartDuringAnOldHandshakeRequestsAReplacementWatch() {
-        var ledger = DeviceWatchLedger()
+        var ledger = DeviceWatchLedger<Termiod.GitChangedPayload>()
         let old = ledger.begin()
         ledger.stop()
 
@@ -75,12 +112,12 @@ final class DeviceGitWatchTests: XCTestCase {
         // async call leaves its defer, so it invalidates the old one and asks
         // that cleanup to begin the visible pane's replacement.
         ledger.requestRestart()
-        XCTAssertNil(ledger.settle(generation: old))
+        XCTAssertFalse(ledger.settle(generation: old))
         XCTAssertTrue(ledger.consumeRestartRequest())
         XCTAssertFalse(ledger.consumeRestartRequest())
 
         let replacement = ledger.begin()
-        XCTAssertNotNil(ledger.settle(generation: replacement))
+        XCTAssertTrue(ledger.settle(generation: replacement))
     }
 
     // MARK: - ResourceRoutingTable

@@ -146,6 +146,17 @@ pub struct CarriedSession {
     /// that did not think about the question is not evidence the answer is yes.
     #[serde(default)]
     pub ring_reconstructs_screen: bool,
+    /// The status engine's clocks, as elapsed durations
+    /// (`session::status::CarriedClocks`).
+    ///
+    /// `status` alone says *what* the session reads as; this says *how long*
+    /// that has been true. Without it every handoff restarted the stale-working
+    /// sweep and the stall window, so a daemon upgraded on a timer could defer
+    /// both indefinitely. Absent from a blob that predates the field, which
+    /// starts the clocks fresh — the old behaviour, for a blob that carries no
+    /// answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_clocks: Option<crate::session::status::CarriedClocks>,
 }
 
 /// The header the new image reads before it has any state of its own. Ring
@@ -638,6 +649,23 @@ mod tests {
             master_fd: -1,
             ring_len,
             ring_reconstructs_screen: true,
+            status_clocks: None,
         }
+    }
+
+    /// The blob is written by one build and read by another, so a field added
+    /// on one side has to be absent-tolerant on the other. `status_clocks` is
+    /// the newest, and this is the shape an older daemon writes.
+    #[test]
+    fn a_carried_session_without_status_clocks_still_decodes() {
+        let older = serde_json::json!({
+            "id": "s_1", "name": "s_1", "cwd": "", "command": "sh", "pid": 1,
+            "rows": 24, "cols": 80, "created_unix": 0, "status": "working",
+            "master_fd": -1, "ring_len": 0,
+        });
+        let decoded: CarriedSession =
+            serde_json::from_value(older).expect("an older blob still crosses");
+        assert!(decoded.status_clocks.is_none());
+        assert!(!decoded.ring_reconstructs_screen);
     }
 }

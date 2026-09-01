@@ -836,21 +836,11 @@ final class TermioStore: ObservableObject {
     func setStatus(_ status: SessionStatus, for id: Session.ID) -> Bool {
         let runtime = runtime(for: id)
         guard runtime.status != status else { return false }
-        let previous = runtime.status
         runtime.status = status
         // A blocked session's dot survives a click (see `markSeen`); any genuine
         // transition off `.needsAttention` — the agent proceeded, or the condition
         // otherwise cleared — retires the "still blocking" flag that kept it lit.
         if status != .needsAttention { blockingAttention.remove(id) }
-        // Stall detection (§4.7) keys off continuous time spent `.working`, so the
-        // window opens on the genuine transition in — this method is the single
-        // status choke point — and closes on the way out: a session that stopped
-        // working can no longer be stalled.
-        if status == .working {
-            beginStallWatch(for: id)
-        } else if previous == .working {
-            stallProbes[id] = nil
-        }
         // The tray and window title present status, so a real change pings them.
         sessionRuntimeDidChange.send()
         // Push the genuine transition to any `termio sessions watch` clients scoped
@@ -1095,11 +1085,11 @@ final class TermioStore: ObservableObject {
     /// unrelated appearance change that also fires `objectWillChange`.
     var installedHooksEnabled: Bool?
 
-    /// The control socket the `termio sessions` CLI drives sibling sessions through.
-    /// Runs for the app's lifetime (harmless when the feature is off — the handler
-    /// refuses with "disabled"); only the awareness note installed into the agent
-    /// instruction files is toggled.
-    var sessionControl: SessionControlListener?
+    /// The socket the `termio` CLI drives the app through. Runs for the app's
+    /// lifetime (harmless when the feature is off — the handler refuses with
+    /// "disabled"); only the awareness note installed into the agent instruction
+    /// files is toggled.
+    var appSocket: AppSocketListener?
     var installedSessionControlEnabled: Bool?
 
     /// The agent's own conversation log per session, learned from the hook stream
@@ -1114,32 +1104,10 @@ final class TermioStore: ObservableObject {
     /// process could actually have created (see `rediscoverConversation`).
     var processSpawnedAt: [Session.ID: Date] = [:]
 
-    /// When each currently-working session last reported activity, used to recover
-    /// a session whose turn ended without a `done` hook (see `sweepStaleWorking`).
-    /// Refreshed both by working hooks and by a *changed* rendered screen
-    /// (`noteOutputActivity`).
+    /// When each currently-working session last reported activity. The device
+    /// decides when a turn has gone quiet — this is what a client keeps so it
+    /// can say how long ago, not a sweep of its own.
     var lastWorkingAt: [Session.ID: Date] = [:]
-    /// Loop-level stall-detection state per continuously-working session (design
-    /// doc §4.7): when it entered `.working`, the current no-progress window, the
-    /// output-rate ticks, and the repo/transcript baseline the sweep compares
-    /// against. Created on the transition into `.working`, dropped on the way out
-    /// (both in `setStatus`); probed by `sweepStalledSessions` in
-    /// `TermioStore+AgentStatus`.
-    var stallProbes: [Session.ID: StallProbe] = [:]
-    /// The last activity a screen-scrape-configured agent's viewport was classified
-    /// into (see `AgentStatusRules` / `applyScreenDetectedActivity`), so status is only
-    /// re-driven on a transition — not re-emitted every tick the screen sits idle.
-    var lastScreenActivity: [Session.ID: AgentStatusRules.Activity] = [:]
-    /// The last activity an agent's live OSC title was classified into (see
-    /// `applyTitleActivity`), so title-driven status also moves only on
-    /// transitions — a spinner frame change re-classifies as the same `working`
-    /// and is dropped here.
-    var lastTitleActivity: [Session.ID: AgentStatusRules.Activity] = [:]
-    /// The last busy/idle state an agent's `OSC 9;4` progress reports resolved to
-    /// (see `applyProgressActivity` / `OSCProgressScanner`). The scanner already
-    /// collapses keepalives, but a session torn down and rebuilt gets a fresh scanner,
-    /// so the store dedupes here too — and the transition guard mirrors the title path.
-    var lastProgressActivity: [Session.ID: AgentStatusRules.Activity] = [:]
     /// Sessions whose `.needsAttention` dot came from a genuine, *observable*
     /// blocking condition — a hook / screen / title "attention" signal, all of which
     /// have a matching "resolved" transition (the agent proceeds → working/idle/done).
@@ -1149,47 +1117,15 @@ final class TermioStore: ObservableObject {
     /// one-shot bell/notification attention — which has no "resolved" event to wait
     /// for — is deliberately *not* recorded here, so it still dismisses on view.
     var blockingAttention: Set<Session.ID> = []
-    var staleWorkingSweep: Timer?
-    /// How long a `.working` session may go with *no screen change and no working
-    /// hook* before the sweep flips it back to idle. A working agent's TUI repaints
-    /// changing content sub-second (`noteOutputActivity` keeps refreshing the
-    /// timestamp while the viewport keeps changing), so this only elapses once the
-    /// screen has genuinely gone static — recovering the many turns that end
-    /// without a `Stop` hook (a cancelled `/resume` or `/compact`, an esc-interrupt,
-    /// or a hook that never correlated) instead of spinning forever.
-    let staleWorkingTimeout: TimeInterval = 12
-
     /// When a session's hooks last applied any state, so the screen-driven
-    /// promotion in `noteOutputActivity` can defer to live hooks: a session whose
-    /// hooks just spoke doesn't need the screen to guess for them.
+    /// device's screen channels can defer to live hooks: a session whose hooks
+    /// just spoke doesn't need the screen to guess for them. The rule runs on
+    /// the device now; the timestamp stays because the Info pane reads it.
     var lastHookReportAt: [Session.ID: Date] = [:]
-    /// When the user last typed (or scrolled) into a session's terminal. Keystroke
-    /// echo repaints the screen exactly like streaming output does, so promotion
-    /// stays quiet for a beat after any input.
-    var lastUserInputAt: [Session.ID: Date] = [:]
-    /// Consecutive changed-screen ticks observed for a non-working session — the
-    /// debounce counter behind promotion (see `noteOutputActivity`).
-    var promotionStreak: [Session.ID: Int] = [:]
-    /// Hooks are trusted for this long after their last report before the screen
-    /// may promote a session to working on its own. Just above
-    /// `staleWorkingTimeout`, so a live turn the sweep mistakenly cleared becomes
-    /// recoverable the moment it repaints, while the repaint burst right after a
-    /// `Stop` hook (the final answer rendering) can never re-light the spinner.
-    let hookQuietWindow: TimeInterval = 15
-    /// How long after user input the screen must settle before promotion; typing a
-    /// long prompt repaints the input box every keystroke.
-    let userInputQuietWindow: TimeInterval = 3
-    /// No promotion this soon after launch: an agent's banner and first prompt
-    /// paint across several ticks while it is simply starting up.
-    let launchGraceWindow: TimeInterval = 10
-    /// PTY bytes per throttle tick that read as genuine streaming for the
-    /// *sustain* path in `noteOutputActivity` — enough to keep a working session
-    /// alive while the user has scrolled its viewport away from the live tail
-    /// (a frozen viewport stops the screen-change signal), yet above the trickle
-    /// an idle prompt emits (a cursor-park sequence, a redraw) so a finished turn
-    /// still goes static and gets swept.
-    let streamingByteFloor = 512
-
+    /// Hooks are trusted for a window after their last report before the
+    /// device's screen channels may promote a session on their own — a rule the
+    /// daemon now enforces (`termiod/src/session/status.rs`). The app keeps the
+    /// timestamp because the Info pane says when the agent last spoke.
     /// Records the host surface's live grid so the next session's PTY is spawned
     /// at a size that matches the window, avoiding the first-prompt reflow. Only
     /// meaningful sizes are kept, and only when they change, so this is cheap to
@@ -1318,7 +1254,7 @@ final class TermioStore: ObservableObject {
         CommandLineTool.refreshSupportCopy()
 
         startHookMonitoring()
-        startSessionControl()
+        startAppSocket()
     }
 
     /// The live branch label for a folder (a project checkout or a session

@@ -24,10 +24,12 @@ release one, so both can run at the same time:
 | Daemon launchd job | `sh.termio.termiod` | `sh.termio.termiod.dev` |
 | Companion port | 8787 | 8788 |
 | CLI on PATH | `termio` | `termio-dev` |
-| Sparkle auto-update | on | **stripped** (dev never self-updates) |
+| Sparkle auto-update | on | **no update feed** (dev never self-updates) |
 
 All of this falls out of the `.dev` bundle-id suffix via `Sources/termio/Companion/AppChannel.swift`
-(paths + port) and `scripts/build-app.sh` (id, name, Sparkle strip, CLI rebind).
+(paths + port) and `scripts/build-app.sh` (id, name, `SUFeedURL` deletion, CLI rebind).
+Sparkle.framework itself is embedded on both channels — the binary links it either
+way — so a dev bundle still carries it; it just has nothing to check.
 
 termio is a plain SwiftPM executable (`Package.swift` → `executableTarget` named
 `termio`); `swift build` alone produces a bare binary with **no Dock icon**. So this

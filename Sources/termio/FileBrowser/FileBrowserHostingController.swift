@@ -73,10 +73,10 @@ final class FileBrowserHostingController: NSHostingController<AnyView>, @preconc
     }
 
     func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
-        state.selection == nil ? 0 : 1
+        state.selectedLocalURL == nil ? 0 : 1
     }
 
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
-        state.selection as? NSURL
+        state.selectedLocalURL as? NSURL
     }
 }

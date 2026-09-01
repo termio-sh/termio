@@ -210,12 +210,48 @@ fn parse_counter(line: &str) -> Option<u64> {
 
 /// Counters in a byte stream, split on line endings with `\r` removed so a
 /// boundary landing inside a `\r\n` pair does not read as a missing line.
+///
+/// Only *complete* lines are returned. Both readers stop mid-flood, so the
+/// bytes they hold almost always end part-way through a line, and a counter
+/// truncated between its digits still parses — as a much smaller number. Left
+/// in, `JOIN 25` sliced out of `JOIN 25484` reads as the stream jumping
+/// backwards, and `assert_consecutive` reports a replay the daemon never
+/// performed. Dropping the final element removes it: after a trailing newline
+/// that element is the empty string, and otherwise it is the partial line.
 fn stream_lines(bytes: &[u8]) -> Vec<String> {
-    String::from_utf8_lossy(bytes)
+    let mut lines: Vec<String> = String::from_utf8_lossy(bytes)
         .replace('\r', "")
         .split('\n')
         .map(str::to_string)
-        .collect()
+        .collect();
+    lines.pop();
+    lines
+}
+
+/// The truncation that made this test call the daemon a liar: a counter cut
+/// between its digits is a proper prefix of the line being written, so it
+/// parses, and it is smaller than the counter before it.
+#[test]
+fn a_line_cut_mid_counter_is_not_a_counter() {
+    let cut = b"JOIN 25482\r\nJOIN 25483\r\nJOIN 25";
+    assert_eq!(
+        stream_lines(cut),
+        vec!["JOIN 25482".to_string(), "JOIN 25483".to_string()],
+        "the partial line survived and would parse as counter 25"
+    );
+
+    let whole = b"JOIN 25482\r\nJOIN 25483\r\n";
+    assert_eq!(
+        stream_lines(whole),
+        vec!["JOIN 25482".to_string(), "JOIN 25483".to_string()],
+        "a stream ending on a line terminator lost a complete line"
+    );
+
+    let counters: Vec<u64> = stream_lines(cut)
+        .iter()
+        .filter_map(|line| parse_counter(line))
+        .collect();
+    assert_consecutive(&counters, "the fixture");
 }
 
 fn assert_consecutive(counters: &[u64], who: &str) {

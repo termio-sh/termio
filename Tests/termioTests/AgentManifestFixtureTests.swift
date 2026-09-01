@@ -160,7 +160,7 @@ final class AgentManifestFixtureTests: XCTestCase {
     }
 
     private func describe(_ rules: AgentStatusRules) -> [String: Any] {
-        ["working": rules.working.map(\.pattern), "attention": rules.attention.map(\.pattern)]
+        ["working": rules.working, "attention": rules.attention]
     }
 
     private func describe(_ hooks: AgentHookSpec) -> [String: Any] {

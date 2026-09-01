@@ -224,6 +224,8 @@
 	<string>Built-in</string>
 	<key>Cancel</key>
 	<string>Cancel</string>
+	<key>Can’t Compare</key>
+	<string>Can’t Compare</string>
 	<key>Can’t Search</key>
 	<string>Can’t Search</string>
 	<key>Can’t browse %@</key>
@@ -920,6 +922,8 @@
 	<string>On iPhone, tap the Mac pill ▸ Scan QR Code. Traffic crosses the relay you run yourself — no third party in the path.</string>
 	<key>Only regular files can be previewed.</key>
 	<string>Only regular files can be previewed.</string>
+	<key>Only the first %lld items are shown — update termio on this device to list them all.</key>
+	<string>Only the first %lld items are shown — update termio on this device to list them all.</string>
 	<key>Opacity</key>
 	<string>Opacity</string>
 	<key>Opacity below 100% lets the desktop show through; blur softens it. The window stays solid at full opacity.</key>
@@ -1258,6 +1262,8 @@
 	<string>Something went wrong loading this repository. Try again in a moment.</string>
 	<key>Sort</key>
 	<string>Sort</string>
+	<key>Special files can’t be previewed</key>
+	<string>Special files can’t be previewed</string>
 	<key>Split Down</key>
 	<string>Split Down</string>
 	<key>Split Left</key>
@@ -1336,6 +1342,8 @@
 	<string>The coding agents offered when you start a session</string>
 	<key>The device couldn’t read this checkout.</key>
 	<string>The device couldn’t read this checkout.</string>
+	<key>The device couldn’t read this comparison.</key>
+	<string>The device couldn’t read this comparison.</string>
 	<key>The devices in your ~/.ssh/config, and the keys that reach them</key>
 	<string>The devices in your ~/.ssh/config, and the keys that reach them</string>
 	<key>The folder was removed, but git couldn’t prune its stale worktree metadata.</key>

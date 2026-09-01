@@ -38,6 +38,13 @@ notify = { version = "8", default-features = false, features = ["macos_fsevent"]
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 frizbee = "0.13.0"
+# Agent status rules are regex, and after
+# `docs/design/20260831-companion-second-protocol-retires.md` §3 the daemon is
+# the only side that matches them. `default-features` off drops the
+# `perf-dfa-full` and Unicode tables this never needs; `unicode-case` and
+# `unicode-perl` stay because shipped manifests match spinner code-point ranges
+# case-insensitively.
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl", "unicode-gencat"] }
 # WebSocket framing for the opt-in loopback listener — the handshake and the
 # frame codec, nothing else. No `connect`, no `native-tls`, no `rustls`: TLS
 # belongs in Tailscale Serve or Caddy, and §H #3 forbids embedding crypto.
@@ -46,6 +53,16 @@ futures-util = { version = "0.3", default-features = false, features = ["sink"] 
 # QR generation is pure data — a bit matrix, not crypto. Default features pull
 # image and svg renderers this never uses.
 qrcode = { version = "0.14", default-features = false }
+# `fs.search` is ripgrep's engine as libraries, not an `rg` subprocess: termiod
+# ships as one static binary to boxes that have neither ripgrep nor, in the
+# containers, git. `grep-searcher` is the line/context/encoding machinery,
+# `grep-matcher` the trait it searches through, `ignore` the gitignore-aware
+# parallel-capable walk, and `aho-corasick` the fixed-string matcher behind
+# that trait — no regex engine, because the wire has always promised literals.
+grep-searcher = "0.1"
+grep-matcher = "0.1"
+ignore = "0.4"
+aho-corasick = { version = "1", default-features = false, features = ["std", "perf-literal"] }
 
 [dev-dependencies]
 # `connect` only exists so the WSS acceptance test can dial its own listener.

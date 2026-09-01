@@ -84,32 +84,141 @@ extension Termiod {
     static func gitDiff(
         route: TermiodRoute, root: String, path: String, staged: Bool, context: Int? = nil
     ) async throws -> (text: String, truncated: Bool) {
+        let result = try await readTier(
+            route: route, GitDiffResult.self, operation: "git diff \(path)"
+        ) { seq in
+            try encodeControl(GitDiffOperation(
+                root: root, path: path, staged: staged,
+                context: context.map(UInt64.init), seq: seq))
+        }
+        return (result.diff, result.truncated)
+    }
+
+    // MARK: History and Compare — the read tier
+
+    /// One read-tier request: send the operation, wait for its reply, decode it
+    /// here. None of these replies are in the shared decode table — each is its
+    /// own plane's answer and nothing else consumes it — so they all arrive as
+    /// `.unknown` and are decoded against `Wire`.
+    private static func readTier<Wire: Decodable & Sendable>(
+        route: TermiodRoute, _ wire: Wire.Type, operation: String,
+        encode: @escaping @Sendable (UInt64) throws -> Data
+    ) async throws -> Wire {
         try await offMain {
             try withPooledRequest(route: route, caps: gitCapabilities) { call, channel in
                 guard channel.capabilities.contains("git") else {
                     throw DeviceGitError.unsupported
                 }
-                try call.send(payload: encodeControl(GitDiffOperation(
-                    root: root, path: path, staged: staged,
-                    context: context.map(UInt64.init), seq: call.seq)))
+                try call.send(payload: encode(call.seq))
                 while true {
                     let frame = try call.next(
-                        timeoutSeconds: connectTimeoutSeconds, operation: "git diff \(path)")
+                        timeoutSeconds: connectTimeoutSeconds, operation: operation)
                     guard frame.kind == .control else { continue }
                     let reply = try decodeControl(frame.payload)
                     if case .error(let failure) = reply {
                         throw TermiodClientError.requestFailed(failure.message)
                     }
                     guard case .unknown = reply else { continue }
-                    // `git_diff_result` is not in the shared decode table: it is
-                    // this plane's own reply and nothing else consumes it, so it
-                    // is decoded here rather than grown into an enum every other
-                    // channel would carry.
-                    let result = try gitDecoder().decode(GitDiffResult.self, from: frame.payload)
-                    return (result.diff, result.truncated)
+                    return try gitDecoder().decode(Wire.self, from: frame.payload)
                 }
             }
         }
+    }
+
+    /// The checkout's recent commits, newest first — the History tab, and with
+    /// `range` (`base..HEAD`) the commit half of a branch comparison.
+    static func gitLog(
+        route: TermiodRoute, root: String, limit: Int = 100, range: String? = nil
+    ) async throws -> (commits: [GitCommit], truncated: Bool) {
+        let result = try await readTier(
+            route: route, WireGitLogResult.self, operation: "git log"
+        ) { seq in
+            try encodeControl(GitLogOperation(
+                root: root, limit: UInt64(limit), range: range, seq: seq))
+        }
+        return (commits(from: result.commits), result.truncated)
+    }
+
+    /// The files one commit touched — the rows a History entry expands to.
+    static func gitCommitFiles(
+        route: TermiodRoute, root: String, commit: String
+    ) async throws -> [GitChange] {
+        let result = try await readTier(
+            route: route, WireGitShowResult.self, operation: "git show \(commit)"
+        ) { seq in
+            try encodeControl(GitShowOperation(root: root, commit: commit, path: nil, seq: seq))
+        }
+        return result.files.compactMap(\.change)
+    }
+
+    /// One file's diff as of one commit — what a History file row opens.
+    static func gitShowDiff(
+        route: TermiodRoute, root: String, commit: String, path: String
+    ) async throws -> String {
+        try await readTier(
+            route: route, WireGitShowResult.self, operation: "git show \(commit) \(path)"
+        ) { seq in
+            try encodeControl(GitShowOperation(root: root, commit: commit, path: path, seq: seq))
+        }.diff
+    }
+
+    /// The checkout's refs, composed into the Compare tab's base-picker context
+    /// with the same suggestion rule the local pane uses.
+    static func gitBranches(
+        route: TermiodRoute, root: String
+    ) async throws -> GitService.CompareContext {
+        let result = try await readTier(
+            route: route, WireGitBranchesResult.self, operation: "git branches"
+        ) { seq in
+            try encodeControl(GitBranchesOperation(root: root, seq: seq))
+        }
+        return compareContext(from: result)
+    }
+
+    /// The branch against a base — files, commits, and behind count in one
+    /// reply, all describing the one head the device pinned before walking. A
+    /// `problem` means the checkout could not be compared and says why.
+    static func gitCompare(
+        route: TermiodRoute, root: String, base: String
+    ) async throws -> (
+        files: [GitChange], commits: [GitCommit], behind: Int,
+        problem: GitService.CompareProblem?
+    ) {
+        let result = try await readTier(
+            route: route, WireGitCompareResult.self, operation: "git compare \(base)"
+        ) { seq in
+            try encodeControl(GitCompareOperation(root: root, base: base, path: nil, seq: seq))
+        }
+        return (result.files.compactMap(\.change), commits(from: result.commits),
+                result.behind, result.compareProblem)
+    }
+
+    /// One file's three-dot diff across `base...HEAD` — what a Compare file
+    /// row opens.
+    static func gitCompareDiff(
+        route: TermiodRoute, root: String, base: String, path: String
+    ) async throws -> String {
+        try await readTier(
+            route: route, WireGitCompareResult.self, operation: "git compare \(base) \(path)"
+        ) { seq in
+            try encodeControl(GitCompareOperation(root: root, base: base, path: path, seq: seq))
+        }.diff
+    }
+
+    /// Composes the wire's ref list into the local pane's picker context, so
+    /// the Compare tab renders a device checkout through the identical view —
+    /// same lists, same suggestion rule.
+    static func compareContext(from result: WireGitBranchesResult) -> GitService.CompareContext {
+        let locals = result.branches.filter { !$0.remote && $0.name != result.current }
+            .map(\.name)
+        let remotes = result.branches.filter(\.remote).map(\.name)
+        return GitService.CompareContext(
+            branch: result.current,
+            remoteBranches: remotes,
+            localBranches: locals,
+            suggestedBase: GitService.suggestedCompareBase(
+                branch: result.current, originHead: result.defaultBranch,
+                remoteBranches: remotes, localBranches: locals))
     }
 
     /// Runs a blocking pooled request off the main thread. Every verb here is
@@ -169,6 +278,230 @@ extension Termiod {
             diff = try container.decodeIfPresent(String.self, forKey: .diff) ?? ""
             truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
         }
+    }
+
+    /// Maps wire commits to the pane's rows. The wire carries both the box's
+    /// own rendered `relative_date` and the instant: the box may speak another
+    /// language, so the date is formatted here from `timestamp` and the box's
+    /// rendering is only the fallback for a host too old to send one.
+    static func commits(from wire: [WireGitCommit]) -> [GitCommit] {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        let now = Date()
+        return wire.map { $0.commit(formatter: formatter, now: now) }
+    }
+
+    /// A commit-file status as `GitStatusCode` spells it on the wire. `nil` for
+    /// a status this build cannot draw — the row is dropped rather than drawn
+    /// as a guess, the same additive-evolution rule the status batches follow.
+    static func commitFileStatus(_ code: String) -> GitFileStatus? {
+        switch code {
+        case "modified", "type_changed": return .modified
+        case "added": return .added
+        case "deleted": return .deleted
+        case "renamed": return .renamed
+        case "copied": return .copied
+        default: return nil
+        }
+    }
+
+    struct WireGitCommit: Decodable, Sendable {
+        let sha: String
+        let shortSha: String
+        let subject: String
+        let author: String
+        let authorEmail: String
+        let relativeDate: String
+        let timestamp: Int64
+        let tags: [String]
+        let unpushed: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case sha, shortSha, subject, author, authorEmail, relativeDate
+            case timestamp, tags, unpushed
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            sha = try container.decode(String.self, forKey: .sha)
+            shortSha = try container.decodeIfPresent(String.self, forKey: .shortSha)
+                ?? String(sha.prefix(7))
+            subject = try container.decodeIfPresent(String.self, forKey: .subject) ?? ""
+            author = try container.decodeIfPresent(String.self, forKey: .author) ?? ""
+            authorEmail = try container.decodeIfPresent(String.self, forKey: .authorEmail) ?? ""
+            relativeDate = try container.decodeIfPresent(String.self, forKey: .relativeDate) ?? ""
+            timestamp = try container.decodeIfPresent(Int64.self, forKey: .timestamp) ?? 0
+            tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+            unpushed = try container.decodeIfPresent(Bool.self, forKey: .unpushed) ?? false
+        }
+
+        func commit(formatter: RelativeDateTimeFormatter, now: Date) -> GitCommit {
+            GitCommit(
+                sha: sha, shortSHA: shortSha, subject: subject,
+                author: author, authorEmail: authorEmail,
+                relativeDate: timestamp > 0
+                    ? formatter.localizedString(
+                        for: Date(timeIntervalSince1970: TimeInterval(timestamp)),
+                        relativeTo: now)
+                    : relativeDate,
+                tags: tags, isUnpushed: unpushed)
+        }
+    }
+
+    struct WireGitCommitFile: Decodable, Sendable {
+        let path: String
+        let originalPath: String?
+        let status: String
+        let additions: Int
+        let deletions: Int
+        let binary: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case path, originalPath, status, additions, deletions, binary
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            path = try container.decode(String.self, forKey: .path)
+            originalPath = try container.decodeIfPresent(String.self, forKey: .originalPath)
+            status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
+            additions = try container.decodeIfPresent(Int.self, forKey: .additions) ?? 0
+            deletions = try container.decodeIfPresent(Int.self, forKey: .deletions) ?? 0
+            binary = try container.decodeIfPresent(Bool.self, forKey: .binary) ?? false
+        }
+
+        var change: GitChange? {
+            guard let status = Termiod.commitFileStatus(status) else { return nil }
+            return GitChange(
+                path: path, status: status, isUntracked: false,
+                additions: additions, deletions: deletions,
+                originalPath: originalPath, isBinary: binary)
+        }
+    }
+
+    struct WireGitLogResult: Decodable, Sendable {
+        let commits: [WireGitCommit]
+        let truncated: Bool
+
+        private enum CodingKeys: String, CodingKey { case commits, truncated }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            commits = try container.decodeIfPresent([WireGitCommit].self, forKey: .commits) ?? []
+            truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+        }
+    }
+
+    struct WireGitShowResult: Decodable, Sendable {
+        let files: [WireGitCommitFile]
+        let diff: String
+        let truncated: Bool
+        let filesTruncated: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case files, diff, truncated, filesTruncated
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            files = try container.decodeIfPresent([WireGitCommitFile].self, forKey: .files) ?? []
+            diff = try container.decodeIfPresent(String.self, forKey: .diff) ?? ""
+            truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+            filesTruncated = try container.decodeIfPresent(
+                Bool.self, forKey: .filesTruncated) ?? false
+        }
+    }
+
+    struct WireGitBranch: Decodable, Sendable {
+        let name: String
+        let remote: Bool
+
+        private enum CodingKeys: String, CodingKey { case name, remote }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = try container.decode(String.self, forKey: .name)
+            remote = try container.decodeIfPresent(Bool.self, forKey: .remote) ?? false
+        }
+    }
+
+    struct WireGitBranchesResult: Decodable, Sendable {
+        let branches: [WireGitBranch]
+        let current: String?
+        let defaultBranch: String?
+
+        private enum CodingKeys: String, CodingKey { case branches, current, defaultBranch }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            branches = try container.decodeIfPresent([WireGitBranch].self, forKey: .branches) ?? []
+            current = try container.decodeIfPresent(String.self, forKey: .current)
+            defaultBranch = try container.decodeIfPresent(String.self, forKey: .defaultBranch)
+        }
+    }
+
+    struct WireGitCompareResult: Decodable, Sendable {
+        let files: [WireGitCommitFile]
+        let commits: [WireGitCommit]
+        let behind: Int
+        let diff: String
+        let problem: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case files, commits, behind, diff, problem
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            files = try container.decodeIfPresent([WireGitCommitFile].self, forKey: .files) ?? []
+            commits = try container.decodeIfPresent(
+                [WireGitCommit].self, forKey: .commits) ?? []
+            behind = try container.decodeIfPresent(Int.self, forKey: .behind) ?? 0
+            diff = try container.decodeIfPresent(String.self, forKey: .diff) ?? ""
+            problem = try container.decodeIfPresent(String.self, forKey: .problem)
+        }
+
+        /// The device's stated problem in the pane's vocabulary. A problem this
+        /// build has never heard of still *is* one — it must not fold into a
+        /// clean empty comparison, so it maps to the unreadable case.
+        var compareProblem: GitService.CompareProblem? {
+            switch problem {
+            case nil: return nil
+            case "missing_base": return .missingBase
+            case "no_common_history": return .noCommonHistory
+            default: return .unreadable
+            }
+        }
+    }
+
+    private struct GitLogOperation: Encodable {
+        let op = "git_log"
+        let root: String
+        let limit: UInt64
+        let range: String?
+        let seq: UInt64
+    }
+
+    private struct GitShowOperation: Encodable {
+        let op = "git_show"
+        let root: String
+        let commit: String
+        let path: String?
+        let seq: UInt64
+    }
+
+    private struct GitBranchesOperation: Encodable {
+        let op = "git_branches"
+        let root: String
+        let seq: UInt64
+    }
+
+    private struct GitCompareOperation: Encodable {
+        let op = "git_compare"
+        let root: String
+        let base: String
+        let path: String?
+        let seq: UInt64
     }
 
     private struct WireGitChanged: Decodable {

@@ -234,7 +234,16 @@ EOF
     esac
 }
 
-SOCKET="$HOME/Library/Application Support/$SUPPORT_DIR_NAME/session-control.sock"
+# The app answers on `app.sock`, named for the process that binds it the way the
+# daemon's `termiod.sock` is. An app older than that rename answers only on the
+# name below it, so fall back rather than fail: this script is often a symlink into
+# a checkout, and so can be newer than the app it is driving. Drop the fallback once
+# the rename has shipped in a release — no installed app binds the old name after
+# that.
+SOCKET_DIR="$HOME/Library/Application Support/$SUPPORT_DIR_NAME"
+SOCKET="$SOCKET_DIR/app.sock"
+[ -S "$SOCKET" ] || [ ! -S "$SOCKET_DIR/session-control.sock" ] || \
+    SOCKET="$SOCKET_DIR/session-control.sock"
 
 # The channel this copy of the script is bound to, spelled the way
 # `TERMIO_CHANNEL` spells it. Passed explicitly on every termiod this script

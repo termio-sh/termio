@@ -50,8 +50,11 @@ struct AgentDefinition: Identifiable {
     /// Screen-scrape rules that classify this agent's rendered viewport into
     /// working / needs-attention, for agents that ship no hook system. `nil` for the
     /// built-ins (they use the precise hook layer) and for user agents that declared
-    /// no `status` block (or that declared `hooks`, which take authority). See
-    /// `AgentStatusRules`.
+    /// no `status` block (or that declared `hooks`, which take authority).
+    ///
+    /// Carried as source and never matched here — the device runs them, against
+    /// its own live screen, for every client at once
+    /// (`termiod/src/session/status.rs`). See `AgentStatusRules`.
     let statusRules: AgentStatusRules?
     /// Rules over the agent's live `OSC 0/2` *title* — the in-band state broadcast
     /// some agents ship (Claude prefixes a braille spinner while working, Codex and
@@ -59,15 +62,16 @@ struct AgentDefinition: Identifiable {
     /// coexists with hooks rather than replacing them: the title is the agent's own
     /// deliberate signal on a channel that cannot break (no hook file, no external
     /// script, no socket), so it corrects a missed or late hook the instant the
-    /// title flips. See `TermioStore.applyTitleActivity` for the arbitration.
+    /// title flips. The arbitration is the device's
+    /// (`StatusEngine::note_title`); what arrives here is its verdict.
     let titleRules: AgentStatusRules?
     /// Whether this agent reports its busy/idle state as ConEmu-style `OSC 9;4`
     /// progress in the PTY byte stream (Grok natively; Claude Code once
     /// `terminalProgressBarEnabled` is set). When true, termio scans the raw stream
     /// for it and drives status the same way the title does — a correction channel
-    /// that coexists with hooks, never a competing authority. See `OSCProgressScanner`
-    /// and `TermioStore.applyProgressActivity`. Off for agents (and the plain shell)
-    /// that don't, so an unrelated tool's progress bar can't move an agent's dot.
+    /// that coexists with hooks, never a competing authority. The scan is the
+    /// device's (`StatusEngine::note_progress`). Off for agents (and the plain
+    /// shell) that don't, so an unrelated tool's progress bar can't move a dot.
     let emitsProgressStatus: Bool
     /// A manifest's declarative hook integration: the destination owned by the agent,
     /// a closed installer/dialect, and its event→state mapping.
@@ -384,71 +388,29 @@ typealias AgentPreset = AgentDefinition
 /// drives the stale-working sweep is fed here, so it costs one extra regex pass a
 /// second while a rule-carrying session is open.
 struct AgentStatusRules {
-    /// Patterns that mean "the agent is mid-turn" (its ticking spinner, a "thinking"
-    /// line). Any match → working.
-    let working: [NSRegularExpression]
-    /// Patterns that mean "the agent is blocked on the user" — a permission prompt, a
-    /// yes/no question, a "waiting for input" line. Any match → needs-attention, and
-    /// it wins over `working` because a prompt can sit under a still-spinning header.
-    let attention: [NSRegularExpression]
+    /// Patterns that mean "the agent is mid-turn" (its ticking spinner, a
+    /// "thinking" line). Any match → working.
+    let working: [String]
+    /// Patterns that mean "the agent is blocked on the user" — a permission
+    /// prompt, a yes/no question, a "waiting for input" line. Any match →
+    /// needs-attention, and it wins over `working` because a prompt can sit
+    /// under a still-spinning header.
+    let attention: [String]
 
-    enum Activity: Hashable {
-        case working
-        case attention
-        case idle
-    }
-
-    /// Like `classify`, but also returns the source pattern that decided the state
-    /// (or `nil` when nothing matched → idle). Feeds the `TERMIO_STATUS_TRACE`
-    /// diagnostic so a user tuning their `status` regex can see exactly which rule
-    /// fired on the live screen — the analogue of `herdr agent explain`.
-    func explain(_ screen: String) -> (activity: Activity, matched: String?) {
-        let range = NSRange(screen.startIndex..., in: screen)
-        if let hit = attention.first(where: { $0.firstMatch(in: screen, range: range) != nil }) {
-            return (.attention, hit.pattern)
-        }
-        if let hit = working.first(where: { $0.firstMatch(in: screen, range: range) != nil }) {
-            return (.working, hit.pattern)
-        }
-        return (.idle, nil)
-    }
-
-    /// Appends one classification line to `/tmp/termio-status.log` when
-    /// `TERMIO_STATUS_TRACE` is set. Costs nothing in normal runs (the caller checks
-    /// the environment once and skips this).
-    static func trace(agent: String, session: Session.ID, activity: Activity, matched: String?) {
-        let rule = matched.map { "/\($0)/" } ?? "(no match → idle)"
-        let line = "[\(session.uuidString.prefix(8))] \(agent) → \(activity) \(rule)\n"
-        let url = URL(fileURLWithPath: "/tmp/termio-status.log")
-        if let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile()
-            handle.write(Data(line.utf8))
-            try? handle.close()
-        } else {
-            try? Data(line.utf8).write(to: url)
-        }
-    }
-
-    /// Builds rules from a user's raw pattern lists, compiling case-insensitively and
-    /// dropping (with a log) any pattern that isn't valid regex, so one typo can't sink
-    /// the agent. Returns `nil` when nothing usable is declared, which leaves the agent
-    /// on the zero-config bell/OSC signal instead.
-    static func from(working: [String]?, attention: [String]?, label: String) -> AgentStatusRules? {
-        let compiledWorking = compile(working, label: label)
-        let compiledAttention = compile(attention, label: label)
-        guard !compiledWorking.isEmpty || !compiledAttention.isEmpty else { return nil }
-        return AgentStatusRules(working: compiledWorking, attention: compiledAttention)
-    }
-
-    private static func compile(_ patterns: [String]?, label: String) -> [NSRegularExpression] {
-        (patterns ?? []).compactMap { pattern in
-            do {
-                return try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
-            } catch {
-                AgentCatalog.log("\(label): ignoring invalid status pattern /\(pattern)/: \(error)")
-                return nil
-            }
-        }
+    /// Carried as source, never compiled. The app stopped matching these when
+    /// the status engine moved to the daemon
+    /// (`docs/design/20260831-companion-second-protocol-retires.md` §3): one
+    /// matcher means one accepted regex language, and two meant a screen that
+    /// classified differently on a Mac than on the box the agent runs on.
+    ///
+    /// They are still parsed here, and that is not vestigial — the app renders
+    /// the agent roster from these manifests, and the fixture contract
+    /// (`termiod/src/agent/fixture.rs`) is explicit that both parsers stay.
+    static func from(working: [String]?, attention: [String]?) -> AgentStatusRules? {
+        let working = working ?? []
+        let attention = attention ?? []
+        guard !working.isEmpty || !attention.isEmpty else { return nil }
+        return AgentStatusRules(working: working, attention: attention)
     }
 }
 
@@ -919,8 +881,8 @@ struct AgentManifest: Decodable {
     /// `status` is.
     var titleStatus: StatusSpec?
     /// Opt-in to reading this agent's ConEmu-style `OSC 9;4` progress out of the PTY
-    /// byte stream as a busy/idle signal (`OSCProgressScanner`). Off by default so a
-    /// plain shell's `wget`/`npm` progress bar can never move an agent's status dot.
+    /// byte stream as a busy/idle signal. Off by default so a plain shell's
+    /// `wget`/`npm` progress bar can never move an agent's status dot.
     var progressStatus: Bool?
     var hooks: HookSpec?
     /// Where the agent loads user-level Agent Skills from, so termio can install
@@ -1380,11 +1342,10 @@ struct AgentManifest: Decodable {
         let skillDir = try resolvedSkillDir()
         let resolvedConfigHome = try resolvedConfigHome(hooks: hookSpec, skillDir: skillDir)
         let statusRules = hookSpec == nil
-            ? AgentStatusRules.from(working: status?.working, attention: status?.attention, label: id)
+            ? AgentStatusRules.from(working: status?.working, attention: status?.attention)
             : nil
         let titleRules = AgentStatusRules.from(
-            working: titleStatus?.working, attention: titleStatus?.attention,
-            label: "\(id).title")
+            working: titleStatus?.working, attention: titleStatus?.attention)
 
         let resumeSpec = try resolvedResumeSpec()
 

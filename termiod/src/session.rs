@@ -32,6 +32,10 @@ mod foreground;
 
 use foreground::{Foreground, ForegroundResolution};
 
+pub mod status;
+
+use status::{OscScanner, OscSignal, StallStep, StatusEngine};
+
 mod wire;
 
 use wire::{
@@ -379,6 +383,15 @@ struct Session {
     ring_reconstructs_screen: bool,
     events: broadcast::Sender<Event>,
     vt: Vt,
+    /// This session's agent status, derived here rather than in each viewer.
+    /// See `session/status.rs` and
+    /// `docs/design/20260831-companion-second-protocol-retires.md` §3.
+    status_engine: StatusEngine,
+    /// The transcript address the last hook report carried, kept for the stall
+    /// detector's probe 3. Deliberately not on `SessionInfo`: it describes one
+    /// report, and a stale path surviving in a roster is a fact nobody
+    /// re-checked.
+    transcript_path: Option<String>,
     /// Who is in the tty's foreground and where the child is standing.
     /// `info()` reads this cache so a roster request never turns into a burst
     /// of syscalls.
@@ -474,6 +487,7 @@ impl Session {
                 master_fd: -1,
                 ring_len: self.ring_bytes as u64,
                 ring_reconstructs_screen: self.ring_reconstructs_screen,
+                status_clocks: self.status_engine.carried_clocks(std::time::Instant::now()),
             },
             master,
             ring,
@@ -519,6 +533,81 @@ impl Session {
         if !self.send_sidecar(SidecarCommand::Write(chunk)) {
             self.vt.release(len);
         }
+    }
+
+    /// Tell the sidecar what this session's status engine needs sampled. Called
+    /// whenever the resolved agent changes, so a shell promoted to a
+    /// hand-started agent starts paying for a screen read and a demoted one
+    /// stops.
+    fn sync_status_watch(&mut self) {
+        let screen = self.status_engine.wants_screen_watch();
+        let text = self.status_engine.wants_screen_text();
+        self.send_sidecar(SidecarCommand::SetStatusWatch { screen, text });
+    }
+
+    /// Re-resolve the session's agent against what is now in the tty's
+    /// foreground. The declared workstream wins; argv is how a hand-started
+    /// agent in a plain shell gets its rules at all.
+    fn refresh_status_facts(&mut self) {
+        let declared = self
+            .workstream
+            .as_ref()
+            .map(|workstream| workstream.agent_id.clone());
+        let argv = self.foreground.current().argv.clone();
+        let facts = status::resolve_facts(
+            status::catalog(),
+            declared.as_deref(),
+            argv.as_deref(),
+        );
+        if facts.agent_id == self.status_engine.facts().agent_id {
+            return;
+        }
+        self.status_engine.set_facts(facts);
+        self.sync_status_watch();
+    }
+
+    /// Publish one engine verdict: the cached wire status, then the event every
+    /// attachment and every `status:` subscriber reads.
+    ///
+    /// The event carries the state and the source and nothing a person reads —
+    /// the tooltip sentence, the dot colour and the done-versus-idle call on a
+    /// row a viewer is looking at all stay client-side (device architecture §4).
+    fn apply_status_change(&mut self, change: status::StatusChange) {
+        self.status = self.status_engine.wire_status();
+        self.emit_event(Event::Status {
+            session: self.id.to_string(),
+            status: self.status.clone(),
+            source: Some(change.source.as_str().to_string()),
+            turn_ended: change.turn_ended,
+            blocking: self.status_engine.blocking_attention(),
+            title: self.title.clone(),
+            transcript_path: None,
+            conversation_id: None,
+            tool: None,
+            prompt_title: None,
+        });
+    }
+
+    /// Where probe 2 fingerprints: the workstream's worktree when it has one,
+    /// else the child's live cwd, else the session's own directory. Resolved
+    /// once per window and then reused, so an agent `cd`-ing between repos
+    /// cannot masquerade as repo progress.
+    fn stall_probe_directory(&self) -> Option<String> {
+        if let Some(worktree) = self
+            .workstream
+            .as_ref()
+            .and_then(|workstream| workstream.worktree.clone())
+        {
+            return Some(worktree);
+        }
+        if let Some(cwd) = self.foreground.current().cwd.clone() {
+            return Some(cwd);
+        }
+        let project = self
+            .workstream
+            .as_ref()
+            .map(|workstream| workstream.project.clone());
+        project.or_else(|| (!self.cwd.is_empty()).then(|| self.cwd.clone()))
     }
 
     fn mark_vt_stale(&mut self, reason: String) {
@@ -1294,6 +1383,7 @@ pub fn spawn(
             status: "unknown".to_string(),
             title: None,
             workstream,
+            status_clocks: None,
         },
         pty,
         waiter,
@@ -1338,6 +1428,7 @@ pub fn adopt(
             status: carried.status,
             title: carried.title,
             workstream: carried.workstream,
+            status_clocks: carried.status_clocks,
         },
         pty,
         waiter,
@@ -1403,6 +1494,9 @@ struct Facts {
     status: String,
     title: Option<String>,
     workstream: Option<WorkstreamSpec>,
+    /// How long the carried status has been true. `None` for a fresh spawn,
+    /// which has no history to keep.
+    status_clocks: Option<crate::session::status::CarriedClocks>,
 }
 
 /// The half of session startup that a fresh spawn and a carried session share:
@@ -1432,6 +1526,11 @@ fn start(
 
     let (tx, rx) = mpsc::unbounded_channel();
     let termination_reason = Arc::new(Mutex::new(None));
+    let workstream_agent = facts
+        .workstream
+        .as_ref()
+        .map(|workstream| workstream.agent_id.clone());
+    let adopted_clocks = facts.status_clocks.clone();
     let mut session = Session {
         id: facts.id.clone(),
         name: facts.name,
@@ -1455,8 +1554,25 @@ fn start(
         ring_reconstructs_screen: true,
         events,
         vt: Vt::live(sidecar.commands, sidecar.queue),
+        status_engine: StatusEngine::new(
+            std::time::Instant::now(),
+            status::resolve_facts(
+                status::catalog(),
+                workstream_agent.as_deref(),
+                None,
+            ),
+        ),
+        transcript_path: None,
         foreground: Foreground::default(),
     };
+    // A carried or created session arrives with a status this actor did not
+    // derive; the engine adopts it so the roster and the engine never disagree
+    // about a session neither of them has seen a transition for yet.
+    let adopted = session.status.clone();
+    session
+        .status_engine
+        .seed(&adopted, adopted_clocks.as_ref(), std::time::Instant::now());
+    session.sync_status_watch();
     for chunk in replay.chunks {
         // Through the same two paths a live byte takes, in the same order: the
         // ring it will be replayed from, and the VT that answers snapshots.
@@ -1503,6 +1619,47 @@ struct Sidecar {
     thread: JoinHandle<()>,
 }
 
+/// One status tick's reading of the live screen, taken on the sidecar thread.
+///
+/// `changed` is a hash compare rather than a diff: the engine only asks whether
+/// the screen moved, and hashing a screen costs one pass where keeping the
+/// previous one costs a second copy per session.
+fn screen_tick(
+    terminal: Option<&termiod_vt::VtTerminal>,
+    faulted: bool,
+    want_text: bool,
+    signature: &mut Option<u64>,
+    pending_bytes: &mut u64,
+) -> sidecar::ScreenTick {
+    let bytes = std::mem::take(pending_bytes);
+    let text = match (faulted, terminal) {
+        (false, Some(terminal)) => terminal.screen_text().ok(),
+        _ => None,
+    };
+    let Some(text) = text else {
+        // No readable screen: treat output as activity rather than risk
+        // clearing a live turn, which is what the Mac did with a detached
+        // surface for the same reason.
+        return sidecar::ScreenTick {
+            changed: true,
+            bytes,
+            text: None,
+        };
+    };
+    let hashed = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut hasher);
+        hasher.finish()
+    };
+    let changed = signature.replace(hashed) != Some(hashed);
+    sidecar::ScreenTick {
+        changed,
+        bytes,
+        text: want_text.then_some(text),
+    }
+}
+
 fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
     // The channel itself stays unbounded and fire-and-forget — PTY delivery must
     // never wait for VT parsing. `SidecarQueue` is the budget instead: the
@@ -1530,17 +1687,57 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
             let mut grid_diff_wanted = false;
             let mut frame_seq = 0u32;
             let keyframe_every = keyframe_every_frames();
+            // The status engine's half of this thread: the two in-band channels
+            // are scanned out of the same tee that feeds the VT, and the screen
+            // is sampled on a timer. Both are off the delivery path by
+            // construction — bytes reached every client before this thread saw
+            // them — which is the anti-100x invariant, and both degrade with
+            // the VT rather than ahead of it: a sidecar that goes stale stops
+            // being fed, so status falls back to what hooks report.
+            let mut osc = OscScanner::default();
+            let mut watch_screen = false;
+            let mut watch_text = false;
+            let mut screen_signature: Option<u64> = None;
+            let mut pending_bytes = 0u64;
+            let mut next_tick = std::time::Instant::now() + sidecar::STATUS_TICK;
 
             loop {
                 let command = match pending.take() {
                     Some(command) => command,
-                    None => match command_rx.recv() {
-                        Ok(command) => command,
-                        Err(_) => break,
-                    },
+                    None => {
+                        if watch_screen {
+                            let now = std::time::Instant::now();
+                            if now >= next_tick {
+                                next_tick = now + sidecar::STATUS_TICK;
+                                let tick = screen_tick(
+                                    terminal.as_ref(),
+                                    fault.is_some(),
+                                    watch_text,
+                                    &mut screen_signature,
+                                    &mut pending_bytes,
+                                );
+                                if result_tx.send(SidecarResult::Screen(tick)).is_err() {
+                                    break;
+                                }
+                                continue;
+                            }
+                            match command_rx.recv_timeout(next_tick - now) {
+                                Ok(command) => command,
+                                Err(std_mpsc::RecvTimeoutError::Timeout) => continue,
+                                Err(std_mpsc::RecvTimeoutError::Disconnected) => break,
+                            }
+                        } else {
+                            match command_rx.recv() {
+                                Ok(command) => command,
+                                Err(_) => break,
+                            }
+                        }
+                    }
                 };
                 match command {
                     SidecarCommand::Write(bytes) => {
+                        let mut signals = osc.scan(&bytes);
+                        pending_bytes = pending_bytes.saturating_add(bytes.len() as u64);
                         if let Some(terminal) = terminal.as_mut() {
                             terminal.vt_write(&bytes);
                         }
@@ -1548,6 +1745,9 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                         loop {
                             match command_rx.try_recv() {
                                 Ok(SidecarCommand::Write(bytes)) => {
+                                    signals.append(&mut osc.scan(&bytes));
+                                    pending_bytes =
+                                        pending_bytes.saturating_add(bytes.len() as u64);
                                     if let Some(terminal) = terminal.as_mut() {
                                         terminal.vt_write(&bytes);
                                     }
@@ -1560,6 +1760,10 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                                 Err(std_mpsc::TryRecvError::Empty) => break,
                                 Err(std_mpsc::TryRecvError::Disconnected) => return,
                             }
+                        }
+                        if !signals.is_empty() && result_tx.send(SidecarResult::Osc(signals)).is_err()
+                        {
+                            break;
                         }
                         if grid_diff_wanted && fault.is_none() {
                             let damage =
@@ -1641,6 +1845,18 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                             break;
                         }
                     }
+                    SidecarCommand::SetStatusWatch { screen, text } => {
+                        if screen && !watch_screen {
+                            // Start the window at the screen as it is now, so a
+                            // row promoted to an agent mid-session does not read
+                            // its first tick as a change.
+                            screen_signature = None;
+                            pending_bytes = 0;
+                            next_tick = std::time::Instant::now() + sidecar::STATUS_TICK;
+                        }
+                        watch_screen = screen;
+                        watch_text = text;
+                    }
                     SidecarCommand::SetGridDiff(wanted) => grid_diff_wanted = wanted,
                     SidecarCommand::Shutdown => break,
                 }
@@ -1653,6 +1869,14 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
         queue,
         thread,
     })
+}
+
+/// One finished stall measurement, on its way back to the actor that asked.
+struct StallResult {
+    generation: u64,
+    directory: Option<String>,
+    measured: status::StallMeasurement,
+    capture: bool,
 }
 
 async fn run(
@@ -1679,17 +1903,108 @@ async fn run(
     // back here. Held for the life of the loop so the branch below never sees a
     // closed channel while the session is alive.
     let (foreground_tx, mut foreground_rx) = mpsc::unbounded_channel::<ForegroundResolution>();
+    // The stale-working timeout it enforces is a handful of seconds, so the
+    // sweep has to tick at that granularity to clear a stuck spinner promptly.
+    // The stall probes ride the same tick and gate themselves on their own,
+    // much longer, window.
+    let mut status_sweep = tokio::time::interval(std::time::Duration::from_secs(2));
+    status_sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let (stall_tx, mut stall_rx) = mpsc::unbounded_channel::<StallResult>();
 
     loop {
         tokio::select! {
             _ = foreground_poll.tick() => {
                 if session.foreground.poll(&session.pty, session.pid, &foreground_tx) {
+                    session.refresh_status_facts();
                     session.emit_roster();
                 }
             }
             Some(resolution) = foreground_rx.recv() => {
                 if session.foreground.apply(resolution) {
+                    // A hand-started agent becomes an agent here, which is when
+                    // its rules start applying. A demotion back to the shell is
+                    // the same edge run backwards.
+                    session.refresh_status_facts();
                     session.emit_roster();
+                }
+            }
+            _ = status_sweep.tick() => {
+                let now = std::time::Instant::now();
+                if let Some(change) = session.status_engine.sweep_stale_working(now) {
+                    session.apply_status_change(change);
+                }
+                match session.status_engine.stall_step(now) {
+                    StallStep::Nothing => {}
+                    StallStep::Capture { generation } => {
+                        let directory = session.stall_probe_directory();
+                        let transcript = session.transcript_path.clone();
+                        let baseline = session
+                            .status_engine
+                            .stall_probe()
+                            .and_then(|probe| probe.baseline.clone());
+                        let tx = stall_tx.clone();
+                        // Off the actor thread: probe 2 shells out to git, and
+                        // a roster request must never wait behind it.
+                        tokio::task::spawn_blocking(move || {
+                            let measured = status::measure_stall_evidence(
+                                directory.as_deref(),
+                                transcript.as_deref(),
+                                baseline.as_ref(),
+                            );
+                            let _ = tx.send(StallResult {
+                                generation,
+                                directory,
+                                measured,
+                                capture: true,
+                            });
+                        });
+                    }
+                    StallStep::Probe { generation, directory, transcript } => {
+                        let transcript = transcript.or_else(|| session.transcript_path.clone());
+                        let baseline = session
+                            .status_engine
+                            .stall_probe()
+                            .and_then(|probe| probe.baseline.clone());
+                        let tx = stall_tx.clone();
+                        let probe_directory = directory.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let measured = status::measure_stall_evidence(
+                                probe_directory.as_deref(),
+                                transcript.as_deref(),
+                                baseline.as_ref(),
+                            );
+                            let _ = tx.send(StallResult {
+                                generation,
+                                directory,
+                                measured,
+                                capture: false,
+                            });
+                        });
+                    }
+                }
+            }
+            Some(result) = stall_rx.recv() => {
+                let assessment = session.status_engine.apply_stall_measurement(
+                    result.generation,
+                    result.directory,
+                    &result.measured,
+                    result.capture,
+                    std::time::Instant::now(),
+                );
+                if let Some(status::Assessment::Stalled { transcript_lines_grown }) = assessment {
+                    let working_seconds = session
+                        .status_engine
+                        .working_since()
+                        .map(|since| since.elapsed().as_secs())
+                        .unwrap_or(0);
+                    // Watch-plane only: the session's real status stays
+                    // `working`. A stall is evidence, not a state, and nothing
+                    // about it is certain enough to move a dot.
+                    session.emit_event(Event::Stalled {
+                        session: session.id.to_string(),
+                        working_seconds,
+                        transcript_lines_grown: transcript_lines_grown as u64,
+                    });
                 }
             }
             _ = tokio::task::yield_now(), if !history_stages.is_empty() => {
@@ -1751,6 +2066,50 @@ async fn run(
                     Some(SidecarResult::Grid(grid)) => session.fan_out_grid(grid),
                     Some(SidecarResult::Keyframe(snapshot)) => {
                         session.fan_out_keyframe(snapshot);
+                    }
+                    Some(SidecarResult::Osc(signals)) => {
+                        let now = std::time::Instant::now();
+                        for signal in signals {
+                            let change = match signal {
+                                OscSignal::Title(title) => {
+                                    // The live title is the row's name as well
+                                    // as a status channel: a client attached
+                                    // straight to this box has no other source
+                                    // for it, and the Mac's surface callback is
+                                    // about to stop being one.
+                                    //
+                                    // Stored, never broadcast on its own. A
+                                    // spinner reprints several times a second,
+                                    // so a roster event per frame would be a
+                                    // fan-out storm for a string that changes
+                                    // by one glyph. It rides the status event
+                                    // when the status moves, and `info()` reads
+                                    // the current one whenever a roster is
+                                    // actually asked for.
+                                    session.title = Some(title.clone());
+                                    session.status_engine.note_title(&title, now)
+                                }
+                                OscSignal::Progress(activity) => {
+                                    session.status_engine.note_progress(activity, now)
+                                }
+                            };
+                            if let Some(change) = change {
+                                session.apply_status_change(change);
+                            }
+                        }
+                    }
+                    Some(SidecarResult::Screen(tick)) => {
+                        let now = std::time::Instant::now();
+                        if let Some(change) =
+                            session.status_engine.note_output(tick.changed, tick.bytes, now)
+                        {
+                            session.apply_status_change(change);
+                        }
+                        if let Some(text) = tick.text {
+                            if let Some(change) = session.status_engine.note_screen(&text, now) {
+                                session.apply_status_change(change);
+                            }
+                        }
                     }
                     None => {
                         sidecar_results_open = false;
@@ -1960,6 +2319,13 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
         }
         SessionMsg::Input { id, data } => {
             if session.writer.as_ref() == Some(&id) {
+                // The choke point every human keystroke crosses — this Mac, a
+                // phone, a browser — which is what the screen-streak promotion
+                // has to stand down for. The Mac's own version of this only ever
+                // saw its own window's keys.
+                session
+                    .status_engine
+                    .note_user_input(std::time::Instant::now());
                 let _ = session.input_tx.send(data);
             } else {
                 session.reject_not_writer(&id);
@@ -2009,13 +2375,28 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
             details,
             reply,
         } => {
-            session.status = status;
             if title.is_some() {
                 session.title = title;
             }
+            if let Some(path) = details.transcript_path.as_deref() {
+                // Probe 3 measures this file's growth, and a hook is the only
+                // thing that knows where an agent writes.
+                session.transcript_path = Some(path.to_string());
+            }
+            let change = session
+                .status_engine
+                .note_hook(&status, std::time::Instant::now());
+            session.status = session.status_engine.wire_status();
+            // The report's four facts ride the event whether or not the state
+            // moved — a tool name on a session already working is still news —
+            // so this event is built here rather than through
+            // `apply_status_change`.
             session.emit_event(Event::Status {
                 session: session.id.to_string(),
                 status: session.status.clone(),
+                source: Some(status::StatusSource::Hook.as_str().to_string()),
+                turn_ended: change.is_some_and(|change| change.turn_ended),
+                blocking: session.status_engine.blocking_attention(),
                 title: session.title.clone(),
                 transcript_path: details.transcript_path,
                 conversation_id: details.conversation_id,
@@ -2198,6 +2579,11 @@ mod tests {
                 ring_reconstructs_screen: true,
                 events,
                 vt: Vt::live(sidecar_tx, sidecar_queue),
+                status_engine: super::StatusEngine::new(
+                    std::time::Instant::now(),
+                    super::status::SessionFacts::default(),
+                ),
+                transcript_path: None,
                 foreground: super::Foreground::default(),
             },
             event_rx,
@@ -2236,6 +2622,10 @@ mod tests {
             }
             SidecarResult::Grid(grid) => session.fan_out_grid(grid),
             SidecarResult::Keyframe(snapshot) => session.fan_out_keyframe(snapshot),
+            // The status half of the sidecar's output. These cases assert the
+            // snapshot FIFO's boundaries; the engine has its own tests, and
+            // routing them here would put a wall clock in an ordering test.
+            SidecarResult::Osc(_) | SidecarResult::Screen(_) => {}
         }
     }
 
@@ -3037,6 +3427,11 @@ mod tests {
             ring_reconstructs_screen: true,
             events,
             vt: Vt::live(sidecar_tx, Arc::new(SidecarQueue::new())),
+            status_engine: super::StatusEngine::new(
+                std::time::Instant::now(),
+                super::status::SessionFacts::default(),
+            ),
+            transcript_path: None,
             foreground: super::Foreground::default(),
         };
 

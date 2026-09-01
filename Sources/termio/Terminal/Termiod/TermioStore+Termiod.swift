@@ -99,15 +99,8 @@ extension TermioStore {
                            to inMemory: InMemoryTerminalSession,
                            for session: Session) {
         let isAgentSession = session.agent != .terminal && !session.isSSH
-        // The same status tap the in-process PTY installs on its output. The daemon
-        // owning the PTY changes where the bytes come from, not what they say about
-        // the agent — and the channels this restores (screen liveness, declared
-        // screen rules, `OSC 9;4`) are what keep a spinner truthful when the host's
-        // own `E status` is silent and a hook report went missing.
-        let statusTap = makeStatusTap(for: session, surface: inMemory, backend: link)
         link.onOutput = { [weak inMemory] data in
             inMemory?.receive(data)
-            statusTap(data)
         }
         // The attach handshake is the cheapest device discovery there is — it was
         // going to happen anyway — so every surfaced session teaches the app which
@@ -140,11 +133,14 @@ extension TermioStore {
         link.onStatus = { [weak self] status in
             self?.applyTermiodStatus(status, for: session.id)
         }
+        link.onStalled = { [weak self] stall in
+            self?.applyTermiodStalled(stall, for: session.id)
+        }
         // Input gating only: the link stops sending `D` frames the daemon would
         // reject and claims by typing. Size is not part of the token — the
         // daemon derives the PTY from every attachment's viewport declaration,
-        // and this pane renders whatever grid `E resized` announces inside its
-        // own frame (content narrower than the pane, the rest blank).
+        // so the token moving never moves the grid, and the pane's letterbox no
+        // longer depends on who holds it (`SessionRuntime.sharedGrid`).
         link.onWriter = { writer in
             Log.termiod.info("""
             session \(session.id.uuidString, privacy: .public) is now \
@@ -189,6 +185,30 @@ extension TermioStore {
     }
 
     // MARK: - Host-reported workstream status
+
+    /// Lands the device's one `stalled` signal on the watch plane (device
+    /// architecture §4.7). The session's own status is untouched: from outside
+    /// an agent a quiet long build and a wedged loop are indistinguishable,
+    /// which is exactly why this plane signals and never kills — no new
+    /// `SessionStatus` case, and the sidebar and menu bar do not move.
+    ///
+    /// The default `termio sessions watch` filter is done + needs-you, so this
+    /// stays opt-in behind `--state stalled`. The evidence sentence is worded
+    /// here rather than on the device, because it is prose a person reads.
+    func applyTermiodStalled(_ stall: Termiod.StalledPayload, for id: Session.ID) {
+        guard let session = session(id), let project = project(for: id) else { return }
+        let minutes = max(1, Int(stall.workingSeconds / 60))
+        let grown = Int(stall.transcriptLinesGrown)
+        let growth = "transcript +\(grown) line" + (grown == 1 ? "" : "s")
+        var event = SessionWatchEvent(
+            projectID: project.id,
+            link: sessionLink(for: session),
+            status: "stalled",
+            title: displayTitle(for: session),
+            cwd: runtimes[id]?.workingDirectory ?? "")
+        event.evidence = "working \(minutes)m, no repo change, \(growth)"
+        SessionWatchHub.shared.broadcast(event)
+    }
 
     /// Lands an `E status` event on the session's row. The vocabulary is the
     /// protocol's; the mapping to a dot, a spinner, or a notification mirrors
@@ -262,6 +282,18 @@ extension TermioStore {
             agentExitStreaks[id] = nil
             if runtimes[id]?.agentExitNotice != nil { runtimes[id]?.agentExitNotice = nil }
         }
+        // `done` and `idle` are the same fact seen from two sides, and which one
+        // a row shows depends on whether *this* window is looking at it — the
+        // one piece of status arbitration that stays with the viewer (device
+        // architecture §4.1: selection is the viewer's). A `done` the agent
+        // itself reported means done everywhere and is left alone; a turn the
+        // device concluded from a screen, a title or a progress marker is judged
+        // here.
+        if report.turnEnded, report.status == "idle" {
+            clearWorking(id)
+            setStatus(isViewing(id) ? .idle : .done, for: id)
+            return
+        }
         switch report.status {
         case "working":
             // No "is this really an agent row?" guard, deliberately: an
@@ -278,9 +310,15 @@ extension TermioStore {
             lastWorkingAt[id] = Date()
         case "needs_you":
             // The agent is blocked waiting on the user. This is an observable
-            // blocking condition, so its dot survives a click.
+            // blocking condition, so its dot survives a click — but only when
+            // the device says the condition has a resolving transition. A bell
+            // does not, and gets a dot a click clears.
             clearWorking(id)
-            flagBlockingAttention(for: id)
+            if report.blocking ?? true {
+                flagBlockingAttention(for: id)
+            } else if !isViewing(id) {
+                setStatus(.needsAttention, for: id)
+            }
         case "done":
             // Always leave a "ready for you" green dot, even on the session the
             // user is looking at, so a finished agent stays on the menu-bar
@@ -447,7 +485,6 @@ extension TermioStore {
                           isPlainTerminal: Bool,
                           surface: InMemoryTerminalSession?) {
         termiodLinks[id] = nil
-        lastScreenActivity[id] = nil
         // The same policy the in-process PTY runs, on the same three inputs. The
         // self-update check is no longer missing here: the app cannot pin a
         // process it does not own, but the daemon that owns it can, and the exit
@@ -1544,8 +1581,8 @@ extension TermioStore {
 
 /// Evidence that a declared agent's wrapped shell has outlived it (RFC 20260830
 /// §D2): consecutive foreground samples showing a login shell where the agent
-/// should be. The same evidence bar as the status-promotion streak
-/// (`noteOutputActivity`) — two consecutive samples, ~4s at the sampler's 2s
+/// should be. The same evidence bar as the device's status-promotion streak
+/// (`StatusEngine::note_output`) — two consecutive samples, ~4s at the 2s
 /// cadence — and the same stand-down rule as every other host-reported fact: an
 /// unanswered sample (`nil` argv) is not evidence and leaves the streak alone.
 /// A plain value type so the verdict logic is testable without the store.

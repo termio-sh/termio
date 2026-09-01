@@ -22,9 +22,9 @@
 #   TERMIO_CHANNEL   which identity to build; only two values exist. Unset (or
 #                    "release") builds ./termio.app. "dev" builds a side-by-side
 #                    termio-dev.app (bundle id ….dev, its own ~/.termio-dev state +
-#                    companion port 8788, Sparkle stripped) so it runs beside an
-#                    installed release build. Any other value is rejected — see
-#                    the channel check below for why.
+#                    companion port 8788, Sparkle's update feed removed) so it runs
+#                    beside an installed release build. Any other value is rejected —
+#                    see the channel check below for why.
 #   TERMIO_VERSION   CFBundleShortVersionString to stamp (default: keep Info.plist's)
 #   TERMIO_BUILD     CFBundleVersion to stamp; must increase across shipped builds
 #                    because Sparkle compares it (default: keep Info.plist's)
@@ -43,7 +43,7 @@ configuration="release"
 # wrapper and identity change per channel.
 product_name="termio"
 # TERMIO_CHANNEL=dev builds a side-by-side dev app (termio-dev.app, id ….dev, its
-# own state dir + port, Sparkle stripped) so it can run beside an installed release.
+# own state dir + port, no Sparkle update feed) so it can run beside an installed release.
 # Unset or "release" builds the shipped identity. Lower-cased the way AppChannel
 # lower-cases it at runtime, so the two agree on what a channel name is.
 channel="$(printf '%s' "${TERMIO_CHANNEL:-release}" | tr '[:upper:]' '[:lower:]')"
@@ -363,11 +363,13 @@ if [[ -n "${TERMIO_BUILD:-}" ]]; then
 fi
 
 # Dev channel: suffix the bundle id (so LaunchServices, UserDefaults, and
-# AppChannel's paths/port all diverge from the release build), rename it, and strip
-# Sparkle so the dev app can never auto-update itself onto the release channel.
+# AppChannel's paths/port all diverge from the release build), rename it, and delete
+# Sparkle's update feed so the dev app can never auto-update itself onto the release
+# channel. The framework itself still ships: the binary links it on both channels, so
+# a bundle without it fails to launch. What changes is that there is no feed to check.
 if [[ "$channel" == "dev" ]]; then
     base_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")"
-    echo "==> Dev channel: bundle id ${base_id}.dev, Sparkle stripped"
+    echo "==> Dev channel: bundle id ${base_id}.dev, Sparkle update feed removed"
     /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${base_id}.dev" "$plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleName termio dev" "$plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName termio dev" "$plist"
