@@ -65,14 +65,39 @@ final class TerminalViewController: UIViewController {
 
     private var companionSession: InMemoryTerminalSession?
 
-    /// Whether this screen is the one the user is looking at. The container
-    /// parks a screen rather than tearing it down — the surface and the socket
-    /// both stay alive — so nothing else tells the device that its viewport
-    /// should leave the session's size min. Without it a phone that merely
-    /// swiped back held every other viewer at phone width.
+    /// Whether this screen is the one the user is looking at, and whether the
+    /// app is frontmost. Both have to be true for this phone's viewport to sit
+    /// in the session's size min, and they move independently: the container
+    /// parks a screen rather than tearing it down, and the app can go to the
+    /// background with a session still on screen.
+    private var screenIsOnScreen = true
+    private var applicationIsActive = true
+
+    /// The container parks a screen rather than tearing it down — the surface
+    /// and the socket both stay alive — so nothing else tells the device that
+    /// this viewport should leave the session's size min. Without it a phone
+    /// that merely swiped back held every other viewer at phone width.
     func setRendering(_ visible: Bool) {
+        guard screenIsOnScreen != visible else { return }
+        screenIsOnScreen = visible
+        publishRendering()
+    }
+
+    /// The same bit for the app as a whole. A locked phone renders nothing, and
+    /// the socket usually — but not reliably — dies on the way to the
+    /// background; until it does, a session left open on screen keeps pinning
+    /// every other viewer at phone width. Composed with `screenIsOnScreen` the
+    /// way the Mac composes `setSurfaceVisible` with its app-active state, so a
+    /// parked screen stays out of the min when the app comes back.
+    private func applicationActivityChanged(_ active: Bool) {
+        guard applicationIsActive != active else { return }
+        applicationIsActive = active
+        publishRendering()
+    }
+
+    private func publishRendering() {
         guard case .device = backend else { return }
-        companion?.setRendering(visible)
+        companion?.setRendering(screenIsOnScreen && applicationIsActive)
     }
     private let headerBar = UIStackView()
     private let contextLabel = UILabel()
@@ -95,6 +120,8 @@ final class TerminalViewController: UIViewController {
         return v
     }()
     private var settingsObserver: NSObjectProtocol?
+    /// Background/foreground observers, for the app half of the rendering bit.
+    private var lifecycleObservers: [NSObjectProtocol] = []
     /// System edit menu over the live selection (Copy/Paste), presented at
     /// the touch-selection release point.
     private lazy var editMenuInteraction = UIEditMenuInteraction(delegate: self)
@@ -163,6 +190,9 @@ final class TerminalViewController: UIViewController {
         if let settingsObserver {
             NotificationCenter.default.removeObserver(settingsObserver)
         }
+        for observer in lifecycleObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     @available(*, unavailable)
@@ -183,6 +213,22 @@ final class TerminalViewController: UIViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.applyAppearanceSettings() }
         }
+        // Backgrounding stops this phone rendering as surely as parking the
+        // screen does; `didBecomeActive` rather than `willEnterForeground` so a
+        // link that reconnects on the same notification finds the viewport
+        // already declared.
+        lifecycleObservers = [
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.applicationActivityChanged(false) }
+            },
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.applicationActivityChanged(true) }
+            },
+        ]
     }
 
     override func viewDidAppear(_ animated: Bool) {

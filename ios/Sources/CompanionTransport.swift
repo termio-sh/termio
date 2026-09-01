@@ -38,6 +38,12 @@ final class CompanionTransport {
     /// holds the write token; typing is what takes the token.
     private var gridCols = 0
     private var gridRows = 0
+    /// Whether this phone is currently rendering the bridged session, re-sent
+    /// on every (re)connect for the same reason the grid is: a reconnect gives
+    /// the Mac a *fresh* bridge, which assumes a viewer is looking. A parked
+    /// screen that reconnected without this rejoined the daemon's size min and
+    /// held every other viewer at phone width again. Guarded by `gridLock`.
+    private var renderingVisible = true
     private let gridLock = NSLock()
     /// Guards send order: `auth` must be the first frame on the socket. The
     /// terminal view calls `resize` (→ `sendGrid`) as it lays out, which can land
@@ -117,8 +123,20 @@ final class CompanionTransport {
     /// Whether this phone still has the bridged session on screen. Parking a
     /// screen keeps the socket, so the Mac has no other way to learn that the
     /// viewport it is holding in the daemon's size min stopped being looked at.
+    ///
+    /// Recorded before it is sent, and re-sent by `sendPreamble`: a bit dropped
+    /// because the socket was down — backgrounding declares one at exactly that
+    /// moment — would otherwise never reach the Mac at all.
     func setRendering(_ visible: Bool) {
         gridLock.lock()
+        renderingVisible = visible
+        gridLock.unlock()
+        sendRendering()
+    }
+
+    private func sendRendering() {
+        gridLock.lock()
+        let visible = renderingVisible
         let ready = authSent
         gridLock.unlock()
         guard ready else { return }
@@ -178,6 +196,10 @@ final class CompanionTransport {
             link.send(CompanionControl.attach(sessionID: attachSessionID).encoded())
         }
         sendGrid()
+        // A reconnect builds a fresh bridge on the Mac, which assumes a viewer
+        // is looking; a parked or backgrounded screen has to say otherwise
+        // again or it silently rejoins the session's size min.
+        sendRendering()
     }
 
     private func receive(_ text: String) {
