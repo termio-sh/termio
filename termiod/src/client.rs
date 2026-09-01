@@ -431,6 +431,7 @@ pub async fn observe(
             rows: 24,
             cols: 80,
             mode: AttachMode::Observe,
+            rendering: true,
             seq: Some(1),
         },
     )
@@ -589,6 +590,7 @@ pub async fn attach(
             rows,
             cols,
             mode: AttachMode::Interact,
+            rendering: true,
             seq: Some(1),
         },
     )
@@ -972,6 +974,7 @@ pub async fn observe_screen_rows(target: &str, rows: u16, cols: u16) -> Result<V
             rows,
             cols,
             mode: AttachMode::Observe,
+            rendering: true,
             seq: Some(2),
         },
     )

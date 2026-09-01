@@ -59,6 +59,14 @@ final class TermiodSession: DeviceSession {
     /// Whether this screen ever had a session, which is what separates "the
     /// device refused a request" from "that session is not there".
     private var everAttached = false
+    /// Whether this phone's surface is on screen. A session parked behind the
+    /// list keeps its socket, its stream and its declared grid, but leaves the
+    /// device's size min — otherwise a phone that merely stopped looking holds
+    /// every other viewer at phone width.
+    private var rendering = true
+    private var sentRendering: Bool?
+    /// Whether the daemon understands the five-byte `R` frame (`viewport`).
+    private var supportsViewport = false
 
     init(endpoint: DeviceEndpoint, sessionName: String) {
         self.sessionName = sessionName
@@ -70,7 +78,13 @@ final class TermiodSession: DeviceSession {
             capabilities: Termiod.attachCapabilities,
             delegateQueue: queue, pingRunLoopMode: .common
         )
-        channel.onReady = { [weak self] _ in self?.sendAttach() }
+        channel.onReady = { [weak self] handshake in
+            // Recorded before the attach goes out: the five-byte `R` frame is
+            // only safe against a daemon that granted `viewport`, and an older
+            // one drops the attachment for sending it.
+            self?.supportsViewport = handshake.caps.contains("viewport")
+            self?.sendAttach()
+        }
         // An attach channel carries one attachment and nothing else, so there is
         // never a second request for a reply to be confused with — the `re` is
         // real but has nothing to demultiplex.
@@ -176,6 +190,7 @@ final class TermiodSession: DeviceSession {
                 rows: grid.rows > 0 ? grid.rows : 24,
                 cols: grid.cols > 0 ? grid.cols : 80)
             sentGrid = declared
+            sentRendering = rendering
             channel.send(kind: .control, payload: try Termiod.attachPayload(
                 target: sessionName,
                 // Never `create_if_missing`: a screen opens on a session that
@@ -186,7 +201,8 @@ final class TermiodSession: DeviceSession {
                 // open; 24×80 stands in when it has not laid out yet, and the
                 // first `R` corrects it.
                 rows: declared.rows,
-                cols: declared.cols
+                cols: declared.cols,
+                rendering: rendering
             ))
         } catch {
             Log.device.error("""
@@ -364,9 +380,28 @@ final class TermiodSession: DeviceSession {
     }
 
     private func sendResize(_ grid: TerminalGrid) {
-        guard sentGrid != grid else { return }
+        // Against a daemon without the capability the bit is not on the wire at
+        // all, so it must not be part of the dedupe either — otherwise a
+        // visibility flip would suppress the next real grid change.
+        let declared = supportsViewport ? rendering : true
+        guard sentGrid != grid || sentRendering != declared else { return }
         sentGrid = grid
-        channel.send(kind: .resize, payload: Termiod.resizePayload(grid.rows, grid.cols))
+        sentRendering = declared
+        channel.send(
+            kind: .resize,
+            payload: Termiod.resizePayload(grid.rows, grid.cols, rendering: declared))
+    }
+
+    /// Whether this session is the one on screen. The phone parks a screen
+    /// rather than tearing it down, so nothing else tells the daemon that the
+    /// surface behind it stopped being looked at.
+    func setRendering(_ visible: Bool) {
+        queue.async { [self] in
+            guard rendering != visible else { return }
+            rendering = visible
+            guard attached, desiredGrid.rows > 0, desiredGrid.cols > 0 else { return }
+            sendResize(desiredGrid)
+        }
     }
 
     private func publishSharedGrid() {

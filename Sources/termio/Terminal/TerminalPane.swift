@@ -150,17 +150,29 @@ struct TerminalPane: View {
                 // ungrouped session has no split geometry and fills the pane.
                 let rect = zoomed && isSelected ? bounds : (paneFrames[id] ?? bounds)
                 let context = store.surface(for: item.session)
-                // The surface always fills its pane. Under the daemon's
-                // per-axis-min size policy the PTY never outgrows any rendering
-                // viewport, so a pane wider than the shared grid shows the
-                // content with the remainder blank — no letterbox, and no
-                // second grid for the surface to be laid out at. (The
-                // `SharedGridLetterbox` that used to sit here shrank the
-                // surface to the shared grid, which turned this pane's
-                // viewport declaration into the shared grid itself and pinned
-                // the min at the smallest size any viewer ever had.)
-                ZStack {
-                    paneBackground
+                // The surface is laid out at the shared grid, not at the pane:
+                // the bytes on the wire are wrapped for the PTY's grid, and a
+                // surface parsing them at its own width re-wraps every long
+                // line — §C.5 divergence that no barrier repairs, because no
+                // size changed. Under the per-axis-min policy the shared grid
+                // is never larger than a rendering pane, so what surrounds it
+                // is blank space rather than a clip.
+                //
+                // What this pane *declares* is its own capacity, sent straight
+                // from the geometry below. That is the half the letterbox must
+                // not feed: declaring the letterboxed surface's grid would make
+                // this pane's viewport the min itself and pin the session at
+                // the narrowest size any viewer ever had.
+                SharedGridLetterbox(
+                    runtime: store.runtime(for: id),
+                    context: context,
+                    paneSize: rect.size,
+                    paddingX: CGFloat(settings.windowPadding),
+                    background: paneBackground,
+                    declareViewport: { rows, cols in
+                        store.declareTermiodViewport(id, rows: rows, cols: cols)
+                    }
+                ) {
                     ManagedTerminalSurface(
                         context: context,
                         isSelected: isSelected,
@@ -1101,3 +1113,85 @@ private struct SplitDividerHandle: View {
     }
 }
 
+
+/// Lays the surface out at the session's shared grid inside a larger pane, and
+/// declares what the pane could hold at its own geometry.
+///
+/// Two jobs that must not be the same number. The **layout** grid is the PTY's:
+/// bytes arrive wrapped for it, and a surface at any other width re-wraps every
+/// long line, which an incrementally redrawing TUI never repairs (§C.5). The
+/// **declared** grid is this pane's own capacity, which is what the daemon's
+/// per-axis min runs over. Feeding the first back as the second is what pins a
+/// session at the narrowest size any viewer ever had.
+///
+/// Under min the shared grid is never larger than a rendering pane, so the
+/// surface always fits and the remainder is blank — the old scale-down branch
+/// this type used to carry is gone with the policy that needed it.
+private struct SharedGridLetterbox<Content: View>: View {
+    let runtime: SessionRuntime
+    @ObservedObject var context: TerminalViewState
+    let paneSize: CGSize
+    let paddingX: CGFloat
+    let background: Color
+    let declareViewport: (Int, Int) -> Void
+    @ViewBuilder let content: () -> Content
+
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        // One structure whether letterboxed or not: a branch here would give
+        // the surface a new identity each time the shared grid moved and
+        // remount its NSView, which is the repaint this file exists to avoid.
+        // A nil frame dimension is "no constraint", so the surface fills it.
+        let size = letterboxSize
+        ZStack(alignment: .topLeading) {
+            background
+            content()
+                .frame(width: size?.width, height: size?.height)
+        }
+        .frame(width: paneSize.width, height: paneSize.height, alignment: .topLeading)
+        .clipped()
+        .onAppear { declarePaneCapacity() }
+        .onChange(of: paneSize) { _, _ in declarePaneCapacity() }
+        .onChange(of: context.surfaceSize?.cellWidthPixels) { _, _ in declarePaneCapacity() }
+        .onChange(of: context.surfaceSize?.cellHeightPixels) { _, _ in declarePaneCapacity() }
+    }
+
+    /// This pane's own capacity in cells — what it would render at if nothing
+    /// else were attached. Deliberately derived from the pane, not read off the
+    /// surface, which under a letterbox is at the shared grid instead.
+    private func declarePaneCapacity() {
+        guard let cell = cellSize else { return }
+        let paddingY = CGFloat(TermioStore.terminalWindowPaddingY)
+        let columns = Int((paneSize.width - 2 * paddingX) / cell.width)
+        let rows = Int((paneSize.height - 2 * paddingY) / cell.height)
+        guard columns > 0, rows > 0 else { return }
+        declareViewport(rows, columns)
+    }
+
+    private var cellSize: CGSize? {
+        guard let metrics = context.surfaceSize,
+              metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0
+        else { return nil }
+        return CGSize(width: CGFloat(metrics.cellWidthPixels) / displayScale,
+                      height: CGFloat(metrics.cellHeightPixels) / displayScale)
+    }
+
+    /// Not conditioned on the surface's current grid differing from the shared
+    /// one: once letterboxed the surface *is* at the shared grid, and that
+    /// condition would take the letterbox away again.
+    private var letterboxSize: CGSize? {
+        guard let grid = runtime.sharedGrid, let cell = cellSize else { return nil }
+        let paddingY = CGFloat(TermioStore.terminalWindowPaddingY)
+        // Half a cell of slack on each axis: libghostty floors
+        // `(size − padding) / cell` for its grid, and an exact multiple can
+        // round to one column short.
+        let width = CGFloat(grid.cols) * cell.width + 2 * paddingX + cell.width / 2
+        let height = CGFloat(grid.rows) * cell.height + 2 * paddingY + cell.height / 2
+        // A shared grid larger than this pane cannot happen under the min
+        // policy, but a stale one can arrive between a resize and its barrier;
+        // filling the pane is the safe reading until the next `E resized`.
+        guard width <= paneSize.width, height <= paneSize.height else { return nil }
+        return CGSize(width: width, height: height)
+    }
+}

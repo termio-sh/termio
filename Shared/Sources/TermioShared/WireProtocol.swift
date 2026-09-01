@@ -112,6 +112,13 @@ public enum CompanionControl: Codable, Sendable, Equatable {
     /// this client holds the write token; otherwise it is remembered for the
     /// moment the client types and takes the token.
     case resize(cols: Int, rows: Int)
+    /// Whether the client is still looking at the session it bridged. The phone
+    /// parks a screen rather than tearing it down, so leaving a session does
+    /// not close the socket — and without this the Mac keeps that viewport in
+    /// the daemon's size min and every other viewer stays pinned at phone
+    /// width. An older Mac ignores it and behaves as it did before, which is
+    /// what a `detach` on the way out already covers.
+    case rendering(visible: Bool)
     /// The PTY's actual grid and whether this client is the one sizing it.
     /// Sent on attach and every time either changes, so a client that is only
     /// watching can lay its surface out at the grid the bytes are wrapped for
@@ -222,6 +229,8 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             return #"{"t":"stop","session":"\#(sessionID)"}"#
         case .resize(let cols, let rows):
             return #"{"t":"resize","cols":\#(cols),"rows":\#(rows)}"#
+        case .rendering(let visible):
+            return #"{"t":"rendering","visible":\#(visible)}"#
         case .grid(let cols, let rows, let writer):
             return #"{"t":"grid","cols":\#(cols),"rows":\#(rows),"writer":\#(writer)}"#
         case .exit(let code):
@@ -346,6 +355,9 @@ public enum CompanionControl: Codable, Sendable, Equatable {
         case "resize":
             guard let cols = obj["cols"] as? Int, let rows = obj["rows"] as? Int else { return nil }
             return .resize(cols: cols, rows: rows)
+        case "rendering":
+            guard let visible = obj["visible"] as? Bool else { return nil }
+            return .rendering(visible: visible)
         case "grid":
             guard let cols = obj["cols"] as? Int, let rows = obj["rows"] as? Int,
                   let writer = obj["writer"] as? Bool else { return nil }

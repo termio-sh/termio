@@ -37,4 +37,11 @@ final class SessionRuntime {
     /// foreground-demotion streak (RFC 20260830 §D2), cleared the moment the
     /// foreground stops being the shell or the agent reports working again.
     var agentExitNotice: String?
+    /// The PTY's real grid, from the daemon. The pane lays its surface out at
+    /// this rather than at its own width: the bytes on the wire are wrapped for
+    /// this grid, and a surface parsing them at a different one re-wraps every
+    /// long line — the §C.5 divergence an incrementally redrawing TUI never
+    /// repairs. Under the per-axis-min policy the shared grid is never *larger*
+    /// than a rendering pane, so the remainder is blank space, never a clip.
+    var sharedGrid: TerminalGrid?
 }

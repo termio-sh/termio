@@ -255,6 +255,8 @@ final class RootContainerViewController: UIViewController {
         let offscreen = view.bounds.offsetBy(dx: view.bounds.width, dy: 0)
         screen.view.frame = offscreen
         screen.view.isHidden = false
+        // Back on screen: this phone's viewport rejoins the size min.
+        (screen as? TerminalViewController)?.setRendering(true)
         view.bringSubviewToFront(screen.view)
         activeScreen = screen
 
@@ -282,6 +284,9 @@ final class RootContainerViewController: UIViewController {
         let finish = {
             if parked {
                 screen.view.isHidden = true // stays in the window: surface alive
+                // Alive but not looked at: the viewport leaves the session's
+                // size min so this phone stops constraining the other viewers.
+                (screen as? TerminalViewController)?.setRendering(false)
             } else {
                 self.evict(screen)
             }

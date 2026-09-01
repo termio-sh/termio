@@ -513,6 +513,12 @@ final class CompanionServer {
             // session: it moves the PTY only while the phone holds the write
             // token, and typing is what takes the token.
             bridges[id]?.applyClientResize(cols: cols, rows: rows)
+        case .rendering(let visible):
+            // The phone parks a screen instead of tearing it down, so leaving a
+            // session keeps this bridge and its socket alive. Without this the
+            // phone's viewport stayed in the daemon's size min and held every
+            // other viewer at phone width for as long as the app stayed up.
+            bridges[id]?.applyClientRendering(visible)
         case .listFiles(let projectID, let path):
             handleListFiles(projectID: projectID, path: path, on: connection)
         case .readFile(let projectID, let path, let dark):
@@ -1112,6 +1118,14 @@ final class SessionBridge: @unchecked Sendable {
     /// when the phone stops viewing the session.
     func applyClientResize(cols: Int, rows: Int) {
         link.resize(rows: rows, cols: cols)
+        link.declareViewport(rows: rows, cols: cols)
+    }
+
+    /// Whether the phone still has this session on screen. The bridge has no
+    /// surface of its own — its viewport is the phone's — so this is the only
+    /// route by which the daemon learns the phone stopped looking.
+    func applyClientRendering(_ visible: Bool) {
+        link.setRendering(visible)
     }
 
     private func publishGrid(grid: TerminalGrid? = nil, writer: Bool? = nil) {

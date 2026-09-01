@@ -40,6 +40,11 @@ pub const HOST_CAPABILITIES: &[&str] = &[
     "git",
     "agents",
     "handoff",
+    // The five-byte `R` frame, whose extra byte says the declaring surface is
+    // not on screen. A daemon without this rejects a five-byte resize as
+    // malformed and drops the attachment, so a client must see this before it
+    // sends one and fall back to the four-byte form otherwise.
+    "viewport",
 ];
 /// Snapshot payload carrying packed cells.
 ///
@@ -611,6 +616,13 @@ pub enum Control {
         cols: u16,
         #[serde(default)]
         mode: AttachMode,
+        /// Whether the attaching surface is on screen. A pane can mount hidden,
+        /// and assuming `true` here made it join the size min for one message
+        /// — a PTY resize and a barrier repaint for every other viewer, undone
+        /// by its own `R` frame a moment later. Absent from an older client,
+        /// which read as rendering because that was the only shape there was.
+        #[serde(default = "default_true")]
+        rendering: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         seq: Option<u64>,
     },

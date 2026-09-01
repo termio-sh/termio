@@ -1241,6 +1241,10 @@ struct AttachRequest {
     rows: u16,
     cols: u16,
     mode: AttachMode,
+    /// Whether the attaching surface is on screen; false for a pane that
+    /// mounted hidden. Carried from `Control::Attach` so the first declaration
+    /// is already right, instead of joining the min and correcting itself.
+    rendering: bool,
     re: Option<u64>,
 }
 
@@ -1579,6 +1583,7 @@ async fn process_control(
             rows,
             cols,
             mode,
+            rendering,
             seq,
         } => {
             let handle = match manager.resolve(&target).await {
@@ -1621,6 +1626,7 @@ async fn process_control(
                 rows,
                 cols,
                 mode,
+                rendering,
                 re: seq,
             }));
         }
@@ -2624,14 +2630,22 @@ async fn run_attach(
     // Every attachment declares the viewport it named in the attach, writer or
     // not: the session sizes the PTY from the declared set (per-axis min over
     // rendering attachments), so an arriving viewer joins the min rather than
-    // waiting to hold the write token. A client whose surface is hidden says so
-    // with its own `R` frame right after this.
-    handle.send(SessionMsg::Resize {
-        id: client_id.clone(),
-        rows: request.rows,
-        cols: request.cols,
-        rendering: true,
-    });
+    // waiting to hold the write token. The attach carries whether that surface
+    // is on screen, so a pane that mounted hidden never joins the min for the
+    // one message it would take to correct itself — that round trip cost every
+    // other viewer a PTY resize and a barrier repaint.
+    //
+    // An observer declares nothing at all: it has no surface, and the size it
+    // named is a placeholder (`client::observe` sends 24x80). The session
+    // filters observers out of the min too; this just keeps the map clean.
+    if !matches!(request.mode, AttachMode::Observe) {
+        handle.send(SessionMsg::Resize {
+            id: client_id.clone(),
+            rows: request.rows,
+            cols: request.cols,
+            rendering: request.rendering,
+        });
+    }
 
     let supports_events = connection.capabilities.contains("events");
     let supports_snapshot = connection.capabilities.contains("snapshot");

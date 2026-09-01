@@ -83,6 +83,15 @@ extension TermioStore {
         termiodLinks[id]?.setRendering(rendering)
     }
 
+    /// What this pane could show at its own geometry, which is what the
+    /// daemon's per-axis min runs over. Declared from the pane rather than read
+    /// off the surface: a letterboxed surface sits at the shared grid, and
+    /// declaring *that* would make this pane's viewport the min and pin the
+    /// session at the narrowest size any viewer ever had.
+    func declareTermiodViewport(_ id: Session.ID, rows: Int, cols: Int) {
+        termiodLinks[id]?.declareViewport(rows: rows, cols: cols)
+    }
+
     /// Wires the channel to the surface and registers it. Output enters the
     /// surface through `InMemoryTerminalSession.receive` — the same seam the
     /// in-process PTY read pump feeds — so there is exactly one render path.
@@ -141,6 +150,13 @@ extension TermioStore {
             session \(session.id.uuidString, privacy: .public) is now \
             \(writer ? "the writer" : "an observer", privacy: .public)
             """)
+        }
+        // The PTY's grid, which the pane lays its surface out at. Without this
+        // the surface fills the pane and parses bytes wrapped for a narrower
+        // shared grid at its own width — §C.5 divergence, and nothing repairs
+        // it because no size changed.
+        link.onSharedGrid = { [weak self] grid in
+            self?.runtime(for: session.id).sharedGrid = grid
         }
         // What the device knows about the process, gated exactly where the
         // in-process PTY's own kernel poll is gated: that poll is installed only

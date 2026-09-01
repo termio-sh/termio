@@ -101,6 +101,10 @@ protocol DeviceSession: AnyObject {
     /// Passes only while this device is the writer, and never claims.
     func sendDeviceReport(_ data: Data)
     func resize(columns: Int, rows: Int)
+    /// Whether this device still has the session on screen. A parked screen
+    /// keeps its socket and its stream, so without this the device's viewport
+    /// stays in the daemon's per-axis size min and pins every other viewer.
+    func setRendering(_ visible: Bool)
     /// Re-send this device's grid: a no-op unless this device holds the write
     /// token and the PTY is not already that size.
     func reassertGrid()

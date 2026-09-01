@@ -697,11 +697,21 @@ impl Session {
     /// resize PTY + VT, fresh `S` to every snapshot attachment, `E resized`.
     /// `initiator` is the attachment whose declaration triggered the recompute,
     /// so a PTY resize failure is reported to someone rather than swallowed.
-    fn apply_viewport_policy(&mut self, initiator: Option<&ClientId>) {
+    /// Returns false when the PTY refused the size the policy derived, so the
+    /// caller can undo the declaration that produced it — the error is reported
+    /// as retryable, and a stored viewport would make the retry dedupe against
+    /// itself and be dropped in silence.
+    fn apply_viewport_policy(&mut self, initiator: Option<&ClientId>) -> bool {
         let mut size: Option<(u16, u16)> = None;
         for viewport in self
             .clients
             .values()
+            // An observer attached without a tty and has no surface of its own;
+            // the size it named is a placeholder (`client::observe` sends
+            // 24x80). Letting it into the min would let `termiod observe` —
+            // documented as invisible to the session's real client — reshape a
+            // live session, and strand it there if it was the only attachment.
+            .filter(|entry| !matches!(entry.role, ClientRole::Observer))
             .filter_map(|entry| entry.viewport)
             .filter(|viewport| viewport.rendering)
         {
@@ -709,12 +719,12 @@ impl Session {
             *rows = (*rows).min(viewport.rows);
             *cols = (*cols).min(viewport.cols);
         }
-        let Some((rows, cols)) = size else { return };
+        let Some((rows, cols)) = size else { return true };
         // The child sees no SIGWINCH from an unchanged ioctl, and every
         // distinct size costs every viewer a barrier repaint — so a size the
         // PTY already has is a no-op, not a cheap re-assert.
         if rows == self.rows && cols == self.cols {
-            return;
+            return true;
         }
         if let Err(error) = self.pty.resize(rows, cols) {
             match initiator {
@@ -724,7 +734,7 @@ impl Session {
                     self.id
                 ),
             }
-            return;
+            return false;
         }
         self.rows = rows;
         self.cols = cols;
@@ -740,6 +750,7 @@ impl Session {
             rows,
             cols,
         });
+        true
     }
 
     /// Fan PTY output out to every attached client; drop dead ones.
@@ -1978,8 +1989,16 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
             if entry.viewport == Some(viewport) {
                 return None;
             }
+            let previous = entry.viewport;
             entry.viewport = Some(viewport);
-            session.apply_viewport_policy(Some(&id));
+            if !session.apply_viewport_policy(Some(&id)) {
+                // The failure went back as `retryable`, so the declaration must
+                // not stay stored: re-sending the same `R` would dedupe against
+                // it above and be dropped without ever reaching the PTY again.
+                if let Some(entry) = session.clients.get_mut(&id) {
+                    entry.viewport = previous;
+                }
+            }
         }
         SessionMsg::Inject { data } => {
             let _ = session.input_tx.send(data);
@@ -2423,6 +2442,97 @@ mod tests {
         client_rx
     }
 
+    async fn observe_actor(
+        handle: &SessionHandle,
+        id: &str,
+    ) -> mpsc::UnboundedReceiver<ClientEvent> {
+        let (client_tx, client_rx) = mpsc::unbounded_channel();
+        let (reply, answer) = oneshot::channel();
+        handle.send(SessionMsg::AddClient {
+            id: ClientId::new(id),
+            interactive: false,
+            out: client_tx,
+            backlog: Arc::new(ClientBacklog::new()),
+            snapshot: false,
+            scrollback: false,
+            grid_diff: false,
+            reply,
+        });
+        answer.await.expect("attached");
+        client_rx
+    }
+
+    /// `termiod observe` is documented as invisible to the session's real
+    /// client, and it attaches with a hardcoded 24x80 placeholder because it
+    /// has no surface. Letting that into the per-axis min let a read-only
+    /// reader reshape a live session — and strand it there for good, since an
+    /// empty rendering set keeps the last size rather than restoring one.
+    #[tokio::test]
+    async fn an_observer_never_moves_the_pty_size() {
+        let (handle, mut events, _on_exit) =
+            start_session(vec!["/bin/cat".to_string()], "/");
+
+        let _mac = attach_to_actor(&handle, "mac", false).await;
+        declare_viewport(&handle, "mac", 50, 200, true);
+        assert_eq!(next_resized(&mut events).await, (50, 200));
+
+        let _watcher = observe_actor(&handle, "watcher").await;
+        declare_viewport(&handle, "watcher", 24, 80, true);
+
+        let _ = actor_info(&handle).await;
+        let info = actor_info(&handle).await;
+        assert_eq!(
+            (info.rows, info.cols),
+            (50, 200),
+            "an observer's placeholder viewport must not size the session"
+        );
+
+        handle.send(SessionMsg::RemoveClient {
+            id: ClientId::new("watcher"),
+        });
+        let info = actor_info(&handle).await;
+        assert_eq!(
+            (info.rows, info.cols),
+            (50, 200),
+            "and it must not have left the session stranded on its way out"
+        );
+        handle.send(SessionMsg::Kill {
+            reason: EndReason::Killed,
+        });
+    }
+
+    /// A pane can mount hidden, and the attach carries that. Assuming
+    /// `rendering: true` for it put a pane nobody was looking at into the min
+    /// for one message — a PTY resize and a barrier repaint for every other
+    /// viewer, undone by its own next declaration.
+    #[tokio::test]
+    async fn a_hidden_attachment_never_joins_the_min() {
+        let (handle, mut events, _on_exit) =
+            start_session(vec!["/bin/cat".to_string()], "/");
+
+        let _phone = attach_to_actor(&handle, "phone", false).await;
+        declare_viewport(&handle, "phone", 45, 50, true);
+        assert_eq!(next_resized(&mut events).await, (45, 50));
+
+        let _hidden = attach_to_actor(&handle, "hidden", false).await;
+        declare_viewport(&handle, "hidden", 30, 100, false);
+
+        let _ = actor_info(&handle).await;
+        let info = actor_info(&handle).await;
+        assert_eq!(
+            (info.rows, info.cols),
+            (45, 50),
+            "a hidden pane's viewport must stay out of the min"
+        );
+
+        // Showing it is a one-bit change and *does* move the min.
+        declare_viewport(&handle, "hidden", 30, 100, true);
+        assert_eq!(next_resized(&mut events).await, (30, 50));
+        handle.send(SessionMsg::Kill {
+            reason: EndReason::Killed,
+        });
+    }
+
     fn declare_viewport(handle: &SessionHandle, id: &str, rows: u16, cols: u16, rendering: bool) {
         handle.send(SessionMsg::Resize {
             id: ClientId::new(id),
@@ -2574,12 +2684,21 @@ mod tests {
         });
     }
 
-    /// The point of the whole design: the write token moving between two
-    /// devices is not a size event. Under the old rule every grant re-asserted
-    /// the winner's grid — a misclassified byte became a full-speed resize
-    /// loop (the focus-report storm). `E resized` and `SidecarCommand::Resize`
-    /// are emitted by the same block, so asserting no `resized` events is
-    /// asserting the sidecar saw no resize either.
+    /// The write token moving between two devices is not a size event, and the
+    /// viewport map is what the size comes from instead.
+    ///
+    /// Scope, stated honestly: the storm this design exists to kill was a
+    /// daemon↔*client* loop — the daemon granted the token, the client answered
+    /// by re-asserting its own grid, that resize was a barrier, and the
+    /// keyframe made the other client do the same. The daemon half alone never
+    /// resized on a grant, on `main` either, so the token ping-pong below would
+    /// pass there too. What it does guard is the half this file owns: that the
+    /// declared viewports, not the token, are the only input to the PTY's size,
+    /// so a grant cannot move it. The client half is gone by construction —
+    /// there is no code left that answers `writer_changed` with a declaration.
+    ///
+    /// `E resized` and `SidecarCommand::Resize` are emitted by the same block,
+    /// so asserting no `resized` events is asserting the sidecar saw none.
     #[tokio::test]
     async fn alternating_typists_move_the_token_but_never_the_size() {
         let (handle, mut events, _on_exit) =

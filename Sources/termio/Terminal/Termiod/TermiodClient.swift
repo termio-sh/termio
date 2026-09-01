@@ -1024,14 +1024,28 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// Keystrokes typed during the connect/attach window — flushed, in order,
     /// the moment the channel is writable so nothing the user typed is lost.
     private var pendingInput = Data()
-    /// The grid this surface is laid out at, updated by every `resize` whether
-    /// or not it can be sent yet. This is a viewport declaration, not a demand:
-    /// the daemon sizes the PTY from every attachment's declaration (per-axis
-    /// min over the ones rendering), so the token moving never moves the size.
+    /// What this pane could show if nothing else constrained it — its own
+    /// geometry in cells (`declareViewport`). This is a viewport declaration,
+    /// not a demand: the daemon sizes the PTY from every attachment's
+    /// declaration (per-axis min over the ones rendering), so the token moving
+    /// never moves the size. Deliberately *not* the surface's current grid: a
+    /// letterboxed pane is laid out at the shared grid, and declaring that
+    /// would pin the min at the narrowest size any viewer ever had.
     private var desiredGrid: TerminalGrid
+    /// The grid the surface is laid out at right now, which under a letterbox
+    /// is the shared grid rather than this pane's capacity. Read only for the
+    /// keyframe-fit and observer-repaint decisions, never sent.
+    private var surfaceGrid: TerminalGrid
     /// Whether this surface is actually on screen. A hidden pane keeps its
     /// declared grid but leaves the daemon's min (`setRendering`).
     private var rendering = true
+    /// Whether this daemon understands the five-byte `R` frame. A daemon
+    /// without the `viewport` capability rejects one as malformed and drops the
+    /// attachment, so against an older host this client keeps sending the
+    /// four-byte form — which that daemon reads as rendering, the only shape it
+    /// ever had. The hidden-pane filter is simply absent there, as it was
+    /// before this existed.
+    private var supportsViewport = false
     /// The last declaration actually written as an `R` frame — grid and
     /// rendering bit — so an unchanged one isn't re-sent.
     private var sentGrid: TerminalGrid?
@@ -1165,6 +1179,7 @@ final class TermiodSessionLink: @unchecked Sendable {
         self.route = route
         let grid = TerminalGrid(rows: UInt16(clamping: rows), cols: UInt16(clamping: cols))
         desiredGrid = grid
+        surfaceGrid = grid
         renderTargetLocked = grid
     }
 
@@ -1180,12 +1195,17 @@ final class TermiodSessionLink: @unchecked Sendable {
                 clientID = handshake.clientID
                 let device = handshake.device
                 DispatchQueue.main.async { [self] in onDevice?(device) }
+                supportsViewport = handshake.capabilities.contains("viewport")
                 let requested = desiredGrid
+                // The attach itself carries visibility, so a pane that mounted
+                // hidden never joins the min for the one message it would take
+                // to correct itself.
                 let payload = try Termiod.attachPayload(
                     target: sessionName,
                     specification: specification,
                     rows: requested.rows,
-                    cols: requested.cols
+                    cols: requested.cols,
+                    rendering: rendering
                 )
                 try Termiod.writeFrame(channel.writeDescriptor, kind: .control, payload: payload)
                 let reply = try Termiod.readFrame(channel.readDescriptor)
@@ -1225,14 +1245,16 @@ final class TermiodSessionLink: @unchecked Sendable {
                 authoritativeGrid = sharedGrid
                 DispatchQueue.main.async { [self] in onSharedGrid?(sharedGrid) }
                 // The daemon turns every attach into a viewport declaration at
-                // the requested grid, rendering — so that is what stands
-                // recorded for this attachment until the next `R`.
+                // the requested grid and the visibility it carried — so that is
+                // what stands recorded for this attachment until the next `R`.
                 sentGrid = requested
-                sentRendering = true
+                sentRendering = rendering
                 observerRepaintPending = !isWriter && sharedGrid != requested
-                // A pane that was hidden before the attach landed says so now,
-                // taking its viewport back out of the daemon's min.
-                if !rendering { try sendResizeLocked(desiredGrid) }
+                // An older daemon never saw the visibility on the attach and
+                // cannot be told in an `R` frame either, so a hidden pane there
+                // declares its grid like any other — the pre-`viewport`
+                // behaviour, not a silent half-application of this one.
+                if !supportsViewport { sentRendering = true }
                 Log.termiod.info("""
                 attached session=\(self.sessionName, privacy: .public) \
                 device=\(device.id, privacy: .public) \
@@ -1361,6 +1383,13 @@ final class TermiodSessionLink: @unchecked Sendable {
         }
     }
 
+    /// The grid the **surface** is actually laid out at, from libghostty's own
+    /// resize callback. This is not what goes on the wire: a pane laid out at
+    /// the shared grid (the letterbox) reports the shared grid here, and
+    /// declaring that would make this pane's viewport *be* the min and pin the
+    /// session at the narrowest size any viewer ever had. What this client can
+    /// show is `declareViewport`'s business; this is only what it is showing
+    /// right now, which is what an arriving keyframe has to fit.
     func resize(rows: Int, cols: Int) {
         let size = TerminalGrid(rows: UInt16(clamping: rows), cols: UInt16(clamping: cols))
         // Recorded before the hop: this is what the surface is laid out at right
@@ -1370,7 +1399,7 @@ final class TermiodSessionLink: @unchecked Sendable {
         renderLock.unlock()
         workQueue.async { [self] in
             guard !closed else { return }
-            desiredGrid = size
+            surfaceGrid = size
             guard attached else { return }
             // A surface arriving at the shared grid is the one moment it needs
             // something beyond its declaration: a keyframe it can finally
@@ -1383,6 +1412,20 @@ final class TermiodSessionLink: @unchecked Sendable {
                 observerRepaintPending = false
                 requestResyncLocked()
             }
+        }
+    }
+
+    /// What this pane *could* show if nothing else constrained it — its own
+    /// geometry in cells, independent of the grid its surface is currently laid
+    /// out at. This is the declaration: the daemon's per-axis min runs over
+    /// these, so the Mac saying "I can hold 160 columns" while rendering the
+    /// phone's 44 is exactly the case the policy is for.
+    func declareViewport(rows: Int, cols: Int) {
+        let size = TerminalGrid(rows: UInt16(clamping: rows), cols: UInt16(clamping: cols))
+        workQueue.async { [self] in
+            guard !closed, desiredGrid != size else { return }
+            desiredGrid = size
+            guard attached else { return }
             scheduleResizeLocked()
         }
     }
@@ -1449,12 +1492,16 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// Must run on `workQueue`.
     private func sendResizeLocked(_ size: TerminalGrid) throws {
         guard let transport else { return }
-        if sentGrid == size, sentRendering == rendering { return }
+        // Against a daemon without the capability the flag is not on the wire
+        // at all, so it must not be part of the dedupe either — otherwise a
+        // visibility flip would suppress the next real grid change.
+        let declared = supportsViewport ? rendering : true
+        if sentGrid == size, sentRendering == declared { return }
         sentGrid = size
-        sentRendering = rendering
+        sentRendering = declared
         try Termiod.writeFrame(
             transport.writeDescriptor, kind: .resize,
-            payload: Termiod.resizePayload(size.rows, size.cols, rendering: rendering))
+            payload: Termiod.resizePayload(size.rows, size.cols, rendering: declared))
     }
 
     /// Leaves the stream but keeps the session alive in the daemon — the
@@ -1769,7 +1816,7 @@ final class TermiodSessionLink: @unchecked Sendable {
             write token on \(self.sessionName, privacy: .public) \
             \(mine ? "claimed" : "lost", privacy: .public)
             """)
-            observerRepaintPending = !mine && authoritativeGrid != desiredGrid
+            observerRepaintPending = !mine && authoritativeGrid != surfaceGrid
             DispatchQueue.main.async { [self] in onWriter?(mine) }
         }
     }
@@ -1819,13 +1866,13 @@ final class TermiodSessionLink: @unchecked Sendable {
             guard authoritativeGrid != grid else { return }
             authoritativeGrid = grid
             DispatchQueue.main.async { [self] in onSharedGrid?(grid) }
-            if !isWriter { observerRepaintPending = grid != desiredGrid }
-            guard grid != desiredGrid else { return }
+            if !isWriter { observerRepaintPending = grid != surfaceGrid }
+            guard grid != surfaceGrid else { return }
             Log.termiod.info("""
             \(self.sessionName, privacy: .public) PTY is now \
             \(grid.rows, privacy: .public)x\(grid.cols, privacy: .public); \
             this client renders \
-            \(self.desiredGrid.rows, privacy: .public)x\(self.desiredGrid.cols, privacy: .public)
+            \(self.surfaceGrid.rows, privacy: .public)x\(self.surfaceGrid.cols, privacy: .public)
             """)
         }
     }

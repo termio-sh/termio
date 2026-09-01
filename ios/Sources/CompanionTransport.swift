@@ -114,6 +114,17 @@ final class CompanionTransport {
         sendGrid()
     }
 
+    /// Whether this phone still has the bridged session on screen. Parking a
+    /// screen keeps the socket, so the Mac has no other way to learn that the
+    /// viewport it is holding in the daemon's size min stopped being looked at.
+    func setRendering(_ visible: Bool) {
+        gridLock.lock()
+        let ready = authSent
+        gridLock.unlock()
+        guard ready else { return }
+        link.send(CompanionControl.rendering(visible: visible).encoded())
+    }
+
     /// Re-sends this phone's grid — on reconnect, foreground, and re-opening a
     /// parked session. The Mac applies it only while this phone holds the
     /// write token, and a size the PTY already has costs nothing.

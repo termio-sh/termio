@@ -62,7 +62,18 @@ final class TerminalViewController: UIViewController {
     }()
     private lazy var shellSession = ShellSession(shell: defaultSandboxShell)
     private var companion: DeviceSession?
+
     private var companionSession: InMemoryTerminalSession?
+
+    /// Whether this screen is the one the user is looking at. The container
+    /// parks a screen rather than tearing it down — the surface and the socket
+    /// both stay alive — so nothing else tells the device that its viewport
+    /// should leave the session's size min. Without it a phone that merely
+    /// swiped back held every other viewer at phone width.
+    func setRendering(_ visible: Bool) {
+        guard case .device = backend else { return }
+        companion?.setRendering(visible)
+    }
     private let headerBar = UIStackView()
     private let contextLabel = UILabel()
     private let titleLabel = UILabel()

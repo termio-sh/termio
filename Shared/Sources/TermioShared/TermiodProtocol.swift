@@ -40,7 +40,12 @@ public enum Termiod {
     /// A later plane opens its own channel and passes its own `caps` to
     /// `withControlChannel` — capabilities are per-connection, so nothing here
     /// has to grow for the file tree or git to land.
-    public static let attachCapabilities = ["snapshot", "events"]
+    /// `viewport` is what makes the five-byte `R` frame safe to send: a daemon
+    /// that predates it rejects one as a malformed resize and drops the
+    /// attachment, and the daemon grants only the capabilities a client asked
+    /// for, so this has to be offered to be answered. Absent from the reply,
+    /// the client keeps to the four-byte form.
+    public static let attachCapabilities = ["snapshot", "events", "viewport"]
 
     /// What a plain control channel (`list`, `kill`) offers: nothing. Both verbs
     /// are unconditional, and tombstones ride the `sessions` reply un-gated.
@@ -357,6 +362,12 @@ public enum Termiod {
         let rows: UInt16
         let cols: UInt16
         let mode = "interact"
+        /// Whether this surface is on screen. A pane can mount hidden, and a
+        /// daemon that assumed `true` put it into the size min for one message
+        /// — a PTY resize and a barrier repaint for every other viewer, undone
+        /// by the `R` frame that followed. A daemon predating the field reads
+        /// its absence as rendering, which is the shape it always had.
+        let rendering: Bool
         let seq: UInt64
     }
 
@@ -1506,13 +1517,15 @@ public enum Termiod {
         target: String,
         specification: CreateSpecification?,
         rows: UInt16,
-        cols: UInt16
+        cols: UInt16,
+        rendering: Bool = true
     ) throws -> Data {
         try encodeControl(AttachOperation(
             target: target,
             createIfMissing: specification,
             rows: rows,
             cols: cols,
+            rendering: rendering,
             seq: 1
         ))
     }
