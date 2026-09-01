@@ -49,12 +49,17 @@ final class TermiodSession: DeviceSession {
     /// isn't re-sent. The device keeps a per-attachment viewport map — every
     /// declaration matters, even one matching the current PTY size.
     private var sentGrid: TerminalGrid?
-    /// An observer whose surface is not yet at the shared grid. The keyframe
-    /// that announced the grid was parsed at the old one, and the surface is
+    /// This surface has not reached the shared grid yet. The keyframe that
+    /// announced the grid was parsed at the old one, and the surface is
     /// re-laid-out only after `onSharedGrid` reaches the screen — so the first
     /// `resize` that lands *on* the shared grid asks the device for a fresh
     /// keyframe, and that one paints right.
-    private var observerRepaintPending = false
+    ///
+    /// Deliberately nothing to do with the write token, which now gates input
+    /// alone: a screen can sit behind the shared grid whether or not its user
+    /// is the one typing, and gating this on the token dropped the repaint for
+    /// the half of the cases that hold it.
+    private var surfaceBehindSharedGrid = false
     private var resizeGeneration: UInt64 = 0
     /// Whether this screen ever had a session, which is what separates "the
     /// device refused a request" from "that session is not there".
@@ -157,9 +162,9 @@ final class TermiodSession: DeviceSession {
             // cell metrics before the layout puts it back — arms the next
             // arrival, so the bytes parsed in between are repainted too.
             if authoritativeGrid != grid {
-                if !isWriter { observerRepaintPending = true }
-            } else if observerRepaintPending {
-                observerRepaintPending = false
+                surfaceBehindSharedGrid = true
+            } else if surfaceBehindSharedGrid {
+                surfaceBehindSharedGrid = false
                 if let payload = try? Termiod.requestSnapshotPayload() {
                     channel.send(kind: .control, payload: payload)
                 }
@@ -190,7 +195,10 @@ final class TermiodSession: DeviceSession {
                 rows: grid.rows > 0 ? grid.rows : 24,
                 cols: grid.cols > 0 ? grid.cols : 80)
             sentGrid = declared
-            sentRendering = rendering
+            // An older daemon never saw the visibility on the attach and cannot
+            // be told in an `R` frame either, so what stands recorded is the
+            // four-byte meaning — rendering — exactly as `sendResize` clamps it.
+            sentRendering = supportsViewport ? rendering : true
             channel.send(kind: .control, payload: try Termiod.attachPayload(
                 target: sessionName,
                 // Never `create_if_missing`: a screen opens on a session that
@@ -224,7 +232,7 @@ final class TermiodSession: DeviceSession {
             // Seeding from here is what lets a viewer know the grid its bytes
             // are wrapped at.
             authoritativeGrid = TerminalGrid(rows: payload.rows, cols: payload.cols)
-            observerRepaintPending = !isWriter && authoritativeGrid != desiredGrid
+            surfaceBehindSharedGrid = authoritativeGrid != desiredGrid
             publishSharedGrid()
             if !pendingInput.isEmpty {
                 let buffered = pendingInput
@@ -340,7 +348,8 @@ final class TermiodSession: DeviceSession {
         write token on \(self.sessionName, privacy: .public) \
         \(mine ? "claimed" : "lost", privacy: .public)
         """)
-        observerRepaintPending = !mine && authoritativeGrid != desiredGrid
+        // The repaint flag is not touched here: it tracks whether this screen
+        // has reached the shared grid, which a token move does not change.
         publishSharedGrid()
         // Nothing else moves: the device holds this attachment's viewport
         // declaration, so the size neither needs re-asserting on promotion nor
@@ -356,7 +365,7 @@ final class TermiodSession: DeviceSession {
     private func applyAuthoritativeGrid(_ grid: TerminalGrid) {
         guard authoritativeGrid != grid else { return }
         authoritativeGrid = grid
-        if !isWriter { observerRepaintPending = grid != desiredGrid }
+        surfaceBehindSharedGrid = grid != desiredGrid
         publishSharedGrid()
         guard grid != desiredGrid, desiredGrid.rows > 0 else { return }
         Log.device.info("""

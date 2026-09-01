@@ -1077,12 +1077,18 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// the authority — §C.5: a client that parses at its own window size instead
     /// of this one wraps the same bytes differently and diverges from the host.
     private var authoritativeGrid: TerminalGrid?
-    /// An observer whose surface is not yet at the shared grid. The keyframe
-    /// that announced the grid was parsed at the old one, and the surface is
-    /// resized only after `onSharedGrid` reaches the UI — so the first `resize`
-    /// that lands *on* the shared grid asks the daemon for a fresh keyframe,
-    /// and that one paints right.
-    private var observerRepaintPending = false
+    /// This surface has not reached the shared grid yet. The keyframe that
+    /// announced the grid was parsed at the old one, and the surface is laid
+    /// out at the new one only after `onSharedGrid` reaches the UI — so the
+    /// first `resize` that lands *on* the shared grid asks the daemon for a
+    /// fresh keyframe, and that one paints right.
+    ///
+    /// Deliberately nothing to do with the write token. It tracked the token
+    /// back when only a demoted pane was letterboxed; the letterbox now
+    /// follows the shared grid for *any* pane wider than it (§C.5 does not
+    /// care who may type), so gating this on the token left the writer's own
+    /// pane dropping a keyframe it then never asked for again.
+    private var surfaceBehindSharedGrid = false
     /// Set on any deliberate teardown so the reader's EOF is not misread as a
     /// daemon crash.
     private var closed = false
@@ -1272,7 +1278,7 @@ final class TermiodSessionLink: @unchecked Sendable {
                 // what stands recorded for this attachment until the next `R`.
                 sentGrid = requested
                 sentRendering = rendering
-                observerRepaintPending = !isWriter && sharedGrid != requested
+                surfaceBehindSharedGrid = sharedGrid != requested
                 // An older daemon never saw the visibility on the attach and
                 // cannot be told in an `R` frame either, so a hidden pane there
                 // declares its grid like any other — the pre-`viewport`
@@ -1430,9 +1436,9 @@ final class TermiodSessionLink: @unchecked Sendable {
             // new cell metrics before layout puts it back — arms the next
             // arrival, so the bytes parsed in between are repainted too.
             if authoritativeGrid != size {
-                if !isWriter { observerRepaintPending = true }
-            } else if observerRepaintPending {
-                observerRepaintPending = false
+                surfaceBehindSharedGrid = true
+            } else if surfaceBehindSharedGrid {
+                surfaceBehindSharedGrid = false
                 requestResyncLocked()
             }
         }
@@ -1843,7 +1849,12 @@ final class TermiodSessionLink: @unchecked Sendable {
             write token on \(self.sessionName, privacy: .public) \
             \(mine ? "claimed" : "lost", privacy: .public)
             """)
-            observerRepaintPending = !mine && authoritativeGrid != surfaceGrid
+            // The repaint flag is not touched here: it tracks whether this
+            // surface has reached the shared grid, which a token move does not
+            // change. Clearing it on promotion used to be safe only because
+            // promotion re-asserted the grid and the barrier produced a fresh
+            // keyframe; that re-assert is gone, so clearing it here would
+            // discard a repaint nothing else would ever satisfy.
             DispatchQueue.main.async { [self] in onWriter?(mine) }
         }
     }
@@ -1893,7 +1904,7 @@ final class TermiodSessionLink: @unchecked Sendable {
             guard authoritativeGrid != grid else { return }
             authoritativeGrid = grid
             DispatchQueue.main.async { [self] in onSharedGrid?(grid) }
-            if !isWriter { observerRepaintPending = grid != surfaceGrid }
+            surfaceBehindSharedGrid = grid != surfaceGrid
             guard grid != surfaceGrid else { return }
             Log.termiod.info("""
             \(self.sessionName, privacy: .public) PTY is now \
