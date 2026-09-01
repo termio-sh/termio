@@ -503,12 +503,12 @@ final class CompanionServer {
             if !stopSession(sessionID) {
                 sendControl(.error(message: "unknown session — pull the list to refresh"), to: connection)
             }
-        case .resize(let cols, let rows):
+        case .resize(let cols, let rows, let rendering):
             // The phone reports its grid on attach, foreground, and layout.
             // A report is a fact about the phone's screen, not a claim on the
-            // session: it moves the PTY only while the phone holds the write
-            // token, and typing is what takes the token.
-            bridges[id]?.applyClientResize(cols: cols, rows: rows)
+            // session: the daemon sizes the session to the smallest viewport
+            // being rendered, and the write token is a separate question.
+            bridges[id]?.applyClientViewport(cols: cols, rows: rows, rendering: rendering)
         case .listFiles(let projectID, let path):
             handleListFiles(projectID: projectID, path: path, on: connection)
         case .readFile(let projectID, let path, let dark):
@@ -1098,15 +1098,21 @@ final class SessionBridge: @unchecked Sendable {
         link.send(data)
     }
 
-    /// The phone's grid. Sizing is the writer's to set: the link sends this as
-    /// an `R` frame only while it holds the token, and otherwise keeps it for
-    /// the moment the token arrives, when the grant re-asserts it. Reporting a
-    /// grid used to claim the token, so a phone that merely opened a session —
-    /// or came back to the foreground, or rotated — pulled the shared PTY down
-    /// to its width and repainted every other attachment, and the Mac pulled it
-    /// back on the next keystroke. Both ends now move the token by typing only.
-    func applyClientResize(cols: Int, rows: Int) {
-        link.resize(rows: rows, cols: cols)
+    /// The phone's viewport, forwarded verbatim as this bridge's own.
+    ///
+    /// A bridge is a byte forwarder with no surface: it renders nothing, so it
+    /// has nothing of its own to declare, and an attachment that declared a
+    /// stand-in grid would size the session for a screen nobody is looking at.
+    /// The phone downstream of it is the surface, and this is where the bridge
+    /// borrows its viewport — including whether it is being shown at all.
+    func applyClientViewport(cols: Int, rows: Int, rendering: Bool) {
+        link.setViewport(rows: rows, cols: cols)
+        link.setRendering(rendering)
+        // The phone's surface fills its screen — it never letterboxes — so the
+        // viewport it declares is also the grid it is laid out at. That is the
+        // fact the repaint arming needs, and on a bridge there is no local
+        // surface to hear it from.
+        link.noteSurfaceGrid(rows: rows, cols: cols)
     }
 
     private func publishGrid(grid: TerminalGrid? = nil, writer: Bool? = nil) {

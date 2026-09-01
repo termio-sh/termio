@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import GhosttyTerminal
+import TermioShared
 
 extension Notification.Name {
     /// Posted by the toolbar's close button to dismiss whichever content overlay (file editor,
@@ -155,13 +156,15 @@ struct TerminalPane: View {
                     context: context,
                     paneSize: rect.size,
                     paddingX: CGFloat(settings.windowPadding),
-                    background: paneBackground
+                    background: paneBackground,
+                    onViewport: { grid in store.reportViewport(grid, for: id) }
                 ) {
                     ManagedTerminalSurface(
                         context: context,
                         isSelected: isSelected,
                         isVisible: isVisible,
                         onFocused: { selectFocusedSurface(id) },
+                        onVisibility: { store.reportRendering($0, for: id) },
                         requestFocus: { reason in
                             requestTerminalFocus(for: id, reason: reason)
                         }
@@ -408,14 +411,23 @@ private enum TerminalFocusReason {
 
 /// Lays a surface out at the grid another device is sizing the session to.
 ///
-/// One PTY has one winsize, and every attachment parses the same bytes. While a
-/// phone holds the write token those bytes are wrapped for the phone's grid, and
-/// a surface stretched across this pane would re-wrap them at its own width —
-/// the §C.5 divergence: every line that wrapped on the phone lands somewhere
-/// else here, and a TUI that repaints incrementally never repairs it. So a
-/// demoted pane shows the session at exactly the shared grid, centred, with the
-/// terminal background around it — the same picture the phone has, at the Mac's
-/// font. Typing takes the token back, and the surface returns to the pane.
+/// One PTY has one winsize, and every attachment parses the same bytes. The
+/// daemon sizes the session to the smallest viewport being rendered, so while a
+/// phone is watching, those bytes are wrapped for the phone's grid — and a
+/// surface stretched across this pane would re-wrap them at its own width, the
+/// §C.5 divergence: every line that wrapped on the phone lands somewhere else
+/// here, and a TUI that repaints incrementally never repairs it. So a pane
+/// larger than the session shows it at exactly the shared grid, centred, with
+/// the terminal background around it — the same picture the phone has, at the
+/// Mac's font. The phone leaves, the session springs back, and the surface
+/// returns to the pane.
+///
+/// This is also where the pane states its *viewport* — how much it could show,
+/// measured from its own geometry. The surface cannot answer that question once
+/// it is letterboxed: it reports the grid it was shrunk to, so a pane that
+/// declared what its surface reports could never say it had room for more, and
+/// the session could never grow back. Not conditioned on the write token, which
+/// no longer has anything to do with size.
 ///
 /// The surface is sized to the grid plus half a cell: libghostty floors
 /// `(size − padding) / cell` to get its column count, and an exact multiple can
@@ -431,15 +443,16 @@ private struct SharedGridLetterbox<Content: View>: View {
     let paneSize: CGSize
     let paddingX: CGFloat
     let background: Color
+    let onViewport: (TerminalGrid) -> Void
     @ViewBuilder let content: () -> Content
 
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         // One structure whether letterboxed or not: a branch here would give
-        // the surface a new identity each time the token moved and remount its
-        // NSView, which is the repaint this file exists to avoid. A nil frame
-        // dimension is "no constraint", so the surface fills the pane.
+        // the surface a new identity each time the session's size moved and
+        // remount its NSView, which is the repaint this file exists to avoid. A
+        // nil frame dimension is "no constraint", so the surface fills the pane.
         let size = letterboxSize
         let fits = size.map { $0.width <= paneSize.width && $0.height <= paneSize.height } ?? true
         ZStack(alignment: fits ? .center : .topLeading) {
@@ -449,23 +462,58 @@ private struct SharedGridLetterbox<Content: View>: View {
         }
         .frame(width: paneSize.width, height: paneSize.height, alignment: .topLeading)
         .clipped()
+        // Outside the body's own evaluation, so declaring a viewport never
+        // mutates state mid-render.
+        .onChange(of: paneGrid, initial: true) { _, grid in
+            if let grid { onViewport(grid) }
+        }
     }
 
+    /// How much this pane could show: libghostty's own floor of the space left
+    /// after padding, so the number matches what the surface would report if it
+    /// were filling the pane rather than sitting at the shared grid.
+    private var paneGrid: TerminalGrid? {
+        guard let cell = cellSize else { return nil }
+        let paddingY = CGFloat(TermioStore.terminalWindowPaddingY)
+        let cols = ((paneSize.width - 2 * paddingX) / cell.width).rounded(.down)
+        let rows = ((paneSize.height - 2 * paddingY) / cell.height).rounded(.down)
+        // A pane mid-teardown reports zero, and a NaN cell size would otherwise
+        // trap on the way to `UInt16`.
+        guard cols.isFinite, rows.isFinite, cols >= 1, rows >= 1 else { return nil }
+        return TerminalGrid(
+            rows: UInt16(clamping: Int(min(rows, 10_000))),
+            cols: UInt16(clamping: Int(min(cols, 10_000))))
+    }
+
+    /// The size a surface at the shared grid takes, or nil to fill the pane.
+    ///
+    /// Half a cell of slack on each axis: libghostty floors
+    /// `(size − padding) / cell` to get its column count, and an exact multiple
+    /// can round to one column short. A shared grid the pane cannot hold is
+    /// still laid out at that grid, anchored top-left and clipped: a surface at
+    /// any other width wraps the bytes wrong, and a correct screen with its edge
+    /// cut off beats a complete one that is scrambled. It also keeps the promise
+    /// the resync depends on — the surface *reaches* the shared grid, so the
+    /// link can ask for the keyframe that paints it (`repaintPending`).
     private var letterboxSize: CGSize? {
-        // Not conditioned on the surface's current grid differing from the
-        // shared one: once letterboxed, the surface *is* at the shared grid,
-        // and that condition would take the letterbox away again.
-        guard !runtime.isWriter,
-              let grid = runtime.sharedGrid,
-              let metrics = context.surfaceSize,
+        // A pane already the session's size fills the pane exactly, with none of
+        // the half-cell slack a letterbox needs, so the common case looks the
+        // way it always did.
+        guard let grid = runtime.sharedGrid, grid != paneGrid, let cell = cellSize
+        else { return nil }
+        let paddingY = CGFloat(TermioStore.terminalWindowPaddingY)
+        let width = CGFloat(grid.cols) * cell.width + 2 * paddingX + cell.width / 2
+        let height = CGFloat(grid.rows) * cell.height + 2 * paddingY + cell.height / 2
+        return CGSize(width: width, height: height)
+    }
+
+    private var cellSize: CGSize? {
+        guard let metrics = context.surfaceSize,
               metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0
         else { return nil }
-        let cellWidth = CGFloat(metrics.cellWidthPixels) / displayScale
-        let cellHeight = CGFloat(metrics.cellHeightPixels) / displayScale
-        let paddingY = CGFloat(TermioStore.terminalWindowPaddingY)
-        let width = CGFloat(grid.cols) * cellWidth + 2 * paddingX + cellWidth / 2
-        let height = CGFloat(grid.rows) * cellHeight + 2 * paddingY + cellHeight / 2
-        return CGSize(width: width, height: height)
+        return CGSize(
+            width: CGFloat(metrics.cellWidthPixels) / displayScale,
+            height: CGFloat(metrics.cellHeightPixels) / displayScale)
     }
 }
 
@@ -478,6 +526,10 @@ private struct ManagedTerminalSurface: View {
     let isSelected: Bool
     let isVisible: Bool
     let onFocused: () -> Void
+    /// The same fact `setSurfaceVisible` acts on, told to the daemon: a pane
+    /// that is not showing is not rendering, and stops holding the session down
+    /// to its width.
+    let onVisibility: (Bool) -> Void
     let requestFocus: (TerminalFocusReason) -> Void
 
     @FocusState private var surfaceFocus: Bool
@@ -513,6 +565,7 @@ private struct ManagedTerminalSurface: View {
             .onChange(of: isVisible, initial: true) { _, visible in
                 applySurfaceVisibility(visible, for: context)
                 DispatchQueue.main.async { applySurfaceVisibility(visible, for: context) }
+                onVisibility(visible)
             }
             // A relaunched session gets a fresh TerminalViewState (see
             // `relaunchSession`); keying the mounted view on the state's identity

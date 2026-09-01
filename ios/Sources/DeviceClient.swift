@@ -95,10 +95,10 @@ protocol DeviceSession: AnyObject {
     /// Link and lifecycle transitions, delivered on the main queue.
     var onState: ((DeviceSessionState) -> Void)? { get set }
 
-    /// The PTY's actual grid and whether this device is the one sizing it,
-    /// on the main queue: once on attach and on every change of either. While
-    /// another device holds the write token the bytes arriving are wrapped for
-    /// that grid, and the screen lays its surface out at it.
+    /// The PTY's actual grid and whether this device holds the write token, on
+    /// the main queue: once on attach and on every change of either. The grid is
+    /// the smallest viewport rendering the session — what the bytes arriving are
+    /// wrapped for — and is unrelated to the token that travels beside it.
     var onSharedGrid: ((TerminalGrid, Bool) -> Void)? { get set }
 
     func start()
@@ -108,9 +108,18 @@ protocol DeviceSession: AnyObject {
     /// A reply the surface generated to a host query (`TerminalDeviceReport`).
     /// Passes only while this device is the writer, and never claims.
     func sendDeviceReport(_ data: Data)
-    func resize(columns: Int, rows: Int)
-    /// Re-send this device's grid: a no-op unless this device holds the write
-    /// token and the PTY is not already that size.
+    /// Declares this screen's viewport. The device sizes the session to the
+    /// smallest viewport being rendered, so this is a fact about this screen and
+    /// not a claim on the session — it goes through whether or not this device
+    /// holds the write token
+    /// (`docs/design/20260901-pty-size-is-not-the-write-token.md`).
+    func setViewport(columns: Int, rows: Int)
+    /// Whether this screen is showing the session. A screen the container parked
+    /// keeps its viewport and stops counting, so a session left open on the
+    /// phone does not hold a Mac pane at phone width forever.
+    func setRendering(_ showing: Bool)
+    /// Ask for a fresh screen: a rebuilt surface starts blank and no byte is
+    /// coming to repaint it.
     func reassertGrid()
 }
 

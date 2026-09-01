@@ -260,7 +260,7 @@ makes one control channel safely multiplexable. Ops marked ✦ exist in POC v0.
 | `subscribe` | c→h | `{events:["roster","status"]}` on a control channel → stream of `E` frames for all sessions |
 | `subscribe_resource` / `subscribed` | c→h / h→c | §C.10. `{resource, since?}` → `{resource, seq, gap}`; replayed `E` frames follow the reply. Gated on the `resources` capability |
 | `unsubscribe_resource` | c→h | Release interest; the resource lingers for other subscribers and for this client's own return |
-| `resize_claim` | h→c | Informs a demoted client who owns size now (§C.5) |
+| `resize_claim` | h→c | Tells one client it now holds the write token (§C.5). A v0 name, from when the token carried the grid; kept because it is the only writer signal a client without `events` sees |
 | `ok` ✦ / `error` ✦ | h→c | §C.7 |
 
 ### C.5 Attach flow, writer policy, resize policy
@@ -318,22 +318,26 @@ and diverge — the synchronized-state-machine guarantee silently breaks. So:
 `attached` (and the v1 `S` snapshot) **carry `rows`/`cols`**, and a smart client
 maintains an internal grid at *authoritative PTY dimensions* with its own
 *local* viewport layered on top (letterbox / scale / scroll) — never by parsing
-at its own window size. *(`Attached` carries `rows`/`cols` as of Phase 1c. As
-of 2026-08-29 both app clients conform: the Mac pane letterboxes a demoted
-surface at the shared grid (`SharedGridLetterbox`) and the phone lays its
-surface out at that grid and scales it to fit, both driven by `E resized` and
-`writer_changed`. The keyframe that announces a new grid reaches an observer
-before its surface has moved, so it is parsed at the old grid; the first
-resize that lands on the shared grid sends `request_snapshot`, and that
-keyframe paints right. The reference CLI client still parses at its own size
-— acceptable for a single same-size CLI.)*
+at its own window size. *(`Attached` carries `rows`/`cols` as of Phase 1c. Both app clients conform: the
+Mac pane letterboxes at the shared grid (`SharedGridLetterbox`) whenever the
+session is smaller than the pane, and the phone fills its screen — under the
+2026-09-01 size policy it is never the larger of the two, so it has nothing to
+scale. Neither is keyed on the write token any more. The keyframe that announces
+a new grid reaches a client before its surface has moved, so it is parsed at the
+old grid; the first surface report that lands on the shared grid sends
+`request_snapshot`, and that keyframe paints right. A pane that letterboxes must
+declare its viewport from its own geometry rather than from the surface: a
+surface laid out at the shared grid reports that grid, and a pane declaring what
+its surface reports could never say it had room for more. The reference CLI
+client still parses at its own size — acceptable for a single same-size CLI.)*
 
 **Writer policy — single writer, follows the device being used, observable.**
 A `mode:"interact"` attach takes the write token only when nobody holds it;
 after that the token moves on `claim_writer` alone, which every client sends
 when its user actually shows up — that is, types. Opening a session on a phone,
 bringing it to the foreground, or rotating it is *looking*, and takes nothing;
-a phone's grid report is remembered and applied only once it holds the token.
+a phone's grid report is a viewport declaration and reaches the size policy
+regardless of who is typing.
 The previous writer stays attached but demoted, and *everyone* on the session
 gets `E {ev:"writer_changed", writer:"c_41"}`. Observers' `D`/`R` frames are
 answered with `error {code:"not_writer"}` rather than dropped. A client's own
@@ -351,12 +355,37 @@ correct it. Promotion has to be a verb, not a side effect of arriving. CRDT/mult
 explicitly rejected (§H); the write token is also the natural place a future
 share ACL plugs in without new message shapes.
 
-**Resize policy — the PTY has one size and the writer owns it.** `R` from the
-writer resizes PTY + vt and fan-outs `E {ev:"resized"}`; in v1 a resize is a
-barrier: quiesce, resize, emit fresh `S`, resume deltas (the ghostty-web
-lesson). `R` from observers → `not_writer`; observer UIs letterbox or scale
-client-side. Per-client server-side reflow is rejected — it means one vt per
-viewer per session, which is a nested-window-manager tax in disguise.
+**Resize policy — the PTY has one size and the *host* computes it, from the
+attachments that are actually rendering.** Amended 2026-09-01 by
+[PTY size is not the write token](20260901-pty-size-is-not-the-write-token.md);
+what follows replaces "the writer owns it".
+
+```
+size = componentwise min(viewport of each attachment that is interactive,
+                         rendering, and has declared one)
+```
+
+`R` declares *this attachment's viewport* — "my window could show N×M" — and is
+accepted from any attachment, writer or not. Zero in either dimension means no
+viewport at all (a window that has not laid out yet), and an optional fifth
+flags byte says the attachment has stopped rendering; a rendering attachment
+writes v0's exact four bytes, so the five-byte form is gated on the host
+offering the `viewport` capability. Only interactive attachments count: an
+observer has no tty and therefore no screen a viewport could be about, so
+`termio read` tailing a session cannot squeeze the window someone is working in.
+With nobody rendering, the size stays exactly where it was.
+
+The barrier is unchanged: quiesce, resize, emit fresh `S`, resume deltas (the
+ghostty-web lesson), and `E {ev:"resized"}` still carries the authoritative
+dimensions. What changed is who decides. Binding the size to the token made
+every token move a resize barrier and every byte misread as typing a resize
+loop — measured at 6135 token moves in 30 seconds, the grid alternating 39×38 ↔
+47×42. Per-client server-side reflow remains rejected — it means one vt per
+viewer per session, which is a nested-window-manager tax in disguise — so the
+mismatch is *shown*: a viewer larger than the session lays its surface out at
+the session's grid and leaves the rest blank, the way tmux pads and screen
+leaves space. Under a smallest-wins policy no renderer is ever narrower than the
+PTY, so nothing is ever scaled down.
 
 ### C.6 Terminal plane staging
 

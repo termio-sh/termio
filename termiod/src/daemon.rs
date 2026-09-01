@@ -2795,11 +2795,16 @@ async fn run_attach(
                     break;
                 }
             }
-            Ok(Some(Frame::Viewport { rows, cols })) => {
+            Ok(Some(Frame::Viewport {
+                rows,
+                cols,
+                rendering,
+            })) => {
                 handle.send(SessionMsg::Viewport {
                     id: client_id.clone(),
                     rows,
                     cols,
+                    rendering,
                 });
             }
             // Version skew, not a broken pipe: the request fails, the

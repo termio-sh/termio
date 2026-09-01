@@ -46,6 +46,7 @@ pub const HOST_CAPABILITIES: &[&str] = &[
     "git",
     "agents",
     "handoff",
+    "viewport",
 ];
 /// Snapshot payload carrying packed cells.
 ///
@@ -79,6 +80,9 @@ pub const MAX_FILE_FRAME_SIZE: usize = 64 * 1024;
 /// credit-of-one acks, a keystroke on a shared pipe waits behind at most one
 /// of these (§C.12 head-of-line discipline).
 pub const MAX_UPLOAD_FRAME_SIZE: usize = 64 * 1024;
+/// `R` flags bit 0: this attachment is showing the session. Absent flags byte
+/// means set — v0's four-byte payload is a rendering attachment.
+pub const VIEWPORT_RENDERING: u8 = 0x01;
 
 /// A single decoded frame off the wire.
 #[derive(Debug)]
@@ -90,10 +94,15 @@ pub enum Frame {
     /// tore down the channel and every subscription riding it.
     UnknownControl { op: String, seq: Option<u64> },
     Data(Vec<u8>),
-    /// `R`: this attachment's viewport is now `rows`×`cols`. Zero in either
-    /// dimension means it has no viewport at all — a window that has not laid
-    /// out yet — and is counted by nobody.
-    Viewport { rows: u16, cols: u16 },
+    /// `R`: this attachment's viewport is now `rows`×`cols`, and it is or is not
+    /// rendering the session. Zero in either dimension means the attachment has
+    /// no viewport at all — it has not laid out yet — which is not the same as
+    /// having one it is not currently showing.
+    Viewport {
+        rows: u16,
+        cols: u16,
+        rendering: bool,
+    },
     Event(Event),
     Snapshot(Snapshot),
     History(HistoryChunk),
@@ -2020,17 +2029,21 @@ pub async fn write_data<W: AsyncWriteExt + Unpin>(w: &mut W, data: &[u8]) -> Res
     Ok(())
 }
 
-/// Writes one `R` frame — v0's exact four bytes, now meaning "my viewport is
-/// this" rather than "set the PTY to this".
+/// Writes one `R` frame. A rendering attachment sends v0's exact four bytes; the
+/// flags byte exists only to say *not* rendering, so a client that never hides a
+/// session never puts a byte on the wire an old host cannot read.
 pub async fn write_viewport<W: AsyncWriteExt + Unpin>(
     w: &mut W,
     rows: u16,
     cols: u16,
+    rendering: bool,
 ) -> Result<()> {
-    let mut buf = [0u8; 4];
+    let mut buf = [0u8; 5];
     buf[0..2].copy_from_slice(&rows.to_be_bytes());
     buf[2..4].copy_from_slice(&cols.to_be_bytes());
-    write_frame(w, KIND_RESIZE, &buf).await
+    buf[4] = if rendering { VIEWPORT_RENDERING } else { 0 };
+    let len = if rendering { 4 } else { 5 };
+    write_frame(w, KIND_RESIZE, &buf[..len]).await
 }
 
 /// Read one frame. Returns `None` on EOF. Any malformed frame is a channel
@@ -2091,12 +2104,22 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Option<Fra
         }
         KIND_DATA => Ok(Some(Frame::Data(payload))),
         KIND_RESIZE => {
-            if payload.len() != 4 {
+            // Four bytes is v0's whole payload and still the common case. The
+            // optional fifth carries flags; an unknown bit is ignored rather
+            // than fatal, so the byte can grow without a version gate.
+            if payload.len() != 4 && payload.len() != 5 {
                 bail!("malformed viewport frame");
             }
             let rows = u16::from_be_bytes([payload[0], payload[1]]);
             let cols = u16::from_be_bytes([payload[2], payload[3]]);
-            Ok(Some(Frame::Viewport { rows, cols }))
+            let rendering = payload
+                .get(4)
+                .is_none_or(|flags| flags & VIEWPORT_RENDERING != 0);
+            Ok(Some(Frame::Viewport {
+                rows,
+                cols,
+                rendering,
+            }))
         }
         KIND_EVENT => {
             let event: Event = serde_json::from_slice(&payload)

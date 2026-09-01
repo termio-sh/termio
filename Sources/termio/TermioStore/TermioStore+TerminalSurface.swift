@@ -307,7 +307,13 @@ extension TermioStore {
             resize: { [weak self] viewport in
                 let columns = Int(viewport.columns)
                 let rows = Int(viewport.rows)
-                termiodLink.resize(rows: rows, cols: columns)
+                // What the *surface* is laid out at, which under a size policy
+                // is the shared grid rather than this pane's — the pane is
+                // letterboxed around it. The viewport the daemon sizes by is
+                // measured from the pane instead (`SharedGridLetterbox`), or a
+                // surface shrunk to somebody else's grid could never say it had
+                // room for more.
+                termiodLink.noteSurfaceGrid(rows: rows, cols: columns)
                 // Remember the host grid for the next session's initial size.
                 DispatchQueue.main.async { self?.rememberHostGrid(columns: columns, rows: rows) }
             }

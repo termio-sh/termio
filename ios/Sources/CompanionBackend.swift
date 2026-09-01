@@ -142,7 +142,8 @@ final class CompanionDeviceSession: DeviceSession {
     /// The Mac's bridge tells a report from a keystroke and gates it on the
     /// phone's own attachment, so on this wire it travels like any other byte.
     func sendDeviceReport(_ data: Data) { transport.send(data) }
-    func resize(columns: Int, rows: Int) { transport.resize(cols: columns, rows: rows) }
+    func setViewport(columns: Int, rows: Int) { transport.setViewport(cols: columns, rows: rows) }
+    func setRendering(_ showing: Bool) { transport.setRendering(showing) }
     func reassertGrid() { transport.reassertGrid() }
 }
 

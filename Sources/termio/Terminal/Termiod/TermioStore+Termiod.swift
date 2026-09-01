@@ -119,18 +119,16 @@ extension TermioStore {
         link.onStalled = { [weak self] stall in
             self?.applyTermiodStalled(stall, for: session.id)
         }
-        // The link itself acts on this (it stops sending `R` frames the daemon
-        // would reject, and re-asserts the grid when the token returns). The
-        // pane acts on it too: a demoted surface is letterboxed at the grid the
-        // other device chose (`SessionRuntime.sharedGrid`), so what it shows is
-        // what the bytes were wrapped for rather than a wide window's reflow of
-        // a phone-width screen.
-        link.onWriter = { [weak self] writer in
+        // Input only: the link gates its `D` frames on this. Nothing about the
+        // *size* rides it any more — a pane is letterboxed at the session's grid
+        // whenever the session is smaller than the pane, whoever is typing
+        // (`SessionRuntime.sharedGrid`,
+        // `docs/design/20260901-pty-size-is-not-the-write-token.md`).
+        link.onWriter = { writer in
             Log.termiod.info("""
             session \(session.id.uuidString, privacy: .public) is now \
             \(writer ? "the writer" : "an observer", privacy: .public)
             """)
-            self?.runtime(for: session.id).isWriter = writer
         }
         link.onSharedGrid = { [weak self] grid in
             self?.runtime(for: session.id).sharedGrid = grid
@@ -163,6 +161,22 @@ extension TermioStore {
         }
         termiodLinks[session.id] = link
         link.start()
+    }
+
+    /// How much of a session this pane could show, measured from the pane
+    /// itself. The daemon sizes the session to the smallest viewport currently
+    /// rendering it, so this is the Mac's whole say in the matter — the write
+    /// token has none.
+    func reportViewport(_ grid: TerminalGrid, for id: Session.ID) {
+        termiodLinks[id]?.setViewport(rows: Int(grid.rows), cols: Int(grid.cols))
+    }
+
+    /// Whether this pane is on screen. A hidden pane keeps its viewport and
+    /// stops counting, so a window left open on another workspace does not hold
+    /// every session it has a pane for down to its own width — zellij's rule for
+    /// tabs nobody is looking at.
+    func reportRendering(_ showing: Bool, for id: Session.ID) {
+        termiodLinks[id]?.setRendering(showing)
     }
 
     // MARK: - Host-reported workstream status

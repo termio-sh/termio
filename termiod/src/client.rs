@@ -720,11 +720,11 @@ pub async fn attach(
         tokio::select! {
             _ = winch.recv() => {
                 let (r, c) = term_size();
-                let _ = write_viewport(&mut wr, r, c).await;
+                let _ = write_viewport(&mut wr, r, c, true).await;
             }
             Some(()) = resize_claim_rx.recv() => {
                 let (r, c) = term_size();
-                let _ = write_viewport(&mut wr, r, c).await;
+                let _ = write_viewport(&mut wr, r, c, true).await;
             }
             n = stdin.read(&mut buf) => {
                 match n {

@@ -39,7 +39,17 @@ public enum Termiod {
     /// A later plane opens its own channel and passes its own `caps` to
     /// `withControlChannel` — capabilities are per-connection, so nothing here
     /// has to grow for the file tree or git to land.
-    public static let attachCapabilities = ["snapshot", "events"]
+    /// `viewport` is the one that changed what `R` means: the host sizes the
+    /// session from every rendering attachment at once instead of from whoever
+    /// holds the write token, and understands an `R` that says "not rendering".
+    /// A host that does not offer it gets v0's four bytes and v0's meaning.
+    public static let attachCapabilities = ["snapshot", "events", viewportCapability]
+
+    /// The host computes the PTY size as a policy over the attachments that are
+    /// rendering (`docs/design/20260901-pty-size-is-not-the-write-token.md`).
+    /// Gate the five-byte `R` on it: an older host reads a payload of any other
+    /// length as a malformed frame and drops the connection.
+    public static let viewportCapability = "viewport"
 
     /// What a plain control channel (`list`, `kill`) offers: nothing. Both verbs
     /// are unconditional, and tombstones ride the `sessions` reply un-gated.
@@ -231,13 +241,22 @@ public enum Termiod {
         }
     }
 
-    /// `R` payload: rows then cols, each a big-endian u16.
-    public static func resizePayload(_ rows: UInt16, _ cols: UInt16) -> Data {
-        var payload = Data(capacity: 4)
+    /// `R` payload: rows then cols, each a big-endian u16, and — only when this
+    /// attachment has stopped rendering — a fifth flags byte.
+    ///
+    /// `R` declares *this attachment's viewport*, never the PTY's size. Zero in
+    /// either dimension is a window that has not laid out yet and is counted by
+    /// nobody. A rendering attachment writes v0's exact four bytes, so the only
+    /// payload an old host cannot read is the one it has no policy for anyway.
+    public static func viewportPayload(
+        rows: UInt16, cols: UInt16, rendering: Bool = true
+    ) -> Data {
+        var payload = Data(capacity: 5)
         var bigEndianRows = rows.bigEndian
         var bigEndianCols = cols.bigEndian
         withUnsafeBytes(of: &bigEndianRows) { payload.append(contentsOf: $0) }
         withUnsafeBytes(of: &bigEndianCols) { payload.append(contentsOf: $0) }
+        if !rendering { payload.append(0) }
         return payload
     }
 

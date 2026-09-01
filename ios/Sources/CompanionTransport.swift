@@ -31,13 +31,15 @@ final class CompanionTransport {
     /// (the standalone companion PoC).
     private let attachSessionID: String?
     private let link: WebSocketLink
-    /// Last grid the terminal reported, re-sent on every (re)connect and on
-    /// foreground: the first resize often fires before the socket exists and
+    /// Last viewport the terminal declared, re-sent on every (re)connect and on
+    /// foreground: the first layout often fires before the socket exists and
     /// would be silently lost, and a reconnect never re-fires it (the view's
-    /// size didn't change). The Mac applies a report only while this phone
-    /// holds the write token; typing is what takes the token.
+    /// size didn't change). The Mac forwards it as its bridge attachment's own
+    /// viewport; the session's size is the smallest one being rendered, and the
+    /// write token has nothing to do with it.
     private var gridCols = 0
     private var gridRows = 0
+    private var gridRendering = true
     private let gridLock = NSLock()
     /// Guards send order: `auth` must be the first frame on the socket. The
     /// terminal view calls `resize` (→ `sendGrid`) as it lays out, which can land
@@ -106,7 +108,10 @@ final class CompanionTransport {
         link.send(data)
     }
 
-    func resize(cols: Int, rows: Int) {
+    /// This screen's viewport. The Mac's bridge has no surface of its own, so it
+    /// forwards this as its own attachment's viewport and the daemon sizes the
+    /// session to the smallest one being rendered.
+    func setViewport(cols: Int, rows: Int) {
         gridLock.lock()
         gridCols = cols
         gridRows = rows
@@ -114,9 +119,17 @@ final class CompanionTransport {
         sendGrid()
     }
 
-    /// Re-sends this phone's grid — on reconnect, foreground, and re-opening a
-    /// parked session. The Mac applies it only while this phone holds the
-    /// write token, and a size the PTY already has costs nothing.
+    /// Whether this screen is showing the session. A parked screen keeps its
+    /// viewport and stops counting toward the session's size.
+    func setRendering(_ showing: Bool) {
+        gridLock.lock()
+        gridRendering = showing
+        gridLock.unlock()
+        sendGrid()
+    }
+
+    /// Re-sends this phone's viewport — on reconnect, foreground, and re-opening
+    /// a parked session. A viewport the Mac already has costs nothing.
     func reassertGrid() {
         sendGrid()
     }
@@ -125,10 +138,12 @@ final class CompanionTransport {
         gridLock.lock()
         let cols = gridCols
         let rows = gridRows
+        let rendering = gridRendering
         let ready = authSent
         gridLock.unlock()
         guard ready, cols > 0, rows > 0 else { return }
-        link.send(CompanionControl.resize(cols: cols, rows: rows).encoded())
+        link.send(
+            CompanionControl.resize(cols: cols, rows: rows, rendering: rendering).encoded())
     }
 
     func stop() {

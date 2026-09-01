@@ -94,12 +94,14 @@ pub enum SessionMsg {
         id: ClientId,
         data: Vec<u8>,
     },
-    /// One attachment's viewport changed. The PTY's size is derived from the
-    /// whole set (`apply_size_policy`); this message never sets it directly.
+    /// One attachment's viewport changed, or it started or stopped rendering.
+    /// The PTY's size is derived from the whole set (`apply_size_policy`); this
+    /// message never sets it directly.
     Viewport {
         id: ClientId,
         rows: u16,
         cols: u16,
+        rendering: bool,
     },
     /// `termiod send` — inject input without attaching. Always applied.
     Inject {
@@ -181,9 +183,15 @@ struct ClientEntry {
     backlog: Arc<ClientBacklog>,
     role: ClientRole,
     plane: ClientPlane,
-    /// What this attachment says it could show. `None` is an attachment with no
-    /// viewport at all — it has not laid out yet, or it never will.
+    /// What this attachment says it is showing, and whether it is showing it.
+    ///
+    /// `None` is an attachment with no viewport at all — it has not laid out
+    /// yet, or it never will (a relay with no surface that declines to speak
+    /// for the one downstream of it). `rendering` is the other axis: a Mac pane
+    /// on a background tab keeps its viewport and stops counting, so the
+    /// session springs back to the width of whoever is still looking.
     viewport: Option<(u16, u16)>,
+    rendering: bool,
     /// Attach-only history staging. Resize barriers discard any remainder and
     /// deliberately do not restage it; resize/reflow history is a later policy.
     staged_history: VecDeque<Bytes>,
@@ -884,7 +892,8 @@ impl Session {
     }
 
     /// The size this session should be: the componentwise smallest viewport
-    /// among the attachments that have declared one. `None` when none has.
+    /// among the attachments that are actually rendering it. `None` when nobody
+    /// is — every viewer left, or every one of them is on another tab.
     ///
     /// Only interactive attachments are counted, for the same reason only they
     /// are ranked for the write token: an observer attached without a tty has no
@@ -897,7 +906,7 @@ impl Session {
     fn policy_size(&self) -> Option<(u16, u16)> {
         self.clients
             .values()
-            .filter(|entry| entry.role.is_interactive())
+            .filter(|entry| entry.role.is_interactive() && entry.rendering)
             .filter_map(|entry| entry.viewport)
             .reduce(|(rows, cols), (other_rows, other_cols)| {
                 (rows.min(other_rows), cols.min(other_cols))
@@ -908,10 +917,11 @@ impl Session {
     ///
     /// This is the only thing in the daemon that resizes a session, and it runs
     /// on every change to the attachment set: an arrival, a departure, a
-    /// viewport. The write token is not consulted — who may type and how big the
-    /// screen is are different questions.
+    /// viewport, a pane going to a background tab. The write token is not
+    /// consulted — who may type and how big the screen is are different
+    /// questions (`docs/design/20260901-pty-size-is-not-the-write-token.md`).
     ///
-    /// With nobody declaring a viewport, the size is left exactly where it was. A session
+    /// With nobody rendering, the size is left exactly where it was. A session
     /// every viewer walked away from keeps the shape its last viewer gave it,
     /// the way zellij holds an unviewed tab, so coming back to it does not cost
     /// a reflow of a screen nobody watched change.
@@ -2231,9 +2241,12 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
                     backlog,
                     role,
                     plane,
-                    // What an attach declares is a best guess — the window it is
-                    // going into may not have laid out yet, and says so with a zero.
+                    // An attach is a viewer arriving to look at the session, so
+                    // it starts rendering. What it declares here is a best
+                    // guess — the window it is going into may not have laid out
+                    // yet, and says so with a zero.
                     viewport: (rows > 0 && cols > 0).then_some((rows, cols)),
+                    rendering: true,
                     staged_history: VecDeque::new(),
                     backlog_strikes: 0,
                 },
@@ -2325,7 +2338,12 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
                 session.reject_not_writer(&id);
             }
         }
-        SessionMsg::Viewport { id, rows, cols } => {
+        SessionMsg::Viewport {
+            id,
+            rows,
+            cols,
+            rendering,
+        } => {
             // Not gated on the write token, and that is the whole point: an
             // attachment saying how big it is is not a claim on the session.
             // Every viewer's declaration counts, and the policy decides.
@@ -2333,10 +2351,11 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
                 return None;
             };
             let declared = (rows > 0 && cols > 0).then_some((rows, cols));
-            if entry.viewport == declared {
+            if entry.viewport == declared && entry.rendering == rendering {
                 return None;
             }
             entry.viewport = declared;
+            entry.rendering = rendering;
             session.apply_size_policy();
         }
         SessionMsg::Inject { data } => {
@@ -2644,13 +2663,14 @@ mod tests {
         client_rx
     }
 
-    fn declare_viewport(session: &mut Session, id: &str, rows: u16, cols: u16) {
+    fn declare_viewport(session: &mut Session, id: &str, rows: u16, cols: u16, rendering: bool) {
         handle_msg(
             session,
             SessionMsg::Viewport {
                 id: ClientId::new(id),
                 rows,
                 cols,
+                rendering,
             },
         );
     }
@@ -2784,8 +2804,11 @@ mod tests {
         let _ = thread.join();
     }
 
+    /// Zellij's refinement: a pane on a background tab is not rendering, so it
+    /// stops holding the session down to its width. Without this a Mac window
+    /// left open on another workspace would pin every session it has a pane for.
     #[tokio::test]
-    async fn a_session_nobody_has_described_keeps_its_size() {
+    async fn an_attachment_that_stopped_rendering_stops_counting() {
         let Sidecar {
             commands,
             results: _results,
@@ -2794,7 +2817,38 @@ mod tests {
         } = spawn_sidecar(24, 80).unwrap();
         let (mut session, _events) = test_session(commands, queue);
 
-        let _mac = attach_interactive_client(&mut session, "mac");
+        let _mac = attach_interactive_client_at(&mut session, "mac", 50, 200);
+        let _phone = attach_interactive_client_at(&mut session, "phone", 42, 47);
+        assert_eq!(session.policy_size(), Some((42, 47)));
+
+        declare_viewport(&mut session, "phone", 42, 47, false);
+        assert_eq!(
+            session.policy_size(),
+            Some((50, 200)),
+            "the phone put the session away; the Mac gets its width back"
+        );
+
+        declare_viewport(&mut session, "phone", 42, 47, true);
+        assert_eq!(session.policy_size(), Some((42, 47)), "and back again");
+
+        session.vt.shut_down();
+        let _ = thread.join();
+    }
+
+    /// With nobody looking there is no answer, and `apply_size_policy` leaves
+    /// the session exactly where it was rather than inventing one.
+    #[tokio::test]
+    async fn nobody_rendering_leaves_the_size_alone() {
+        let Sidecar {
+            commands,
+            results: _results,
+            queue,
+            thread,
+        } = spawn_sidecar(24, 80).unwrap();
+        let (mut session, _events) = test_session(commands, queue);
+
+        let _mac = attach_interactive_client_at(&mut session, "mac", 50, 200);
+        declare_viewport(&mut session, "mac", 50, 200, false);
         assert_eq!(session.policy_size(), None);
         let (rows, cols) = (session.rows, session.cols);
         session.apply_size_policy();
@@ -2822,7 +2876,7 @@ mod tests {
         let _phone = attach_interactive_client_at(&mut session, "phone", 0, 0);
         assert_eq!(session.policy_size(), Some((50, 200)));
 
-        declare_viewport(&mut session, "phone", 42, 47);
+        declare_viewport(&mut session, "phone", 42, 47, true);
         assert_eq!(session.policy_size(), Some((42, 47)));
 
         session.vt.shut_down();
@@ -2844,7 +2898,7 @@ mod tests {
 
         let _mac = attach_interactive_client_at(&mut session, "mac", 50, 200);
         let _reader = attach_client(&mut session, "reader", false);
-        declare_viewport(&mut session, "reader", 10, 10);
+        declare_viewport(&mut session, "reader", 10, 10, true);
         assert_eq!(session.policy_size(), Some((50, 200)));
 
         session.vt.shut_down();
@@ -3213,6 +3267,7 @@ mod tests {
                     role: ClientRole::Interactive { seq: 1 },
                     plane: ClientPlane::Raw,
                     viewport: Some((24, 80)),
+                    rendering: true,
                     staged_history: VecDeque::new(),
                     backlog_strikes: 0,
                 },
@@ -3239,6 +3294,7 @@ mod tests {
                 id: ClientId::new("writer"),
                 rows: 40,
                 cols: 120,
+                rendering: true,
             },
         )
         .is_none());
@@ -3333,6 +3389,7 @@ mod tests {
             id: ClientId::new("writer"),
             rows: 40,
             cols: 120,
+            rendering: true,
         });
         let carried = carry(&resized.handle).await;
         assert!(
@@ -3351,6 +3408,7 @@ mod tests {
             id: ClientId::new("writer"),
             rows: 40,
             cols: 120,
+            rendering: true,
         });
         let mut carried = carry(&session.handle).await;
         assert!(!carried.info.ring_reconstructs_screen);

@@ -1044,40 +1044,51 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// Keystrokes typed during the connect/attach window — flushed, in order,
     /// the moment the channel is writable so nothing the user typed is lost.
     private var pendingInput = Data()
-    /// The grid this client wants the PTY to be, updated by every `resize`
-    /// whether or not it can be sent yet.
-    private var desiredGrid: TerminalGrid
-    /// The last grid actually written as an `R` frame, so a redundant resize
-    /// isn't re-sent while the daemon is still applying the first one.
-    private var sentGrid: TerminalGrid?
-    /// Bumped by every `resize`; only the newest scheduled send may write its
-    /// frame. See `scheduleResizeLocked`.
-    private var resizeGeneration: UInt64 = 0
+    /// This attachment's viewport: how much of a session this pane could show,
+    /// measured from the pane's own geometry rather than read back off the
+    /// surface. The two are not the same thing once the surface is laid out at a
+    /// smaller shared grid — a surface that reports the grid it was shrunk to is
+    /// a pane that can never say it has room for more, and the session would
+    /// never grow back.
+    private var viewportGrid: TerminalGrid
+    /// Whether this pane is on screen. A hidden pane keeps its viewport and
+    /// stops counting toward the session's size, so a window left open on
+    /// another workspace does not hold every session it has a pane for down to
+    /// its own width.
+    private var rendering = true
+    /// The last viewport actually written as an `R` frame, so an unchanged
+    /// declaration isn't re-sent while the daemon is still applying the first.
+    private var sentViewport: (grid: TerminalGrid, rendering: Bool)?
+    /// Bumped by every viewport change; only the newest scheduled send may write
+    /// its frame. See `scheduleViewportLocked`.
+    private var viewportGeneration: UInt64 = 0
+    /// The grid libghostty says this surface is actually laid out at. Read only
+    /// by the repaint arming below — it is never what goes on the wire.
+    private var surfaceGrid: TerminalGrid
+    /// Whether the daemon said it sizes sessions by policy. Without it this is
+    /// an older host that reads `R` as "set the PTY size", and the five-byte
+    /// form it has never seen would drop the connection.
+    private var hostSizesByPolicy = false
     /// The PTY's real size, from `attached` and then every `E resized`. This is
     /// the authority — §C.5: a client that parses at its own window size instead
     /// of this one wraps the same bytes differently and diverges from the host.
     private var authoritativeGrid: TerminalGrid?
-    /// An observer whose surface is not yet at the shared grid. The keyframe
-    /// that announced the grid was parsed at the old one, and the surface is
-    /// resized only after `onSharedGrid` reaches the UI — so the first `resize`
-    /// that lands *on* the shared grid asks the daemon for a fresh keyframe,
-    /// and that one paints right.
-    private var observerRepaintPending = false
+    /// A surface not yet laid out at the shared grid. The keyframe that
+    /// announced the grid was parsed at the old one, and the surface is re-laid
+    /// out only after `onSharedGrid` reaches the UI — so the first surface
+    /// report that lands *on* the shared grid asks the daemon for a fresh
+    /// keyframe, and that one paints right.
+    ///
+    /// Not gated on the write token any more. Under a size policy the writer's
+    /// own surface is letterboxed too whenever somebody smaller is looking, and
+    /// it needs the same repaint the observer always did.
+    private var repaintPending = false
     /// Set on any deliberate teardown so the reader's EOF is not misread as a
     /// daemon crash.
     private var closed = false
     private var exitDelivered = false
     private var connectionLostDelivered = false
     private var startRefusedDelivered = false
-
-    /// What the reader thread needs to judge an arriving `S` against: the grid
-    /// the surface is currently laid out at, and whether this client is the one
-    /// moving the PTY toward it. Its own lock rather than the work queue because
-    /// a snapshot is rendered inline on the reader thread — hopping would break
-    /// the S-before-D ordering that path exists to preserve.
-    private let renderLock = NSLock()
-    private var renderTargetLocked: TerminalGrid
-    private var renderWriterLocked = false
 
     /// The last instant something was written toward the session's stdin. Its own
     /// lock, not the work queue, so the status tap can read it from the reader
@@ -1183,8 +1194,8 @@ final class TermiodSessionLink: @unchecked Sendable {
         self.specification = specification
         self.route = route
         let grid = TerminalGrid(rows: UInt16(clamping: rows), cols: UInt16(clamping: cols))
-        desiredGrid = grid
-        renderTargetLocked = grid
+        viewportGrid = grid
+        surfaceGrid = grid
     }
 
     /// Kicks off connect → hello → attach in the background. The caller wires
@@ -1197,9 +1208,10 @@ final class TermiodSessionLink: @unchecked Sendable {
                 let handshake = try Termiod.performHello(
                     channel, role: "attach", caps: Termiod.attachCapabilities)
                 clientID = handshake.clientID
+                hostSizesByPolicy = handshake.capabilities.contains(Termiod.viewportCapability)
                 let device = handshake.device
                 DispatchQueue.main.async { [self] in onDevice?(device) }
-                let requested = desiredGrid
+                let requested = viewportGrid
                 let payload = try Termiod.attachPayload(
                     target: sessionName,
                     specification: specification,
@@ -1225,7 +1237,6 @@ final class TermiodSessionLink: @unchecked Sendable {
                 }
                 attached = true
                 isWriter = attachedPayload.writer
-                publishRenderWriter(attachedPayload.writer)
                 DispatchQueue.main.async { [self] in
                     onDaemonSessionID?(attachedPayload.sessionId)
                 }
@@ -1235,17 +1246,22 @@ final class TermiodSessionLink: @unchecked Sendable {
                 // first frame and has to be able to say so. `applyWriter` only
                 // ever fires on a transition, so nothing else covers this.
                 DispatchQueue.main.async { [self] in onWriter?(attachedPayload.writer) }
-                // `attached` reports the session's size *before* this attach is
-                // applied; the daemon then resizes to what a writer asked for and
-                // announces it as `E resized`. Seeding from the reply means an
-                // observer — which never triggers that resize — still knows the
-                // grid its bytes are wrapped at.
+                // `attached` reports the size the session settled at once this
+                // attachment's viewport was counted — the daemon applies the
+                // policy before it answers — so this is the grid the bytes
+                // arriving on this channel are already wrapped for.
                 let sharedGrid = TerminalGrid(
                     rows: attachedPayload.rows, cols: attachedPayload.cols)
                 authoritativeGrid = sharedGrid
                 DispatchQueue.main.async { [self] in onSharedGrid?(sharedGrid) }
-                if isWriter { sentGrid = requested }
-                observerRepaintPending = !isWriter && sharedGrid != requested
+                // The attach control carried this viewport, so the daemon has
+                // already counted it; re-sending it would be a barrier for
+                // nothing.
+                sentViewport = (requested, true)
+                // A pane that went to a background tab before its attach landed
+                // has to say so: the daemon counts every arrival as rendering.
+                if !rendering { scheduleViewportLocked() }
+                repaintPending = sharedGrid != surfaceGrid
                 Log.termiod.info("""
                 attached session=\(self.sessionName, privacy: .public) \
                 device=\(device.id, privacy: .public) \
@@ -1334,9 +1350,8 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// its user just opened — and needs to say so out loud, because until it
     /// holds the token its screen is painted for somebody else's grid.
     ///
-    /// The grant arrives as `writer_changed`, and `applyWriter` re-asserts this
-    /// client's grid on the way through; there is nothing to send here beyond
-    /// the claim itself.
+    /// The grant arrives as `writer_changed`. Nothing else rides it: the token
+    /// carries no size, so there is nothing to send here beyond the claim.
     func claimWriter() {
         workQueue.async { [self] in
             guard !closed, attached, !isWriter else { return }
@@ -1374,83 +1389,113 @@ final class TermiodSessionLink: @unchecked Sendable {
         }
     }
 
-    func resize(rows: Int, cols: Int) {
+    /// Declares how much of a session this pane could show.
+    ///
+    /// Measured from the pane, not read back off the surface, and sent whether
+    /// or not this client holds the write token. The daemon sizes the session to
+    /// the smallest viewport being rendered; who may type is a separate question
+    /// and asking it here is what used to turn a stray byte into a resize loop
+    /// (`docs/design/20260901-pty-size-is-not-the-write-token.md`).
+    func setViewport(rows: Int, cols: Int) {
         let size = TerminalGrid(rows: UInt16(clamping: rows), cols: UInt16(clamping: cols))
-        // Recorded before the hop: this is what the surface is laid out at right
-        // now, and the reader thread judges every arriving keyframe against it.
-        renderLock.lock()
-        renderTargetLocked = size
-        renderLock.unlock()
         workQueue.async { [self] in
-            guard !closed else { return }
-            desiredGrid = size
+            guard !closed, viewportGrid != size else { return }
+            viewportGrid = size
             guard attached else { return }
-            // Observers must not resize the shared PTY out from under the
-            // writer; the daemon would reject the frame anyway. An observer
-            // arriving at the shared grid is the one moment it does need
-            // something from the daemon: a keyframe it can finally paint.
-            // Leaving the grid — a font change reports the old frame at new
-            // cell metrics before the letterbox puts it back — arms the next
-            // arrival, so the bytes parsed in between are repainted too.
-            guard isWriter else {
-                if authoritativeGrid != size {
-                    observerRepaintPending = true
-                } else if observerRepaintPending {
-                    observerRepaintPending = false
-                    requestResyncLocked()
-                }
-                return
-            }
-            scheduleResizeLocked()
+            scheduleViewportLocked()
         }
     }
 
-    /// How long the grid must hold still before the size goes to the daemon.
+    /// Whether this pane is on screen. A hidden pane is not rendering and stops
+    /// counting toward the session's size; showing it again puts its viewport
+    /// back in the running.
+    func setRendering(_ showing: Bool) {
+        workQueue.async { [self] in
+            guard !closed, rendering != showing else { return }
+            rendering = showing
+            guard attached else { return }
+            scheduleViewportLocked()
+        }
+    }
+
+    /// The grid libghostty laid this surface out at, which under a size policy
+    /// is the *shared* grid rather than the pane's — the pane is letterboxed
+    /// around it. Never sent: it would tell the daemon this pane has room for
+    /// only what it was already shrunk to, and the session could never grow.
+    ///
+    /// Arriving at the shared grid is the one moment a letterboxed surface needs
+    /// something from the daemon: a keyframe it can finally paint. Leaving it —
+    /// a font change reports the old frame at new cell metrics before the
+    /// letterbox puts it back — arms the next arrival, so the bytes parsed in
+    /// between are repainted too.
+    func noteSurfaceGrid(rows: Int, cols: Int) {
+        let size = TerminalGrid(rows: UInt16(clamping: rows), cols: UInt16(clamping: cols))
+        workQueue.async { [self] in
+            guard !closed else { return }
+            surfaceGrid = size
+            guard attached else { return }
+            if authoritativeGrid != size {
+                repaintPending = true
+            } else if repaintPending {
+                repaintPending = false
+                requestResyncLocked()
+            }
+        }
+    }
+
+    /// How long the viewport must hold still before it goes to the daemon.
     /// The same 50ms `PTYProcess.resizeFromHost` coalesces on, and for a
     /// sharper reason here: on the in-process path an intermediate size costs a
-    /// SIGWINCH, while on this one every distinct size is a host-side
-    /// **barrier** — the session quiesces, resizes, and pushes a fresh keyframe
-    /// to every attachment. A live drag or a settling split emits a burst of
-    /// them, and each keyframe is a full repaint racing the child's own redraw.
-    private static let resizeCoalescingInterval = DispatchTimeInterval.milliseconds(50)
+    /// SIGWINCH, while on this one a viewport that moves the session is a
+    /// host-side **barrier** — the session quiesces, resizes, and pushes a fresh
+    /// keyframe to every attachment. A live drag or a settling split emits a
+    /// burst of them, and each keyframe is a full repaint racing the child's own
+    /// redraw.
+    private static let viewportCoalescingInterval = DispatchTimeInterval.milliseconds(50)
 
-    /// Sends `desiredGrid` once the surface stops moving. Generation-stamped
-    /// rather than debounced with a cancellable work item because the size is
-    /// re-read at fire time: the last scheduled send is the only one that
-    /// writes, and it writes whatever the grid settled at.
+    /// Sends the viewport once the pane stops moving. Generation-stamped rather
+    /// than debounced with a cancellable work item because the size is re-read
+    /// at fire time: the last scheduled send is the only one that writes, and it
+    /// writes whatever the pane settled at.
     ///
     /// Must run on `workQueue`.
-    private func scheduleResizeLocked() {
-        resizeGeneration &+= 1
-        let generation = resizeGeneration
-        workQueue.asyncAfter(deadline: .now() + Self.resizeCoalescingInterval) { [self] in
-            guard !closed, attached, isWriter, generation == resizeGeneration else { return }
+    private func scheduleViewportLocked() {
+        viewportGeneration &+= 1
+        let generation = viewportGeneration
+        workQueue.asyncAfter(deadline: .now() + Self.viewportCoalescingInterval) { [self] in
+            guard !closed, attached, generation == viewportGeneration else { return }
             do {
-                try sendResizeLocked(desiredGrid)
+                try sendViewportLocked()
             } catch {
                 Log.termiod.error("""
-                resize of \(self.sessionName, privacy: .public) failed: \
+                viewport of \(self.sessionName, privacy: .public) failed: \
                 \(error.localizedDescription, privacy: .public)
                 """)
             }
         }
     }
 
-    /// Writes one `R` frame, unless the PTY is already that size and nothing
-    /// else is in flight. The skip is not a micro-optimisation: a resize is a
-    /// **barrier** host-side (§C.5) — the session quiesces, resizes, and emits a
-    /// fresh `S` keyframe to every attachment — so re-asserting a size the PTY
-    /// already has costs a full repaint for every viewer.
+    /// Writes one `R` frame, unless the daemon already has this exact
+    /// declaration. The skip is not a micro-optimisation: a viewport that moves
+    /// the session is a **barrier** host-side (§C.5), so re-declaring what the
+    /// daemon already knows can cost every viewer a full repaint.
+    ///
+    /// An older daemon reads `R` as "set the PTY size" and refuses it from
+    /// anyone but the writer, so on one of those this stays gated the way it
+    /// always was — and never sends the five-byte form, which such a daemon
+    /// reads as a malformed frame and hangs up on.
     ///
     /// Must run on `workQueue`.
-    private func sendResizeLocked(_ size: TerminalGrid) throws {
+    private func sendViewportLocked() throws {
         guard let transport else { return }
-        // Confirmed at this size, and nothing else on the wire that would move
-        // it away: the frame would be a pure no-op with a repaint attached.
-        if authoritativeGrid == size, sentGrid == nil || sentGrid == size { return }
-        sentGrid = size
-        try Termiod.writeFrame(transport.writeDescriptor, kind: .resize,
-                               payload: Termiod.resizePayload(size.rows, size.cols))
+        guard hostSizesByPolicy || isWriter else { return }
+        let showing = hostSizesByPolicy ? rendering : true
+        if let sent = sentViewport, sent.grid == viewportGrid, sent.rendering == showing { return }
+        sentViewport = (viewportGrid, showing)
+        try Termiod.writeFrame(
+            transport.writeDescriptor, kind: .resize,
+            payload: Termiod.viewportPayload(
+                rows: viewportGrid.rows, cols: viewportGrid.cols, rendering: showing))
     }
 
     /// Leaves the stream but keeps the session alive in the daemon — the
@@ -1601,16 +1646,21 @@ final class TermiodSessionLink: @unchecked Sendable {
                     // pulls the first live `D` — preserves S-before-D through
                     // the same `onOutput` seam, with no hold-back buffer needed.
                     // A mid-session `S` (the resize barrier's fresh keyframe)
-                    // takes the same path and repaints idempotently — but only
-                    // one taken at the grid this surface is actually laid out
-                    // at (see `snapshotIsStale`).
+                    // takes the same path and repaints idempotently.
+                    //
+                    // Painted even when it describes a grid this surface is not
+                    // laid out at yet, which it briefly is: the barrier's `S`
+                    // arrives ahead of the `E resized` the letterbox reacts to.
+                    // Dropping it instead used to be safe only for the writer,
+                    // whose own resize guaranteed another keyframe behind it —
+                    // and no client can make that promise now that the size is a
+                    // policy nobody client-side controls. `repaintPending` is
+                    // what repairs the one mangled frame, on the far side of the
+                    // layout pass.
                     guard let keyframe = TermiodSnapshot.decode(frame.payload) else {
                         Log.termiod.error("""
                         undecodable snapshot frame on \(self.sessionName, privacy: .public)
                         """)
-                        break
-                    }
-                    guard !self.snapshotIsStale(rows: keyframe.rows, cols: keyframe.cols) else {
                         break
                     }
                     self.onOutput?(TermiodSnapshot.render(keyframe))
@@ -1754,10 +1804,13 @@ final class TermiodSessionLink: @unchecked Sendable {
 
     /// Applies a writer-token change. The daemon names the writer by client id,
     /// so this is the one comparison that tells this connection whether its `D`
-    /// and `R` frames will be honoured or answered with `not_writer`.
+    /// frames will be honoured or answered with `not_writer`.
     ///
-    /// Promotion re-asserts the grid: a client that was demoted stopped sending
-    /// resizes, so the PTY can be any size by the time the token comes back.
+    /// The token no longer carries the grid with it. It used to: gaining it
+    /// re-asserted this client's size, which made every misclassified byte a
+    /// resize, and two devices trading the token a resize loop. The size is the
+    /// daemon's policy over what is being rendered and does not move when the
+    /// token does.
     private func applyWriter(_ writer: String?) {
         workQueue.async { [self] in
             guard !closed else { return }
@@ -1765,18 +1818,17 @@ final class TermiodSessionLink: @unchecked Sendable {
             claimingWriter = false
             guard mine != isWriter else { return }
             isWriter = mine
-            publishRenderWriter(mine)
             Log.termiod.info("""
             write token on \(self.sessionName, privacy: .public) \
             \(mine ? "claimed" : "lost", privacy: .public)
             """)
-            // Demoted with the surface still at its own grid: the letterbox
-            // will move it, and the resize that lands is what asks for the
-            // keyframe (see `observerRepaintPending`).
-            observerRepaintPending = !mine && authoritativeGrid != desiredGrid
-            if mine {
+            // An older daemon still reads `R` as "set the PTY size" and refuses
+            // it from anyone but the writer, so on one of those the token is
+            // still the only moment this pane may state its size. Nothing here
+            // runs against a daemon that sizes by policy.
+            if mine, !hostSizesByPolicy {
                 do {
-                    try sendResizeLocked(desiredGrid)
+                    try sendViewportLocked()
                 } catch {
                     Log.termiod.error("""
                     reclaiming size on \(self.sessionName, privacy: .public) failed: \
@@ -1788,87 +1840,28 @@ final class TermiodSessionLink: @unchecked Sendable {
         }
     }
 
-    private func publishRenderWriter(_ mine: Bool) {
-        renderLock.lock()
-        renderWriterLocked = mine
-        renderLock.unlock()
-    }
-
-    /// Whether an arriving keyframe describes a screen this surface can't paint.
+    /// Records the PTY's real size — the smallest viewport currently rendering
+    /// this session, which is what every attachment's bytes are wrapped for.
     ///
-    /// The payload is a formatted repaint, wrapped rows and all, laid out for
-    /// the grid the host VT held when it was taken. Painted into a surface of a
-    /// different width every wrapped row shifts, which is a mangled screen — and
-    /// the TUIs that redraw incrementally (an agent's composer box) never repaint
-    /// it back, so the damage sits there until the next keystroke.
-    ///
-    /// Only a **writer** may drop one, and that is what makes dropping safe
-    /// rather than a blank pane: this client is then the one moving the PTY, so
-    /// a mismatch means its own resize is still in flight and the barrier at the
-    /// far end of it will push a keyframe at the right size. An observer has no
-    /// such promise — nothing it does will produce another `S` — so it paints
-    /// what it was given and lives with §C.5 divergence.
-    static func snapshotIsStale(payload: TerminalGrid,
-                                target: TerminalGrid,
-                                isWriter: Bool) -> Bool {
-        isWriter && payload != target
-    }
-
-    /// Reader-thread half of `snapshotIsStale`, reading the surface's grid and
-    /// the write token under `renderLock`.
-    private func snapshotIsStale(rows: Int, cols: Int) -> Bool {
-        let payload = TerminalGrid(rows: UInt16(clamping: rows), cols: UInt16(clamping: cols))
-        renderLock.lock()
-        let target = renderTargetLocked
-        let writer = renderWriterLocked
-        renderLock.unlock()
-        guard Self.snapshotIsStale(payload: payload, target: target, isWriter: writer) else {
-            return false
-        }
-        Log.termiod.info("""
-        skipping \(payload.rows, privacy: .public)x\(payload.cols, privacy: .public) keyframe on \
-        \(self.sessionName, privacy: .public); this surface is \
-        \(target.rows, privacy: .public)x\(target.cols, privacy: .public)
-        """)
-        return true
-    }
-
-    /// Records the PTY's real size. Two things read it: `sendResizeLocked`, so a
-    /// size the PTY already has never costs a barrier repaint, and the check
-    /// below — the PTY only diverges from what this client asked for when
-    /// another client owns the token, and that is the §C.5 case where this
-    /// window is wrapping bytes at the wrong width.
-    ///
-    /// A writer answers that divergence instead of only noting it. It has to:
-    /// the surface reports a grid only when it *changes*
-    /// (`InMemoryTerminalSession.dispatchResize` drops an unchanged viewport),
-    /// so a PTY moved out from under a still window has no second chance to be
-    /// noticed — the screen stays formatted for someone else's grid until the
-    /// user drags the window edge. An *observer* cannot resize anything, so its
-    /// answer is on the other side of `onSharedGrid`: the pane lays the surface
-    /// out at the shared grid instead (`SharedGridLetterbox`).
+    /// Only noted, never answered. A writer used to answer a divergence by
+    /// putting its own size back, which is how two devices watching one session
+    /// sawed the PTY between their two grids. The pane's answer is on the other
+    /// side of `onSharedGrid`: it lays the surface out at the shared grid and
+    /// leaves the rest of the pane blank (`SharedGridLetterbox`), the way tmux
+    /// pads and screen leaves space.
     private func applyAuthoritativeGrid(_ grid: TerminalGrid) {
         workQueue.async { [self] in
             guard authoritativeGrid != grid else { return }
             authoritativeGrid = grid
             DispatchQueue.main.async { [self] in onSharedGrid?(grid) }
-            if !isWriter { observerRepaintPending = grid != desiredGrid }
-            guard grid != desiredGrid else { return }
+            repaintPending = grid != surfaceGrid
+            guard grid != viewportGrid else { return }
             Log.termiod.info("""
             \(self.sessionName, privacy: .public) PTY is now \
             \(grid.rows, privacy: .public)x\(grid.cols, privacy: .public); \
-            this client renders \
-            \(self.desiredGrid.rows, privacy: .public)x\(self.desiredGrid.cols, privacy: .public)
+            this pane has room for \
+            \(self.viewportGrid.rows, privacy: .public)x\(self.viewportGrid.cols, privacy: .public)
             """)
-            guard isWriter else { return }
-            do {
-                try sendResizeLocked(desiredGrid)
-            } catch {
-                Log.termiod.error("""
-                restoring the grid on \(self.sessionName, privacy: .public) failed: \
-                \(error.localizedDescription, privacy: .public)
-                """)
-            }
         }
     }
 

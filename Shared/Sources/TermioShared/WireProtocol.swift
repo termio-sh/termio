@@ -108,10 +108,18 @@ public enum CompanionControl: Codable, Sendable, Equatable {
     /// The client asks the Mac to close a session (the phone's swipe-to-remove).
     /// No success reply — the next roster push drops the row everywhere.
     case stop(sessionID: String)
-    /// The client's terminal grid changed. The server applies it only while
-    /// this client holds the write token; otherwise it is remembered for the
-    /// moment the client types and takes the token.
-    case resize(cols: Int, rows: Int)
+    /// The client's terminal grid changed, or it stopped showing the session.
+    ///
+    /// This is a *viewport* declaration, not a claim on the session: the Mac
+    /// forwards it as its bridge attachment's own viewport, and the daemon sizes
+    /// the session to the smallest viewport being rendered. The bridge is a byte
+    /// forwarder with no surface of its own — its viewport is this client's, and
+    /// this message is the only thing that gives it one.
+    ///
+    /// `rendering` is false when the client has the session open but is not
+    /// showing it (a parked screen the phone navigated away from). Omitted by
+    /// clients built before the field, which is read as showing.
+    case resize(cols: Int, rows: Int, rendering: Bool)
     /// The PTY's actual grid and whether this client is the one sizing it.
     /// Sent on attach and every time either changes, so a client that is only
     /// watching can lay its surface out at the grid the bytes are wrapped for
@@ -220,8 +228,8 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             return Self.json(fields)
         case .stop(let sessionID):
             return #"{"t":"stop","session":"\#(sessionID)"}"#
-        case .resize(let cols, let rows):
-            return #"{"t":"resize","cols":\#(cols),"rows":\#(rows)}"#
+        case .resize(let cols, let rows, let rendering):
+            return #"{"t":"resize","cols":\#(cols),"rows":\#(rows),"rendering":\#(rendering)}"#
         case .grid(let cols, let rows, let writer):
             return #"{"t":"grid","cols":\#(cols),"rows":\#(rows),"writer":\#(writer)}"#
         case .exit(let code):
@@ -345,7 +353,9 @@ public enum CompanionControl: Codable, Sendable, Equatable {
             return .stop(sessionID: sessionID)
         case "resize":
             guard let cols = obj["cols"] as? Int, let rows = obj["rows"] as? Int else { return nil }
-            return .resize(cols: cols, rows: rows)
+            // Missing = showing, which is what every phone built before the
+            // field means by sending a grid at all.
+            return .resize(cols: cols, rows: rows, rendering: obj["rendering"] as? Bool ?? true)
         case "grid":
             guard let cols = obj["cols"] as? Int, let rows = obj["rows"] as? Int,
                   let writer = obj["writer"] as? Bool else { return nil }
