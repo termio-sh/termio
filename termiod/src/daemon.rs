@@ -1420,7 +1420,7 @@ async fn run_connection(
                         };
                         let _ = out.send(Outbound::Control(reply));
                     }
-                    Ok(Some(Frame::Data(_))) | Ok(Some(Frame::Resize { .. })) => {
+                    Ok(Some(Frame::Data(_))) | Ok(Some(Frame::Viewport { .. })) => {
                         let _ = out.send(Outbound::Control(error(
                             None,
                             ErrorCode::ProtoError,
@@ -1647,8 +1647,14 @@ async fn process_control(
                         if spec.name.is_none() {
                             spec.name = Some(target.clone());
                         }
-                        spec.rows = rows;
-                        spec.cols = cols;
+                        // Zero is "my window has not laid out yet" — a real
+                        // viewport declaration in every other case, but no
+                        // size to spawn a brand-new PTY at. The spec's own
+                        // default stands in, and the first `R` corrects it.
+                        if rows > 0 && cols > 0 {
+                            spec.rows = rows;
+                            spec.cols = cols;
+                        }
                         match manager.create(spec) {
                             Ok(id) => {
                                 manager.publish_created(&id).await;
@@ -2665,6 +2671,11 @@ async fn run_attach(
     handle.send(SessionMsg::AddClient {
         id: client_id.clone(),
         interactive: request.mode == AttachMode::Interact,
+        // The attach's own grid is this attachment's opening viewport
+        // declaration, not an instruction to resize the PTY. The session's size
+        // is derived from every rendering viewport at once.
+        rows: request.rows,
+        cols: request.cols,
         out: client_out,
         backlog: backlog.clone(),
         snapshot: connection.capabilities.contains("snapshot"),
@@ -2691,14 +2702,6 @@ async fn run_attach(
         cols: added.cols,
         re: request.re,
     }));
-
-    if added.writer {
-        handle.send(SessionMsg::Resize {
-            id: client_id.clone(),
-            rows: request.rows,
-            cols: request.cols,
-        });
-    }
 
     let supports_events = connection.capabilities.contains("events");
     let supports_snapshot = connection.capabilities.contains("snapshot");
@@ -2792,8 +2795,8 @@ async fn run_attach(
                     break;
                 }
             }
-            Ok(Some(Frame::Resize { rows, cols })) => {
-                handle.send(SessionMsg::Resize {
+            Ok(Some(Frame::Viewport { rows, cols })) => {
+                handle.send(SessionMsg::Viewport {
                     id: client_id.clone(),
                     rows,
                     cols,

@@ -3,7 +3,7 @@
 
 use crate::paths;
 use crate::protocol::{
-    read_frame, write_control, write_data, write_resize, AttachMode, ChannelRole, Control,
+    read_frame, write_control, write_data, write_viewport, AttachMode, ChannelRole, Control,
     CreateSpec, Event, Frame, GridDiff, SessionInfo, Snapshot, WireCell, PROTOCOL_VERSION,
 };
 use anyhow::{bail, Context, Result};
@@ -720,11 +720,11 @@ pub async fn attach(
         tokio::select! {
             _ = winch.recv() => {
                 let (r, c) = term_size();
-                let _ = write_resize(&mut wr, r, c).await;
+                let _ = write_viewport(&mut wr, r, c).await;
             }
             Some(()) = resize_claim_rx.recv() => {
                 let (r, c) = term_size();
-                let _ = write_resize(&mut wr, r, c).await;
+                let _ = write_viewport(&mut wr, r, c).await;
             }
             n = stdin.read(&mut buf) => {
                 match n {

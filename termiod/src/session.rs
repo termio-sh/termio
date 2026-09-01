@@ -66,6 +66,10 @@ pub enum SessionMsg {
     AddClient {
         id: ClientId,
         interactive: bool,
+        /// The viewport the attach control declared. Zero in either dimension
+        /// is "not laid out yet"; the first `R` says what it is.
+        rows: u16,
+        cols: u16,
         out: mpsc::UnboundedSender<ClientEvent>,
         backlog: Arc<ClientBacklog>,
         snapshot: bool,
@@ -90,7 +94,9 @@ pub enum SessionMsg {
         id: ClientId,
         data: Vec<u8>,
     },
-    Resize {
+    /// One attachment's viewport changed. The PTY's size is derived from the
+    /// whole set (`apply_size_policy`); this message never sets it directly.
+    Viewport {
         id: ClientId,
         rows: u16,
         cols: u16,
@@ -175,6 +181,9 @@ struct ClientEntry {
     backlog: Arc<ClientBacklog>,
     role: ClientRole,
     plane: ClientPlane,
+    /// What this attachment says it could show. `None` is an attachment with no
+    /// viewport at all — it has not laid out yet, or it never will.
+    viewport: Option<(u16, u16)>,
     /// Attach-only history staging. Resize barriers discard any remainder and
     /// deliberately do not restage it; resize/reflow history is a later policy.
     staged_history: VecDeque<Bytes>,
@@ -187,9 +196,9 @@ struct ClientEntry {
 
 /// Whether this attachment can hold the write token.
 enum ClientRole {
-    /// Attached without a tty. §A: an observer never claims the token. One that
-    /// could would strand the session at whatever size the last real client
-    /// left, having no tty of its own to resize.
+    /// Attached without a tty. §A: an observer never claims the token, and it
+    /// never counts toward the session's size — there is no screen behind it
+    /// whose viewport either could be about.
     Observer,
     /// Attached with a tty. `seq` is interactive attach order — the highest
     /// takes the token back when the current holder leaves. Only interactive
@@ -721,6 +730,8 @@ impl Session {
         if self.writer != old_writer {
             self.emit_writer_changed(self.writer.clone());
         }
+        // A viewer that died was very likely the smallest one.
+        self.apply_size_policy();
     }
 
     /// Send a protocol event to attachments and control-channel subscribers.
@@ -745,6 +756,10 @@ impl Session {
         });
     }
 
+    /// Announces the token's new holder. `resize_claim_target`, if any, also
+    /// gets the `resize_claim` control frame directly — a v0 name for what is
+    /// now just "you have the token", kept because it is the only writer signal
+    /// a client without the `events` capability ever sees.
     fn emit_writer_changed(&mut self, resize_claim_target: Option<ClientId>) {
         if let Some(target) = resize_claim_target {
             if let Some(entry) = self.clients.get_mut(&target) {
@@ -868,23 +883,74 @@ impl Session {
         }
     }
 
-    fn reject_resize(&mut self, id: &ClientId, error: &anyhow::Error) {
-        let message = format!("resize failed: {error}");
-        eprintln!(
-            "termiod: resize failed for writer {id} in session {}: {error}",
-            self.id
-        );
-        if let Some(entry) = self.clients.get_mut(id) {
-            Self::queue_non_data(
-                entry,
-                ClientEvent::Control(Control::Error {
-                    re: None,
-                    code: ErrorCode::Internal,
-                    message,
-                    retryable: true,
-                }),
-            );
+    /// The size this session should be: the componentwise smallest viewport
+    /// among the attachments that have declared one. `None` when none has.
+    ///
+    /// Only interactive attachments are counted, for the same reason only they
+    /// are ranked for the write token: an observer attached without a tty has no
+    /// viewport of its own, and a `termiod read` tailing a session must not
+    /// squeeze the window someone is working in.
+    ///
+    /// Rows and columns are minimised independently, which is what tmux's
+    /// `smallest` does. A session between a tall narrow phone and a short wide
+    /// pane ends up narrow *and* short, and both ends see all of it.
+    fn policy_size(&self) -> Option<(u16, u16)> {
+        self.clients
+            .values()
+            .filter(|entry| entry.role.is_interactive())
+            .filter_map(|entry| entry.viewport)
+            .reduce(|(rows, cols), (other_rows, other_cols)| {
+                (rows.min(other_rows), cols.min(other_cols))
+            })
+    }
+
+    /// Moves the PTY to whatever the policy now says, if that is somewhere else.
+    ///
+    /// This is the only thing in the daemon that resizes a session, and it runs
+    /// on every change to the attachment set: an arrival, a departure, a
+    /// viewport. The write token is not consulted — who may type and how big the
+    /// screen is are different questions.
+    ///
+    /// With nobody declaring a viewport, the size is left exactly where it was. A session
+    /// every viewer walked away from keeps the shape its last viewer gave it,
+    /// the way zellij holds an unviewed tab, so coming back to it does not cost
+    /// a reflow of a screen nobody watched change.
+    fn apply_size_policy(&mut self) {
+        let Some((rows, cols)) = self.policy_size() else {
+            return;
+        };
+        // A resize is a barrier: the session quiesces and every attachment is
+        // handed a fresh keyframe to repaint from. Doing that for a size the PTY
+        // already has buys nothing and costs each viewer a full repaint. The
+        // child would see no SIGWINCH from this ioctl either, so nothing
+        // downstream is waiting on it.
+        if rows == self.rows && cols == self.cols {
+            return;
         }
+        if let Err(error) = self.pty.resize(rows, cols) {
+            // Nobody asked for this, so there is nobody to answer: the size is a
+            // policy over the whole attachment set, not one client's request.
+            // The session stays where it was and the next change tries again.
+            eprintln!(
+                "termiod: resize of session {} to {rows}x{cols} failed: {error}",
+                self.id
+            );
+            return;
+        }
+        self.rows = rows;
+        self.cols = cols;
+        // The bytes already in the ring were written into the old grid.
+        // Replaying them into this one would put them in the wrong places, which
+        // only matters where a replay is all there is — the far side of a
+        // handoff.
+        self.ring_reconstructs_screen = false;
+        self.send_sidecar(SidecarCommand::Resize { rows, cols });
+        self.begin_snapshot_barrier();
+        self.emit_event(Event::Resized {
+            session: self.id.to_string(),
+            rows,
+            cols,
+        });
     }
 
     fn queue_history_chunk(
@@ -2106,6 +2172,8 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
         SessionMsg::AddClient {
             id,
             interactive,
+            rows,
+            cols,
             out,
             backlog,
             snapshot,
@@ -2163,6 +2231,9 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
                     backlog,
                     role,
                     plane,
+                    // What an attach declares is a best guess — the window it is
+                    // going into may not have laid out yet, and says so with a zero.
+                    viewport: (rows > 0 && cols > 0).then_some((rows, cols)),
                     staged_history: VecDeque::new(),
                     backlog_strikes: 0,
                 },
@@ -2170,27 +2241,30 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
             // Enabling precedes this client's in-band Snapshot request, so
             // later Writes can only produce G results after its S boundary.
             session.sync_grid_diff_interest();
-            // Attaching is a viewer arriving, not a device taking over. Taking
-            // the token here meant a phone merely *looking* at a session pulled
-            // the one shared PTY down to phone width through `run_attach`'s
-            // resize, and the Mac had no answer: its own resizes are gated on
-            // holding the token, so the window sat there rendering a screen
-            // formatted for a grid it does not have. The token travels by
-            // typing — both ends claim on input — so the only attach that takes
-            // it is the one that finds nobody holding it.
+            // Attaching is a viewer arriving, not a device taking over. The
+            // token travels by typing — both ends claim on input — so the only
+            // attach that takes it is the one that finds nobody holding it.
+            // What this attach *does* move, if it is smaller than everyone
+            // already looking, is the size; that is `apply_size_policy` below
+            // and it is deliberately not this decision.
             if interactive && session.writer.is_none() {
                 session.grant_writer(&id);
             }
             let is_writer = session.writer.as_ref() == Some(&id);
+
+            if let Some(request_id) = snapshot_request {
+                session.request_snapshot(id.clone(), request_id, scrollback);
+            }
+            // After the bootstrap request, not before: a policy that moves the
+            // size opens a barrier, and `begin_pending` is what supersedes the
+            // bootstrap `S` with one taken at the new grid. Reversing these two
+            // would leave the newcomer's own snapshot describing the old size.
+            session.apply_size_policy();
             let _ = reply.send(AddClientReply {
                 writer: is_writer,
                 rows: session.rows,
                 cols: session.cols,
             });
-
-            if let Some(request_id) = snapshot_request {
-                session.request_snapshot(id.clone(), request_id, scrollback);
-            }
 
             if session.writer != old_writer {
                 session.emit_writer_changed(old_writer);
@@ -2207,6 +2281,9 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
             if session.writer != old_writer {
                 session.emit_writer_changed(session.writer.clone());
             }
+            // The viewer that left may have been the one holding the session
+            // narrow; the rest of them get their width back.
+            session.apply_size_policy();
             session.emit_roster();
         }
         SessionMsg::ResendSnapshot { id } => {
@@ -2219,19 +2296,19 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
             session.request_snapshot(id, request_id, false);
         }
         SessionMsg::ClaimWriter { id, reply } => {
-            // An observer is refused rather than promoted: it attached without
-            // a tty and cannot resize, so handing it the token would strand the
-            // session at whatever size the last real client left. A stranger —
-            // a stale id, a racing reconnect — is refused for the same reason
-            // `grant_writer` will not install a writer nobody can reach.
+            // An observer is refused rather than promoted: it attached without a
+            // tty, so there is no person behind it whose typing the token is
+            // meant to follow. A stranger — a stale id, a racing reconnect — is
+            // refused for the same reason `grant_writer` will not install a
+            // writer nobody can reach.
             let held = session.writer.as_ref() == Some(&id);
             let eligible = session.grant_writer(&id);
             let _ = reply.send(eligible);
             if !eligible || held {
                 return None;
             }
-            // The client that just took the token is told its own size claim is
-            // now the one that counts, the same shape `AddClient` uses.
+            // The client that just took the token is told so directly, the same
+            // shape `AddClient` uses.
             session.emit_writer_changed(session.writer.clone());
         }
         SessionMsg::Input { id, data } => {
@@ -2248,39 +2325,19 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
                 session.reject_not_writer(&id);
             }
         }
-        SessionMsg::Resize { id, rows, cols } => {
-            if session.writer.as_ref() == Some(&id) {
-                // A resize is a barrier: the session quiesces and every
-                // attachment is handed a fresh keyframe to repaint from. Doing
-                // that for a size the PTY already has buys nothing and costs
-                // each viewer a full repaint — and one arrives on every attach,
-                // because `run_attach` asks unconditionally for the size the
-                // client named. The child would see no SIGWINCH from this
-                // ioctl either, so nothing downstream is waiting on it.
-                if rows == session.rows && cols == session.cols {
-                    return None;
-                }
-                if let Err(error) = session.pty.resize(rows, cols) {
-                    session.reject_resize(&id, &error);
-                    return None;
-                }
-                session.rows = rows;
-                session.cols = cols;
-                // The bytes already in the ring were written into the old grid.
-                // Replaying them into this one would put them in the wrong
-                // places, which only matters where a replay is all there is —
-                // the far side of a handoff.
-                session.ring_reconstructs_screen = false;
-                session.send_sidecar(SidecarCommand::Resize { rows, cols });
-                session.begin_snapshot_barrier();
-                session.emit_event(Event::Resized {
-                    session: session.id.to_string(),
-                    rows,
-                    cols,
-                });
-            } else {
-                session.reject_not_writer(&id);
+        SessionMsg::Viewport { id, rows, cols } => {
+            // Not gated on the write token, and that is the whole point: an
+            // attachment saying how big it is is not a claim on the session.
+            // Every viewer's declaration counts, and the policy decides.
+            let Some(entry) = session.clients.get_mut(&id) else {
+                return None;
+            };
+            let declared = (rows > 0 && cols > 0).then_some((rows, cols));
+            if entry.viewport == declared {
+                return None;
             }
+            entry.viewport = declared;
+            session.apply_size_policy();
         }
         SessionMsg::Inject { data } => {
             let _ = session.input_tx.send(data);
@@ -2553,9 +2610,19 @@ mod tests {
     }
 
     /// A client with a tty behind it — the kind that can hold the write token.
+    /// It declares no viewport, which is a window that has not laid out yet.
     fn attach_interactive_client(
         session: &mut Session,
         id: &str,
+    ) -> mpsc::UnboundedReceiver<ClientEvent> {
+        attach_interactive_client_at(session, id, 0, 0)
+    }
+
+    fn attach_interactive_client_at(
+        session: &mut Session,
+        id: &str,
+        rows: u16,
+        cols: u16,
     ) -> mpsc::UnboundedReceiver<ClientEvent> {
         let (client_tx, client_rx) = mpsc::unbounded_channel();
         let (reply, _reply_rx) = oneshot::channel();
@@ -2564,6 +2631,8 @@ mod tests {
             SessionMsg::AddClient {
                 id: ClientId::new(id),
                 interactive: true,
+                rows,
+                cols,
                 out: client_tx,
                 backlog: Arc::new(ClientBacklog::new()),
                 snapshot: false,
@@ -2573,6 +2642,17 @@ mod tests {
             },
         );
         client_rx
+    }
+
+    fn declare_viewport(session: &mut Session, id: &str, rows: u16, cols: u16) {
+        handle_msg(
+            session,
+            SessionMsg::Viewport {
+                id: ClientId::new(id),
+                rows,
+                cols,
+            },
+        );
     }
 
     fn claim_writer(session: &mut Session, id: &str) -> bool {
@@ -2600,6 +2680,8 @@ mod tests {
             SessionMsg::AddClient {
                 id: ClientId::new(id),
                 interactive: false,
+                rows: 0,
+                cols: 0,
                 out: client_tx,
                 backlog: backlog.clone(),
                 snapshot,
@@ -2640,6 +2722,130 @@ mod tests {
 
         assert!(claim_writer(&mut session, "mac"), "the Mac's user typed");
         assert_eq!(writer(&session), Some("mac"));
+
+        session.vt.shut_down();
+        let _ = thread.join();
+    }
+
+    /// The session is as wide as its narrowest viewer, and the write token has
+    /// nothing to do with it.
+    ///
+    /// This is the whole of the policy, and every assertion here used to be
+    /// false: the size followed the token, so the answer to "how big is this
+    /// session" was "whoever typed last".
+    #[tokio::test]
+    async fn the_session_is_the_smallest_viewport_being_rendered() {
+        let Sidecar {
+            commands,
+            results: _results,
+            queue,
+            thread,
+        } = spawn_sidecar(24, 80).unwrap();
+        let (mut session, _events) = test_session(commands, queue);
+
+        let _mac = attach_interactive_client_at(&mut session, "mac", 50, 200);
+        assert_eq!(session.policy_size(), Some((50, 200)), "one viewer, its grid");
+
+        let _phone = attach_interactive_client_at(&mut session, "phone", 42, 47);
+        assert_eq!(
+            session.policy_size(),
+            Some((42, 47)),
+            "the phone is smaller, so the session is"
+        );
+
+        // The token moving is what used to move the size. It no longer does.
+        assert!(claim_writer(&mut session, "mac"));
+        assert_eq!(session.policy_size(), Some((42, 47)));
+        assert!(claim_writer(&mut session, "phone"));
+        assert_eq!(session.policy_size(), Some((42, 47)));
+
+        session.vt.shut_down();
+        let _ = thread.join();
+    }
+
+    /// Rows and columns are minimised independently, the way tmux's `smallest`
+    /// does it: a short wide pane and a tall narrow phone leave a session that
+    /// is short *and* narrow, which is the only shape both can show in full.
+    #[tokio::test]
+    async fn rows_and_columns_are_taken_from_whichever_viewer_is_smaller() {
+        let Sidecar {
+            commands,
+            results: _results,
+            queue,
+            thread,
+        } = spawn_sidecar(24, 80).unwrap();
+        let (mut session, _events) = test_session(commands, queue);
+
+        let _wide = attach_interactive_client_at(&mut session, "wide", 20, 200);
+        let _tall = attach_interactive_client_at(&mut session, "tall", 60, 47);
+        assert_eq!(session.policy_size(), Some((20, 47)));
+
+        session.vt.shut_down();
+        let _ = thread.join();
+    }
+
+    #[tokio::test]
+    async fn a_session_nobody_has_described_keeps_its_size() {
+        let Sidecar {
+            commands,
+            results: _results,
+            queue,
+            thread,
+        } = spawn_sidecar(24, 80).unwrap();
+        let (mut session, _events) = test_session(commands, queue);
+
+        let _mac = attach_interactive_client(&mut session, "mac");
+        assert_eq!(session.policy_size(), None);
+        let (rows, cols) = (session.rows, session.cols);
+        session.apply_size_policy();
+        assert_eq!((session.rows, session.cols), (rows, cols));
+
+        session.vt.shut_down();
+        let _ = thread.join();
+    }
+
+    /// A window that has not laid out yet says so with a zero, and is not
+    /// counted. Before this the phone's 24x80 stand-in, sent because its surface
+    /// had not measured itself, would have squeezed every other viewer for as
+    /// long as it took the first layout pass to arrive.
+    #[tokio::test]
+    async fn a_viewer_with_no_viewport_yet_does_not_count() {
+        let Sidecar {
+            commands,
+            results: _results,
+            queue,
+            thread,
+        } = spawn_sidecar(24, 80).unwrap();
+        let (mut session, _events) = test_session(commands, queue);
+
+        let _mac = attach_interactive_client_at(&mut session, "mac", 50, 200);
+        let _phone = attach_interactive_client_at(&mut session, "phone", 0, 0);
+        assert_eq!(session.policy_size(), Some((50, 200)));
+
+        declare_viewport(&mut session, "phone", 42, 47);
+        assert_eq!(session.policy_size(), Some((42, 47)));
+
+        session.vt.shut_down();
+        let _ = thread.join();
+    }
+
+    /// §A again, from the sizing side: an observer attached without a tty has no
+    /// viewport, so `termio read` tailing a session cannot squeeze the window
+    /// somebody is working in.
+    #[tokio::test]
+    async fn an_observer_never_sizes_the_session() {
+        let Sidecar {
+            commands,
+            results: _results,
+            queue,
+            thread,
+        } = spawn_sidecar(24, 80).unwrap();
+        let (mut session, _events) = test_session(commands, queue);
+
+        let _mac = attach_interactive_client_at(&mut session, "mac", 50, 200);
+        let _reader = attach_client(&mut session, "reader", false);
+        declare_viewport(&mut session, "reader", 10, 10);
+        assert_eq!(session.policy_size(), Some((50, 200)));
 
         session.vt.shut_down();
         let _ = thread.join();
@@ -2971,8 +3177,14 @@ mod tests {
         let _ = tokio::task::spawn_blocking(move || thread.join()).await;
     }
 
+    /// A PTY that refuses to resize leaves the session where it was, and says
+    /// so in the daemon's log rather than to a client: the size is a policy over
+    /// the whole attachment set, so there is no requester to answer. Nothing
+    /// downstream may move — a `Resized` event or a sidecar barrier for a resize
+    /// that did not happen would leave every viewer repainting for a grid the
+    /// PTY does not have.
     #[tokio::test]
-    async fn failed_pty_resize_preserves_state_and_reports_error() {
+    async fn failed_pty_resize_preserves_state_and_tells_nobody() {
         let pty = Arc::new(Pty::non_pty_for_resize_failure_test().unwrap());
         let (input_tx, _input_rx) = mpsc::unbounded_channel();
         let (events, mut event_rx) = broadcast::channel(8);
@@ -3000,6 +3212,7 @@ mod tests {
                     backlog,
                     role: ClientRole::Interactive { seq: 1 },
                     plane: ClientPlane::Raw,
+                    viewport: Some((24, 80)),
                     staged_history: VecDeque::new(),
                     backlog_strikes: 0,
                 },
@@ -3022,7 +3235,7 @@ mod tests {
 
         assert!(handle_msg(
             &mut session,
-            SessionMsg::Resize {
+            SessionMsg::Viewport {
                 id: ClientId::new("writer"),
                 rows: 40,
                 cols: 120,
@@ -3039,20 +3252,10 @@ mod tests {
             event_rx.try_recv(),
             Err(broadcast::error::TryRecvError::Empty)
         ));
-        match client_rx.recv().await.unwrap() {
-            ClientEvent::Control(Control::Error {
-                code,
-                message,
-                retryable,
-                ..
-            }) => {
-                assert_eq!(code, ErrorCode::Internal);
-                assert!(message.starts_with("resize failed: TIOCSWINSZ failed:"));
-                assert!(retryable);
-            }
-            _ => panic!("failed resize did not return a typed control error"),
-        }
-        assert!(client_rx.try_recv().is_err());
+        assert!(
+            client_rx.try_recv().is_err(),
+            "a failed resize is the daemon's problem, not a client's error"
+        );
     }
 
     /// Drive a real session until its sampled foreground satisfies `ready`, or
@@ -3126,7 +3329,7 @@ mod tests {
         );
 
         let resized = attached_session().await;
-        resized.handle.send(SessionMsg::Resize {
+        resized.handle.send(SessionMsg::Viewport {
             id: ClientId::new("writer"),
             rows: 40,
             cols: 120,
@@ -3144,7 +3347,7 @@ mod tests {
     #[tokio::test]
     async fn an_unfaithful_ring_comes_back_with_a_vt_that_refuses_snapshots() {
         let session = attached_session().await;
-        session.handle.send(SessionMsg::Resize {
+        session.handle.send(SessionMsg::Viewport {
             id: ClientId::new("writer"),
             rows: 40,
             cols: 120,
@@ -3201,6 +3404,8 @@ mod tests {
         handle.send(SessionMsg::AddClient {
             id: ClientId::new("writer"),
             interactive: true,
+            rows: 24,
+            cols: 80,
             out: client_tx,
             backlog: Arc::new(ClientBacklog::new()),
             snapshot: false,

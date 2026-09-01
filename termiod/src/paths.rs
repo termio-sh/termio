@@ -635,7 +635,24 @@ mod serve_lock_tests {
         let held = super::flock_exclusive(&path).expect("first claim");
         assert!(super::flock_exclusive(&path).is_err(), "second claim must fail");
         drop(held);
-        super::flock_exclusive(&path).expect("claim after release");
+        // Not instantaneous, and not this lock's fault: `flock` follows the open
+        // file *description*, and a sibling test spawning a session forks this
+        // very binary — the child holds every descriptor the parent had until
+        // its `execvp` runs and `O_CLOEXEC` shuts them. A reclaim landing inside
+        // that window sees the lock still held by a process that is microseconds
+        // from dropping it. The retry says "released", which is what this test
+        // is about, without asserting a scheduling guarantee nothing offers.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let reclaimed = loop {
+            match super::flock_exclusive(&path) {
+                Ok(file) => break Some(file),
+                Err(_) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(_) => break None,
+            }
+        };
+        assert!(reclaimed.is_some(), "claim after release");
         let _ = std::fs::remove_file(&path);
     }
 }

@@ -6,8 +6,13 @@
 //! [ kind: u8 ][ len: u32 big-endian ][ payload: len bytes ]
 //! ```
 //!
-//! Control and event payloads are JSON. PTY data stays raw and resize stays a
-//! four-byte binary payload, so v0 clients remain byte-compatible.
+//! Control and event payloads are JSON. PTY data stays raw and the viewport
+//! frame stays a four-byte binary payload, so v0 clients remain byte-compatible.
+//!
+//! `R` names an *attachment's viewport*, not the PTY's size. The host derives
+//! the PTY size from the set of viewports that are currently rendering — see
+//! `session::Session::apply_size_policy` and
+//! `docs/design/20260901-pty-size-is-not-the-write-token.md`.
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
@@ -15,6 +20,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const KIND_CONTROL: u8 = b'C';
 pub const KIND_DATA: u8 = b'D';
+/// `R`: one attachment's viewport. The name is v0's and is frozen on the wire.
 pub const KIND_RESIZE: u8 = b'R';
 pub const KIND_EVENT: u8 = b'E';
 pub const KIND_SNAPSHOT: u8 = b'S';
@@ -84,7 +90,10 @@ pub enum Frame {
     /// tore down the channel and every subscription riding it.
     UnknownControl { op: String, seq: Option<u64> },
     Data(Vec<u8>),
-    Resize { rows: u16, cols: u16 },
+    /// `R`: this attachment's viewport is now `rows`×`cols`. Zero in either
+    /// dimension means it has no viewport at all — a window that has not laid
+    /// out yet — and is counted by nobody.
+    Viewport { rows: u16, cols: u16 },
     Event(Event),
     Snapshot(Snapshot),
     History(HistoryChunk),
@@ -1181,6 +1190,10 @@ pub enum Control {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         re: Option<u64>,
     },
+    /// Sent to the client that just took the write token. The name is v0's,
+    /// from when the token carried the grid with it; it now says only that this
+    /// attachment may type. Retained because it is the one writer signal a
+    /// client without the `events` capability receives.
     ResizeClaim {
         session: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2007,7 +2020,13 @@ pub async fn write_data<W: AsyncWriteExt + Unpin>(w: &mut W, data: &[u8]) -> Res
     Ok(())
 }
 
-pub async fn write_resize<W: AsyncWriteExt + Unpin>(w: &mut W, rows: u16, cols: u16) -> Result<()> {
+/// Writes one `R` frame — v0's exact four bytes, now meaning "my viewport is
+/// this" rather than "set the PTY to this".
+pub async fn write_viewport<W: AsyncWriteExt + Unpin>(
+    w: &mut W,
+    rows: u16,
+    cols: u16,
+) -> Result<()> {
     let mut buf = [0u8; 4];
     buf[0..2].copy_from_slice(&rows.to_be_bytes());
     buf[2..4].copy_from_slice(&cols.to_be_bytes());
@@ -2073,11 +2092,11 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Option<Fra
         KIND_DATA => Ok(Some(Frame::Data(payload))),
         KIND_RESIZE => {
             if payload.len() != 4 {
-                bail!("malformed resize frame");
+                bail!("malformed viewport frame");
             }
             let rows = u16::from_be_bytes([payload[0], payload[1]]);
             let cols = u16::from_be_bytes([payload[2], payload[3]]);
-            Ok(Some(Frame::Resize { rows, cols }))
+            Ok(Some(Frame::Viewport { rows, cols }))
         }
         KIND_EVENT => {
             let event: Event = serde_json::from_slice(&payload)
