@@ -468,10 +468,15 @@ def main():
     os.write(a1, b"FROM_A1\r")
     check("single-writer: writer input applied", b"FROM_A1" in read_until(a2, "FROM_A1"))
 
-    # Typing is what moves the token, and the size travels with it.
+    # Typing moves the token. The size does not travel with it: the daemon
+    # sizes the PTY to the per-axis min over the rendering attachments, so with
+    # a1 at 26x90 and a2 at 34x110 the grid is (26, 90) whoever is typing. This
+    # is the invariant the focus-report storm violated — a token move was a
+    # resize, so one misclassified byte became a full-speed resize loop.
     os.write(a2, b"FROM_A2\r")
     check("single-writer: typing takes the token", b"FROM_A2" in read_until(a1, "FROM_A2"))
-    check("the winsize follows the token", wait_for_size("fan", (34, 110)))
+    time.sleep(0.5)
+    check("the winsize does not follow the token", session_size("fan") == (26, 90))
 
     os.write(a2, b"\x1c")
     a2p.wait(timeout=5)
@@ -479,7 +484,7 @@ def main():
     while time.time() < deadline and session_size("fan") != (26, 90):
         time.sleep(0.05)
     check(
-        "writer failover: promoted reference client reclaims its size",
+        "writer failover: the remaining client's viewport is the whole min",
         session_size("fan") == (26, 90),
     )
     drain(a1, 0.5)
@@ -1076,13 +1081,17 @@ def main():
         rejected is not None and rejected[1]["retryable"] is False,
     )
     w2.close()
+    # The token still moves on the departure, and the daemon still says so —
+    # but as `writer_changed` only. `resize_claim` is gone: it existed to tell a
+    # promoted writer to re-assert its grid, and size no longer rides on the
+    # token, so there is nothing for it to ask for.
     promoted, _ = w1.recv_matching(
-        lambda kind, msg: kind == "C"
-        and msg.get("op") == "resize_claim"
+        lambda kind, msg: kind == "E"
+        and msg.get("ev") == "writer_changed"
         and msg.get("writer") == w1.hello["client_id"]
     )
     check(
-        "writer policy: promoted writer receives a resize claim",
+        "writer policy: promotion is announced without a resize claim",
         promoted is not None,
     )
     w1.close()
