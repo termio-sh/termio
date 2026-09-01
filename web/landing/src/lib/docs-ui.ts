@@ -18,8 +18,17 @@ export type DocsChrome = {
   copyAriaLabel: string;
   markdown: string;
   markdownAriaLabel: string;
+  askAI: string;
+  askAIAriaLabel: string;
+  askClaude: string;
+  askChatGPT: string;
+  /** The prompt handed to the assistant. `{url}` becomes the page's `.md` URL.
+      A template rather than a function: this record crosses into client
+      components, and a function can't. */
+  askPrompt: string;
   editPage: string;
   language: string;
+  skipToContent: string;
   docsLabel: string;
   download: string;
   theme: string;
@@ -43,8 +52,15 @@ const en: DocsChrome = {
   copyAriaLabel: "Copy this page as Markdown",
   markdown: "Markdown",
   markdownAriaLabel: "Open this page as raw Markdown",
+  askAI: "Ask AI",
+  askAIAriaLabel: "Ask an assistant about this page",
+  askClaude: "Ask Claude",
+  askChatGPT: "Ask ChatGPT",
+  askPrompt:
+    "Read {url} — it is a page of the Termio documentation. Answer my questions about it, and say when something isn't covered there.",
   editPage: "Edit this page on GitHub",
   language: "Language",
+  skipToContent: "Skip to content",
   docsLabel: "Docs",
   download: "Download",
   theme: "Appearance",
@@ -68,8 +84,15 @@ const zhCN: DocsChrome = {
   copyAriaLabel: "以 Markdown 拷贝本页",
   markdown: "Markdown",
   markdownAriaLabel: "以 Markdown 原文打开本页",
+  askAI: "问 AI",
+  askAIAriaLabel: "就本页提问",
+  askClaude: "问 Claude",
+  askChatGPT: "问 ChatGPT",
+  askPrompt:
+    "请阅读 {url}，这是 Termio 文档的一页。请据此回答我的问题；文档里没写到的地方，直接说明。",
   editPage: "在 GitHub 上编辑本页",
   language: "语言",
+  skipToContent: "跳到正文",
   docsLabel: "文档",
   download: "下载",
   theme: "外观",

@@ -2,8 +2,10 @@ import { source } from "@/lib/source";
 import { i18n, isDocsLanguage } from "@/lib/i18n";
 
 // Serves a doc page's raw Markdown. Reached as /docs/<slug>.md — and
-// /<locale>/docs/<slug>.md — via the rewrites in next.config.ts; a route handler
-// can't sit beside the docs page.tsx, so the real path is /docs-md/[<locale>/]<slug>.
+// /<locale>/docs/<slug>.md — via the rewrites in next.config.ts, and at the plain
+// page URL for a client that asked for Markdown in its Accept header (src/proxy.ts).
+// A route handler can't sit beside the docs page.tsx, so the real path is
+// /docs-md/[<locale>/]<slug>.
 // The docs index answers to /docs/index.md.
 // Every page prerenders at build time: getText("raw") reads the content/docs
 // sources from disk, which aren't in the serverless bundle at request time.

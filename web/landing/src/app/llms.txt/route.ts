@@ -30,6 +30,7 @@ export function GET() {
     `- [iPhone companion beta](${testflightUrl}): TestFlight — mirrors Mac sessions live on the phone`,
     `- [Full docs in one file](${siteUrl}/llms-full.txt): every page above, concatenated`,
     `- [Agent skill](${siteUrl}/skill.md): the termio skill the Mac app installs into ~/.claude/skills and ~/.codex/skills — save it there yourself to drive sibling sessions from an agent Termio doesn't auto-configure`,
+    `- Any docs page also answers with Markdown at its own URL when the request carries \`Accept: text/markdown\` — the \`.md\` links above are the explicit form of the same thing`,
     `- Programmatic docs search: \`GET ${siteUrl}/api/search?query=<terms>\` returns JSON results with page URLs`,
   ].join("\n");
 

@@ -9,6 +9,7 @@ import {
 import { source } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
 import { CopyMarkdownButton } from "@/components/docs/copy-markdown-button";
+import { AskAIMenu } from "@/components/docs/ask-ai-menu";
 import { docsChrome } from "@/lib/docs-ui";
 import { siteUrl } from "@/lib/docs-llms";
 import { i18n, languageTags, type DocsLanguage } from "@/lib/i18n";
@@ -17,6 +18,11 @@ import { i18n, languageTags, type DocsLanguage } from "@/lib/i18n";
 export function docUrl(lang: string, slug: string[]): string {
   const path = ["docs", ...slug].join("/");
   return lang === i18n.defaultLanguage ? `/${path}` : `/${lang}/${path}`;
+}
+
+/** The page's social card, drawn by the /docs-og handler. English only. */
+function cardUrl(slug: string[]): string {
+  return `/docs-og/${slug.length ? slug.join("/") : "index"}`;
 }
 
 /** The raw-Markdown twin of a page — /docs/<slug>.md, rewritten to /docs-md. */
@@ -39,18 +45,42 @@ export async function docPageMetadata(
     languages[languageTags[language] ?? language] = docUrl(language, slug);
   }
 
+  // One card per page, so a docs link in a thread carries the page's own name
+  // instead of the landing hero every other link already showed. It is drawn from
+  // the English title — see the note in the /docs-og handler — so a translated
+  // page shares the English card rather than a boxes-for-glyphs one.
+  const english = source.getPage(slug, i18n.defaultLanguage);
+  const card = {
+    url: cardUrl(english ? slug : []),
+    width: 1200,
+    height: 630,
+    type: "image/png",
+    alt: `${english?.data.title ?? title} — Termio documentation`,
+  };
+
   return {
     title,
     description,
-    alternates: { canonical: docUrl(lang, slug), languages },
-    openGraph: { title, description, url: docUrl(lang, slug) },
+    alternates: {
+      canonical: docUrl(lang, slug),
+      languages,
+      // The Markdown twin, named in the page's own head. An agent that reads the
+      // HTML once can find the clean copy without guessing at a `.md` suffix.
+      types: {
+        "text/markdown": [
+          { url: markdownUrl(docUrl(lang, slug)), title: page.data.title },
+        ],
+      },
+    },
+    openGraph: { title, description, url: docUrl(lang, slug), images: [card] },
+    twitter: { card: "summary_large_image", title, description, images: [card] },
   };
 }
 
 // The page frame — table of contents, breadcrumbs, prev/next, the edit link —
-// is fumadocs-ui's. What stays ours are the two page actions, because they exist
-// for a readership that is driving coding agents: copy the page as Markdown, or
-// open its raw `.md` twin.
+// is fumadocs-ui's. What stays ours are the page actions, because they exist for a
+// readership that is driving coding agents: copy the page as Markdown, hand it to
+// an assistant, or open its raw `.md` twin.
 export async function DocPage({
   lang,
   slug,
@@ -167,6 +197,18 @@ export async function DocPage({
               aria: chrome.copyAriaLabel,
             }}
           />
+          <AskAIMenu
+            labels={{
+              trigger: chrome.askAI,
+              aria: chrome.askAIAriaLabel,
+              claude: chrome.askClaude,
+              chatgpt: chrome.askChatGPT,
+              prompt: chrome.askPrompt.replace(
+                "{url}",
+                `${siteUrl}${markdownUrl(page.url)}`,
+              ),
+            }}
+          />
           <a
             href={markdownUrl(page.url)}
             aria-label={chrome.markdownAriaLabel}
@@ -177,7 +219,9 @@ export async function DocPage({
           </a>
         </div>
       </div>
-      <DocsBody>
+      {/* The skip link in the docs frame lands here — the library's page has no
+          anchor of its own, and the frame and the page always render together. */}
+      <DocsBody id="docs-content" tabIndex={-1}>
         <MDX components={getMDXComponents()} />
       </DocsBody>
       <script

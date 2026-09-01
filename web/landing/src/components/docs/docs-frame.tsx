@@ -48,6 +48,16 @@ export function DocsFrame({
           translations: docsLibraryChrome(lang),
         }}
       >
+        {/* Every docs page opens with a header, a sidebar tree and a search field
+            before the prose starts. A keyboard or screen-reader user should not have
+            to walk them on every page — the first thing the tab order offers is the
+            way past them. Invisible until focused. */}
+        <a
+          href="#docs-content"
+          className="sr-only z-[100] focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:inline-flex focus:h-9 focus:items-center focus:rounded-lg focus:bg-primary focus:px-3 focus:text-[13px] focus:font-semibold focus:text-primary-foreground focus:no-underline focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+        >
+          {chrome.skipToContent}
+        </a>
         <DocsHeader lang={lang} />
         <DocsLayout
           tree={source.getPageTree(lang)}
