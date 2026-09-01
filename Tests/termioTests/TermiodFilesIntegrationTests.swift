@@ -436,8 +436,8 @@ final class TermiodFilesIntegrationTests: XCTestCase {
         XCTAssertTrue(result.hits.allSatisfy { $0.path == "sub/b.txt" })
     }
 
-    /// A query nothing matches is an answer, not a failure — `git grep` exits 1
-    /// for it, and the pane must show "no matches" rather than an error.
+    /// A query nothing matches is an answer, not a failure: the pane must show
+    /// "no matches" rather than an error.
     func testSearchWithNoHitsSucceedsEmpty() throws {
         let result = try Termiod.searchContents(
             route: .local, root: root.path, query: "nothing-here-at-all", limit: 400)

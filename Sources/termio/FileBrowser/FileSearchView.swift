@@ -2,13 +2,64 @@ import AppKit
 import SwiftUI
 import TermioShared
 
+/// One grep hit: a line of a file that contains the query, with the lines around
+/// it and — the part that matters — where the query actually hit.
+///
+/// The spans come from the matcher that found the line — always the daemon's,
+/// on whichever box holds the checkout. Nothing downstream re-searches the text.
+/// A results row that finds its own highlights is running a second matcher
+/// beside the first, and two matchers disagree in exactly the cases that look
+/// like bugs: an uppercase query painting lowercase text, a line whose match sat
+/// past the length cap and so lit up nothing at all.
+struct ContentMatch: Sendable {
+    /// Path relative to the searched root — the grouping key and header label.
+    let relative: String
+    let url: URL
+    /// 1-based line number, as the daemon reports it.
+    let line: Int
+    /// The matched line, or a window of it when the line is long enough that
+    /// sending the whole thing is pointless. Untrimmed — the row trims.
+    let text: String
+    /// Where the query hit inside `text`. Empty only against a host too old to
+    /// report spans, where the row falls back to painting nothing rather than
+    /// guessing.
+    let spans: [Range<String.Index>]
+    /// True when `text` is a window cut out of a longer line, so the row can say
+    /// so rather than implying the line begins there.
+    let isWindowed: Bool
+    /// The lines immediately before and after, for the excerpt. Empty when the
+    /// hit is at the top or bottom of its file, or from a host too old to send
+    /// context.
+    let before: [String]
+    let after: [String]
+
+    /// The line numbers `before` and `after` occupy, which the excerpt gutter
+    /// needs and which are pure arithmetic off `line`.
+    var firstLine: Int { line - before.count }
+
+    /// A byte range measured by a host, as a range of `text`'s characters.
+    /// `nil` when the bytes do not land on character boundaries — a host and a
+    /// client disagreeing about where a character starts is a highlight in the
+    /// wrong place, and none is better than wrong.
+    static func range(_ text: String, bytes: Range<Int>) -> Range<String.Index>? {
+        let utf8 = text.utf8
+        guard bytes.lowerBound >= 0, bytes.upperBound <= utf8.count else { return nil }
+        let start = utf8.index(utf8.startIndex, offsetBy: bytes.lowerBound)
+        let end = utf8.index(utf8.startIndex, offsetBy: bytes.upperBound)
+        guard let lower = start.samePosition(in: text),
+              let upper = end.samePosition(in: text), lower <= upper else { return nil }
+        return lower ..< upper
+    }
+}
+
 /// Which machine the Search pane searches, and therefore what a hit opens. The
 /// pane is one pane either way — a field, hits grouped under their file, click to
 /// open — so the two roads differ only here.
 enum SearchScope {
-    /// This Mac: `git grep` under a local root (`ContentSearch`), and a hit opens
-    /// the editor at its line.
-    case thisMac(URL)
+    /// This Mac: the local daemon's own `fs.search` over the Unix socket, and a
+    /// hit opens the editor at its line. The provider is what makes local an
+    /// ordinary device here — the pane runs no matcher of its own.
+    case thisMac(DeviceFileProvider, URL)
     /// Another machine: that device's own `fs.search`, and a hit opens the
     /// read-only preview the device's file tree already uses. `root` is a path on
     /// **that** box, so it is carried as a string; the `URL`s the rows build from
@@ -16,12 +67,49 @@ enum SearchScope {
     case device(DeviceFileProvider, host: String, root: String)
 }
 
+extension SearchScope {
+    /// The daemon this pane asks. Local is not a special case: it is the device
+    /// whose route is a Unix socket, so both roads reach one search engine and a
+    /// query cannot mean two things depending on which box holds the checkout.
+    var provider: DeviceFileProvider {
+        switch self {
+        case .thisMac(let provider, _): return provider
+        case .device(let provider, _, _): return provider
+        }
+    }
+
+    /// What a hit's relative path is resolved against. Real for this Mac; for a
+    /// device the `URL` is synthetic, exactly as `DeviceFileNode` builds them.
+    var base: URL {
+        switch self {
+        case .thisMac(_, let root): return root
+        case .device(_, _, let root): return URL(fileURLWithPath: root, isDirectory: true)
+        }
+    }
+
+    /// Which machine a failed search is logged against.
+    var machine: String {
+        switch self {
+        case .thisMac(_, let root): return root.path
+        case .device(_, let host, let root): return host + ":" + root
+        }
+    }
+
+    /// Whether the checkout is on this Mac. The engine no longer asks — only the
+    /// sentences do, since a failure worded for a machine across a network reads
+    /// wrong on the one the window is open on.
+    var isLocal: Bool {
+        if case .thisMac = self { return true }
+        return false
+    }
+}
+
 /// The inspector's Search pane — a sibling of Files / Changes / Info on the
 /// toolbar switch, searching file *contents* (VS Code's ⇧⌘F; the filename jump
-/// lives in Open Quickly, ⌘⇧O). Queries run debounced through `git grep` — this
-/// Mac's own for a local root, the device's for a checkout on another machine —
-/// results group under their file with the matched substring tinted accent, and
-/// clicking a hit opens the file scrolled to that line.
+/// lives in Open Quickly, ⌘⇧O). Queries run debounced through `fs.search`, on
+/// whichever daemon owns the checkout — this Mac's over its socket, a device's
+/// over its pipe — results group under their file with the matched substring
+/// tinted accent, and clicking a hit opens the file scrolled to that line.
 struct FileSearchView: View {
     @EnvironmentObject var store: TermioStore
     @EnvironmentObject var settings: AppSettings
@@ -305,11 +393,12 @@ struct FileSearchView: View {
     // MARK: - Search
 
     /// Debounce + cancel-on-keystroke (Warp's abort pattern): each edit kills
-    /// the in-flight task, and the cancellation reaches all the way down —
-    /// `ContentSearch` terminates its grep subprocess — so a stale search stops
-    /// consuming the machine instead of racing the fresh one. Deliberately NOT
-    /// `Task.detached`: a detached task sits outside this task tree, which is
-    /// exactly what would strand the grep beyond cancellation's reach.
+    /// the in-flight task, and the cancellation reaches all the way down — the
+    /// abandoned call cancels its `fs.search` by request id, and the daemon drops
+    /// the walk — so a stale search stops consuming the box instead of racing the
+    /// fresh one. Deliberately NOT `Task.detached`: a detached task sits outside
+    /// this task tree, which is exactly what would strand the search beyond
+    /// cancellation's reach.
     private func scheduleSearch() {
         searchTask?.cancel()
         // Cleared here rather than inside the task: the message belongs to the
@@ -334,55 +423,66 @@ struct FileSearchView: View {
         }
     }
 
-    /// Runs one query on whichever machine holds the root. The device's search is
-    /// a network round trip, so its failures are shown rather than swallowed —
-    /// a root that no longer resolves, a daemon too old for `fs.search`, a box
-    /// that stopped answering.
+    /// Runs one query against the daemon that owns the root — the local one over
+    /// a Unix socket, a device's over its pipe. One engine answers both, so the
+    /// same query in the same pane cannot return two different hit sets
+    /// depending on which machine the checkout sits on. A search is a round trip
+    /// either way, so its failures are shown rather than swallowed: a root that
+    /// no longer resolves, a daemon too old for `fs.search`, a box that stopped
+    /// answering.
     private func find(_ query: String, limit: Int) async -> [ContentMatch] {
-        switch scope {
-        case .thisMac(let root):
-            return await ContentSearch.search(query, under: root, limit: limit)
-        case .device(let provider, let host, let root):
-            do {
-                let result = try await provider.search(query, limit: limit)
-                let base = URL(fileURLWithPath: root, isDirectory: true)
-                return result.hits.map { hit in
-                    ContentMatch(
-                        relative: hit.path,
-                        url: base.appendingPathComponent(hit.path),
-                        line: hit.line,
-                        text: hit.text,
-                        // The host measured these in bytes of its own line; the
-                        // row paints characters. A range that does not land on a
-                        // character boundary is dropped rather than nudged —
-                        // a highlight one byte off is worse than none.
-                        spans: hit.spans.compactMap { ContentMatch.range(hit.text, bytes: $0) },
-                        isWindowed: hit.isWindowed,
-                        before: hit.before,
-                        after: hit.after)
-                }
-            } catch {
-                guard !Task.isCancelled else { return [] }
-                Log.files.error("""
-                device search \(host, privacy: .public):\(root, privacy: .public): \
-                \(String(describing: error), privacy: .public)
-                """)
-                failure = Self.message(for: error, fallback: localized("The search failed."))
-                return []
+        let base = scope.base
+        do {
+            let result = try await scope.provider.search(query, limit: limit)
+            return result.hits.map { hit in
+                ContentMatch(
+                    relative: hit.path,
+                    url: base.appendingPathComponent(hit.path),
+                    line: hit.line,
+                    text: hit.text,
+                    // The host measured these in bytes of its own line; the
+                    // row paints characters. A range that does not land on a
+                    // character boundary is dropped rather than nudged —
+                    // a highlight one byte off is worse than none.
+                    spans: hit.spans.compactMap { ContentMatch.range(hit.text, bytes: $0) },
+                    isWindowed: hit.isWindowed,
+                    before: hit.before,
+                    after: hit.after)
             }
+        } catch {
+            guard !Task.isCancelled else { return [] }
+            Log.files.error("""
+            search \(scope.machine, privacy: .public): \
+            \(String(describing: error), privacy: .public)
+            """)
+            failure = Self.message(for: error, on: scope,
+                                   fallback: localized("The search failed."))
+            return []
         }
     }
 
-    /// The device described what went wrong; wording it is this client's job, and
+    /// The daemon described what went wrong; wording it is this client's job, and
     /// only for the cases the client decides itself — a daemon that named a cause
     /// is quoted verbatim. `fallback` says which of the two round trips failed,
     /// since an error with no message of its own tells the user nothing else.
-    private static func message(for error: Error, fallback: String) -> String {
+    ///
+    /// The two roads need different sentences even though they now run one
+    /// engine. A device that stopped answering is a network story; the daemon on
+    /// this Mac is not reached over a network, and telling someone searching
+    /// their own laptop that "this device didn’t answer" points them at a machine
+    /// that is not the problem.
+    private static func message(for error: Error, on scope: SearchScope,
+                                fallback: String) -> String {
         // Silence, not a refusal — and the likeliest cause is a host that has
         // never heard of the op, so the sentence names that. The rest is the
         // shared table every device pane words its failures from.
         if case TermiodClientError.timedOut = error {
-            return localized("This device didn’t answer. Its termiod may be too old to search.")
+            return scope.isLocal
+                ? localized("termiod on this Mac didn’t answer.")
+                : localized("This device didn’t answer. Its termiod may be too old to search.")
+        }
+        if case DeviceFileError.unsupported = error, scope.isLocal {
+            return localized("termiod on this Mac is too old to search.")
         }
         return RemoteFileFailure.message(for: error, fallback: fallback)
     }

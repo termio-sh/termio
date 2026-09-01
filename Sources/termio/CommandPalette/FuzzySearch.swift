@@ -10,7 +10,7 @@ struct ProjectFile: Sendable {
 
 /// The fuzzy matcher and project file lister behind Open Quickly (⌘⇧O), split
 /// out of `CommandPalette` so future consumers share one notion of "matches".
-/// (Content search is separate — see `ContentSearch`.)
+/// (Content search is separate — see `FileSearchView`, which reads `fs.search`.)
 enum FuzzySearch {
     /// otty-style subsequence match: every query character must appear in
     /// order. Scoring is transparent, not learned — word-boundary hits beat

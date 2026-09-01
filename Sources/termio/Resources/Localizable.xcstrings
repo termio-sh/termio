@@ -7975,6 +7975,26 @@
         }
       }
     },
+    "termiod on this Mac didn’t answer.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 上的 termiod 没有响应。"
+          }
+        }
+      }
+    },
+    "termiod on this Mac is too old to search.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 上的 termiod 版本过旧，不支持搜索。"
+          }
+        }
+      }
+    },
     "this Mac": {
       "localizations": {
         "zh-Hans": {

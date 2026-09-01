@@ -335,11 +335,13 @@ struct FileBrowserView: View {
             } else if let deviceCheckout {
                 unavailable(pane: localized("Search"), on: deviceCheckout)
             } else if let projectPath {
-                // Still this Mac's own `git grep` (`ContentSearch`). The tree
-                // moved to the device plane; search is Stage 3's half of the
-                // same move and has not.
+                // This Mac's own daemon, over the Unix socket — the same
+                // `fs.search` a device answers with, and the same plane the tree's
+                // listings already ride. Local stopped being a second engine here.
                 FileSearchView(
-                    scope: .thisMac(URL(fileURLWithPath: projectPath)),
+                    scope: .thisMac(
+                        DeviceFileProvider(route: .local, root: projectPath),
+                        URL(fileURLWithPath: projectPath)),
                     onDismiss: { store.inspectorTab = .files }
                 )
                 // Fresh identity per project, so a stale query/result set

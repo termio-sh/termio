@@ -32,7 +32,7 @@ import TermioShared
 ///   a directory listing can no more queue behind PTY bytes than PTY bytes can
 ///   queue behind a listing (§A).
 /// - **Never serialised within itself.** Requests are demultiplexed by `re`, so
-///   a slow `git grep` does not hold up the folder expand behind it. Only the
+///   a slow `fs.search` does not hold up the folder expand behind it. Only the
 ///   frame writes are serialised, which is what keeps frames whole.
 /// - **System OpenSSH stays the trust plane.** The pool holds a pipe that
 ///   `Transport.open` produced; it knows nothing about keys, hosts or crypto.
@@ -144,8 +144,8 @@ extension Termiod {
         /// Declares this request cancellable, from the moment it is on the wire
         /// until the host's terminal reply lands.
         ///
-        /// Only streaming requests need it, and for a sharp reason. A `git grep`
-        /// keeps running on the device until something stops it, and until this
+        /// Only streaming requests need it, and for a sharp reason. A search
+        /// keeps walking the host until something stops it, and until this
         /// change the thing that stopped it was the connection closing — the
         /// host's `run_search` watches `out.closed()` for exactly that. Pooling
         /// removed that signal: the channel outlives the request now, so a search

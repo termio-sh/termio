@@ -1614,6 +1614,10 @@ Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks
 %@</key>
 	<string>termiod on %@ never opened its listener.
 %@</string>
+	<key>termiod on this Mac didn’t answer.</key>
+	<string>termiod on this Mac didn’t answer.</string>
+	<key>termiod on this Mac is too old to search.</key>
+	<string>termiod on this Mac is too old to search.</string>
 	<key>this Mac</key>
 	<string>this Mac</string>
 	<key>· resets %@</key>
