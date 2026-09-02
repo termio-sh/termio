@@ -39,4 +39,27 @@ final class TermiodViewportFrameTests: XCTestCase {
     func testTheAttachChannelAsksForTheSizePolicy() {
         XCTAssertTrue(Termiod.attachCapabilities.contains(Termiod.viewportCapability))
     }
+
+    /// `attach` carries the same two facts `R` does. It used to carry only the
+    /// viewport, and a host read every arrival as one somebody was looking at —
+    /// so a surface made for a pane with no screen behind it took the session's
+    /// size until a correction a round trip later gave it back.
+    func testAnAttachSaysWhetherAnyoneIsLookingAtIt() throws {
+        let showing = try attachFields(rendering: true)
+        XCTAssertNil(
+            showing["rendering"],
+            "the common case writes what every client before the size policy wrote")
+        XCTAssertEqual(showing["rows"] as? Int, 40)
+        XCTAssertEqual(showing["cols"] as? Int, 120)
+
+        let hidden = try attachFields(rendering: false)
+        XCTAssertEqual(hidden["rendering"] as? Bool, false)
+    }
+
+    private func attachFields(rendering: Bool) throws -> [String: Any] {
+        let payload = try Termiod.attachPayload(
+            target: "a-session", specification: nil, rows: 40, cols: 120,
+            rendering: rendering)
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+    }
 }

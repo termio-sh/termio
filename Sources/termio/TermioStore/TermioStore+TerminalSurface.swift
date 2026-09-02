@@ -280,12 +280,29 @@ extension TermioStore {
         // The session runs inside the daemon and this app instance attaches to
         // it, so quitting detaches instead of killing.
         //
-        // Attached at the last real host grid rather than a fixed 80x24, so the
-        // shell's first prompt is drawn at (usually) the window's actual width
-        // and the first layout pass doesn't reflow it — the reflow that mangles
-        // zsh's `PROMPT_SP` line into a stray `%` (see `lastHostGridColumns`).
+        // A brand-new session still spawns at the last real host grid rather
+        // than a fixed 80x24, so the shell's first prompt is drawn at (usually)
+        // the window's actual width and the first layout pass doesn't reflow it
+        // — the reflow that mangles zsh's `PROMPT_SP` line into a stray `%`
+        // (see `lastHostGridColumns`).
+        //
+        // What this attachment declares as its *own* viewport is a separate
+        // question, and the window is only sometimes the answer. Surfaces are
+        // made lazily on first render, but not every caller is a pane: a phone
+        // opening a session this Mac never showed surfaces it here to spawn the
+        // agent with its resume arguments, and `termio sessions send` does the
+        // same for a background session. Declaring the window's grid for a pane
+        // with no screen behind it made that attachment the newest-used
+        // candidate the daemon sizes by, so every open moved the PTY to a width
+        // nothing was showing and the phone's first `resize` pulled it back. A
+        // zero is "no viewport at all"; the pane declares a real one on its
+        // first layout pass, if it ever gets a screen
+        // (`docs/design/20260901-pty-size-is-not-the-write-token.md` §5.1).
+        let onScreen = isPaneOnScreen(session.id)
         let termiodLink = makeTermiodLink(
-            for: session, argv: argv, cwd: spawnPath, env: env)
+            for: session, argv: argv, cwd: spawnPath, env: env,
+            viewport: onScreen ? nil : TerminalGrid(rows: 0, cols: 0),
+            rendering: onScreen)
         let inMemory = InMemoryTerminalSession(
             write: { data in
                 // libghostty answers the host's terminal queries through this

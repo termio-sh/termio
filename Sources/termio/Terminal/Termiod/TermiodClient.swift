@@ -1195,7 +1195,7 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// stops counting toward the session's size, so a window left open on
     /// another workspace does not hold every session it has a pane for down to
     /// its own width.
-    private var rendering = true
+    private var rendering: Bool
     /// The last viewport actually written as an `R` frame, so an unchanged
     /// declaration isn't re-sent while the daemon is still applying the first.
     private var sentViewport: (grid: TerminalGrid, rendering: Bool)?
@@ -1335,14 +1335,20 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// viewer, and pinning to it never resolves.
     var onSizesByPolicy: ((Bool) -> Void)?
 
+    /// `rendering` is whether there is a screen in front of this attachment
+    /// when it arrives. Usually there is — a pane is made because it is about
+    /// to be shown — but the Mac also makes surfaces for sessions nobody is
+    /// showing, and the attach frame is where one says so.
     init(sessionName: String,
          specification: Termiod.CreateSpecification,
          route: TermiodRoute = .local,
          rows: Int,
-         cols: Int) {
+         cols: Int,
+         rendering: Bool = true) {
         self.sessionName = sessionName
         self.specification = specification
         self.route = route
+        self.rendering = rendering
         let grid = TerminalGrid(rows: UInt16(clamping: rows), cols: UInt16(clamping: cols))
         viewportGrid = grid
         surfaceGrid = grid
@@ -1365,11 +1371,16 @@ final class TermiodSessionLink: @unchecked Sendable {
                 let device = handshake.device
                 DispatchQueue.main.async { [self] in onDevice?(device) }
                 let requested = viewportGrid
+                // An old host has no rendering concept at all — it reads every
+                // attachment as one somebody is looking at, and there is no
+                // form of this frame that tells it otherwise.
+                let declaredRendering = hostSizesByPolicy ? rendering : true
                 let payload = try Termiod.attachPayload(
                     target: sessionName,
                     specification: specification,
                     rows: requested.rows,
-                    cols: requested.cols
+                    cols: requested.cols,
+                    rendering: declaredRendering
                 )
                 try Termiod.writeFrame(channel.writeDescriptor, kind: .control, payload: payload)
                 let reply = try Termiod.readFrame(channel.readDescriptor)
@@ -1407,13 +1418,10 @@ final class TermiodSessionLink: @unchecked Sendable {
                     rows: attachedPayload.rows, cols: attachedPayload.cols)
                 authoritativeGrid = sharedGrid
                 DispatchQueue.main.async { [self] in onSharedGrid?(sharedGrid) }
-                // The attach control carried this viewport, so the daemon has
-                // already counted it; re-sending it would be a barrier for
-                // nothing.
-                sentViewport = (requested, true)
-                // A pane that went to a background tab before its attach landed
-                // has to say so: the daemon counts every arrival as rendering.
-                if !rendering { scheduleViewportLocked() }
+                // The attach control carried this viewport and whether anyone
+                // is in front of it, so the daemon has already counted both;
+                // re-sending them would be a barrier for nothing.
+                sentViewport = (requested, declaredRendering)
                 repaintPending = sharedGrid != surfaceGrid
                 Log.termiod.info("""
                 attached session=\(self.sessionName, privacy: .public) \

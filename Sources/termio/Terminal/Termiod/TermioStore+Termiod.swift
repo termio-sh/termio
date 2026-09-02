@@ -17,9 +17,14 @@ extension TermioStore {
     /// session the screen behind it could show. A pane's own geometry replaces
     /// it on the first layout pass; a relay with no screen of its own passes a
     /// zero, which the daemon reads as "no viewport at all" and never sizes by.
+    /// `rendering` is the other half of the same question: whether anyone is in
+    /// front of that screen yet. Two facts, two fields — a hidden pane keeps a
+    /// viewport it gets back when it is shown, and a window that has not laid
+    /// out has none to get back.
     func makeTermiodLink(for session: Session, argv: [String], cwd: String,
                          env: [String: String],
-                         viewport: TerminalGrid? = nil) -> TermiodSessionLink {
+                         viewport: TerminalGrid? = nil,
+                         rendering: Bool = true) -> TermiodSessionLink {
         // The session is the only source of truth for where it runs. There used
         // to be a `TERMIO_TERMIOD_REMOTE` fallback here from before the picker
         // existed, but it silently turned *every* session without an explicit
@@ -55,7 +60,8 @@ extension TermioStore {
             specification: specification,
             route: route,
             rows: Int(opening.rows),
-            cols: Int(opening.cols)
+            cols: Int(opening.cols),
+            rendering: rendering
         )
     }
 

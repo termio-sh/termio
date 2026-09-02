@@ -3,7 +3,7 @@ title: PTY size is not the write token
 status: active
 type: rfc
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-02
 related:
   - ../bug/agent-tui-focus-report-resize-storm.md
   - 20260730-termiod-session-protocol.md
@@ -430,3 +430,27 @@ viewport for a screen it does not have, against §5.4's own rule. Harmless under
 smallest-wins (it was never the smallest). Not harmless here: an attach is a use,
 so a stale stand-in would have taken the session for a frame. The bridge now
 attaches with a zero grid, which the daemon reads as no viewport at all.
+
+### 11.5 The bridge was not the only attachment with no screen
+
+§11.4 fixed the bridge and stopped one step short. The surface it opens the
+bridge *for* has the same problem: a phone opening a session this Mac never
+showed makes one through `surface(for:)`, which is what spawns the agent with
+its resume arguments — and that path put `lastHostGrid` in the attach payload
+too. Every phone-open therefore moved the PTY to the Mac window's width for a
+pane nobody was showing, and the phone's first `resize` pulled it back. One
+wrong resize per open, which is what tears an agent TUI's composer box.
+`termio sessions send` addressing a background session did the same thing.
+
+Two changes, because the state has two halves and §5.1 keeps them apart. A
+surface made for a pane that is not on screen attaches with a zero grid — no
+viewport at all, the §11.4 treatment. And `attach` grew the `rendering` field
+`R` already had, so an attachment says on arrival whether a screen is in front
+of it instead of the host counting every arrival as one; absent is `true`, so
+nothing written before it changes. The client-side correction that existed only
+because the host assumed — a second declaration sent a round trip after attach —
+is gone with it.
+
+`used` follows the same rule as `SessionMsg::Viewport`: an attach that is not
+rendering does not stamp one. Nobody is looking at it, so it is not somebody
+using this device.

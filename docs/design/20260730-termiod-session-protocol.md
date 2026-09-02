@@ -3,7 +3,7 @@ title: termiod Session Protocol
 status: draft
 type: design
 created: 2026-07-30
-updated: 2026-08-31
+updated: 2026-09-02
 related:
   - 20260730-termiod-session-mux.md
   - 20260708-session-daemon-architecture.md
@@ -66,7 +66,14 @@ Code Remote's public architecture record.
 authority by design; the pairing token is daemon-equivalent until rotated; the
 invariants are no non-loopback bind and no embedded TLS — not "no TCP ever"),
 per the docker-dockerd-lessons RFC §5.1, and aligned §D's WSS auth cell with
-it. -->
+it.
+2026-09-02: `attach` gained an optional `rendering` field, so an attachment
+arrives saying whether a screen is in front of it rather than the host assuming
+one is. The Mac makes surfaces for sessions no pane is showing — a phone opening
+one it never displayed — and each of those took the session's size for a frame
+before its first `R` gave it back. Same fact as `R`'s flags byte
+(`20260901-pty-size-is-not-the-write-token.md` §5.1); absent is `true`, so no
+client written before it changes. -->
 
 
 # Design: termiod Session Protocol
@@ -252,7 +259,7 @@ makes one control channel safely multiplexable. Ops marked ✦ exist in POC v0.
 | `hello` / `hello_ok` / `hello_err` | both | §C.3 |
 | `create` ✦ | c→h | `CreateSpec {name?, cwd?, argv, env, rows, cols, workstream?}` — `workstream {agent_id, project, worktree?}` is new |
 | `list` ✦ / `sessions` ✦ | c→h / h→c | `SessionInfo` gains `status`, `agent_id`, `title`, `attached_clients`, `writer_client_id` |
-| `attach` ✦ / `attached` ✦ | c→h / h→c | `{target, mode:"interact"|"observe", create_if_missing?, rows, cols}`; reply carries `session_id`, `writer` (bool), and (v1) is followed by one `S` frame |
+| `attach` ✦ / `attached` ✦ | c→h / h→c | `{target, mode:"interact"|"observe", create_if_missing?, rows, cols, rendering?}` — `rows`/`cols` are this attachment's opening viewport, `rendering` (absent = true) whether a screen is in front of it; reply carries `session_id`, `writer` (bool), and (v1) is followed by one `S` frame |
 | `detach` ✦ | c→h | Leave stream; session lives |
 | `kill` ✦ | c→h | End process; every attachment gets `session_exited` |
 | `send` ✦ | c→h | Inject bytes without attaching — the `termio sessions send` path, now first-class |

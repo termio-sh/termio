@@ -62,8 +62,18 @@ final class TermiodSizePolicyIntegrationTests: XCTestCase {
     }
 
     /// `onSharedGrid` fires on the main queue; the tests read it from there too.
+    ///
+    /// Every grid, not just the last one: a wrong resize that something else
+    /// corrects a round trip later leaves no trace in the current value, and a
+    /// resize the user did not ask for is the whole subject of this file.
     private final class GridWatcher {
         var grid: TerminalGrid?
+        private(set) var seen: [TerminalGrid] = []
+
+        func note(_ grid: TerminalGrid) {
+            self.grid = grid
+            seen.append(grid)
+        }
     }
 
     private func link(_ name: String, rows: Int, cols: Int) -> TermiodSessionLink {
@@ -112,7 +122,7 @@ final class TermiodSizePolicyIntegrationTests: XCTestCase {
 
         let mac = link(name, rows: Int(wide.rows), cols: Int(wide.cols))
         let macGrid = GridWatcher()
-        mac.onSharedGrid = { macGrid.grid = $0 }
+        mac.onSharedGrid = { macGrid.note($0) }
         mac.start()
         defer { mac.detach() }
         waitForGrid(macGrid, wide, "one viewer, its own grid")
@@ -122,7 +132,7 @@ final class TermiodSizePolicyIntegrationTests: XCTestCase {
         // letterboxes.
         let phone = link(name, rows: Int(narrow.rows), cols: Int(narrow.cols))
         let phoneGrid = GridWatcher()
-        phone.onSharedGrid = { phoneGrid.grid = $0 }
+        phone.onSharedGrid = { phoneGrid.note($0) }
         phone.start()
         defer { phone.detach() }
         waitForGrid(phoneGrid, narrow, "the phone was just opened, so the session is its size")
@@ -173,7 +183,7 @@ final class TermiodSizePolicyIntegrationTests: XCTestCase {
         let keyframes = KeyframeCounter()
         mac.onOutput = { keyframes.count($0) }
         let macGrid = GridWatcher()
-        mac.onSharedGrid = { macGrid.grid = $0 }
+        mac.onSharedGrid = { macGrid.note($0) }
         mac.start()
         defer { mac.detach() }
         waitForGrid(macGrid, before, "one viewer, its own grid")
@@ -242,6 +252,53 @@ final class TermiodSizePolicyIntegrationTests: XCTestCase {
         }
     }
 
+    /// A surface made for a pane that is not on screen must not take the size.
+    ///
+    /// The Mac makes one whenever something other than a pane asks for a
+    /// session — a phone opening one this Mac never showed, `termio sessions
+    /// send` addressing a background session. That attachment arrived declaring
+    /// the *window's* grid and the daemon counted every arrival as rendering, so
+    /// it was instantly the newest-used candidate: the PTY moved to a width no
+    /// screen was showing, and the phone's first `resize` pulled it straight
+    /// back. One wrong resize per open, which is what tears an agent TUI's
+    /// composer box.
+    func testAnAttachmentThatIsNotRenderingNeverTakesTheSize() throws {
+        let name = "size-offscreen-\(UUID().uuidString.prefix(8))"
+        let shown = TerminalGrid(rows: 42, cols: 47)
+        let window = TerminalGrid(rows: 50, cols: 200)
+
+        let phone = link(name, rows: Int(shown.rows), cols: Int(shown.cols))
+        let phoneGrid = GridWatcher()
+        phone.onSharedGrid = { phoneGrid.note($0) }
+        phone.start()
+        defer { phone.detach() }
+        waitForGrid(phoneGrid, shown, "one viewer, its own grid")
+
+        // The forced surface: a pane that exists without a screen in front of
+        // it, and says so on the attach rather than a round trip later.
+        let offscreen = link(name, rows: Int(window.rows), cols: Int(window.cols))
+        offscreen.setRendering(false)
+        let offscreenGrid = GridWatcher()
+        offscreen.onSharedGrid = { offscreenGrid.note($0) }
+        offscreen.start()
+        defer { offscreen.detach() }
+        waitForGrid(
+            offscreenGrid, shown,
+            "the attach is answered with the size the session already had")
+        assertGridHolds(
+            phoneGrid, shown, "a pane nobody is looking at must not resize the session")
+        // Where it settles is not the assertion — a wrong resize that something
+        // corrects a round trip later settles back here too. The session must
+        // never have been at the window's grid at all.
+        XCTAssertFalse(
+            phoneGrid.seen.contains(window),
+            "the attach moved the session to a grid no screen was showing")
+
+        // And it is not muted for good: putting that pane on screen is using it.
+        offscreen.setRendering(true)
+        waitForGrid(phoneGrid, window, "showing the pane hands the session to it")
+    }
+
     /// The other half: a viewer that leaves altogether releases the session too,
     /// and the size it left behind survives until somebody is rendering again.
     /// A departure is the one size change nobody asked for, so it is the one
@@ -253,7 +310,7 @@ final class TermiodSizePolicyIntegrationTests: XCTestCase {
 
         let mac = link(name, rows: Int(wide.rows), cols: Int(wide.cols))
         let macGrid = GridWatcher()
-        mac.onSharedGrid = { macGrid.grid = $0 }
+        mac.onSharedGrid = { macGrid.note($0) }
         mac.start()
         defer { mac.detach() }
         waitForGrid(macGrid, wide, "one viewer, its own grid")
