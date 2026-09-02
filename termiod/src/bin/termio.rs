@@ -27,6 +27,7 @@ use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use termiod::api;
 use termiod::app_socket::{self, Outcome};
 use termiod::channel::{self, Channel};
 use termiod::{lifecycle, version};
@@ -85,6 +86,13 @@ enum Verb {
         args: Vec<String>,
     },
 
+    /// Speak the session protocol directly — one JSON message in, JSON out.
+    #[command(long_about = API_HELP)]
+    Api {
+        #[command(subcommand)]
+        verb: ApiVerb,
+    },
+
     /// One table: this client, the running app, the local termiod, and every
     /// known remote as of last connect.
     Version,
@@ -92,6 +100,27 @@ enum Verb {
     /// `termio [DIR]` — the `code .`-shaped shorthand for `open DIR`.
     #[command(external_subcommand)]
     Directory(Vec<String>),
+}
+
+#[derive(Subcommand)]
+enum ApiVerb {
+    /// What this daemon is and what it can do — the handshake reply.
+    Capabilities,
+
+    /// Send one control message and print what comes back.
+    Call {
+        /// The message, as one JSON object: `{"op":"list"}`.
+        #[arg(value_name = "JSON")]
+        request: String,
+
+        /// Keep printing frames after the reply, until the daemon closes.
+        /// This is how a subscription is read.
+        #[arg(long)]
+        stream: bool,
+    },
+
+    /// Print the protocol schema this build answers to.
+    Schema,
 }
 
 #[derive(Subcommand)]
@@ -610,6 +639,11 @@ async fn main() -> Result<()> {
             let directory = words.first().map(String::as_str).unwrap_or(".");
             open_project(&channel, Path::new(directory))
         }
+        Some(Verb::Api { verb }) => match verb {
+            ApiVerb::Capabilities => api::capabilities().await,
+            ApiVerb::Call { request, stream } => api::call(&request, stream).await,
+            ApiVerb::Schema => api::schema(),
+        },
         Some(Verb::Version) => version::print_table(&channel, provenance).await,
         // The parsed vector cannot be forwarded: clap claims the first `--`
         // after the subcommand as its own end-of-options marker and drops it,
@@ -1004,6 +1038,30 @@ const LIST_HELP: &str = "\
 List the sessions in this project with their live status (working / idle /
 done / needs-you). `--json` adds each session's transcript path once its
 agent has reported one.";
+
+const API_HELP: &str = "\
+The protocol the Mac app and the iPhone speak to termiod, reachable from any
+program that can run a subprocess. `sessions` is the ergonomic surface over
+the few verbs a supervisor needs; this is the whole plane, including the file,
+git, upload, and resource verbs the app itself uses.
+
+  termio api capabilities
+  termio api call '{\"op\":\"list\"}'
+  termio api call '{\"op\":\"subscribe_resource\",\"resource\":\"/repo\",\"since\":41}' --stream
+
+Requests are the JSON objects in `termio api schema`; the handshake and the
+framing are done for you. Every reply carries `re`, echoing the request's
+`seq` (1 when you omit it), and --stream keeps reading after that reply so a
+subscription's events land on stdout as they happen. A subscription resumes:
+pass the last `seq` you saw as `since` and the daemon replays what you missed
+rather than making you rescan.
+
+Nothing here is interpreted on the way through, so a verb newer than this
+build still reaches the daemon and is answered — or refused — by it. The same
+messages travel over SSH to a remote box (`termiod stdio`), which is why a
+Linux VPS with no app running answers exactly what this Mac does.
+
+exit codes: 1 when the daemon answers this request with an error.";
 
 const WATCH_HELP: &str = "\
 Block and stream one line per session status transition until interrupted.

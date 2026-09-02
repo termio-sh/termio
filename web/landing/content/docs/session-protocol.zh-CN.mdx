@@ -1,0 +1,108 @@
+---
+title: 会话协议
+description: 客户端与 termiod 之间来回的成帧 JSON 消息——Mac app 和 iPhone 说的就是这一套。任何程序都能通过 termio api 说它，走本地 socket 或 SSH 都行。
+x-i18n:
+  source_path: session-protocol.mdx
+  source_hash: f588966dabef825a75715e449b60d907df8a6f5a680ab444435c263903d097b2
+  generated_at: 2026-09-02
+---
+
+Termio 里每个会话都活在 `termiod` 里，所有驱动它的东西——Mac app、你的 iPhone、
+`termio` 命令——对它说的是同一套成帧消息。这套协议是公开的。你自己写的程序也能
+说它，而且不必待在跑会话的那台机器上。
+
+## 两条路
+
+消息是 JSON。`termio api` 替你完成握手和成帧，任何能起子进程的语言都够用了：
+
+```sh
+termio api capabilities                       # 这个守护进程是什么、能做什么
+termio api call '{"op":"list"}'               # 这台机器上的会话
+termio api schema                             # 全部消息，JSON Schema 形式
+```
+
+想自己持有连接的客户端可以直接说 socket。成帧只有三段：
+
+```text
+[ kind: u8 ][ length: u32 大端 ][ payload: length 字节 ]
+```
+
+`C` 和 `E` 装控制消息和事件的 JSON。`D` 是 PTY 原始字节，其余的——`S`、`H`、`G`、
+`F`、`U`、`R`——是附着端用的二进制平面。按键这条路上没有任何一步要等 JSON。
+
+## 握手
+
+第一帧是 `hello`，回复告诉你对面是谁：
+
+```json
+{"op":"hello","proto":1,"min_proto":1,"role":"control","caps":["events","resources"],"client":"my-tool/1.0"}
+{"op":"hello_ok","proto":1,"caps":["events","resources"],"host":"termiod/0.48.0 macos-aarch64","version":"0.48.0+1713","host_id":"h_5693f0…","client_id":"c_15a5","home":"/Users/you"}
+```
+
+`caps` 是协商，不是通告：你列出自己能处理什么，守护进程回复交集。版本说不到一块
+去的守护进程会直说——`hello_err` 里写明它支持哪些版本——而不是等你发出一条自以为
+它懂的消息时才炸。
+
+## 请求与回复
+
+给请求一个 `seq`，回复就带着 `re` 把它回显出来。连接上同时还在推事件时，客户端
+就靠这个把答案和问题对上。不写的话，`termio api` 用 `1`。
+
+```sh
+$ termio api call '{"op":"list","seq":4}'
+{"op":"sessions","re":4,"sessions":[…],"tombstones":[…]}
+```
+
+失败是同一个形状，带一个可以直接分支的 code，而不是一句你得去匹配的话：
+
+```json
+{"op":"error","re":4,"code":"no_such_session","message":"no such session: nope","retryable":false}
+```
+
+这个守护进程没听说过的 op 也照这个形状拒绝，并且写明是哪个 op。新客户端对着老
+守护进程，永远拿得到一个回答——不会是沉默。
+
+## 订阅可以续上
+
+状态变化和文件变化作为事件，落在发起订阅的那条连接上。每条都带 `seq`，而订阅可以
+从某个 `seq` 开始：
+
+```sh
+termio api call '{"op":"subscribe_resource","resource":"/path/to/repo","since":41}' --stream
+```
+
+带上 `since`，你不在的那段时间发生的事会重放。守护进程做不到时——积压没留那么
+远——它会说 `gap`，而不是假装做到了：客户端据此重新扫描，而不是去信一幅不完整的
+图。不加 `--stream` 时 `termio api call` 拿到回复就返回；加上它，事件会持续落到
+stdout。
+
+## 同一套消息，远程也一样
+
+`termiod stdio` 把协议放到 stdin 和 stdout 上，于是 SSH 原样把它运过去：
+
+```sh
+ssh vps termiod stdio
+```
+
+客户端发给 Linux VPS 的帧，和它发给 Mac 的帧是同一批。远程没有第二套协议，两端
+也都不需要有 app 在跑——一台无头机器自己就能回答。
+
+## Schema
+
+`termio api schema` 打印一份 JSON Schema，描述每一条控制消息和每一个事件。它是从
+守护进程自己的类型生成的，所以它描述的是打印它的那个构建，而不是某份文档记得写下
+来的东西。同一个文件在仓库里：
+[`docs/api/session-protocol.schema.json`](https://github.com/termio-sh/termio/blob/main/docs/api/session-protocol.schema.json)。
+
+把代码生成器指过去，或者直接翻它找你要的 op：
+
+```sh
+termio api schema | jq -r '.schemas.control.oneOf[].properties.op.const' | sort
+```
+
+## 该用哪一层
+
+`termio sessions` 是监督者常做的那几件事的近路——列出、派生、发送、盯着、关闭——
+而且打印的是人能读的表格，见[会话控制与命令行](/docs/session-control)。当你要的是
+平面的其余部分时再用协议：app 自己在用的文件、git、上传和资源那些 verb，或者一条
+由你的程序持有的长连接。
