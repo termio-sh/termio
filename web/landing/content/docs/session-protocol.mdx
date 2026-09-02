@@ -8,6 +8,22 @@ the Mac app, your iPhone, the `termio` command — says the same framed messages
 to it. That protocol is public. A program you write speaks it too, and it does
 not have to be on the machine where the sessions run.
 
+## Pick a layer
+
+Most automation should start one layer up from here. Reach for the raw protocol
+when you need a verb the CLI does not wrap, or a connection your own program
+holds open.
+
+| Layer | Reach for it when |
+| --- | --- |
+| [`termio sessions`](/docs/session-control) | A person or a hook is typing it: list, spawn, send, watch, close. |
+| `termio api` | A script needs a verb the CLI does not wrap, or a resumable event stream. |
+| The socket | Your program owns the connection — a client, a bridge, a long-lived subscriber. |
+
+All three carry the same messages. The top layer resolves things the protocol
+deliberately does not: which session you meant from the directory you are in,
+where a new pane lands, how a named key is encoded for the program in the pane.
+
 ## Two ways in
 
 The messages are JSON. `termio api` does the handshake and the framing for you,
@@ -16,7 +32,7 @@ which is enough for anything that can run a subprocess:
 ```sh
 termio api capabilities                       # what this daemon is and can do
 termio api call '{"op":"list"}'               # the sessions on this box
-termio api schema                             # every message, as JSON Schema
+termio api schema                             # every message this build answers
 ```
 
 A client that would rather own the connection speaks the socket directly. The
@@ -93,24 +109,63 @@ The frames a client sends a Linux VPS are the frames it sends the Mac. There is
 no second protocol for remote, and no app has to be running on either end — a
 headless box answers on its own.
 
-## The schema
+## Every message, from the build in front of you
 
-`termio api schema` prints a JSON Schema describing every control message and
-every event, generated from the daemon's own types, so it describes the build
-that printed it rather than what a document remembered to say. The same file is
-in the repository at
-[`docs/api/session-protocol.schema.json`](https://github.com/termio-sh/termio/blob/main/docs/api/session-protocol.schema.json).
-
-Point a code generator at it, or read it to find the op you want:
+`termio api schema` prints what this daemon answers to — generated from its own
+types, so it describes the binary that printed it rather than what a document
+remembered to say.
 
 ```sh
-termio api schema | jq -r '.schemas.control.oneOf[].properties.op.const' | sort
+termio api schema                  # a summary you can read
+termio api schema --json           # the JSON Schema document, for code generators
+termio api schema --output api.json
 ```
 
-## Which surface to use
+The summary groups every op by direction, which is the thing worth knowing
+first:
 
-`termio sessions` is the short path for what a supervisor does — list, spawn,
-send, watch, close — and it prints tables a person can read. See
-[Session control & the CLI](/docs/session-control). Reach for the protocol when
-you want the rest of the plane: the file, git, upload, and resource verbs the
-app itself uses, or a long-lived connection your own program owns.
+```text
+Handshake (3)
+  hello, hello_err, hello_ok
+
+Requests (29)
+  attach, cancel, claim_writer, create, detach, handoff, install_agents, kill
+  list, probe_agents, request_snapshot, send, set_status, subscribe
+  subscribe_resource, unsubscribe_resource, wait
+  fs      fs_list, fs_match, fs_read, fs_search
+  git     git_branches, git_compare, git_diff, git_log, git_show
+  upload  upload_abort, upload_commit, upload_open
+
+Replies (20)
+  …
+
+Pushed by the daemon (3)
+  exited, resize_claim, upload_ack
+
+Events (13)
+  ready, resized, resynced, roster, search_results, session_exited, stalled
+  status, status_changed, vt_stale, writer_changed
+  fs      fs_changed
+  git     git_changed
+```
+
+The `fs_*`, `git_*`, and `upload_*` families are the file tree, the diff, and
+image paste — the planes the app itself runs on, and the reason the protocol is
+worth reaching for rather than shelling out to `git` on the far side.
+
+The same document is in the repository at
+[`docs/api/session-protocol.schema.json`](https://github.com/termio-sh/termio/blob/main/docs/api/session-protocol.schema.json),
+and CI regenerates it to prove it still matches the daemon.
+
+## Bootstrapping without a gap
+
+A client that keeps its own picture of the box — a dashboard, a bridge, another
+editor — has one ordering problem, and the protocol answers it rather than
+leaving you to guess. Subscribe **first**, on its own connection, and wait for
+the `subscribed` reply. Buffer what arrives. Then ask for the state you need
+(`list`, `fs_list`), install it, and apply the buffered events in order.
+
+Doing it the other way around loses whatever changed between the snapshot and
+the subscription. If you already have a cursor, `since` closes that window for
+you; `gap: true` in the `subscribed` reply is the daemon saying it cannot, and
+that you should rescan.

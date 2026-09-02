@@ -120,7 +120,15 @@ enum ApiVerb {
     },
 
     /// Print the protocol schema this build answers to.
-    Schema,
+    Schema {
+        /// Print the full JSON Schema document instead of the summary.
+        #[arg(long)]
+        json: bool,
+
+        /// Write the full document to a file.
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -642,7 +650,7 @@ async fn main() -> Result<()> {
         Some(Verb::Api { verb }) => match verb {
             ApiVerb::Capabilities => api::capabilities().await,
             ApiVerb::Call { request, stream } => api::call(&request, stream).await,
-            ApiVerb::Schema => api::schema(),
+            ApiVerb::Schema { json, output } => api::schema(json, output),
         },
         Some(Verb::Version) => version::print_table(&channel, provenance).await,
         // The parsed vector cannot be forwarded: clap claims the first `--`
@@ -1048,6 +1056,8 @@ git, upload, and resource verbs the app itself uses.
   termio api capabilities
   termio api call '{\"op\":\"list\"}'
   termio api call '{\"op\":\"subscribe_resource\",\"resource\":\"/repo\",\"since\":41}' --stream
+  termio api schema            # every op this build answers, grouped by direction
+  termio api schema --json     # the JSON Schema document, for code generators
 
 Requests are the JSON objects in `termio api schema`; the handshake and the
 framing are done for you. Every reply carries `re`, echoing the request's

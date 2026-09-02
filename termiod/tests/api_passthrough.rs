@@ -133,6 +133,60 @@ fn capabilities_reports_the_handshake() {
     );
 }
 
+/// The summary is derived from the schema document, so it is worth one test
+/// that the derivation still finds the ops — a refactor that silently produced
+/// an empty summary would otherwise ship.
+#[test]
+fn schema_prints_a_summary_and_the_document_without_a_daemon() {
+    // No daemon: the schema is baked into the binary, and a box that cannot
+    // reach a daemon must still be able to read what it would say.
+    let summary = Command::new(CLI)
+        .args(["api", "schema"])
+        .env("TERMIOD_SOCK", "/nonexistent/termiod.sock")
+        .output()
+        .expect("run termio api schema");
+    assert!(summary.status.success());
+    let text = String::from_utf8_lossy(&summary.stdout);
+    for expected in [
+        "Termio session protocol 1",
+        "Handshake",
+        "Requests",
+        "Replies",
+        "Events",
+        "subscribe_resource",
+        "fs_search",
+    ] {
+        assert!(text.contains(expected), "summary is missing {expected}:\n{text}");
+    }
+    assert!(
+        !text.contains("\"$schema\""),
+        "the bare summary should not be the JSON document"
+    );
+
+    let document = Command::new(CLI)
+        .args(["api", "schema", "--json"])
+        .output()
+        .expect("run termio api schema --json");
+    assert!(document.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&document.stdout).expect("--json prints a JSON document");
+    assert_eq!(parsed["protocol"], 1);
+
+    let path = std::env::temp_dir().join("termio-api-schema-test.json");
+    let _ = std::fs::remove_file(&path);
+    let written = Command::new(CLI)
+        .args(["api", "schema", "--output"])
+        .arg(&path)
+        .output()
+        .expect("run termio api schema --output");
+    assert!(written.status.success());
+    let from_file: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("written schema"))
+            .expect("--output writes a JSON document");
+    assert_eq!(from_file, parsed, "--output and --json must write the same document");
+    let _ = std::fs::remove_file(&path);
+}
+
 #[test]
 fn a_malformed_request_fails_before_connecting() {
     let daemon = start_daemon("malformed");

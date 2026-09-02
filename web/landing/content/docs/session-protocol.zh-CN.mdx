@@ -3,13 +3,27 @@ title: 会话协议
 description: 客户端与 termiod 之间来回的成帧 JSON 消息——Mac app 和 iPhone 说的就是这一套。任何程序都能通过 termio api 说它，走本地 socket 或 SSH 都行。
 x-i18n:
   source_path: session-protocol.mdx
-  source_hash: f588966dabef825a75715e449b60d907df8a6f5a680ab444435c263903d097b2
+  source_hash: a79a35c8dd046d4737e9f2a9fe0b4d4f3841317671cf73b50971154b24dacd76
   generated_at: 2026-09-02
 ---
 
 Termio 里每个会话都活在 `termiod` 里，所有驱动它的东西——Mac app、你的 iPhone、
 `termio` 命令——对它说的是同一套成帧消息。这套协议是公开的。你自己写的程序也能
 说它，而且不必待在跑会话的那台机器上。
+
+## 先挑一层
+
+大多数自动化应该从上面一层开始。要用 CLI 没包的 verb，或者要一条由你自己的程序
+持有的连接时，再下到裸协议这层来。
+
+| 这一层 | 什么时候用 |
+| --- | --- |
+| [`termio sessions`](/docs/session-control) | 人或 hook 直接敲的那些：列出、派生、发送、盯着、关闭。 |
+| `termio api` | 脚本要用 CLI 没包的 verb，或者要一条可续上的事件流。 |
+| socket | 你的程序自己持有连接——一个客户端、一座桥、一个长期订阅者。 |
+
+三层运的是同一批消息。最上面那层负责解决协议故意不管的事：从你所在的目录判断你
+指的是哪个会话、新窗格落在哪、一个具名按键该怎么编码给窗格里的程序。
 
 ## 两条路
 
@@ -87,22 +101,57 @@ ssh vps termiod stdio
 客户端发给 Linux VPS 的帧，和它发给 Mac 的帧是同一批。远程没有第二套协议，两端
 也都不需要有 app 在跑——一台无头机器自己就能回答。
 
-## Schema
+## 全部消息，来自你面前这个构建
 
-`termio api schema` 打印一份 JSON Schema，描述每一条控制消息和每一个事件。它是从
-守护进程自己的类型生成的，所以它描述的是打印它的那个构建，而不是某份文档记得写下
-来的东西。同一个文件在仓库里：
-[`docs/api/session-protocol.schema.json`](https://github.com/termio-sh/termio/blob/main/docs/api/session-protocol.schema.json)。
-
-把代码生成器指过去，或者直接翻它找你要的 op：
+`termio api schema` 打印这个守护进程认的东西——从它自己的类型生成，所以它描述的
+是打印它的那个二进制，而不是某份文档记得写下来的东西。
 
 ```sh
-termio api schema | jq -r '.schemas.control.oneOf[].properties.op.const' | sort
+termio api schema                  # 给人读的摘要
+termio api schema --json           # JSON Schema 文档，给代码生成器
+termio api schema --output api.json
 ```
 
-## 该用哪一层
+摘要按方向分组，这也是最该先知道的一件事：
 
-`termio sessions` 是监督者常做的那几件事的近路——列出、派生、发送、盯着、关闭——
-而且打印的是人能读的表格，见[会话控制与命令行](/docs/session-control)。当你要的是
-平面的其余部分时再用协议：app 自己在用的文件、git、上传和资源那些 verb，或者一条
-由你的程序持有的长连接。
+```text
+Handshake (3)
+  hello, hello_err, hello_ok
+
+Requests (29)
+  attach, cancel, claim_writer, create, detach, handoff, install_agents, kill
+  list, probe_agents, request_snapshot, send, set_status, subscribe
+  subscribe_resource, unsubscribe_resource, wait
+  fs      fs_list, fs_match, fs_read, fs_search
+  git     git_branches, git_compare, git_diff, git_log, git_show
+  upload  upload_abort, upload_commit, upload_open
+
+Replies (20)
+  …
+
+Pushed by the daemon (3)
+  exited, resize_claim, upload_ack
+
+Events (13)
+  ready, resized, resynced, roster, search_results, session_exited, stalled
+  status, status_changed, vt_stale, writer_changed
+  fs      fs_changed
+  git     git_changed
+```
+
+`fs_*`、`git_*`、`upload_*` 这三族就是文件树、diff 和图片粘贴——app 自己跑在上面
+的那些平面，也正是值得用协议、而不是到对面去 shell 一个 `git` 的理由。
+
+同一份文档在仓库里：
+[`docs/api/session-protocol.schema.json`](https://github.com/termio-sh/termio/blob/main/docs/api/session-protocol.schema.json)，
+CI 会重新生成一遍，证明它和守护进程还是对得上的。
+
+## 启动时不留缺口
+
+自己维护一份机器状态的客户端——一块面板、一座桥、另一个编辑器——只有一个顺序问题，
+而协议直接给了答案，不用你猜。**先**订阅，用一条单独的连接，等到 `subscribed`
+回复。把这期间到达的事件缓冲住。然后再去要你需要的状态（`list`、`fs_list`），装上
+它，再按顺序把缓冲的事件应用上去。
+
+反过来做，快照和订阅之间变的那些东西就丢了。你要是已经有游标，`since` 替你把这个
+窗口关上；`subscribed` 回复里的 `gap: true` 是守护进程在说它关不上，你该重新扫一遍。
