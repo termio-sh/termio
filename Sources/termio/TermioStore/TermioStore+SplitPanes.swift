@@ -14,6 +14,16 @@ extension TermioStore {
         return selectedSessionID.map { [$0] } ?? []
     }
 
+    /// Whether a session has a screen in front of it right now — the same fact
+    /// `ManagedTerminalSurface` reports to the daemon as it appears and
+    /// disappears, asked at the one moment there is no pane to ask: while the
+    /// surface is being made. Zoom is the only thing `visiblePaneIDs` does not
+    /// already answer, because a zoomed pane hides its own siblings.
+    func isPaneOnScreen(_ id: Session.ID) -> Bool {
+        guard visiblePaneIDs.contains(id) else { return false }
+        return !isPaneZoomed || selectedSessionID == id
+    }
+
     /// The group `id` belongs to, as an index into `splitGroups` — a session is
     /// in at most one group, so the first hit is the only one.
     private func groupIndex(containing id: Session.ID) -> Int? {

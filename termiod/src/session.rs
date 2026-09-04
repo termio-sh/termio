@@ -70,6 +70,12 @@ pub enum SessionMsg {
         /// is "not laid out yet"; the first `R` says what it is.
         rows: u16,
         cols: u16,
+        /// Whether there is a screen in front of this attachment. Attaching is
+        /// usually a viewer arriving to look, which is why the wire's default
+        /// is `true` — but a Mac makes a surface for a session nobody is
+        /// showing (a phone opening one it never displayed), and that one says
+        /// so here rather than a round trip later.
+        rendering: bool,
         out: mpsc::UnboundedSender<ClientEvent>,
         backlog: Arc<ClientBacklog>,
         snapshot: bool,
@@ -2379,6 +2385,7 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
             interactive,
             rows,
             cols,
+            rendering,
             out,
             backlog,
             snapshot,
@@ -2397,8 +2404,17 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
                 ClientRole::Observer
             };
             let old_writer = session.writer.clone();
-            session.use_clock += 1;
-            let use_stamp = session.use_clock;
+            // Opening a session on a device is somebody using that device, so
+            // the newcomer sizes it — unless it arrived with no screen in front
+            // of it, which is nobody using anything. Same rule as
+            // `SessionMsg::Viewport` below, at the one moment that message has
+            // not been sent yet.
+            let use_stamp = if rendering {
+                session.use_clock += 1;
+                session.use_clock
+            } else {
+                0
+            };
             let snapshot_request = snapshot.then(|| session.allocate_snapshot_request());
 
             if !snapshot {
@@ -2438,15 +2454,12 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
                     backlog,
                     role,
                     plane,
-                    // An attach is a viewer arriving to look at the session, so
-                    // it starts rendering. What it declares here is a best
-                    // guess — the window it is going into may not have laid out
-                    // yet, and says so with a zero.
+                    // What it declares here is a best guess — the window it is
+                    // going into may not have laid out yet, and says so with a
+                    // zero.
                     viewport: (rows > 0 && cols > 0).then_some((rows, cols)),
-                    rendering: true,
-                    // Opening a session on a device is somebody using that
-                    // device, so the newcomer sizes it. The Mac springs back the
-                    // moment it is typed in again.
+                    rendering,
+                    // The Mac springs back the moment it is typed in again.
                     used: use_stamp,
                     staged_history: VecDeque::new(),
                     backlog_strikes: 0,
@@ -2872,6 +2885,16 @@ mod tests {
         rows: u16,
         cols: u16,
     ) -> mpsc::UnboundedReceiver<ClientEvent> {
+        attach_interactive_client_showing(session, id, rows, cols, true)
+    }
+
+    fn attach_interactive_client_showing(
+        session: &mut Session,
+        id: &str,
+        rows: u16,
+        cols: u16,
+        rendering: bool,
+    ) -> mpsc::UnboundedReceiver<ClientEvent> {
         let (client_tx, client_rx) = mpsc::unbounded_channel();
         let (reply, _reply_rx) = oneshot::channel();
         handle_msg(
@@ -2881,6 +2904,7 @@ mod tests {
                 interactive: true,
                 rows,
                 cols,
+                rendering,
                 out: client_tx,
                 backlog: Arc::new(ClientBacklog::new()),
                 snapshot: false,
@@ -2945,6 +2969,7 @@ mod tests {
                 interactive: false,
                 rows: 0,
                 cols: 0,
+                rendering: true,
                 out: client_tx,
                 backlog: backlog.clone(),
                 snapshot,
@@ -3164,6 +3189,44 @@ mod tests {
 
         declare_viewport(&mut session, "phone", 42, 47, true);
         assert_eq!(session.policy_size(), Some((42, 47)));
+
+        session.vt.shut_down();
+        let _ = thread.join();
+    }
+
+    /// An attachment that arrives with no screen in front of it is not a
+    /// viewer arriving, and must not take the size on its way in.
+    ///
+    /// The Mac makes a surface for a session nobody is showing whenever
+    /// something other than a pane asks for one — a phone opening a session it
+    /// never displayed. That attachment used to be counted as rendering by
+    /// construction here, so it was instantly the newest-used candidate and the
+    /// PTY moved to a width no screen was showing until its first `R` said
+    /// otherwise. One wrong resize per open.
+    #[tokio::test]
+    async fn an_attachment_that_arrives_not_rendering_never_takes_the_size() {
+        let Sidecar {
+            commands,
+            results: _results,
+            queue,
+            thread,
+        } = spawn_sidecar(24, 80).unwrap();
+        let (mut session, _events) = test_session(commands, queue);
+
+        let _phone = attach_interactive_client_at(&mut session, "phone", 42, 47);
+        assert_eq!(session.policy_size(), Some((42, 47)));
+
+        let _offscreen =
+            attach_interactive_client_showing(&mut session, "offscreen", 50, 200, false);
+        assert_eq!(
+            session.policy_size(),
+            Some((42, 47)),
+            "a pane nobody is looking at must not resize the session"
+        );
+
+        // And it is not muted for good: putting that pane on screen is using it.
+        declare_viewport(&mut session, "offscreen", 50, 200, true);
+        assert_eq!(session.policy_size(), Some((50, 200)));
 
         session.vt.shut_down();
         let _ = thread.join();
@@ -3931,6 +3994,7 @@ mod tests {
             interactive: true,
             rows: 24,
             cols: 80,
+            rendering: true,
             out: client_tx,
             backlog: Arc::new(ClientBacklog::new()),
             snapshot: false,

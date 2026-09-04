@@ -652,6 +652,15 @@ pub enum Control {
         create_if_missing: Option<CreateSpec>,
         rows: u16,
         cols: u16,
+        /// Whether there is a screen in front of this attachment, the same fact
+        /// `R`'s flags byte carries. Absent is `true`, which is what every
+        /// client written before the size policy means by attaching at all —
+        /// and what this host assumed of all of them, so a Mac surfacing a
+        /// session for a pane that is not on screen took the size for a frame
+        /// and gave it back on its first `R`
+        /// (`docs/design/20260901-pty-size-is-not-the-write-token.md` §5.1).
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        rendering: bool,
         #[serde(default)]
         mode: AttachMode,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1524,6 +1533,10 @@ pub struct SessionInfo {
 
 fn default_status() -> String {
     "unknown".to_string()
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn is_false(value: &bool) -> bool {

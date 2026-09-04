@@ -72,4 +72,34 @@ final class TermioStoreSelectionTests: XCTestCase {
 
         XCTAssertEqual(store.status(for: blocked.id), .needsAttention)
     }
+
+    /// Which sessions have a screen in front of them, which is what a surface
+    /// declares to the daemon as its viewport when it is made. Surfaces are
+    /// made lazily on first render, so this is usually "yes" — but the phone
+    /// and `termio sessions send` both make one for a session no pane is
+    /// showing, and that one has no viewport to declare
+    /// (`docs/design/20260901-pty-size-is-not-the-write-token.md` §5.1).
+    func testOnlyTheSessionsAPaneIsShowingHaveAScreen() {
+        let shown = Session(title: "Terminal 1")
+        let grouped = Session(title: "Terminal 2")
+        let elsewhere = Session(title: "Terminal 3")
+        let store = makeStore(sessions: [shown, grouped, elsewhere])
+        store.selectedSessionID = shown.id
+
+        XCTAssertTrue(store.isPaneOnScreen(shown.id))
+        XCTAssertFalse(store.isPaneOnScreen(elsewhere.id))
+
+        // Grouping puts both halves on screen, selected or not.
+        store.dropSession(grouped.id, onto: shown.id, zone: .right)
+        XCTAssertTrue(store.isPaneOnScreen(shown.id))
+        XCTAssertTrue(store.isPaneOnScreen(grouped.id))
+        XCTAssertFalse(store.isPaneOnScreen(elsewhere.id))
+
+        // Zooming one takes the others off it — they keep their frames and are
+        // drawn at zero opacity, which is not a screen anyone is looking at.
+        store.selectedSessionID = grouped.id
+        store.isPaneZoomed = true
+        XCTAssertTrue(store.isPaneOnScreen(grouped.id))
+        XCTAssertFalse(store.isPaneOnScreen(shown.id))
+    }
 }

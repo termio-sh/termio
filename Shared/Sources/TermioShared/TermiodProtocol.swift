@@ -371,6 +371,11 @@ public enum Termiod {
         let createIfMissing: CreateSpecification?
         let rows: UInt16
         let cols: UInt16
+        /// Written only to say *not* rendering, the same way `R`'s flags byte
+        /// is only spent on that state. Absent is what every client written
+        /// before the size policy means by attaching, and what a host that
+        /// predates the field reads anyway.
+        let rendering: Bool?
         let mode = "interact"
         let seq: UInt64
     }
@@ -1704,17 +1709,24 @@ public enum Termiod {
         let seq: Int
     }
 
+    /// `attach`: the opening declaration of one attachment — where it wants to
+    /// land, and what its screen is. `rows`/`cols` are that screen's viewport,
+    /// never an instruction to resize, and `rendering` says whether anyone is
+    /// in front of it. Both are facts about this client; the host derives the
+    /// session's size from every attachment at once.
     public static func attachPayload(
         target: String,
         specification: CreateSpecification?,
         rows: UInt16,
-        cols: UInt16
+        cols: UInt16,
+        rendering: Bool = true
     ) throws -> Data {
         try encodeControl(AttachOperation(
             target: target,
             createIfMissing: specification,
             rows: rows,
             cols: cols,
+            rendering: rendering ? nil : false,
             seq: 1
         ))
     }
