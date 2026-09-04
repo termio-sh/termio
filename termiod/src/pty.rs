@@ -308,6 +308,17 @@ impl Pty {
             cmd.env("LANG", locale);
             cmd.env("LC_CTYPE", locale);
         }
+        // Route a zsh startup through the daemon's OSC 133 shim so the VT can
+        // reflow resizes under it (see `crate::shell_integration`). The user's
+        // own ZDOTDIR rides along and is restored by the shim before their
+        // configuration loads; a shell that is not zsh, or a shim that cannot
+        // be written, changes nothing.
+        if let Some(shim) = crate::shell_integration::zsh_shim_zdotdir(&program) {
+            if let Some(original) = lookup("ZDOTDIR") {
+                cmd.env("TERMIOD_ZSH_ZDOTDIR", original);
+            }
+            cmd.env("ZDOTDIR", shim);
+        }
         if login_shell {
             // argv[0] = "-<shell>" marks a login shell to the shell itself.
             let base = std::path::Path::new(&program)
@@ -612,6 +623,63 @@ mod tests {
         assert!(!dumped.contains("CLAUDE_CODE_CHILD_SESSION="));
         assert!(dumped.contains("TERM_PROGRAM=termio"));
         assert!(!dumped.contains("TERM_PROGRAM=Apple_Terminal"));
+    }
+
+    /// End to end through the real shell: a zsh spawned by the daemon emits
+    /// the OSC 133 prompt-start mark, because `spawn` routed its startup
+    /// through the shim (`crate::shell_integration`). Without the mark the VT
+    /// can never reflow a resize under the shell, so this is the assertion
+    /// that the whole injection chain — ZDOTDIR handoff, shim install, hook
+    /// registration — actually reaches the byte stream.
+    ///
+    /// Skipped where zsh is not installed; the shim itself is unit-tested in
+    /// `shell_integration`.
+    #[tokio::test]
+    async fn a_spawned_zsh_emits_prompt_marks() {
+        let Some(zsh) = ["/bin/zsh", "/usr/bin/zsh"]
+            .into_iter()
+            .find(|path| std::path::Path::new(path).exists())
+        else {
+            return;
+        };
+
+        // A scratch HOME (and ZDOTDIR, exercising the shim's restore path)
+        // keeps the user's real zsh configuration out of the assertion.
+        let home = std::env::temp_dir().join(format!("termiod-zsh-marks-{}", std::process::id()));
+        std::fs::create_dir_all(&home).expect("scratch home");
+        let overrides = vec![
+            ("HOME".to_string(), home.display().to_string()),
+            ("ZDOTDIR".to_string(), home.display().to_string()),
+        ];
+        let (pty, mut child) = Pty::spawn(
+            &[zsh.to_string(), "-i".to_string()],
+            None,
+            &overrides,
+            24,
+            80,
+        )
+        .expect("spawn zsh");
+
+        const PROMPT_START: &[u8] = b"\x1b]133;A\x07";
+        let marked = |bytes: &[u8]| bytes.windows(PROMPT_START.len()).any(|w| w == PROMPT_START);
+        let mut collected = Vec::new();
+        let mut buffer = [0u8; 4096];
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !marked(&collected) {
+            match tokio::time::timeout_at(deadline, pty.read(&mut buffer)).await {
+                Ok(Ok(0)) | Ok(Err(_)) | Err(_) => break,
+                Ok(Ok(count)) => collected.extend_from_slice(&buffer[..count]),
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&home);
+
+        assert!(
+            marked(&collected),
+            "no OSC 133 prompt mark in zsh output: {:?}",
+            String::from_utf8_lossy(&collected)
+        );
     }
 
     /// The other half of the launcher problem: the terminal and job-control

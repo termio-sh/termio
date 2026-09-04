@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use libghostty_vt::render::{CellIterator, Dirty, RenderState, RowIterator};
-use libghostty_vt::screen::{CellContentTag, Screen};
+use libghostty_vt::screen::{CellContentTag, RowSemanticPrompt, Screen};
 use libghostty_vt::style::{RgbColor, StyleColor};
 use libghostty_vt::terminal::{Mode, Point, PointCoordinate};
 use libghostty_vt::{Error, Terminal, TerminalOptions};
@@ -213,9 +213,10 @@ impl VtTerminal {
     /// ⌘D duplicated-prompt report. Ghostty.app escapes this only because it
     /// injects shell integration and clears OSC 133-marked prompt rows before
     /// reflowing (and its engine's post-1.3.1 clear-after-reflow ordering,
-    /// dde3d4d6b, re-breaks the wrapped case even then). Sessions here carry
-    /// no integration, so the marks-free behaviour every shell is written
-    /// against — truncate, don't rewrap — is the correct one for the host.
+    /// dde3d4d6b, re-breaks the wrapped case even then). This is the
+    /// marks-free behaviour every shell is written against — truncate, don't
+    /// rewrap — and it stays the fallback whenever `resize_for_shell` finds no
+    /// marks under the cursor.
     ///
     /// The engine gates reflow on DECAWM (mode ?7), so wraparound is parked
     /// off across the resize and restored to whatever the program had chosen.
@@ -261,6 +262,70 @@ impl VtTerminal {
         // Pixel dimensions are not used by the daemon snapshot sidecar; fixed
         // cell metrics still give libghostty-vt consistent total dimensions.
         check(self.terminal.resize(cols, rows, 8, 16), "Terminal::resize")
+    }
+
+    /// Resize while a **shell** holds the terminal: reflow when the screen
+    /// carries OSC 133 prompt marks, truncate (`resize`) when it does not.
+    ///
+    /// This is Ghostty.app's escape from the duplicated-prompt trap, done in
+    /// the order its engine regression (dde3d4d6b) got wrong: blank the
+    /// current prompt *before* reflowing. zsh's SIGWINCH redisplay moves the
+    /// cursor up by the physical rows its prompt occupied at the width it was
+    /// drawn, then clears down and reprints. Blank rows do not rewrap, so
+    /// clearing the prompt's rows first keeps that arithmetic true across the
+    /// reflow — the redraw lands on clean cells — while everything above the
+    /// prompt rewraps to the new width instead of losing line tails.
+    ///
+    /// Only the prompt run the cursor sits in is cleared: the walk ascends
+    /// through continuation rows to the nearest primary prompt row and stops
+    /// there, so an earlier prompt stacked directly above (enter pressed at an
+    /// empty prompt) is history nobody will redraw and is left to reflow as
+    /// ordinary text. The cursor is saved and restored (DECSC/DECRC) around
+    /// the clear because the redisplay's row arithmetic starts from wherever
+    /// the cursor was — parking it at the prompt's first row would shift the
+    /// whole repaint up by the prompt's height.
+    pub fn resize_for_shell(&mut self, rows: u16, cols: u16) -> Result<()> {
+        match self.current_prompt_start()? {
+            Some(prompt_row) => {
+                let clear = format!("\x1b7\x1b[{};1H\x1b[J\x1b8", u32::from(prompt_row) + 1);
+                self.vt_write(clear.as_bytes());
+                self.resize_reflowing(rows, cols)
+            }
+            None => self.resize(rows, cols),
+        }
+    }
+
+    /// The first row of the prompt the cursor currently sits in, or `None`
+    /// when the cursor is not on an OSC 133-marked row — an unmarked shell, a
+    /// program that took the alternate screen, or a screen state the marks do
+    /// not describe. `None` is the signal to fall back to the truncating
+    /// resize, so every uncertain answer here must be `None`.
+    fn current_prompt_start(&self) -> Result<Option<u16>> {
+        let alternate =
+            check(self.terminal.active_screen(), "Terminal::active_screen")? == Screen::Alternate;
+        if alternate {
+            return Ok(None);
+        }
+        let mut y = check(self.terminal.cursor_y(), "Terminal::cursor_y")?;
+        loop {
+            match self.row_semantic_prompt(y)? {
+                RowSemanticPrompt::Prompt => return Ok(Some(y)),
+                RowSemanticPrompt::Continuation if y > 0 => y -= 1,
+                _ => return Ok(None),
+            }
+        }
+    }
+
+    fn row_semantic_prompt(&self, y: u16) -> Result<RowSemanticPrompt> {
+        let reference = check(
+            self.terminal.grid_ref(Point::Active(PointCoordinate {
+                x: 0,
+                y: u32::from(y),
+            })),
+            "Terminal::grid_ref(active)",
+        )?;
+        let row = check(reference.row(), "GridRef::row")?;
+        check(row.semantic_prompt(), "Row::semantic_prompt")
     }
 
     /// Serialise the current screen back into **VT sequences** — the repaint a

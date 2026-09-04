@@ -2025,7 +2025,7 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                                 let resized = if reflow {
                                     terminal.resize_reflowing(rows, cols)
                                 } else {
-                                    terminal.resize(rows, cols)
+                                    terminal.resize_for_shell(rows, cols)
                                 };
                                 if let Err(error) = resized {
                                     fault = Some(format!("VT resize failed: {error}"));
@@ -3228,9 +3228,11 @@ mod tests {
     /// The rule the reflow policy turns on, and the case that made the previous
     /// one wrong: `zsh -ilc exec claude` leaves no shell in the session at all,
     /// so "is a job running under the shell" was false for exactly the sessions
-    /// a truncating resize mangles.
+    /// a truncating resize mangles. A shell gets the mark-gated resize
+    /// (`resize_for_shell`): reflow when its prompt rows are OSC 133-marked,
+    /// truncation when they are not.
     #[tokio::test]
-    async fn only_a_shell_gets_the_truncating_resize() {
+    async fn only_a_shell_gets_the_mark_gated_resize() {
         let Sidecar {
             commands,
             results: _results,

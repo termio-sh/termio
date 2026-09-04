@@ -97,11 +97,12 @@ pub(crate) enum SidecarCommand {
     Resize {
         rows: u16,
         cols: u16,
-        /// Whether the screen may be rewrapped. False while the shell holds the
-        /// terminal, because its SIGWINCH redisplay assumes the old wrap points
-        /// (`termiod_vt::VtTerminal::resize`); true when a job does, which is
-        /// the only case where truncating is visible as a mangled window rather
-        /// than as a clean prompt.
+        /// Whether the screen may be rewrapped unconditionally. True when a
+        /// job holds the terminal, which repaints from its own model. False
+        /// while the shell does, because its SIGWINCH redisplay assumes the
+        /// old wrap points — the VT then reflows only if the screen carries
+        /// OSC 133 prompt marks to clear first, and truncates otherwise
+        /// (`termiod_vt::VtTerminal::resize_for_shell`).
         reflow: bool,
     },
     Snapshot {
