@@ -791,6 +791,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         store.windowIsFullScreen = true
     }
 
+    /// Fullscreen hands the whole screen to the content: the title-bar band slides away with the
+    /// menu bar and returns when the pointer reaches the top edge, so a maximized file fills the
+    /// display instead of sitting under a strip of chrome.
+    ///
+    /// This is the *only* switch macOS reads for that band. `NSToolbar.isVisible` belongs to the
+    /// windowed title bar; once the fullscreen title-bar host owns the toolbar, hiding it there
+    /// left the band reserved but empty — the blank strip that then outlived the maximized detail —
+    /// and writing the property back during a fullscreen transition made AppKit drop the toolbar's
+    /// items outright. AppKit asks for these options only on the way in, so this is a property of
+    /// the whole fullscreen session rather than something the maximize button can toggle.
+    func window(
+        _ window: NSWindow,
+        willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions
+    ) -> NSApplication.PresentationOptions {
+        proposedOptions.union(.autoHideToolbar)
+    }
+
     /// The twin of `windowWillEnterFullScreen` for the maximized detail's header: the buttons come
     /// back with the window, so the gap that clears them is restored before the animation ends.
     func windowWillExitFullScreen(_ notification: Notification) {
@@ -812,6 +829,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         applyWindowTransparency()
         updateInspectorMaxThickness()
         store.windowIsFullScreen = false
+        // The band is the toolbar's own again, and it may have been left showing for a detail that
+        // is still maximized (fullscreen ignored the request). Re-derive it a runloop later, once
+        // the transition AppKit answers by dropping toolbar items is over.
+        DispatchQueue.main.async { [weak self] in self?.syncMaximizedChrome() }
     }
 
     /// View ▸ Toggle Full Screen (⌃⌘F).
@@ -1417,6 +1438,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// already matches, because re-asserting visibility churns the tracking separators.
     private func syncMaximizedChrome() {
         guard let window, let toolbar = window.toolbar else { return }
+        // Nothing to take away in fullscreen: the band is already the system's auto-hiding overlay
+        // (see `willUseFullScreenPresentationOptions`), and `isVisible` written on that side of the
+        // boundary is what stranded an empty strip across the top of the window.
+        guard !window.styleMask.contains(.fullScreen) else { return }
         let hidesToolbar = detailMaximized && sidebarSplitItem?.isCollapsed == true
         guard toolbar.isVisible == hidesToolbar else { return }
         toolbar.isVisible = !hidesToolbar
