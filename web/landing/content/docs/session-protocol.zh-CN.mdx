@@ -1,0 +1,157 @@
+---
+title: 会话协议
+description: 客户端与 termiod 之间来回的成帧 JSON 消息——Mac app 和 iPhone 说的就是这一套。任何程序都能通过 termio api 说它，走本地 socket 或 SSH 都行。
+x-i18n:
+  source_path: session-protocol.mdx
+  source_hash: a79a35c8dd046d4737e9f2a9fe0b4d4f3841317671cf73b50971154b24dacd76
+  generated_at: 2026-09-02
+---
+
+Termio 里每个会话都活在 `termiod` 里，所有驱动它的东西——Mac app、你的 iPhone、
+`termio` 命令——对它说的是同一套成帧消息。这套协议是公开的。你自己写的程序也能
+说它，而且不必待在跑会话的那台机器上。
+
+## 先挑一层
+
+大多数自动化应该从上面一层开始。要用 CLI 没包的 verb，或者要一条由你自己的程序
+持有的连接时，再下到裸协议这层来。
+
+| 这一层 | 什么时候用 |
+| --- | --- |
+| [`termio sessions`](/docs/session-control) | 人或 hook 直接敲的那些：列出、派生、发送、盯着、关闭。 |
+| `termio api` | 脚本要用 CLI 没包的 verb，或者要一条可续上的事件流。 |
+| socket | 你的程序自己持有连接——一个客户端、一座桥、一个长期订阅者。 |
+
+三层运的是同一批消息。最上面那层负责解决协议故意不管的事：从你所在的目录判断你
+指的是哪个会话、新窗格落在哪、一个具名按键该怎么编码给窗格里的程序。
+
+## 两条路
+
+消息是 JSON。`termio api` 替你完成握手和成帧，任何能起子进程的语言都够用了：
+
+```sh
+termio api capabilities                       # 这个守护进程是什么、能做什么
+termio api call '{"op":"list"}'               # 这台机器上的会话
+termio api schema                             # 全部消息，JSON Schema 形式
+```
+
+想自己持有连接的客户端可以直接说 socket。成帧只有三段：
+
+```text
+[ kind: u8 ][ length: u32 大端 ][ payload: length 字节 ]
+```
+
+`C` 和 `E` 装控制消息和事件的 JSON。`D` 是 PTY 原始字节，其余的——`S`、`H`、`G`、
+`F`、`U`、`R`——是附着端用的二进制平面。按键这条路上没有任何一步要等 JSON。
+
+## 握手
+
+第一帧是 `hello`，回复告诉你对面是谁：
+
+```json
+{"op":"hello","proto":1,"min_proto":1,"role":"control","caps":["events","resources"],"client":"my-tool/1.0"}
+{"op":"hello_ok","proto":1,"caps":["events","resources"],"host":"termiod/0.48.0 macos-aarch64","version":"0.48.0+1713","host_id":"h_5693f0…","client_id":"c_15a5","home":"/Users/you"}
+```
+
+`caps` 是协商，不是通告：你列出自己能处理什么，守护进程回复交集。版本说不到一块
+去的守护进程会直说——`hello_err` 里写明它支持哪些版本——而不是等你发出一条自以为
+它懂的消息时才炸。
+
+## 请求与回复
+
+给请求一个 `seq`，回复就带着 `re` 把它回显出来。连接上同时还在推事件时，客户端
+就靠这个把答案和问题对上。不写的话，`termio api` 用 `1`。
+
+```sh
+$ termio api call '{"op":"list","seq":4}'
+{"op":"sessions","re":4,"sessions":[…],"tombstones":[…]}
+```
+
+失败是同一个形状，带一个可以直接分支的 code，而不是一句你得去匹配的话：
+
+```json
+{"op":"error","re":4,"code":"no_such_session","message":"no such session: nope","retryable":false}
+```
+
+这个守护进程没听说过的 op 也照这个形状拒绝，并且写明是哪个 op。新客户端对着老
+守护进程，永远拿得到一个回答——不会是沉默。
+
+## 订阅可以续上
+
+状态变化和文件变化作为事件，落在发起订阅的那条连接上。每条都带 `seq`，而订阅可以
+从某个 `seq` 开始：
+
+```sh
+termio api call '{"op":"subscribe_resource","resource":"/path/to/repo","since":41}' --stream
+```
+
+带上 `since`，你不在的那段时间发生的事会重放。守护进程做不到时——积压没留那么
+远——它会说 `gap`，而不是假装做到了：客户端据此重新扫描，而不是去信一幅不完整的
+图。不加 `--stream` 时 `termio api call` 拿到回复就返回；加上它，事件会持续落到
+stdout。
+
+## 同一套消息，远程也一样
+
+`termiod stdio` 把协议放到 stdin 和 stdout 上，于是 SSH 原样把它运过去：
+
+```sh
+ssh vps termiod stdio
+```
+
+客户端发给 Linux VPS 的帧，和它发给 Mac 的帧是同一批。远程没有第二套协议，两端
+也都不需要有 app 在跑——一台无头机器自己就能回答。
+
+## 全部消息，来自你面前这个构建
+
+`termio api schema` 打印这个守护进程认的东西——从它自己的类型生成，所以它描述的
+是打印它的那个二进制，而不是某份文档记得写下来的东西。
+
+```sh
+termio api schema                  # 给人读的摘要
+termio api schema --json           # JSON Schema 文档，给代码生成器
+termio api schema --output api.json
+```
+
+摘要按方向分组，这也是最该先知道的一件事：
+
+```text
+Handshake (3)
+  hello, hello_err, hello_ok
+
+Requests (29)
+  attach, cancel, claim_writer, create, detach, handoff, install_agents, kill
+  list, probe_agents, request_snapshot, send, set_status, subscribe
+  subscribe_resource, unsubscribe_resource, wait
+  fs      fs_list, fs_match, fs_read, fs_search
+  git     git_branches, git_compare, git_diff, git_log, git_show
+  upload  upload_abort, upload_commit, upload_open
+
+Replies (20)
+  …
+
+Pushed by the daemon (3)
+  exited, resize_claim, upload_ack
+
+Events (13)
+  ready, resized, resynced, roster, search_results, session_exited, stalled
+  status, status_changed, vt_stale, writer_changed
+  fs      fs_changed
+  git     git_changed
+```
+
+`fs_*`、`git_*`、`upload_*` 这三族就是文件树、diff 和图片粘贴——app 自己跑在上面
+的那些平面，也正是值得用协议、而不是到对面去 shell 一个 `git` 的理由。
+
+同一份文档在仓库里：
+[`docs/api/session-protocol.schema.json`](https://github.com/termio-sh/termio/blob/main/docs/api/session-protocol.schema.json)，
+CI 会重新生成一遍，证明它和守护进程还是对得上的。
+
+## 启动时不留缺口
+
+自己维护一份机器状态的客户端——一块面板、一座桥、另一个编辑器——只有一个顺序问题，
+而协议直接给了答案，不用你猜。**先**订阅，用一条单独的连接，等到 `subscribed`
+回复。把这期间到达的事件缓冲住。然后再去要你需要的状态（`list`、`fs_list`），装上
+它，再按顺序把缓冲的事件应用上去。
+
+反过来做，快照和订阅之间变的那些东西就丢了。你要是已经有游标，`since` 替你把这个
+窗口关上；`subscribed` 回复里的 `gap: true` 是守护进程在说它关不上，你该重新扫一遍。

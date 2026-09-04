@@ -26,6 +26,20 @@ path = "src/bin/termiod.rs"
 name = "termio"
 path = "src/bin/termio.rs"
 
+# The schema generator, not shipped: it is the only thing that pulls schemars,
+# and `docs/api/session-protocol.schema.json` is its checked-in output.
+[[bin]]
+name = "termiod-schema"
+path = "src/bin/schema.rs"
+required-features = ["schema"]
+
+[features]
+# Derives `JsonSchema` alongside the serde derives on the protocol types so the
+# published schema is generated from the types the daemon actually answers
+# with. Off by default: a shipped daemon has no reason to carry the reflection
+# tables, and only `termiod-schema` turns it on.
+schema = ["dep:schemars"]
+
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "io-std", "sync", "macros", "signal", "time", "process"] }
 bytes = "1"
@@ -63,6 +77,10 @@ grep-searcher = "0.1"
 grep-matcher = "0.1"
 ignore = "0.4"
 aho-corasick = { version = "1", default-features = false, features = ["std", "perf-literal"] }
+# Optional, and only for `termiod-schema`: the published API schema is
+# generated from the protocol types rather than written by hand, which is the
+# only way it cannot drift from them.
+schemars = { version = "1", optional = true }
 
 [dev-dependencies]
 # `connect` only exists so the WSS acceptance test can dial its own listener.

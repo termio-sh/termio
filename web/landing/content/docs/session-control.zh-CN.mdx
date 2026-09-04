@@ -3,13 +3,17 @@ title: 会话控制与命令行
 description: Termio 的编排 API——让 Agent 汇报自己在做什么的状态 hooks，以及让你（或另一个 Agent）从 shell 里派生、驱动和监督会话的 termio sessions 命令行。
 x-i18n:
   source_path: session-control.mdx
-  source_hash: d8f45e181eaceaf156197e86596db197400f29e4b4fcda4ddb44d8d644a93984
-  generated_at: 2026-09-01
+  source_hash: 4560c086c4f6daf3570462255476638e55d83a5140fd63576d3d5d277ee1af17
+  generated_at: 2026-09-02
 ---
 
 你在侧栏看到的实时状态背后，是两个相关的可选功能：让 Agent 汇报自己在做什么的**状态
 hooks**，以及让你——或另一个 Agent——从 shell 驱动会话的 **`termio` 命令行工具**。用
 Termio 并不需要它们；但它们让一支 Agent 队伍好带得多。
+
+`termio sessions` 是[会话协议](/docs/session-protocol)其中一个平面的近路——人或 hook
+会直接敲的那些 verb，而且你指的是哪个会话，它从你所在的位置替你算出来。当你需要一个
+它没包的 verb，或者一条由你自己的程序持有的连接时，那一页从这一页停下的地方接着讲。
 
 ## Agent 实时状态
 
