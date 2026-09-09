@@ -32,6 +32,7 @@ struct FileBrowserView: View {
     /// Bumped to collapse the whole tree: it is the file list's `.id`, so changing it
     /// rebuilds the list fresh — and a fresh `List(children:)` starts fully collapsed.
     @State private var treeGeneration = 0
+    @AppStorage("fileBrowserShowHiddenFiles") private var showHiddenFiles = true
 
     /// Where the selected session's files live, and on which machine — see
     /// `TermioStore.inspectorCheckout`. Nothing in this pane may ask the session
@@ -110,6 +111,13 @@ struct FileBrowserView: View {
             seedChangeCount()
         }
         .onDisappear { stop() }
+        .onChange(of: showHiddenFiles) {
+            tree?.showHiddenFiles = showHiddenFiles
+            if let selection = browserState.selection, tree?.isPathVisible(selection) == false {
+                browserState.selection = nil
+                browserState.selectedLocalURL = nil
+            }
+        }
         .onChange(of: checkout) { previous, _ in
             stop(previous)
             // A path from the checkout that just left addresses nothing in the
@@ -173,6 +181,7 @@ struct FileBrowserView: View {
     /// and its `fs:` watch runs for as long as this pane is on screen.
     private func start() {
         guard store.inspectorVisible, let tree else { return }
+        tree.showHiddenFiles = showHiddenFiles
         // Weak, and holding no view state: the model outlives this pane in the
         // cache, so anything strongly captured here would outlive a window.
         tree.onCheckoutChanged = { [weak store] in
@@ -444,6 +453,16 @@ struct FileBrowserView: View {
                     createFolder(in: root)
                 }
             }
+            TreeHeaderButton(huge: .view, help: hiddenFilesAction) {
+                showHiddenFiles.toggle()
+            }
+            .accessibilityLabel(hiddenFilesAction)
+            .background {
+                if showHiddenFiles {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.primary.opacity(0.08))
+                }
+            }
             TreeHeaderButton(codicon: .refresh, help: localized("Refresh")) {
                 tree.refresh()
             }
@@ -454,6 +473,10 @@ struct FileBrowserView: View {
         .padding(.leading, 14)
         .padding(.trailing, 8)
         .padding(.vertical, 3)
+    }
+
+    private var hiddenFilesAction: String {
+        showHiddenFiles ? localized("Hide Hidden Files") : localized("Show Hidden Files")
     }
 
     private func seedChangeCount() { Self.seedChangeCount(into: store) }
@@ -684,7 +707,7 @@ private struct FileTreeContent: View {
             )
         case .ready:
             FileTreeList(
-                nodes: model.rootNodes,
+                nodes: model.visibleRootNodes,
                 revision: model.revision,
                 selection: $selection,
                 font: font,

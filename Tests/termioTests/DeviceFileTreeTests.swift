@@ -49,6 +49,60 @@ final class DeviceFileTreeTests: XCTestCase {
             isShortened: isShortened)
     }
 
+    func testHiddenFilesTogglePreservesLoadedNodesOnEitherDevice() throws {
+        for tree in [model(), localModel(root: root)] {
+            tree.apply([listing(root, [
+                (".config", .directory), ("src", .directory), (".env", .file),
+            ])])
+            tree.apply([
+                listing("\(root)/src", [(".settings", .file), ("app.swift", .file)]),
+                listing("\(root)/.config", [("agent.json", .file)]),
+            ])
+            let source = try XCTUnwrap(tree.node(at: "\(root)/src"))
+            let configuration = try XCTUnwrap(tree.node(at: "\(root)/.config"))
+            let loadedConfiguration = try XCTUnwrap(configuration.children?.first)
+            XCTAssertEqual(tree.visibleRootNodes.count, 3)
+            let revision = tree.revision
+
+            tree.showHiddenFiles = false
+
+            XCTAssertGreaterThan(tree.revision, revision, "the outline must update even when nodes are reused")
+            XCTAssertEqual(tree.visibleRootNodes.map(\.name), ["src"])
+            XCTAssertEqual(source.children?.map(\.name), ["app.swift"])
+            XCTAssertFalse(tree.isPathVisible("\(root)/.config/agent.json"))
+            XCTAssertTrue(tree.isPathVisible("\(root)/src/app.swift"))
+
+            tree.showHiddenFiles = true
+
+            XCTAssertEqual(tree.visibleRootNodes.count, 3)
+            XCTAssertTrue(tree.node(at: "\(root)/src") === source)
+            XCTAssertTrue(tree.node(at: "\(root)/.config") === configuration)
+            XCTAssertTrue(configuration.children?.first === loadedConfiguration)
+            XCTAssertEqual(source.children?.map(\.name), [".settings", "app.swift"])
+        }
+    }
+
+    func testHiddenFilesStayFilteredAfterListingsChange() throws {
+        let tree = localModel(root: "/r/.checkout")
+        tree.showHiddenFiles = false
+        tree.apply([listing("/r/.checkout", [("src", .directory), (".env", .file)])])
+        tree.apply([listing("/r/.checkout/src", [("app.swift", .file)])])
+        let source = try XCTUnwrap(tree.node(at: "/r/.checkout/src"))
+
+        tree.apply([
+            listing("/r/.checkout", [("src", .directory), (".new", .file)], isShortened: true),
+            listing("/r/.checkout/src", [("app.swift", .file), (".new", .file)]),
+        ])
+
+        XCTAssertEqual(tree.visibleRootNodes.first?.name, "src")
+        XCTAssertEqual(tree.visibleRootNodes.count, 2)
+        XCTAssertNotNil(tree.visibleRootNodes.last?.notice, "filtering must preserve incomplete-listing notices")
+        XCTAssertEqual(source.children?.map(\.name), ["app.swift"])
+        XCTAssertTrue(tree.isPathVisible("/r/.checkout/src/app.swift"), "the root's own name is not filtered")
+        tree.showHiddenFiles = true
+        XCTAssertEqual(source.children?.map(\.name), [".new", "app.swift"])
+    }
+
     /// The ask: the root plus every directory whose contents the tree is holding,
     /// parents before children so a graft never runs ahead of the node it hangs
     /// off.

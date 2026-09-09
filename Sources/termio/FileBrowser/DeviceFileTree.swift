@@ -319,13 +319,13 @@ final class DeviceFileNode: Identifiable {
 
     var children: [DeviceFileNode]? {
         guard isDirectory else { return nil }
-        if let loadedChildren { return loadedChildren }
+        if let loadedChildren { return model?.visibleNodes(loadedChildren) ?? loadedChildren }
         // `loadChildren` adopts a prefetched listing synchronously, so a folder
         // whose contents were fetched ahead of this click opens with its rows
         // already in it — read back here rather than published, because a
         // publish from inside a getter runs during a view update.
         model?.loadChildren(of: self)
-        return loadedChildren ?? []
+        return model?.visibleNodes(loadedChildren ?? []) ?? []
     }
 }
 
@@ -368,6 +368,28 @@ final class DeviceFileTreeModel: ObservableObject {
     /// unchanged after an incremental re-list — same node references — so this
     /// is what tells the outline there is an update pass worth running.
     @Published private(set) var revision = 0
+
+    var showHiddenFiles = true {
+        didSet {
+            guard showHiddenFiles != oldValue else { return }
+            revision &+= 1
+        }
+    }
+
+    var visibleRootNodes: [DeviceFileNode] { visibleNodes(rootNodes) }
+
+    // Keep hidden nodes and their loaded children cached so showing them again
+    // does not need another device request or replace surviving node identities.
+    fileprivate func visibleNodes(_ nodes: [DeviceFileNode]) -> [DeviceFileNode] {
+        showHiddenFiles ? nodes : nodes.filter { $0.notice != nil || !$0.name.hasPrefix(".") }
+    }
+
+    func isPathVisible(_ path: String) -> Bool {
+        guard !showHiddenFiles else { return true }
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        guard path.hasPrefix(prefix) else { return false }
+        return !path.dropFirst(prefix.count).split(separator: "/").contains { $0.hasPrefix(".") }
+    }
 
     /// Raised when the device reports the checkout moved: a batch, or a reset
     /// that says what is held may be stale. The Changes badge is seeded off it,

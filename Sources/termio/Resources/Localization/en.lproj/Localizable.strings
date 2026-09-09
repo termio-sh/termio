@@ -596,6 +596,8 @@
 	<string>Group with</string>
 	<key>Hide</key>
 	<string>Hide</string>
+	<key>Hide Hidden Files</key>
+	<string>Hide Hidden Files</string>
 	<key>Hide Others</key>
 	<string>Hide Others</string>
 	<key>Hide Replace</key>
@@ -1238,6 +1240,8 @@
 	<string>Show</string>
 	<key>Show All</key>
 	<string>Show All</string>
+	<key>Show Hidden Files</key>
+	<string>Show Hidden Files</string>
 	<key>Show Original</key>
 	<string>Show Original</string>
 	<key>Show Project Files</key>

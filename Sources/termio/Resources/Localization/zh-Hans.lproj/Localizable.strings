@@ -596,6 +596,8 @@
 	<string>编组到</string>
 	<key>Hide</key>
 	<string>隐藏</string>
+	<key>Hide Hidden Files</key>
+	<string>不显示隐藏文件</string>
 	<key>Hide Others</key>
 	<string>隐藏其他</string>
 	<key>Hide Replace</key>
@@ -1238,6 +1240,8 @@
 	<string>显示</string>
 	<key>Show All</key>
 	<string>全部显示</string>
+	<key>Show Hidden Files</key>
+	<string>显示隐藏文件</string>
 	<key>Show Original</key>
 	<string>显示原身</string>
 	<key>Show Project Files</key>

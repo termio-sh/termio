@@ -2914,6 +2914,16 @@
         }
       }
     },
+    "Hide Hidden Files": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不显示隐藏文件"
+          }
+        }
+      }
+    },
     "Hide Others": {
       "localizations": {
         "zh-Hans": {
@@ -6114,6 +6124,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "全部显示"
+          }
+        }
+      }
+    },
+    "Show Hidden Files": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示隐藏文件"
           }
         }
       }
