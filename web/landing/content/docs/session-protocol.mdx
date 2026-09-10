@@ -1,0 +1,171 @@
+---
+title: The session protocol
+description: The framed JSON messages clients exchange with termiod — the same plane the Mac app and the iPhone speak — reachable from any program through termio api, over a local socket or SSH.
+---
+
+Every session in Termio lives in `termiod`, and everything that drives one —
+the Mac app, your iPhone, the `termio` command — says the same framed messages
+to it. That protocol is public. A program you write speaks it too, and it does
+not have to be on the machine where the sessions run.
+
+## Pick a layer
+
+Most automation should start one layer up from here. Reach for the raw protocol
+when you need a verb the CLI does not wrap, or a connection your own program
+holds open.
+
+| Layer | Reach for it when |
+| --- | --- |
+| [`termio sessions`](/docs/session-control) | A person or a hook is typing it: list, spawn, send, watch, close. |
+| `termio api` | A script needs a verb the CLI does not wrap, or a resumable event stream. |
+| The socket | Your program owns the connection — a client, a bridge, a long-lived subscriber. |
+
+All three carry the same messages. The top layer resolves things the protocol
+deliberately does not: which session you meant from the directory you are in,
+where a new pane lands, how a named key is encoded for the program in the pane.
+
+## Two ways in
+
+The messages are JSON. `termio api` does the handshake and the framing for you,
+which is enough for anything that can run a subprocess:
+
+```sh
+termio api capabilities                       # what this daemon is and can do
+termio api call '{"op":"list"}'               # the sessions on this box
+termio api schema                             # every message this build answers
+```
+
+A client that would rather own the connection speaks the socket directly. The
+framing is three fields:
+
+```text
+[ kind: u8 ][ length: u32 big-endian ][ payload: length bytes ]
+```
+
+`C` and `E` carry the control and event JSON. `D` is raw PTY bytes, and the
+rest — `S`, `H`, `G`, `F`, `U`, `R` — are the binary planes an attachment uses.
+Nothing about a keystroke's path waits on JSON.
+
+## The handshake
+
+The first frame is `hello`, and the reply says what you are talking to:
+
+```json
+{"op":"hello","proto":1,"min_proto":1,"role":"control","caps":["events","resources"],"client":"my-tool/1.0"}
+{"op":"hello_ok","proto":1,"caps":["events","resources"],"host":"termiod/0.48.0 macos-aarch64","version":"0.48.0+1713","host_id":"h_5693f0…","client_id":"c_15a5","home":"/Users/you"}
+```
+
+`caps` is a negotiation, not an announcement: you list what your client can
+handle, the daemon answers with the intersection. A daemon that cannot speak
+your protocol version says so — `hello_err` naming the versions it supports —
+rather than failing later on a message you assumed.
+
+## Requests and replies
+
+Give a request a `seq` and its reply carries `re`, echoing it. That is how a
+client matches an answer to a question on a connection that is also streaming
+events. Omit it and `termio api` uses `1`.
+
+```sh
+$ termio api call '{"op":"list","seq":4}'
+{"op":"sessions","re":4,"sessions":[…],"tombstones":[…]}
+```
+
+Failures are the same shape, with a code you can branch on rather than a
+message you would have to match:
+
+```json
+{"op":"error","re":4,"code":"no_such_session","message":"no such session: nope","retryable":false}
+```
+
+An op this daemon has never heard of is refused the same way, naming the op.
+A newer client always gets an answer from an older daemon — never silence.
+
+## Subscriptions resume
+
+Status changes and filesystem changes arrive as events on the connection that
+subscribed. Each carries a `seq`, and a subscription can start from one:
+
+```sh
+termio api call '{"op":"subscribe_resource","resource":"/path/to/repo","since":41}' --stream
+```
+
+Passing `since` replays what happened while you were gone. When the daemon
+cannot honour it — the backlog does not reach that far — it says `gap` instead
+of pretending, which tells a client to rescan rather than to trust an
+incomplete picture. Without `--stream`, `termio api call` returns after the
+reply; with it, events keep landing on stdout as they happen.
+
+## The same messages, remotely
+
+`termiod stdio` puts the protocol on stdin and stdout, so SSH carries it
+unchanged:
+
+```sh
+ssh vps termiod stdio
+```
+
+The frames a client sends a Linux VPS are the frames it sends the Mac. There is
+no second protocol for remote, and no app has to be running on either end — a
+headless box answers on its own.
+
+## Every message, from the build in front of you
+
+`termio api schema` prints what this daemon answers to — generated from its own
+types, so it describes the binary that printed it rather than what a document
+remembered to say.
+
+```sh
+termio api schema                  # a summary you can read
+termio api schema --json           # the JSON Schema document, for code generators
+termio api schema --output api.json
+```
+
+The summary groups every op by direction, which is the thing worth knowing
+first:
+
+```text
+Handshake (3)
+  hello, hello_err, hello_ok
+
+Requests (29)
+  attach, cancel, claim_writer, create, detach, handoff, install_agents, kill
+  list, probe_agents, request_snapshot, send, set_status, subscribe
+  subscribe_resource, unsubscribe_resource, wait
+  fs      fs_list, fs_match, fs_read, fs_search
+  git     git_branches, git_compare, git_diff, git_log, git_show
+  upload  upload_abort, upload_commit, upload_open
+
+Replies (20)
+  …
+
+Pushed by the daemon (3)
+  exited, resize_claim, upload_ack
+
+Events (13)
+  ready, resized, resynced, roster, search_results, session_exited, stalled
+  status, status_changed, vt_stale, writer_changed
+  fs      fs_changed
+  git     git_changed
+```
+
+The `fs_*`, `git_*`, and `upload_*` families are the file tree, the diff, and
+image paste — the planes the app itself runs on, and the reason the protocol is
+worth reaching for rather than shelling out to `git` on the far side.
+
+The same document is in the repository at
+[`docs/api/session-protocol.schema.json`](https://github.com/termio-sh/termio/blob/main/docs/api/session-protocol.schema.json),
+and CI regenerates it to prove it still matches the daemon.
+
+## Bootstrapping without a gap
+
+A client that keeps its own picture of the box — a dashboard, a bridge, another
+editor — has one ordering problem, and the protocol answers it rather than
+leaving you to guess. Subscribe **first**, on its own connection, and wait for
+the `subscribed` reply. Buffer what arrives. Then ask for the state you need
+(`list`, `fs_list`), install it, and apply the buffered events in order.
+
+Doing it the other way around loses whatever changed between the snapshot and
+the subscription. If you already have a cursor, `since` closes that window for
+you; `gap: true` in the `subscribed` reply is the daemon saying it cannot, and
+that you should rescan.

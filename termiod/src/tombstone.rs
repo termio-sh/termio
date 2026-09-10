@@ -68,6 +68,7 @@ impl EndReason {
 /// decides presentation. A tombstone says `daemon_lost` and lets the client
 /// choose the words.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Tombstone {
     pub id: String,
     pub name: String,

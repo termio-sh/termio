@@ -229,6 +229,7 @@ pub struct GridDiff {
 /// What a directory entry is, as far as the tree needs to know (§C.12).
 /// `unloaded_dir` marks a directory the host will never walk on its own
 /// (VCS internals today); a client may still list it explicitly.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntryKind {
@@ -239,6 +240,7 @@ pub enum EntryKind {
 }
 
 /// One row of an `fs.list` page.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DirEntry {
     pub name: String,
@@ -262,6 +264,7 @@ pub struct DirEntry {
 /// The listing for one requested path inside an `fs_listed` reply. A path
 /// that vanished or escapes the root fails alone (`error`), so a batched
 /// speculative request is never all-or-nothing.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathListing {
     pub path: String,
@@ -281,6 +284,7 @@ pub struct PathListing {
 /// One axis of a tracked file's two-axis status (§C.13). The vocabulary is
 /// adopted from Zed verbatim — battle-tested and 1:1 with the
 /// GitHub-Desktop-shaped changes pane.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GitStatusCode {
@@ -293,6 +297,7 @@ pub enum GitStatusCode {
     Copied,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GitUnmergedCode {
@@ -304,6 +309,7 @@ pub enum GitUnmergedCode {
 /// A file's git status (§C.13): two axes for tracked files, plus
 /// `untracked | ignored | unmerged {first_head, second_head}` with the
 /// merge-conflict path set first-class.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GitFileStatus {
@@ -326,6 +332,7 @@ pub enum GitFileStatus {
 /// per file would need one round trip per row to draw one list. Zed carries the
 /// same numbers on the same message (`git.proto` `StatusEntry.diff_stat_added`),
 /// for the same reason.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitStatusEntry {
     pub path: String,
@@ -348,6 +355,7 @@ pub struct GitStatusEntry {
 /// Both a rendered `relative_date` and a `timestamp`: the box prints git's own
 /// "3 hours ago" in the box's language, and the client rendering the row may be
 /// in another one, so it needs the instant to format for itself.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitCommitEntry {
     pub sha: String,
@@ -372,6 +380,7 @@ pub struct GitCommitEntry {
 /// One file a commit touched (§C.13 read tier). `status` reuses the status
 /// vocabulary the `git:` kind already publishes; a commit's file carries one
 /// axis, not two.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitCommitFile {
     pub path: String,
@@ -392,6 +401,7 @@ pub struct GitCommitFile {
 /// Why a `git_compare` could not compare — each a different instruction to the
 /// user, so folding them into an empty file list (which reads as "this branch
 /// changes nothing") is the one thing this must never do.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GitCompareProblem {
@@ -403,6 +413,7 @@ pub enum GitCompareProblem {
 }
 
 /// One ref in a `git.branches` reply (§C.13 read tier).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitBranchEntry {
     /// Short name: `main` for a local branch, `origin/main` for a
@@ -415,6 +426,7 @@ pub struct GitBranchEntry {
 
 /// One `fs.search` hit (§C.12): workspace-relative path, 1-based line, the
 /// matching line's text.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchMatch {
     pub path: String,
@@ -446,6 +458,7 @@ fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelRole {
@@ -453,6 +466,7 @@ pub enum ChannelRole {
     Attach,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachMode {
@@ -461,6 +475,7 @@ pub enum AttachMode {
     Observe,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -480,6 +495,7 @@ pub enum ErrorCode {
     Internal,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkstreamSpec {
     pub agent_id: String,
@@ -489,6 +505,7 @@ pub struct WorkstreamSpec {
 }
 
 /// How to spawn a session's process.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSpec {
     #[serde(default)]
@@ -593,7 +610,12 @@ impl StatusDetails {
 /// Control-plane messages. `op` tags the variant on the wire.
 ///
 /// Optional `seq`/`re` fields are omitted when absent, preserving the exact v0
-/// shapes. Unknown operations deserialize to `Unknown` and are ignored.
+/// shapes. An op this build has never heard of does **not** decode to a
+/// catch-all variant: it fails to decode, which is what [`Frame::UnknownControl`]
+/// is for, and the daemon answers it with a per-request `proto_error` naming the
+/// op. A `#[serde(other)]` arm here would swallow the request instead, and a
+/// client waiting on its `re` would wait forever.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Control {
@@ -1239,9 +1261,6 @@ pub enum Control {
         #[serde(default)]
         retryable: bool,
     },
-
-    #[serde(other)]
-    Unknown,
 }
 
 impl Control {
@@ -1280,6 +1299,7 @@ impl Control {
 }
 
 /// Event-plane messages. Unknown event types are ignored additively.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "ev", rename_all = "snake_case")]
 pub enum Event {
@@ -1494,6 +1514,7 @@ pub enum Event {
 }
 
 /// A row in `termiod list`.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub id: String,
@@ -2089,7 +2110,15 @@ pub async fn write_viewport<W: AsyncWriteExt + Unpin>(
 
 /// Read one frame. Returns `None` on EOF. Any malformed frame is a channel
 /// protocol error; the daemon turns the returned error into `proto_error`.
-pub async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Option<Frame>> {
+/// One frame off the wire with its payload left alone: the kind byte and the
+/// bytes behind it, header validated and length bounded, nothing decoded.
+///
+/// [`read_frame`] is built on this and is what a client that understands the
+/// messages wants. This exists for the client that deliberately does not —
+/// `termio api`, which forwards control JSON it has never heard of so a newer
+/// daemon stays reachable from an older CLI. Typing the payload there would
+/// flatten exactly the fields that make it newer.
+pub async fn read_raw_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Option<(u8, Vec<u8>)>> {
     let mut header = [0u8; 5];
     match r.read_exact(&mut header).await {
         Ok(_) => {}
@@ -2118,6 +2147,13 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Option<Fra
 
     let mut payload = vec![0u8; len];
     r.read_exact(&mut payload).await?;
+    Ok(Some((kind, payload)))
+}
+
+pub async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Option<Frame>> {
+    let Some((kind, payload)) = read_raw_frame(r).await? else {
+        return Ok(None);
+    };
     match kind {
         KIND_CONTROL => {
             match serde_json::from_slice::<Control>(&payload) {
@@ -2127,6 +2163,7 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Option<Fra
                     // broken pipe: answer it, don't hang up on it. Only a frame
                     // that names an op qualifies — anything else really is
                     // malformed JSON and keeps failing the read.
+                    #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
                     #[derive(serde::Deserialize)]
                     struct Tagged {
                         op: String,
