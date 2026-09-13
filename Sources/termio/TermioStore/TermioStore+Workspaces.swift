@@ -374,7 +374,10 @@ extension TermioStore {
         let column = Trace.workspace.begin("workspace column")
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
-                Trace.workspace.end(column)
+                // The retained-surface count rides along because #638's stall
+                // scales with it: the line that says "3.4 s" should also say
+                // how much mounted state that turn was reconciling.
+                Trace.workspace.end(column, "surfaces=\(self?.surfaces.count ?? 0)")
                 guard let self, self.workspaceArrival == arrival else { return }
                 self.finishArriving(in: id)
             }

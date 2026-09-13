@@ -506,7 +506,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         maybePromptForSessionControl()
         LaunchTrace.mark("launched")
-        LaunchTrace.whenLaunchSettles {}
+        LaunchTrace.whenLaunchSettles {
+            // After the launch settles, so the launch's own long main-thread
+            // turns never burn the watchdog's capture cooldown.
+            StallWatchdog.shared.startIfEnabled()
+        }
     }
 
     /// Start whichever server the Mobile pane's Direct Attach switch selects.

@@ -47,6 +47,8 @@ struct Trace: Sendable {
     static let device = Trace(Log.termiod)
     /// The launch a user watches the Dock icon through (see `LaunchTrace`).
     static let launch = Trace(Log.app)
+    /// Main-thread stalls the watchdog caught in the act (see `StallWatchdog`).
+    static let stall = Trace(Log.app)
 
     private let logger: Logger
     private let signposter: OSSignposter
