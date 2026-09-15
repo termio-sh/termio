@@ -11,10 +11,10 @@ struct IconBadge: View {
 
     var body: some View {
         glyph
-            // The same column `SettingsSymbolBadge` occupies. An agent keeps its
-            // own brand mark rather than being forced into a tinted square — the
-            // mark *is* its identity — but it has to start where every other
-            // row's icon starts or the column stops lining up.
+            // The shared leading column. An agent keeps its own brand mark
+            // rather than being forced into a tinted square — the mark *is* its
+            // identity — but it has to start where every other row's icon starts
+            // or the column stops lining up.
             .frame(width: settingsRowIconWidth, height: settingsRowIconWidth)
     }
 
@@ -39,37 +39,19 @@ struct IconBadge: View {
     }
 }
 
-/// A System Settings row icon: a filled, continuous-corner square with the glyph
-/// knocked out in white.
-///
-/// The shape is the cue, not the colour. A macOS list reads as a scannable column
-/// because every row opens with the same filled square at the same size and the
-/// titles line up off its trailing edge. A thin monochrome glyph sitting on the
-/// window background reads as decoration instead, and the column stops existing —
-/// which is most of why the Devices roster did not look like the rest of the
-/// system.
-///
-/// Tints stay semantic and few. This Mac is graphite because it is not somewhere
-/// you connect to; a device is blue because it is. Two colours carrying one
-/// distinction, rather than a palette carrying none.
-struct SettingsSymbolBadge: View {
-    let symbol: String
-    var tint: Color
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(tint.gradient)
-            .frame(width: 26, height: 26)
-            .overlay {
-                Image(systemName: symbol)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-    }
-}
-
-/// The width every row's leading column occupies, badge or not, so a row without
+/// The width every row's leading column occupies, marked or not, so a row without
 /// an icon still lines its title up with the ones that have one.
+///
+/// This used to be the width of a filled, tinted square that every machine row
+/// opened with, on the argument that the *shape* is what makes a macOS list
+/// scannable and that a thin monochrome glyph reads as decoration instead. Half
+/// of that argument was sound and is kept — the column is still exactly this
+/// wide, whatever sits in it. The other half was a tint rule that only worked
+/// while this Mac and a remote host shared one list: graphite for the box you are
+/// on, blue for a box you connect to, "two colours carrying one distinction". Split
+/// into Server and Remote Hosts, every row in the list is a box you connect to, so
+/// the distinction had nothing left to carry and the column became a stack of
+/// identical accent-blue squares competing with the names beside them.
 let settingsRowIconWidth: CGFloat = 26
 
 /// The gutter AppKit hangs under an editable table — the `+` strip in System

@@ -4,59 +4,80 @@ import SwiftUI
 /// Settings ▸ Mobile: what this Mac serves to phones — the companion port, the
 /// pairing token, the QR carrying both, and the tunnel fronting them (RFC §D9).
 ///
-/// This lived inside Devices ▸ this Mac for a while, on the argument that every
+/// This lived inside a machine's pane for a while, on the argument that every
 /// line of it is a fact about *one machine*: this Mac's port, this Mac's token,
 /// the phones paired to this Mac. The scope reading was right; the placement it
 /// implied was not. Pairing is the one step a new user cannot guess at, and it
 /// was three levels down a tab named after something else — so nobody found it.
 ///
-/// So the tab is back, and the scope objection is answered where it belongs: a
-/// machine picker at the top, and the card named after whichever machine is
-/// showing. A phone pairs with a *box*, and this Mac is only the nearest one —
-/// the VPS the user actually leaves agents running on is the case that matters,
-/// and it was unreachable from the UI entirely.
+/// The tab came back with a machine **picker** on top, and that was the wrong
+/// repair: a picker is a mode, so the QR on screen belongs to a box the user has
+/// to remember rather than read, and scanning the wrong one is silent. It also
+/// still cost a row on the overwhelmingly common setup, where the only machine
+/// serving anything is the Mac you are looking at.
+///
+/// So: this Mac's serving *is* the page, and a remote host is a row that pushes
+/// its own. Same information, chosen by navigation instead of by a control, and
+/// on a roster of one there is nothing extra on screen at all.
 struct MobileSettingsTab: View {
     @ObservedObject var store: TermioStore
-    /// The machine being paired with, by `settingsKey`. Defaults to this Mac:
-    /// it is the one that always answers, and on a roster of one it is the only
-    /// choice — in which case the picker does not appear at all.
-    @State private var scope = KnownDevice.thisMac.settingsKey
 
-    private var machines: [KnownDevice] { DeviceRoster.known(in: store) }
-
-    /// Falls back to this Mac when the selected box leaves the roster, so the
-    /// pane never renders against a machine that is no longer there.
-    private var selected: KnownDevice {
-        machines.first { $0.settingsKey == scope } ?? .thisMac
+    /// The boxes other than this Mac that can serve a phone. Empty for most
+    /// setups, and then the whole second section is absent.
+    private var remoteHosts: [KnownDevice] {
+        DeviceRoster.known(in: store).filter { !$0.isLocal }
     }
 
     var body: some View {
         Form {
-            if machines.count > 1 {
+            DeviceServingSection()
+            if !remoteHosts.isEmpty {
                 Section {
-                    Picker(localized("Device"), selection: $scope) {
-                        ForEach(machines) { machine in
-                            Text(machine.name).tag(machine.settingsKey)
+                    ForEach(remoteHosts) { machine in
+                        NavigationLink(value: ServingRoute(key: machine.settingsKey)) {
+                            HStack(spacing: 12) {
+                                HugeIconView(icon: .serverStack, size: 15, color: .secondary)
+                                    .frame(width: settingsRowIconWidth, alignment: .center)
+                                Text(machine.name)
+                                Spacer(minLength: 4)
+                            }
                         }
                     }
+                } header: {
+                    SectionHeaderLabel(title: localized("Other machines"))
                 } footer: {
-                    Text(localized("Which machine your iPhone connects to. Each one serves its own sessions."))
+                    Text(localized("A phone can attach straight to one of these instead, and keep working when this Mac is asleep."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            if selected.isLocal {
-                DeviceServingSection()
-            } else {
-                RemotePairingSection(machine: selected)
-                    // Rebuilt per machine: the pane's whole state is one box's
-                    // invite, and carrying the previous box's QR into the next
-                    // selection would offer a working code for the wrong host.
-                    .id(selected.settingsKey)
-            }
         }
         .formStyle(.grouped)
+        .navigationDestination(for: ServingRoute.self) { route in
+            if let machine = remoteHosts.first(where: { $0.settingsKey == route.key }) {
+                Form { RemotePairingSection(machine: machine) }
+                    .formStyle(.grouped)
+                    .navigationTitle(machine.name)
+                    // Rebuilt per machine: the pane's whole state is one box's
+                    // invite, and carrying the previous box's QR into the next
+                    // would offer a working code for the wrong host.
+                    .id(route.key)
+            } else {
+                ContentUnavailableView {
+                    Text(localized("Host Unavailable"))
+                } description: {
+                    Text(localized("This host is no longer in your configuration."))
+                }
+            }
+        }
     }
+}
+
+/// What a serving row pushes. Distinct from `DeviceRoute` so that a machine's
+/// *pane* and a machine's *serving* can never be confused on the settings
+/// window's shared navigation stack.
+struct ServingRoute: Hashable {
+    let key: String
 }
 
 /// The pane's one card: everything this Mac serves, under the machine's own name

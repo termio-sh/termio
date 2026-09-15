@@ -1,4 +1,5 @@
 import Foundation
+import TermioShared
 
 /// Whether an agent's CLI is on a machine — with the third answer the local probe
 /// never needed (RFC §D4).
@@ -48,7 +49,7 @@ struct AgentFleetReadiness: Equatable {
         if !missing.isEmpty {
             if asked <= 1 { return localized("Not installed") }
             if missing.count == 1 { return localized("Not installed on \(missing[0])") }
-            return localized("Missing on \(missing.count) devices")
+            return localized("Missing on \(missing.count) machines")
         }
         // "We could not ask `vps`" is a fact about **`vps`**, not about this
         // agent, so a roster that repeated it would print the same sentence on
@@ -58,7 +59,7 @@ struct AgentFleetReadiness: Equatable {
         // nothing at all, where silence would read as "all fine".
         guard !unknown.isEmpty, unknown.count == asked else { return nil }
         if unknown.count == 1 { return localized("Can’t check on \(unknown[0])") }
-        return localized("Can’t check on \(unknown.count) devices")
+        return localized("Can’t check on \(unknown.count) machines")
     }
 
     /// Only a machine that *answered* earns the badge. "We could not ask" says so
@@ -188,7 +189,14 @@ enum DeviceProbe {
                     ? AgentReadiness.available.rawValue
                     : AgentReadiness.missing.rawValue
             }
-            return DeviceDiscoveredState(checkedAt: now, reachable: true, agents: agents)
+            // Asked off-main: it is a socket handshake, and the pane calling
+            // this is on the main actor. `nil` means no daemon is running yet,
+            // which the row renders as "Not running" rather than as a failure.
+            let version = await Task.detached(priority: .userInitiated) {
+                try? Termiod.probeExistingLocalDevice().daemonVersion
+            }.value
+            return DeviceDiscoveredState(
+                checkedAt: now, reachable: true, termiodVersion: version, agents: agents)
         }
 
         let probe = await SSHConfigFile.testConnection(alias: alias)
@@ -288,7 +296,7 @@ final class DevicePaneModel: ObservableObject {
     /// The agents whose presence this machine is judged on: the ones the user
     /// actually keeps on their list. Judging on the whole catalog would report a
     /// machine unready for an agent its owner has never used.
-    private var listedAgents: [AgentPreset] {
+    var listedAgents: [AgentPreset] {
         settings.orderedAgents(AgentPreset.codingAgents.filter(settings.isAgentListed))
     }
 
@@ -387,7 +395,7 @@ final class DevicePaneModel: ObservableObject {
         guard let alias = device.alias else {
             switch CommandLineTool.install() {
             case .installed:
-                return nil
+                break
             case .conflict:
                 return .blocked(localized("Something else already owns \(CommandLineTool.installURL.path)."))
             case .unavailable:
@@ -396,6 +404,15 @@ final class DevicePaneModel: ObservableObject {
                 let directory = CommandLineTool.installURL.deletingLastPathComponent().path
                 return .blocked(localized("Couldn’t link `\(CommandLineTool.toolName)` into \(directory)."))
             }
+            // The daemon rung, which this Mac used to skip: a machine is set up
+            // when it runs this build's termiod, and that was true of every box
+            // except the one the app runs on (`localReadyCheck`).
+            switch await TermioStore.localReadyCheck(force: force) {
+            case .success:
+                return nil
+            case .failure(let error):
+                return error.state == .staged ? .staged(error.message) : .blocked(error.message)
+            }
         }
         switch await TermioStore.remoteReadyCheck(host: alias, force: force) {
         case .success:
@@ -403,6 +420,18 @@ final class DevicePaneModel: ObservableObject {
         case .failure(let error):
             return error.state == .staged ? .staged(error.message) : .blocked(error.message)
         }
+    }
+
+    /// Records that this build's hooks and skill are on the machine, after a
+    /// write that reported no failure. The end of `setUp`'s integration rung
+    /// does the same thing inline; Reinstall is the other way the same fact
+    /// becomes true, and until it said so a repaired machine kept reading as
+    /// behind.
+    func stampIntegration() {
+        var state = discovered ?? DeviceDiscoveredState(checkedAt: Date(), reachable: true)
+        state.checkedAt = Date()
+        state.integrationVersion = AppInfo.buildStamp
+        apply(state)
     }
 
     private func apply(_ state: DeviceDiscoveredState) {

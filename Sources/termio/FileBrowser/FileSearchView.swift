@@ -479,7 +479,7 @@ struct FileSearchView: View {
         if case TermiodClientError.timedOut = error {
             return scope.isLocal
                 ? localized("termiod on this Mac didn’t answer.")
-                : localized("This device didn’t answer. Its termiod may be too old to search.")
+                : localized("This machine didn’t answer. Its termiod may be too old to search.")
         }
         if case DeviceFileError.unsupported = error, scope.isLocal {
             return localized("termiod on this Mac is too old to search.")

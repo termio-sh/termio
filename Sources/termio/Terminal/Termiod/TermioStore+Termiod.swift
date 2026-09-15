@@ -1578,6 +1578,79 @@ extension TermioStore {
         }
     }
 
+    /// The same lifecycle loop `remoteReadyCheck` runs, aimed at this Mac — the
+    /// rung Settings ▸ Server's "Set up this Mac" stands on.
+    ///
+    /// `reconcileLocalDaemon` above passes `--handoff-only` because nobody asked
+    /// for it: an unrequested deploy must never reach the stop rung while the
+    /// daemon holds live work. Here someone clicked, so the plain `deploy` is
+    /// right — it may stop an idle daemon — and `force` is the pane's "Update
+    /// Anyway", offered with the busy sessions named.
+    ///
+    /// Until this existed, this Mac's daemon was the one machine no button could
+    /// bring current: every remote is reconciled before each terminal opens, and
+    /// the local one was reached only by the launch pass and the alert it raises.
+    static func localReadyCheck(force: Bool = false) async -> RemoteSetupResult {
+        await Task.detached(priority: .userInitiated) {
+            performLocalReadyCheck(force: force)
+        }.value
+    }
+
+    /// The blocking half, run off-main for the same reason as its remote twin:
+    /// one process, one JSON document, and the loop's own vocabulary turned into
+    /// a sentence here rather than decided here.
+    private nonisolated static func performLocalReadyCheck(force: Bool) -> RemoteSetupResult {
+        let binary = Termiod.daemonBinaryPath()
+        guard FileManager.default.isExecutableFile(atPath: binary) else {
+            return .failure(RemoteSetupError(
+                state: .failed,
+                message: "The termiod binary to deploy wasn't found at \(binary)."))
+        }
+        var arguments = ["deploy", "--json"]
+        if force { arguments.append("--force") }
+        guard let run = runProcess(binary, arguments) else {
+            return .failure(RemoteSetupError(
+                state: .failed, message: "Couldn't run termiod deploy."))
+        }
+        let report: Termiod.LifecycleReport
+        do {
+            report = try Termiod.LifecycleReport.decode(Data(run.standardOutput.utf8))
+        } catch {
+            let detail = run.standardError
+                .split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+                .last(where: { !$0.isEmpty }) ?? "termiod deploy exited \(run.exitCode)"
+            return .failure(RemoteSetupError(
+                state: .failed, message: "Couldn't set up termiod on this Mac.\n\(detail)"))
+        }
+        switch report.state {
+        case .current:
+            guard let hostID = report.hostId, let version = report.version else {
+                return .failure(RemoteSetupError(
+                    state: .failed,
+                    message: "termiod on this Mac answered without saying which machine it is."))
+            }
+            return .success(TermiodDevice(
+                id: hostID, daemonVersion: version, routes: [.local],
+                negotiatedProtocol: report.proto, lastSeen: Date()))
+        case .staged:
+            return .failure(RemoteSetupError(
+                state: .staged, message: stagedUpdateMessage(report, on: "this Mac")))
+        case .unhealthy:
+            let rolledBack = report.rolledBack == true
+                ? "\nThe previous termiod is back in place." : ""
+            return .failure(RemoteSetupError(
+                state: .unhealthy,
+                message: "Updated termiod on this Mac, but the new one didn't answer.\n"
+                    + "\(report.message ?? "")\(rolledBack)"))
+        // `unreachable` cannot happen to the machine the app runs on; it is
+        // folded into `failed` rather than given a sentence nobody can read.
+        case .unreachable, .failed:
+            return .failure(RemoteSetupError(
+                state: .failed,
+                message: "Couldn't set up termiod on this Mac.\n\(report.message ?? "")"))
+        }
+    }
+
     /// The one rung that costs something, put to the user: the daemon on this
     /// Mac could not take the new binary in place, so finishing the update
     /// means stopping the sessions named here. Declining is free — the new

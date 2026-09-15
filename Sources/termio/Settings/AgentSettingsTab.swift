@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UserNotifications
 
 /// The Agents tab as a drill-down, the shape System Settings ▸ Notifications has:
 /// one pane holding a grouped roster of agents, each row carrying its mark, its
@@ -20,8 +21,9 @@ import SwiftUI
 /// page touching a machine would need its own copy, and the phone would need one
 /// too.
 ///
-/// So machines are rows. Exactly one surface selects a machine, and it is the
-/// Devices list. The property that makes this affordable everywhere: **a roster
+/// So machines are rows. A machine is chosen by navigation — Settings ▸ Server,
+/// or a row in Settings ▸ Remote Hosts — and never by a control on a page about
+/// something else. The property that makes this affordable everywhere: **a roster
 /// of one renders exactly as this page did before there was more than one
 /// machine** — no list, no labels, no bar. A picker with one option cannot do
 /// that; it still costs a row.
@@ -29,15 +31,20 @@ struct AgentSettingsTab: View {
     @ObservedObject var settings: AppSettings
     /// The store the device roster and the readiness lines read from.
     @ObservedObject var store: TermioStore
+    /// Opens the machine that can fix an integration gap — Server for this Mac,
+    /// the host's pane under Remote Hosts otherwise. Injected because switching
+    /// tabs is the settings window's own business, not this pane's.
+    let onOpenMachine: (KnownDevice) -> Void
 
-    /// Every machine Termio has worked on. The same roster the Devices tab lists,
-    /// so a machine appears here the moment it is real and never before.
+    /// Every machine Termio has worked on. The same roster Remote Hosts lists
+    /// (plus this Mac), so a machine appears here the moment it is real and never
+    /// before.
     private var devices: [KnownDevice] { DeviceRoster.known(in: store) }
 
-    /// The machines this build's hooks and skill have not reached, as one line.
+    /// The machines this build's hooks and skill have not reached, one row each.
     /// Read from their device files off the main actor rather than in `body`,
     /// which would put N file reads in every redraw.
-    @State private var integrationGap: String?
+    @State private var behind: [IntegrationGap] = []
 
     /// Bumped after every catalog reload. `AgentDefinition` equality is by id, so
     /// without this a rename would leave stale rows on screen; referencing the
@@ -87,24 +94,60 @@ struct AgentSettingsTab: View {
                     )
                 }
                 .toggleStyle(.switch)
-                // The switches are the preference; putting the files on a machine
-                // is a machine operation. It runs on **every** machine rather than
-                // on a chosen one: wanting live status is one decision, and asking
-                // it once per box was the picker's tax. A bare button under a
-                // toggle reads as attached to that toggle, so it stays a labelled
-                // row — it is its own action, both switches at once, everywhere.
-                InstallButtonRow(title: installTitle) { await installIntegration() }
-                if let integrationGap {
-                    Text(integrationGap)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                // The machines that are not carrying what the switches ask for,
+                // one row each, each opening the machine that can fix it.
+                //
+                // There was a button here that installed on every machine at
+                // once, and it was the same operation's fourth caller: this Mac
+                // reconciles itself whenever a switch moves
+                // (`TermioStore.syncAgentIntegration`), and a remote box is
+                // brought current by its own "Set Up" — so on a single Mac the
+                // button re-did what flipping the switch had just done, and its
+                // failure path sent the user to the machine's pane regardless. It
+                // was also the only control that fired ssh at every configured
+                // host on one click, which one sleeping VPS was enough to stall.
+                //
+                // What is left is the half a preference tab may honestly own: the
+                // intent, and a report naming who is behind. Installing is a
+                // machine operation and happens on the machine (RFC §D1).
+                ForEach(behind) { machine in
+                    Button { onOpenMachine(machine.device) } label: {
+                        IntegrationGapRow(machine: machine)
+                    }
+                    .buttonStyle(.plain)
                 }
             } header: {
                 SectionHeaderLabel(title: localized("Integration"))
             } footer: {
-                Text(devices.count > 1
-                    ? localized("Whether you want these at all, and putting them on every device.")
-                    : localized("Whether you want these at all, and putting them on this Mac."))
+                Text(behind.isEmpty
+                    ? localized("Whether you want these at all. Termio puts them on each machine as you set it up.")
+                    : localized("Open a machine to put them there."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle(isOn: $settings.notifyOnTaskCompletion) {
+                    SettingsLabel(
+                        title: localized("Task completion"),
+                        subtext: localized("Posts a notification when an agent finishes or needs you while Termio is in the background."),
+                        titleFont: .headline
+                    )
+                }
+                .toggleStyle(.switch)
+                if settings.notifyOnTaskCompletion {
+                    Toggle(localized("Play sound"), isOn: $settings.notificationSoundEnabled)
+                    NotificationPermissionRow()
+                }
+            } header: {
+                SectionHeaderLabel(title: localized("Notifications"))
+            } footer: {
+                // The dependency, said once. A banner with the hooks off is a
+                // switch that does nothing, and General — where this lived —
+                // had no way to say so from another tab.
+                Text(settings.notifyOnTaskCompletion && !settings.agentHooksEnabled
+                    ? localized("Needs Live agent status above: without it, nothing tells Termio an agent finished.")
+                    : localized("Termio notifies you about the agents above, wherever they run."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -140,7 +183,7 @@ struct AgentSettingsTab: View {
                 // On a roster of one the sentence would be true and pointless, and
                 // this page's whole claim is that a single machine costs nothing.
                 Text(devices.count > 1
-                    ? localized("Drag an agent onto another to reorder. Readiness covers every device you work on.")
+                    ? localized("Drag an agent onto another to reorder. Readiness covers every machine you work on.")
                     : localized("Drag an agent onto another to reorder."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -162,15 +205,6 @@ struct AgentSettingsTab: View {
 
     // MARK: Integration
 
-    /// A roster of one has no machine worth choosing between, so the button says
-    /// what it always said. Beyond one, "All Devices" is the honest name for what
-    /// it does — and the reason no machine has to be picked first.
-    private var installTitle: String {
-        devices.count > 1
-            ? localized("Install on All Devices")
-            : localized("Install on \(devices.first?.name ?? KnownDevice.thisMac.name)")
-    }
-
     /// Re-read whenever the roster or either switch changes: turning a switch on
     /// is exactly when "and it is not on `devbox` yet" becomes worth saying.
     private var integrationKey: String {
@@ -178,84 +212,36 @@ struct AgentSettingsTab: View {
             + "#\(settings.agentHooksEnabled)#\(settings.sessionControlEnabled)"
     }
 
-    /// Installs on every machine at once, and reports by machine.
+    /// Which machines are not carrying what the switches ask for.
     ///
-    /// Per-machine `Reinstall` is not duplicated here — it already lives on each
-    /// machine's own pane, which is where a config hand-edited after Termio wrote
-    /// it gets fixed. This button exists for the other case, the common one: a new
-    /// box that should carry what all the others do.
-    private func installIntegration() async -> InstallFeedback {
-        // Read the preferences here, on the main actor — see `InstallButtonRow`.
-        // The writing is the installer's own business: it keeps its file work and
-        // its daemon calls off this thread rather than being wrapped in a
-        // `Task.detached` that could only wait for them.
-        let hooksWanted = settings.agentHooksEnabled
-        let controlWanted = settings.sessionControlEnabled
-        let stamp = AppInfo.buildStamp
-        let roster = devices.map {
-            (key: $0.settingsKey, name: $0.name, target: $0.integrationTarget)
-        }
-        var perDevice: [(name: String, outcome: InstallOutcome)] = []
-        for machine in roster {
-            // One message for both switches: the daemon on that machine writes
-            // the hooks and the skill in one pass.
-            let outcome = await AgentIntegrationInstaller.sync(
-                hooks: hooksWanted ? .install : .remove,
-                skills: controlWanted ? .install : .remove,
-                target: machine.target)
-            if outcome.failed.isEmpty && !outcome.isEmpty {
-                DeviceStateCache.stampIntegration(stamp, for: machine.key)
-            }
-            perDevice.append((machine.name, outcome))
-        }
-        let feedback: InstallFeedback
-        // One machine: report which agents took it, exactly as before. Naming
-        // the only machine there is says nothing; the agents are the news.
-        if perDevice.count == 1, let only = perDevice.first {
-            feedback = .summarizing(
-                only.outcome, headline: localized("Installed"), unit: localized("agents"))
-        } else if perDevice.allSatisfy({ $0.outcome.isEmpty }) {
-            // Nothing was asked for anywhere: both switches off leaves every
-            // machine with an empty outcome.
-            feedback = .failure(localized("Nothing to install."))
-        } else {
-            // Several: the machine is the news, and a per-agent list across four
-            // boxes is a paragraph.
-            var fleet = InstallOutcome()
-            for machine in perDevice {
-                fleet.record(machine.name, installed: machine.outcome.failed.isEmpty)
-            }
-            feedback = .summarizing(
-                fleet, headline: localized("Installed"), unit: localized("devices"))
-        }
-        await refreshIntegrationGap()
-        return feedback
-    }
-
-    /// Which machines are behind, in one line — the fleet answer a picker could
-    /// not give, since it shows one machine at a time.
+    /// This replaced a one-line sentence naming them ("Not installed on vps and
+    /// devbox.") — the right information in a shape nobody could act on. The
+    /// computation is unchanged and still off the main actor: this Mac's answer
+    /// is a cached probe and every other machine is a file read, never the
+    /// network, which is the only reason a preference tab may ask about N
+    /// machines at all.
     ///
-    /// Silent on a roster of one: there the button beside it is the whole story,
-    /// and a standing "not installed on This Mac" under two switches the user has
-    /// just turned on reads as a fault rather than as a next step.
+    /// Empty is the common case and renders nothing. With one Mac and a switch
+    /// on, the files are already there — `syncAgentIntegration` put them there
+    /// the instant the switch moved — so there is no row, no button, and no
+    /// question with one answer.
     private func refreshIntegrationGap() async {
-        guard devices.count > 1,
-              settings.agentHooksEnabled || settings.sessionControlEnabled
-        else {
-            integrationGap = nil
+        guard settings.agentHooksEnabled || settings.sessionControlEnabled else {
+            behind = []
             return
         }
-        let roster = devices.map { (key: $0.settingsKey, name: $0.name) }
-        let behind = await Task.detached(priority: .utility) {
-            roster
-                .filter { DeviceStateCache.load($0.key)?.carriesCurrentIntegration != true }
-                .map(\.name)
+        let roster = devices
+        behind = await Task.detached(priority: .utility) {
+            roster.compactMap { device -> IntegrationGap? in
+                let state = DeviceStateCache.load(device.settingsKey)
+                guard state?.carriesCurrentIntegration != true else { return nil }
+                return IntegrationGap(device: device, state: state)
+            }
         }.value
-        integrationGap = behind.isEmpty ? nil : localized(
-            "Not installed on \(InstallOutcome.list(behind, unit: localized("devices"))).")
     }
 
     // MARK: Pushed pane
+
 
     @ViewBuilder
     private func detail(for id: String) -> some View {
@@ -358,6 +344,55 @@ struct AgentSettingsTab: View {
 /// string destination.
 private struct AgentRoute: Hashable {
     let id: String
+}
+
+/// One machine that is not carrying this build's hooks and skill, and why —
+/// which is the difference between "go install it" and "that box is asleep".
+///
+/// Distinguishing the two is why this is a type rather than a name: §D4's rule is
+/// that a machine we could not reach must never be reported as missing something,
+/// because that sends the user to reinstall what is already there.
+struct IntegrationGap: Identifiable {
+    let device: KnownDevice
+    /// The machine's device file, or `nil` when it has never been asked.
+    let state: DeviceDiscoveredState?
+
+    var id: String { device.settingsKey }
+
+    /// What the row says on its second line.
+    var detail: String {
+        guard let state else { return localized("Not set up yet") }
+        return state.reachable ? localized("Not installed") : localized("Can’t check")
+    }
+
+    /// Only a machine that answered earns the warning tint. "We could not ask" is
+    /// a fact about the machine, not a defect to flag.
+    var isFault: Bool { state?.reachable ?? false }
+}
+
+/// A gap row: the machine, what is missing, and a chevron saying the fix is one
+/// click away on the machine itself.
+private struct IntegrationGapRow: View {
+    let machine: IntegrationGap
+
+    var body: some View {
+        // No leading mark: there are at most a handful of these, the machine's
+        // name is the whole point of the row, and a glyph that only says "this is
+        // a machine" repeats what the name already said.
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(machine.device.name)
+                Text(machine.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+    }
 }
 
 /// The roster's add and remove actions, in the list's own gutter (see
@@ -488,7 +523,7 @@ private struct AgentListRow: View {
     /// The tooltip names the machines even when the caption had to count them —
     /// a hover is where "which two?" gets answered without leaving the roster.
     private var missingHelp: String {
-        let names = InstallOutcome.list(fleet?.missing ?? [], unit: localized("devices"))
+        let names = InstallOutcome.list(fleet?.missing ?? [], unit: localized("machines"))
         return localized("\(preset.displayName) isn’t installed on \(names)")
     }
 }
@@ -587,7 +622,7 @@ private struct AgentDetailPane: View {
                 // subtext, which is where the readiness word goes once there is
                 // more than one machine to report on.
                 if devices.count > 1 {
-                    Text(localized("Where each device launches \(preset.displayName) from. Leave empty to use its default."))
+                    Text(localized("Where each machine launches \(preset.displayName) from. Leave empty to use its default."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -777,5 +812,58 @@ private struct DefaultChatAgentRow: View {
             },
             set: { settings.defaultChatAgentID = $0 == lastUsedTag ? nil : $0 }
         )
+    }
+}
+
+/// Surfaces the macOS-side notification authorization under the toggle. An app
+/// cannot grant itself notification permission — only the system prompt or
+/// System Settings can — so this row offers whichever of the two applies:
+/// "Request Permission" while macOS has never been asked, a System Settings
+/// deep link once the user has denied. Silent when already authorized (or when
+/// running unbundled, where the framework is untouchable). Re-audits whenever
+/// the app comes back to front, so returning from System Settings updates it.
+private struct NotificationPermissionRow: View {
+    @State private var status: UNAuthorizationStatus?
+
+    var body: some View {
+        Group {
+            switch status {
+            case .notDetermined:
+                HStack(spacing: 10) {
+                    Text(localized("macOS hasn’t been asked to allow Termio’s notifications yet."))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(localized("Request Permission")) {
+                        Task {
+                            _ = await TaskNotificationCenter.requestPermission()
+                            status = await TaskNotificationCenter.authorizationStatus()
+                        }
+                    }
+                }
+            case .denied:
+                HStack(spacing: 10) {
+                    Text(localized("Notifications for Termio are turned off in System Settings."))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(localized("Open System Settings")) {
+                        let id = Bundle.main.bundleIdentifier ?? ""
+                        if let url = URL(string:
+                            "x-apple.systempreferences:com.apple.preference.notifications?id=\(id)") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+            default:
+                EmptyView()
+            }
+        }
+        .task { status = await TaskNotificationCenter.authorizationStatus() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
+            Task { status = await TaskNotificationCenter.authorizationStatus() }
+        }
     }
 }

@@ -409,7 +409,7 @@ struct FileBrowserView: View {
         return PaneEmptyState(
             title,
             icon: .serverStack,
-            message: localized("\(pane) isn’t available on this device yet.")
+            message: localized("\(pane) isn’t available on this machine yet.")
         )
     }
 

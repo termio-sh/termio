@@ -124,7 +124,7 @@ struct GitCompareView: View {
                 PaneEmptyState(
                     localized("Can’t Compare"),
                     icon: .serverStack,
-                    message: localized("The device couldn’t read this comparison.")
+                    message: localized("The machine couldn’t read this comparison.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

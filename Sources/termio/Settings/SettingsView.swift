@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The preferences window, opened from the app menu (⌘,). The groups mirror the
-/// settings model: how the app behaves, then the machines it reaches and what
-/// runs on them. Controls bind straight to `AppSettings`, which persists on
-/// change, so there is no separate save step.
+/// The preferences window, opened from the app menu (⌘,). The three sidebar
+/// groups are the scope model itself: how this app behaves, what you use wherever
+/// it runs, and the machines that run it. Controls bind straight to
+/// `AppSettings`, which persists on change, so there is no separate save step.
 ///
 /// The layout follows macOS System Settings: a left sidebar of groups and a detail
 /// pane that carries the group's title + subtitle in the toolbar with a grouped
@@ -17,8 +17,8 @@ struct SettingsView: View {
     /// the workspace list — a closure would have to hand over a copy that stops
     /// tracking the moment one is added.
     @ObservedObject var store: TermioStore
-    /// Opens an SSH terminal to a `~/.ssh/config` alias in the main window — the
-    /// Devices tab's Connect action, injected by the app delegate because
+    /// Opens an SSH terminal to a `~/.ssh/config` alias in the main window — a
+    /// host pane's Connect action, injected by the app delegate because
     /// connecting is a main-window launch, not something this window does.
     let onSSHConnect: (String) -> Void
     /// Runs `ssh-copy-id` for an alias with the given public key, in the main
@@ -31,16 +31,16 @@ struct SettingsView: View {
     /// whose `navigationDestination` left with its tab would otherwise sit on the
     /// stack unresolvable.
     @State private var path = NavigationPath()
+    /// A machine to open once the tab switch that `open(_:)` asked for has
+    /// landed. Held rather than pushed inline because the switch clears the
+    /// stack; see the `onChange` below.
+    @State private var pendingMachine: String?
 
     init(
         settings: AppSettings,
         usage: UsageMonitor,
         store: TermioStore,
         initialTab: SettingsTab = .general,
-        /// A machine's `settingsKey` to open straight onto, for the deep links
-        /// that mean a *pane* rather than a tab — "Pair a phone…" lands on this
-        /// Mac's Serving section (RFC §D9), which is two clicks in otherwise.
-        initialDevice: String? = nil,
         onSSHConnect: @escaping (String) -> Void,
         onSetUpKey: @escaping (String, String) -> Void
     ) {
@@ -50,9 +50,6 @@ struct SettingsView: View {
         self.onSSHConnect = onSSHConnect
         self.onSetUpKey = onSetUpKey
         _selection = State(initialValue: initialTab)
-        _path = State(initialValue: initialDevice.map {
-            NavigationPath([DeviceRoute(key: $0)])
-        } ?? NavigationPath())
     }
 
     var body: some View {
@@ -130,11 +127,37 @@ struct SettingsView: View {
         // and it must also capture the initial deep-linked tab a user stays on.
         .onChange(of: selection, initial: true) { previous, tab in
             UserDefaults.standard.set(tab.rawValue, forKey: SettingsTab.lastOpenKey)
-            // Only a real switch empties the stack. The `initial: true` fire is
-            // what writes the deep-linked tab to `lastOpenKey`, and clearing on
-            // it too would pop the pane `initialDevice` just pushed — the window
-            // would open on the Devices roster instead of the machine asked for.
-            if previous != tab { path = NavigationPath() }
+            // Only a real switch empties the stack: the `initial: true` fire is
+            // what writes a deep-linked tab to `lastOpenKey`, and it has no stack
+            // to clear.
+            guard previous != tab else { return }
+            path = NavigationPath()
+            // …and the same clear is why a jump to a machine has to re-push
+            // afterwards rather than set both at once: the switch it just made
+            // would empty the stack under it.
+            if let pending = pendingMachine {
+                path = NavigationPath([DeviceRoute(key: pending)])
+                pendingMachine = nil
+            }
+        }
+    }
+
+    /// Jumps to the machine that owns a fact shown elsewhere — the Agents tab's
+    /// integration rows. This Mac is a tab of its own, so it needs no push; a
+    /// remote host is a row under Remote Hosts, so it needs one.
+    ///
+    /// The hop exists because the alternative is worse in both directions: a
+    /// machine pane rendered inside the Agents tab would leave the sidebar
+    /// pointing at Agents while showing a machine, and a row that only *names*
+    /// the machine (what the sentence here used to do) tells the user where to go
+    /// and then makes them walk.
+    private func open(_ machine: KnownDevice) {
+        if machine.isLocal {
+            pendingMachine = nil
+            selection = .server
+        } else {
+            pendingMachine = machine.settingsKey
+            selection = .remoteHosts
         }
     }
 
@@ -167,14 +190,15 @@ struct SettingsView: View {
         case .appearance: AppearanceSettingsTab(settings: settings)
         case .terminal: TerminalSettingsTab(settings: settings)
         case .workspaces: WorkspaceSettingsTab(store: store)
-        case .devices:
-            DevicesSettingsTab(
+        case .server: ServerSettingsTab(settings: settings)
+        case .remoteHosts:
+            RemoteHostsSettingsTab(
                 settings: settings, store: store,
                 onConnect: onSSHConnect, onSetUpKey: onSetUpKey
             )
         case .keyboard: KeybindingsSettingsTab()
         case .agents:
-            AgentSettingsTab(settings: settings, store: store)
+            AgentSettingsTab(settings: settings, store: store, onOpenMachine: open)
         case .usage: UsageSettingsTab(settings: settings, usage: usage)
         case .mobile: MobileSettingsTab(store: store)
         case .community: CommunitySettingsTab()

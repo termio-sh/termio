@@ -970,7 +970,7 @@ extension Termiod {
         try withControlChannel(route: route, caps: [agentCapability]) { transport, handshake in
             guard handshake.capabilities.contains(agentCapability) else {
                 throw TermiodClientError.requestFailed(
-                    localized("This device’s termiod is too old to install agent integration."))
+                    localized("This machine’s termiod is too old to install agent integration."))
             }
             try writeFrame(
                 transport.writeDescriptor, kind: .control,
@@ -1000,7 +1000,7 @@ extension Termiod {
         try withControlChannel(route: route, caps: [agentCapability]) { transport, handshake in
             guard handshake.capabilities.contains(agentCapability) else {
                 throw TermiodClientError.requestFailed(
-                    localized("This device’s termiod is too old to report its agents."))
+                    localized("This machine’s termiod is too old to report its agents."))
             }
             try writeFrame(
                 transport.writeDescriptor, kind: .control,

@@ -56,22 +56,27 @@ struct DevicePane: View {
                 SectionHeaderLabel(title: localized("Status"))
             }
             reachedBySection
+            serverSection
+            agentsSection
             integrationSection
-            // What this Mac serves to phones is Settings ▸ Mobile, not a second
+            // What a machine serves to phones is Settings ▸ Mobile, not a second
             // copy here: one set of controls, one place they live.
         }
         .formStyle(.grouped)
-        .navigationTitle(machine.name)
+        .navigationDestination(for: MachineAgentsRoute.self) { _ in
+            MachineAgentsPane(machine: machine, settings: settings, model: model)
+        }
     }
 
     // MARK: Header
 
     private var header: some View {
         HStack(spacing: 12) {
-            SettingsSymbolBadge(
-                symbol: machine.isLocal ? "laptopcomputer" : "server.rack",
-                tint: machine.isLocal ? .secondary : .blue)
-                .scaleEffect(1.4)
+            // One glyph for both entrances, and no branch: what this pane is
+            // about is the machine's termiod, which this Mac runs as much as a
+            // VPS does. Line ink rather than a filled accent square — the
+            // accent colour is reserved for controls, and a hero mark is not one.
+            HugeIconView(icon: .serverStack, size: 22, color: .secondary)
                 .frame(width: 30, height: 30)
             VStack(alignment: .leading, spacing: 2) {
                 Text(machine.name)
@@ -128,7 +133,12 @@ struct DevicePane: View {
         case .ready: return localized("Ready")
         case .checking: return model.step?.label ?? localized("Checking…")
         case .staged: return localized("Update ready")
-        case .blocked, .unasked: return localized("Set up this device")
+        // Named, because the pane is reached two ways now and "this device"
+        // reads as a stray when the tab above it says Server.
+        case .blocked, .unasked:
+            return machine.isLocal
+                ? localized("Set up this Mac")
+                : localized("Set up this host")
         }
     }
 
@@ -164,14 +174,16 @@ struct DevicePane: View {
 
     // MARK: Reached by — the route half
 
+    /// Absent on this Mac rather than filled with a placeholder. The old pane
+    /// stood one machine list in front of both, so every section had to render
+    /// for both and the local branch printed "nothing to reach" — a card whose
+    /// only content was that it did not apply. Server and Remote Hosts are
+    /// separate entrances now, so a section that cannot apply simply is not
+    /// there.
     @ViewBuilder
     private var reachedBySection: some View {
-        Section {
-            if machine.isLocal {
-                Text(localized("Nothing to reach — this is the machine you’re on."))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
+        if !machine.isLocal {
+            Section {
                 LabeledContent {
                     probeControl
                 } label: {
@@ -192,10 +204,37 @@ struct DevicePane: View {
                         titleFont: .headline
                     )
                 }
+            } header: {
+                SectionHeaderLabel(title: localized("Reached by"))
             }
-        } header: {
-            SectionHeaderLabel(title: localized("Reached by"))
         }
+    }
+
+    // MARK: Termio server — the daemon that holds the sessions
+
+    /// Read-only, on both entrances. Putting the daemon there and moving it
+    /// forward is what *Set Up* does, and a second button for the same loop was
+    /// the same action under two verbs.
+    ///
+    /// This Mac used to have no such row at all: `integrationSection` spent the
+    /// local branch on the CLI, so the one daemon the user could actually see
+    /// running was the only one whose version the app never showed.
+    private var serverSection: some View {
+        Section {
+            SettingsLabel(title: "termiod", subtext: serverSubtext, titleFont: .headline)
+        } header: {
+            SectionHeaderLabel(title: localized("Termio server"))
+        }
+    }
+
+    private var serverSubtext: String {
+        if let version = model.discovered?.termiodVersion {
+            return localized(
+                "Version \(version) on \(machine.name). Sessions keep running there after you disconnect.")
+        }
+        return machine.isLocal
+            ? localized("Not running yet. Sessions start it, and keep running after you quit Termio.")
+            : localized("The session host on \(machine.name). Sessions keep running there after you disconnect.")
     }
 
     /// The one probe outcome with a fix worth offering in place. A password is a
@@ -252,63 +291,100 @@ struct DevicePane: View {
 
     // MARK: The ladder, as disclosure
 
-    /// The facts behind the one line. The daemon's row is read-only: putting it
-    /// there, and updating it, is what *Set Up* does, and a second button for
-    /// the same loop was the same action twice under two verbs. The hooks and
-    /// the skill keep a "Reinstall" each because a config hand-edited after
-    /// Termio wrote it is a real case — but neither is the primary action.
-    private var integrationSection: some View {
+    // MARK: Agents — this machine's half of the agent question
+
+    /// A link, not a list: the roster on Settings ▸ Agents answers "which agents
+    /// do I use", and this answers "what does *this box* have" — the same
+    /// question from the other axis, which is a page of its own rather than four
+    /// more rows on a pane that is already five sections deep.
+    ///
+    /// This used to be a sentence in the section below telling the user to go to
+    /// another tab and re-find this machine there. Naming the destination is not
+    /// the same as going there.
+    private var agentsSection: some View {
         Section {
-            if machine.isLocal {
-                CommandLineToolRow()
-            } else {
+            NavigationLink(value: MachineAgentsRoute(key: machine.settingsKey)) {
                 SettingsLabel(
-                    title: "termiod",
-                    subtext: model.discovered?.termiodVersion.map {
-                        localized("Version \($0) on \(machine.name). Sessions keep running there after you disconnect.")
-                    } ?? localized("The session host on \(machine.name). Sessions keep running there after you disconnect."),
-                    titleFont: .headline
-                )
-            }
-            LabeledContent {
-                InstallButtonRow(title: localized("Reinstall"), trailing: true) {
-                    .summarizing(
-                        await AgentIntegrationInstaller.sync(
-                            hooks: settings.agentHooksEnabled ? .install : .remove,
-                            skills: .leave,
-                            target: machine.integrationTarget),
-                        headline: localized("Hooks reinstalled"), unit: localized("agents"))
-                }
-            } label: {
-                SettingsLabel(
-                    title: localized("Hooks"),
-                    subtext: localized("Report each agent’s status back to Termio."),
-                    titleFont: .headline
-                )
-            }
-            LabeledContent {
-                InstallButtonRow(title: localized("Reinstall"), trailing: true) {
-                    .summarizing(
-                        await AgentIntegrationInstaller.sync(
-                            hooks: .leave,
-                            skills: settings.sessionControlEnabled ? .install : .remove,
-                            target: machine.integrationTarget),
-                        headline: localized("Skill reinstalled"), unit: localized("agents"))
-                }
-            } label: {
-                SettingsLabel(
-                    title: localized("Skill"),
-                    subtext: localized("Teaches agents the termio session commands."),
+                    title: agentsSummary,
+                    subtext: localized("Which agent CLIs are on \(machine.name), and where each one launches from."),
                     titleFont: .headline
                 )
             }
         } header: {
+            SectionHeaderLabel(title: localized("Agents"))
+        }
+    }
+
+    /// The headline the link carries: the bad news if there is any, the count
+    /// otherwise. A machine nobody has asked about yet says so rather than
+    /// reporting zero of anything.
+    private var agentsSummary: String {
+        guard model.discovered != nil else { return localized("Not checked yet") }
+        let states = model.listedAgents.map { model.readiness(for: $0) }
+        let missing = states.filter { $0 == .missing }.count
+        if missing > 0 { return localized("\(missing) not installed") }
+        let available = states.filter { $0 == .available }.count
+        guard available > 0 else { return localized("None found") }
+        return localized("\(available) installed")
+    }
+
+    /// The facts behind the one line: what the two Agents switches asked for, and
+    /// whether this machine is carrying it.
+    ///
+    /// **One Reinstall, not one per half.** Each half used to carry its own
+    /// button passing `.leave` for the other, and neither touched the machine's
+    /// integration stamp — so a config repaired here still read as "not
+    /// installed" everywhere the stamp is consulted. The daemon writes both
+    /// halves in one pass anyway (`AgentIntegrationInstaller.sync` takes the
+    /// pair), so two buttons were two names for one write, and only the one that
+    /// does what the switches say can honestly claim the machine is current.
+    ///
+    /// The `termio` CLI rides here on this Mac only: it is the local twin of the
+    /// daemon rung, and there is no CLI to link onto a box the user never types
+    /// into directly.
+    private var integrationSection: some View {
+        Section {
+            if machine.isLocal {
+                CommandLineToolRow()
+            }
+            SettingsLabel(
+                title: localized("Hooks"),
+                subtext: settings.agentHooksEnabled
+                    ? localized("Report each agent’s status back to Termio.")
+                    : localized("Turned off in Settings ▸ Agents, so Termio removes them from \(machine.name)."),
+                titleFont: .headline
+            )
+            SettingsLabel(
+                title: localized("Skill"),
+                subtext: settings.sessionControlEnabled
+                    ? localized("Teaches agents the termio session commands.")
+                    : localized("Turned off in Settings ▸ Agents, so Termio removes it from \(machine.name)."),
+                titleFont: .headline
+            )
+            InstallButtonRow(title: localized("Reinstall")) { await reinstallIntegration() }
+        } header: {
             SectionHeaderLabel(title: localized("Installed by Termio"))
         } footer: {
-            Text(localized("What Termio puts on \(machine.name) so its agents can report. Which agents run there, and where each launches from, is Settings ▸ Agents with \(machine.name) selected."))
+            Text(localized("What Termio puts on \(machine.name) so its agents can report. Reinstall after hand-editing an agent’s config."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Writes both halves as the switches ask, then stamps the machine when the
+    /// write was clean — the stamp is what "Not installed on \(machine.name)"
+    /// reads, so a repair that does not clear it leaves the user chasing a
+    /// warning they have already answered.
+    private func reinstallIntegration() async -> InstallFeedback {
+        let outcome = await AgentIntegrationInstaller.sync(
+            hooks: settings.agentHooksEnabled ? .install : .remove,
+            skills: settings.sessionControlEnabled ? .install : .remove,
+            target: machine.integrationTarget)
+        if outcome.failure == nil && outcome.failed.isEmpty {
+            model.stampIntegration()
+        }
+        return .summarizing(
+            outcome, headline: localized("Reinstalled"), unit: localized("agents"))
     }
 }
 
@@ -419,5 +495,73 @@ struct CommandLineToolRow: View {
     private var buttonTitle: String {
         if case .stale = status { return localized("Update") }
         return localized("Reinstall")
+    }
+}
+
+/// What the machine pane's Agents row pushes. A named type so the settings
+/// window's shared stack cannot confuse it with a machine or an agent.
+struct MachineAgentsRoute: Hashable {
+    let key: String
+}
+
+/// One machine's agents: which CLIs are on it, and where each one launches from.
+///
+/// The same two facts Settings ▸ Agents shows, turned ninety degrees. That tab
+/// holds the agent fixed and walks the machines, because the task it serves is
+/// "get Claude running everywhere". This page holds the *machine* fixed and walks
+/// the agents, because the task it serves is "I just added this box — what can it
+/// run?". Neither is the other's duplicate, and both read the same stored value
+/// (`AppSettings.commandPath(for:on:)`), so an edit here shows up there.
+///
+/// Readiness comes from the pane's own probe rather than a fresh one: this page
+/// is reached *from* the machine's pane, which has already asked.
+private struct MachineAgentsPane: View {
+    let machine: KnownDevice
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var model: DevicePaneModel
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(model.listedAgents) { preset in
+                    LabeledContent {
+                        TextField(
+                            "",
+                            text: Binding(
+                                get: { settings.commandPath(for: preset, on: machine) ?? "" },
+                                set: { settings.setCommandPath($0, for: preset, on: machine) }
+                            ),
+                            prompt: Text(preset.command ?? localized("Login shell"))
+                        )
+                        .multilineTextAlignment(.trailing)
+                        .labelsHidden()
+                        .frame(minWidth: 180)
+                    } label: {
+                        SettingsLabel(
+                            title: preset.displayName,
+                            subtext: detail(for: preset),
+                            titleFont: .headline
+                        )
+                    }
+                }
+            } footer: {
+                Text(localized("Leave a path empty to launch the agent the way \(machine.name)’s login shell would. Which agents appear at all is Settings ▸ Agents."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(localized("Agents on \(machine.name)"))
+    }
+
+    /// The machine's answer under each name. Always present rather than shown
+    /// only when something is wrong: a caption that appears and disappears makes
+    /// every row jump as answers land.
+    private func detail(for preset: AgentPreset) -> String {
+        switch model.readiness(for: preset) {
+        case .available: return localized("Installed")
+        case .missing: return localized("Not installed")
+        case .unknown: return localized("Can’t check")
+        }
     }
 }

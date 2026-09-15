@@ -189,8 +189,8 @@ private struct WorkspacePane: View {
                         Text(workspace.device.displayName).foregroundStyle(.secondary)
                     } label: {
                         SettingsLabel(
-                            title: localized("Device"),
-                            subtext: localized("The machine everything filed under this workspace lives on."),
+                            title: localized("Machine"),
+                            subtext: localized("Where everything filed under this workspace lives."),
                             titleFont: .headline
                         )
                     }

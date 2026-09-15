@@ -1080,21 +1080,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         openSettings(initialTab: remembered ?? .general)
     }
 
-    /// Opens this Mac's Serving section, where the pairing QR lives (RFC §D9).
+    /// Opens the pairing QR (RFC §D9).
     ///
-    /// The QR moved off a top-level tab and onto the machine that serves it,
-    /// which is correct and two clicks deeper. §D9 says the discoverability is
-    /// paid back here rather than by a duplicate settings entry: **pairing is an
-    /// action**, so it belongs in the command palette, not in the sidebar.
+    /// One hop now rather than three: Mobile renders the serving this Mac does
+    /// instead of standing a machine roster in front of it, so the tab itself is
+    /// the destination and there is no pane to seed underneath.
     @objc func pairPhone(_ sender: Any?) {
-        openSettings(initialTab: .devices, initialDevice: KnownDevice.thisMac.settingsKey)
+        openSettings(initialTab: .mobile)
     }
 
     /// Opens (or refocuses) the preferences window on a specific tab. The content
     /// view is rebuilt each call so the requested tab takes effect even when the
     /// window is reused — harmless because every control binds straight to
     /// `AppSettings`, so there is no transient UI state to preserve.
-    func openSettings(initialTab: SettingsTab, initialDevice: String? = nil) {
+    func openSettings(initialTab: SettingsTab) {
         if settingsWindow == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 540),
@@ -1134,7 +1133,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             usage: usageMonitor,
             store: store,
             initialTab: initialTab,
-            initialDevice: initialDevice,
             onSSHConnect: { [weak self] host in
                 guard let self else { return }
                 self.store.addSSHSession(host: host)

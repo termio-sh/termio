@@ -30,7 +30,7 @@ final class AgentFleetReadinessTests: XCTestCase {
 
     func testCountsBeyondOneRatherThanListing() {
         let fleet = AgentFleetReadiness(missing: ["devbox", "vps"], asked: 3)
-        XCTAssertEqual(fleet.summary, "Missing on 2 devices")
+        XCTAssertEqual(fleet.summary, "Missing on 2 machines")
     }
 
     /// Missing outranks unknown: a machine that answered "it is not here" is
@@ -57,7 +57,7 @@ final class AgentFleetReadinessTests: XCTestCase {
             "Can’t check on vps")
         XCTAssertEqual(
             AgentFleetReadiness(unknown: ["vps", "devbox"], asked: 2).summary,
-            "Can’t check on 2 devices")
+            "Can’t check on 2 machines")
     }
 
     // MARK: The badge

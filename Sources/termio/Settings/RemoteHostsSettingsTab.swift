@@ -1,31 +1,28 @@
 import AppKit
 import SwiftUI
 
-/// Settings ▸ Machines: one row per machine sessions can run on, each pushing
+/// Settings ▸ Remote Hosts: one row per machine this Mac reaches, each pushing
 /// that machine's pane.
 ///
-/// This tab is where the RFC's D2 collision was resolved. The shipped "Devices"
-/// tab was the renamed SSH tab — a `~/.ssh/config` projection, which
-/// `docs/design/20260814-remote-to-device.decisions.md` §1 classifies as *routes* —
-/// so machine identity had no home and the name it wanted was taken. Two tabs
-/// that both list machines would force the user to learn the route/identity
-/// distinction before they could find anything; one pane that shows both does
-/// not. So: **one tab, one row per machine, and the two halves are sections
-/// inside a machine's pane** — *Reached by* (alias, destination, key, Test
-/// Connection, Edit in Config) above *Runs* (what is installed on it).
+/// The pane it pushes is `DevicePane`, the same one Settings ▸ Server renders for
+/// this Mac. The split between the two tabs is top-level only, so the five things
+/// a machine has — its route, its daemon, what Termio installed on it, its agent
+/// CLIs, what it serves — are built once and described once. What the split buys
+/// is that neither entrance has to render a section that cannot apply.
 ///
-/// What stays at this level is what is not per-machine: `~/.ssh/config` itself,
-/// and the public keys in `~/.ssh`. Those are about the user's own credentials,
-/// not about any one box.
+/// Each row is still *the road and the machine at the end of it* in one pane —
+/// the RFC's D2 answer. Two surfaces that both list machines would force the user
+/// to learn the route/identity distinction before they could find anything; one
+/// pane showing both does not. What is not per-machine stays at this level:
+/// `~/.ssh/config` itself and the public keys in `~/.ssh`, which are the user's
+/// own credentials rather than facts about any one box.
 ///
 /// A grouped `Form`, like every other pane in this window and like System
 /// Settings itself. It was a `List` to keep `onMove` live in case the roster ever
 /// became reorderable — a container chosen for a feature that does not exist and
 /// cannot: the order here is `~/.ssh/config`'s own, and reordering would mean
-/// rewriting the user's file. The cost was real and visible: this was the only
-/// tab in the app without the grouped cards, so its rows sat flat on the window
-/// with full-bleed separators and the first one clipped under the toolbar.
-struct DevicesSettingsTab: View {
+/// rewriting the user's file.
+struct RemoteHostsSettingsTab: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var store: TermioStore
     /// Opens an SSH terminal to the alias in the main window (wired to
@@ -44,7 +41,7 @@ struct DevicesSettingsTab: View {
 
     var body: some View {
         Form {
-            // No section header: the tab is called Devices and this is the
+            // No section header: the tab is called Remote Hosts and this is the
             // only list of them in it. The add control is the roster's own
             // gutter rather than a bar pinned to the window bottom, which in a
             // tall window sat a screen away from the roster with two unrelated
@@ -52,7 +49,7 @@ struct DevicesSettingsTab: View {
             Section {
                 ForEach(machines) { machine in
                     NavigationLink(value: DeviceRoute(key: machine.settingsKey)) {
-                        DeviceListRow(machine: machine, host: host(for: machine))
+                        RemoteHostListRow(machine: machine, host: host(for: machine))
                     }
                 }
                 SettingsListGutter {
@@ -60,11 +57,13 @@ struct DevicesSettingsTab: View {
                         SettingsGutterGlyph(symbol: "plus")
                     }
                     .buttonStyle(.plain)
-                    .help(localized("Add Device"))
-                    .accessibilityLabel(localized("Add Device"))
+                    .help(localized("Add Remote Host"))
+                    .accessibilityLabel(localized("Add Remote Host"))
                 }
             } footer: {
-                Text(localized("Open one to see how it is reached and what it runs."))
+                Text(machines.isEmpty
+                     ? localized("Add a host you reach over SSH and Termio can run sessions on it, with agents that keep working after you disconnect.")
+                     : localized("Open one to see how it is reached and what it runs."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -125,12 +124,13 @@ struct DevicesSettingsTab: View {
                     onEditConfig: { presentEditor(for: host(for: machine)) }
                 )
                 .id(route.key)
+                .navigationTitle(machine.name)
             } else {
                 // The alias left `~/.ssh/config` while its pane was open.
                 ContentUnavailableView {
-                    Text(localized("Device Unavailable"))
+                    Text(localized("Host Unavailable"))
                 } description: {
-                    Text(localized("This device is no longer in your configuration."))
+                    Text(localized("This host is no longer in your configuration."))
                 }
             }
         }
@@ -143,17 +143,21 @@ struct DevicesSettingsTab: View {
         }
     }
 
-    /// This Mac first, then every machine Termio has worked on, then the aliases
-    /// in `~/.ssh/config` it has not. The last group matters: a box you configured
+    /// Every machine Termio has worked on except this one, then the aliases in
+    /// `~/.ssh/config` it has not. The last group matters: a box you configured
     /// but never opened is exactly the one you came here to set up.
+    ///
+    /// This Mac is filtered out rather than led with: it has its own tab, and a
+    /// roster that also carried it would be two doors to one pane.
     private var machines: [KnownDevice] {
         let known = DeviceRoster.known(in: store)
-        return known + DeviceRoster.unusedAliases(known: known)
-            .map { KnownDevice(alias: $0, deviceID: nil) }
+        return known.filter { !$0.isLocal }
+            + DeviceRoster.unusedAliases(known: known)
+                .map { KnownDevice(alias: $0, deviceID: nil) }
     }
 
     /// The `~/.ssh/config` block that reaches this machine, when one names it.
-    /// `nil` for this Mac, and for a device known only from a session record.
+    /// `nil` for a host known only from a session record.
     private func host(for machine: KnownDevice) -> SSHConfigHost? {
         machine.alias.flatMap { alias in hosts.first { $0.alias == alias } }
     }
@@ -199,22 +203,18 @@ struct DeviceRoute: Hashable {
     let key: String
 }
 
-/// One machine on the roster: its name over how it is reached. No status here —
-/// a roster that probed every host on appear would fire ssh at every configured
-/// box each time Settings opens, and a sleeping VPS would make that take as long
-/// as its timeout. The pane asks; the roster lists.
-private struct DeviceListRow: View {
+/// One host on the roster: its name over how it is reached. No status here — a
+/// roster that probed every host on appear would fire ssh at every configured box
+/// each time Settings opens, and a sleeping VPS would make that take as long as
+/// its timeout. The pane asks; the roster lists.
+private struct RemoteHostListRow: View {
     let machine: KnownDevice
     let host: SSHConfigHost?
 
-    /// Empty for a Mac whose name cannot be read, so the row is one line rather
-    /// than one line and a gap.
+    /// Empty when nothing is known about the route, so the row is one line rather
+    /// than one line and a gap. Apple's rows put the *fact* in the subtitle ("65
+    /// apps", "Off"); here the fact is where this host is and what signs in.
     private var detail: String {
-        // The host name, not "the machine you're on" — a subtitle restating the
-        // title is a line that costs a row's height and answers nothing. Apple's
-        // rows put the *fact* there ("65 apps", "Off"); here the fact is which
-        // Mac this is.
-        guard machine.alias != nil else { return Host.current().localizedName ?? "" }
         guard let host else { return localized("From your session history") }
         guard let identityFile = host.identityFile else { return host.destinationLabel }
         return "\(host.destinationLabel) · \((identityFile as NSString).lastPathComponent)"
@@ -222,9 +222,14 @@ private struct DeviceListRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            SettingsSymbolBadge(
-                symbol: machine.isLocal ? "laptopcomputer" : "server.rack",
-                tint: machine.isLocal ? .secondary : .blue)
+            // The same glyph, size and ink the main sidebar gives a remote
+            // machine — whose comment already claims it matches "its host row in
+            // Settings", which was untrue while this drew a filled accent-blue
+            // square with an SF Symbol in it. Every row in this list is the same
+            // kind of thing, so a tinted chip repeated down the column
+            // distinguished nothing and just pulled the eye off the names.
+            HugeIconView(icon: .serverStack, size: 15, color: .secondary)
+                .frame(width: settingsRowIconWidth, alignment: .center)
             VStack(alignment: .leading, spacing: 2) {
                 Text(machine.name)
                 if !detail.isEmpty {

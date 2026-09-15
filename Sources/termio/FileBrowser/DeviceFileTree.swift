@@ -83,13 +83,13 @@ enum RemoteFileFailure {
     ) -> String {
         switch error {
         case DeviceFileError.unsupported:
-            return localized("This device’s termiod is too old to browse files.")
+            return localized("This machine’s termiod is too old to browse files.")
         case DeviceFileError.tooLarge:
             return localized("Preview is capped at 1 MB.")
         case DeviceFileError.notRegularFile:
             return localized("Only regular files can be previewed.")
         case DeviceFileError.unsafeName:
-            return localized("This device sent a name the file tree can’t show.")
+            return localized("This machine sent a name the file tree can’t show.")
         case TermiodClientError.requestFailed(let detail) where !detail.isEmpty:
             return detail
         default:

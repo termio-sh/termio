@@ -333,11 +333,11 @@ final class GitPanelModel: ObservableObject {
     private static func message(for error: Error) -> String {
         switch error {
         case DeviceGitError.unsupported:
-            return localized("This device’s termiod is too old to read git.")
+            return localized("This machine’s termiod is too old to read git.")
         case TermiodClientError.requestFailed(let detail) where !detail.isEmpty:
             return detail
         default:
-            return localized("The device couldn’t read this checkout.")
+            return localized("The machine couldn’t read this checkout.")
         }
     }
 

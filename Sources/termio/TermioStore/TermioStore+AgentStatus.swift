@@ -79,7 +79,20 @@ extension TermioStore {
             settings.agentHooksEnabled ? .install : .remove
         let skills: Termiod.AgentHalfAction =
             settings.sessionControlEnabled ? .install : .remove
-        Task { _ = await AgentIntegrationInstaller.sync(hooks: hooks, skills: skills) }
+        Task {
+            let outcome = await AgentIntegrationInstaller.sync(hooks: hooks, skills: skills)
+            // Stamped for the same reason a machine's pane stamps after its own
+            // install: the stamp is what "Not installed on This Mac" reads, and
+            // this is the only thing that ever puts the files here. Unstamped, the
+            // one machine that configures itself was also the one that reported
+            // itself behind forever.
+            //
+            // An empty outcome is not success: with both switches off nothing was
+            // asked for, so there is nothing to claim this build did.
+            guard outcome.failure == nil, outcome.failed.isEmpty, !outcome.isEmpty else { return }
+            DeviceStateCache.stampIntegration(
+                AppInfo.buildStamp, for: KnownDevice.thisMac.settingsKey)
+        }
     }
 
     /// Records only the first usable prompt label in a conversation. It stays a
