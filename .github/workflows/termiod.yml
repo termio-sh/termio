@@ -13,6 +13,10 @@ on:
     paths:
       - "termiod/**"
       - ".github/workflows/termiod.yml"
+      # The published schema is this daemon's own output, and the generator is
+      # what CI re-runs to prove it still is.
+      - "docs/api/**"
+      - "scripts/generate-api-schema.sh"
       - "Sources/termio/Terminal/Termiod/**"
       - "Tests/termioTests/TermiodFilesIntegrationTests.swift"
       - "Tests/termioTests/TermiodWireOrderIntegrationTests.swift"
@@ -28,6 +32,10 @@ on:
     paths:
       - "termiod/**"
       - ".github/workflows/termiod.yml"
+      # The published schema is this daemon's own output, and the generator is
+      # what CI re-runs to prove it still is.
+      - "docs/api/**"
+      - "scripts/generate-api-schema.sh"
       - "Sources/termio/Terminal/Termiod/**"
       - "Tests/termioTests/TermiodFilesIntegrationTests.swift"
       - "Tests/termioTests/TermiodWireOrderIntegrationTests.swift"
@@ -120,9 +128,17 @@ jobs:
         run: cargo build
 
       # Unit tests plus the integration suites: join_invariant (byte delivery
-      # never blocks on the VT parse), snapshot_prologue, stdio_bridge.
+      # never blocks on the VT parse), snapshot_prologue, stdio_bridge,
+      # api_passthrough.
       - name: Test
         run: cargo test
+
+      # The published schema is generated from the protocol types, so a change
+      # to a message that forgets to regenerate it fails here rather than
+      # shipping a schema describing a daemon nobody has.
+      - name: API schema is current
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/generate-api-schema.sh --check
 
       # A daemon auto-starts on the first client op and keeps running the binary
       # image it was launched from, so a leftover one serves stale code and

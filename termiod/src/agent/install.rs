@@ -72,6 +72,7 @@ const DEVICE_SKILL: &str =
 /// message still covers the whole roster — this is what keeps that true when
 /// the switches disagree, instead of costing a second round trip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum HalfAction {
     Install,
@@ -91,6 +92,7 @@ pub enum HalfAction {
 /// command, one set of flags, and one ownership fingerprint. What survives is the
 /// skill payload, because a Mac has a `termio` binary to teach and a box does not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Reporter {
     /// This Mac, where the app is running.
@@ -165,6 +167,7 @@ impl InstallRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum InstallStatus {
     /// The config carries termio's current wiring — including the common case
@@ -179,6 +182,7 @@ pub enum InstallStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct InstallResult {
     /// The agent's id, so a client can key its own roster off the reply.
     pub id: String,
@@ -220,6 +224,7 @@ impl InstallResult {
 /// microseconds. It is the same login-shell probe the install already runs
 /// before writing a skill, exposed so a client can ask without writing anything.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentPresence {
     pub id: String,
     /// The command that was looked for, so a client can show what was asked.
