@@ -2469,10 +2469,10 @@ async fn process_control(
             )));
             return Ok(ControlFlow::Close);
         }
-        // Unknown operations are ignored. Response-direction messages sent by
-        // a client are likewise harmless and ignored.
-        Control::Unknown
-        | Control::HelloOk { .. }
+        // Response-direction messages sent by a client are harmless and
+        // ignored. An *unknown* op never lands here — it fails to decode and
+        // arrives as `Frame::UnknownControl`, which is answered.
+        Control::HelloOk { .. }
         | Control::HelloErr { .. }
         | Control::Ok { .. }
         | Control::Created { .. }
@@ -3061,7 +3061,6 @@ async fn run_attach(
                     )));
                 }
             }
-            Ok(Some(Frame::Control(Control::Unknown))) => {}
             Ok(Some(Frame::Event(event))) => drop(event),
             Ok(Some(Frame::Control(_))) => {
                 let _ = out.send(Outbound::Control(error(

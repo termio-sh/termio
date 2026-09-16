@@ -19,6 +19,7 @@
     "atp",
     "worktrees",
     "session-control",
+    "session-protocol",
     "---个性化---",
     "appearance",
     "keyboard",

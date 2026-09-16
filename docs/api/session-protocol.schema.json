@@ -1,0 +1,3482 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The framed messages clients exchange with termiod. Framing is [kind: u8][len: u32 big-endian][payload]; control and event payloads are the JSON described here. See https://termio.sh/docs/session-protocol.",
+  "frame_kinds": {
+    "C": "control — the JSON in $defs.Control",
+    "D": "data — raw PTY bytes, not JSON",
+    "E": "event — the JSON in $defs.Event",
+    "F": "file — file chunk, not JSON",
+    "G": "grid — grid diff payload, not JSON",
+    "H": "history — scrollback chunk, not JSON",
+    "R": "viewport — one attachment's rows and cols, four or five bytes",
+    "S": "snapshot — packed cells or VT sequences, not JSON",
+    "U": "upload — upload chunk, not JSON"
+  },
+  "protocol": 1,
+  "schemas": {
+    "control": {
+      "$defs": {
+        "AgentPresence": {
+          "description": "Whether one agent's CLI is on this box.\n\nThe Mac used to answer this with one `ssh host 'command -v …'` *per agent*,\nwhich is a dozen round trips to learn something the box knows about itself in\nmicroseconds. It is the same login-shell probe the install already runs\nbefore writing a skill, exposed so a client can ask without writing anything.",
+          "properties": {
+            "command": {
+              "description": "The command that was looked for, so a client can show what was asked.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "present": {
+              "description": "`true` also when the probe could not look — never cry wolf, the same rule\nthe install follows.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "present"
+          ],
+          "type": "object"
+        },
+        "AttachMode": {
+          "enum": [
+            "interact",
+            "observe"
+          ],
+          "type": "string"
+        },
+        "ChannelRole": {
+          "enum": [
+            "control",
+            "attach"
+          ],
+          "type": "string"
+        },
+        "CreateSpec": {
+          "description": "How to spawn a session's process.",
+          "properties": {
+            "argv": {
+              "default": [],
+              "description": "argv[0] is the program. Empty ⇒ the daemon picks the login shell.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "cols": {
+              "default": 80,
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cwd": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "env": {
+              "default": [],
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "name": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rows": {
+              "default": 24,
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "workstream": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkstreamSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "DirEntry": {
+          "description": "One row of an `fs.list` page.",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/EntryKind"
+            },
+            "mtime": {
+              "description": "Seconds since the Unix epoch; 0 when the filesystem cannot say.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "symlink_target": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target_kind": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntryKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a `symlink`, what it resolves to — and only when the target stays\ninside the workspace root. A tree draws a link to a directory as a\ndirectory (the Finder's and the VS Code explorer's rule), and it may\nonly offer that when descending would actually be answered: `confine`\ncanonicalises before it lists, so a link out of the root is refused.\n`None` means \"do not descend this\" — dangling, outside the root, or a\nhost too old to say."
+            }
+          },
+          "required": [
+            "name",
+            "kind",
+            "size",
+            "mtime"
+          ],
+          "type": "object"
+        },
+        "EntryKind": {
+          "description": "What a directory entry is, as far as the tree needs to know (§C.12).\n`unloaded_dir` marks a directory the host will never walk on its own\n(VCS internals today); a client may still list it explicitly.",
+          "enum": [
+            "file",
+            "dir",
+            "symlink",
+            "unloaded_dir"
+          ],
+          "type": "string"
+        },
+        "ErrorCode": {
+          "oneOf": [
+            {
+              "enum": [
+                "incompatible",
+                "proto_error",
+                "no_such_session",
+                "not_writer",
+                "already_exited",
+                "create_failed",
+                "denied",
+                "busy",
+                "internal"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "conflict",
+              "description": "The write was refused because what it would replace has changed since\nthe writer read it. Its own code because a client shows it as a question\n(overwrite, or not) rather than as a failure.",
+              "type": "string"
+            }
+          ]
+        },
+        "GitBranchEntry": {
+          "description": "One ref in a `git.branches` reply (§C.13 read tier).",
+          "properties": {
+            "name": {
+              "description": "Short name: `main` for a local branch, `origin/main` for a\nremote-tracking one. The two are told apart by `remote`, never by the\nshape of the name.",
+              "type": "string"
+            },
+            "remote": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "GitCommitEntry": {
+          "description": "One commit row (§C.13 read tier), as `git.log` and `git.show` report it.\n\nBoth a rendered `relative_date` and a `timestamp`: the box prints git's own\n\"3 hours ago\" in the box's language, and the client rendering the row may be\nin another one, so it needs the instant to format for itself.",
+          "properties": {
+            "author": {
+              "type": "string"
+            },
+            "author_email": {
+              "type": "string"
+            },
+            "relative_date": {
+              "type": "string"
+            },
+            "sha": {
+              "type": "string"
+            },
+            "short_sha": {
+              "type": "string"
+            },
+            "subject": {
+              "type": "string"
+            },
+            "tags": {
+              "description": "Tags pointing at this commit. Branch decorations are dropped — the\nsidebar and the pane's own scope already say which branch this is.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "timestamp": {
+              "description": "Author date, Unix seconds.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "unpushed": {
+              "default": false,
+              "description": "The commit has not reached the branch's upstream (`@{upstream}..HEAD`).\nFalse for every row when the branch has no upstream, so a purely local\nbranch does not mark all of them.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "sha",
+            "short_sha",
+            "subject",
+            "author",
+            "author_email",
+            "relative_date",
+            "timestamp"
+          ],
+          "type": "object"
+        },
+        "GitCommitFile": {
+          "description": "One file a commit touched (§C.13 read tier). `status` reuses the status\nvocabulary the `git:` kind already publishes; a commit's file carries one\naxis, not two.",
+          "properties": {
+            "additions": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "binary": {
+              "default": false,
+              "description": "`--numstat` reported `-` for the counts, so `+`/`−` numbers would be a\nlie rather than a zero.",
+              "type": "boolean"
+            },
+            "deletions": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "original_path": {
+              "description": "For a rename or a copy, the path the file came from.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/GitStatusCode"
+            }
+          },
+          "required": [
+            "path",
+            "status"
+          ],
+          "type": "object"
+        },
+        "GitCompareProblem": {
+          "description": "Why a `git_compare` could not compare — each a different instruction to the\nuser, so folding them into an empty file list (which reads as \"this branch\nchanges nothing\") is the one thing this must never do.",
+          "oneOf": [
+            {
+              "const": "missing_base",
+              "description": "The base no longer resolves: its branch was deleted since it was picked.",
+              "type": "string"
+            },
+            {
+              "const": "no_common_history",
+              "description": "No merge base connects the two — unrelated histories, or a shallow\nclone grafted above the divergence point.",
+              "type": "string"
+            }
+          ]
+        },
+        "GitStatusCode": {
+          "description": "One axis of a tracked file's two-axis status (§C.13). The vocabulary is\nadopted from Zed verbatim — battle-tested and 1:1 with the\nGitHub-Desktop-shaped changes pane.",
+          "enum": [
+            "unmodified",
+            "modified",
+            "type_changed",
+            "added",
+            "deleted",
+            "renamed",
+            "copied"
+          ],
+          "type": "string"
+        },
+        "HalfAction": {
+          "description": "What to do with one half of the integration.\n\nPer half, not one flag for both, because the two Integration switches are\nindependent: a user can want live status without session control. One\nmessage still covers the whole roster — this is what keeps that true when\nthe switches disagree, instead of costing a second round trip.",
+          "oneOf": [
+            {
+              "enum": [
+                "install"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "remove",
+              "description": "Sweep every directory termio has ever written this half into.",
+              "type": "string"
+            },
+            {
+              "const": "leave",
+              "description": "Not this caller's business — the device pane's \"Reinstall hooks\" must not\ntouch the skill.",
+              "type": "string"
+            }
+          ]
+        },
+        "InstallResult": {
+          "properties": {
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "description": "The agent's id, so a client can key its own roster off the reply.",
+              "type": "string"
+            },
+            "kind": {
+              "description": "`hooks` or `skill`.",
+              "type": "string"
+            },
+            "name": {
+              "description": "The agent's display name, for the sentence a Settings row shows.",
+              "type": "string"
+            },
+            "path": {
+              "description": "Where it landed on this box, resolved — the answer the client could not\nwork out for itself.",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/InstallStatus"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "path",
+            "status"
+          ],
+          "type": "object"
+        },
+        "InstallStatus": {
+          "oneOf": [
+            {
+              "const": "installed",
+              "description": "The config carries termio's current wiring — including the common case\nwhere it already did and nothing was written.",
+              "type": "string"
+            },
+            {
+              "const": "failed",
+              "description": "It was left alone on purpose (unparseable, or not ours to overwrite), or\nthe write failed. `detail` says which.",
+              "type": "string"
+            },
+            {
+              "const": "skipped",
+              "description": "This daemon does not install this dialect yet. Reported rather than\ndropped: a silent no-op is the failure mode this must not have.",
+              "type": "string"
+            }
+          ]
+        },
+        "PathListing": {
+          "description": "The listing for one requested path inside an `fs_listed` reply. A path\nthat vanished or escapes the root fails alone (`error`), so a batched\nspeculative request is never all-or-nothing.",
+          "properties": {
+            "entries": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/DirEntry"
+              },
+              "type": "array"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "next_after": {
+              "description": "The last name served, when more entries follow — pass it back as\n`after`. Absent when the listing is complete, which is every ordinary\ndirectory. A client that never sees this field is talking to a host too\nold to continue a listing and must say so rather than treat one page as\nthe whole directory.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "Reporter": {
+          "description": "Which machine this is, for the one thing that still differs between them.\n\nIt used to be *how a hook reports* — the Mac's hooks called the app's `termio`\nCLI into a socket the app owned, a device's called `termiod`. That split is\ngone: every hook now reports to the daemon that owns its PTY, so there is one\ncommand, one set of flags, and one ownership fingerprint. What survives is the\nskill payload, because a Mac has a `termio` binary to teach and a box does not.",
+          "oneOf": [
+            {
+              "description": "This Mac, where the app is running.",
+              "properties": {
+                "kind": {
+                  "const": "this_mac",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "A box reached over the protocol.",
+              "properties": {
+                "kind": {
+                  "const": "device",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "SessionInfo": {
+          "description": "A row in `termiod list`.",
+          "properties": {
+            "agent_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "alive": {
+              "type": "boolean"
+            },
+            "attached_clients": {
+              "default": 0,
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "child_cwd": {
+              "description": "The child's *current* directory, which `cd` moves and `cwd` (the\ndirectory the session was created in) does not.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "child_executable": {
+              "description": "The binary the child is running, as the kernel resolved it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "child_executable_replaced": {
+              "description": "Whether that binary has been replaced on disk since it was pinned — an\nagent that updated itself and quit, told apart from one that just quit.",
+              "type": "boolean"
+            },
+            "clients": {
+              "description": "v0 field retained for old consumers.",
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "command": {
+              "type": "string"
+            },
+            "created_unix": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "foreground_argv": {
+              "description": "Argv of that process — the agent's identity, read from the kernel rather\nthan scraped off the screen.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "foreground_job": {
+              "description": "Whether something other than the session's own child holds the\nforeground, i.e. a command is running rather than a shell idling at its\nprompt. This is the signal a client keys \"closing this loses work\" off.\n\nDerived from the foreground *process group*, not from `foreground_pid`:\na pipeline whose leader has already exited is still a running job, and\ncomparing the surviving member's pid against the shell would say so\ntwice over — but comparing a *missing* one would say the opposite.",
+              "type": "boolean"
+            },
+            "foreground_pid": {
+              "description": "The live process inside the tty's foreground process group whose argv is\nreported below. This is the program the user is talking to, which after\nthe first minute of a session is rarely the one in `command`.\n\nA pid, not the process group id. The two agree whenever the group leader\nis still running, which is every simple command; they part in a pipeline\nwhose leader has exited while a later stage still runs.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "pid": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "project": {
+              "default": null,
+              "description": "The workstream's project root. A client attached straight to this host\nhas no other source for it, and without it the roster is a flat list of\nsessions with nothing to group them under.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "default": "unknown",
+              "type": "string"
+            },
+            "title": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "writer_client_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "cwd",
+            "command",
+            "pid",
+            "rows",
+            "cols",
+            "clients",
+            "created_unix",
+            "alive"
+          ],
+          "type": "object"
+        },
+        "Tombstone": {
+          "description": "A dead session, in the terms a UI needs to say what happened: which session,\nwhat it was running, when it started and stopped, and why it stopped.\n\nDeliberately carries no rendered text — the host describes state and never\ndecides presentation. A tombstone says `daemon_lost` and lets the client\nchoose the words.",
+          "properties": {
+            "agent_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "child_executable_replaced": {
+              "default": false,
+              "description": "The session's binary was replaced on disk while it ran — \"the agent\nupdated itself and quit\" rather than \"the agent crashed\". Computed on\nthe exit path, where the inode read is still meaningful, and carried\nhere because a client that was not attached when the session died has\nno other route to it: `Event::SessionExited` reaches only the attached.",
+              "type": "boolean"
+            },
+            "command": {
+              "type": "string"
+            },
+            "created_unix": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "ended_unix": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "exit_status": {
+              "default": null,
+              "description": "The process's exit code. `None` for `daemon_lost` — the daemon that\nwould have reaped the child died first, so no honest answer exists.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "reason": {
+              "description": "`exited` · `killed` · `daemon_stopped` · `daemon_lost`.",
+              "type": "string"
+            },
+            "status": {
+              "default": "",
+              "description": "The workstream status the session last reported (`working`, `needs_you`,\n…). A session that died while `needs_you` is a different story from one\nthat died `idle`, and that difference is exactly what the user lost.",
+              "type": "string"
+            },
+            "title": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "cwd",
+            "command",
+            "reason",
+            "created_unix",
+            "ended_unix"
+          ],
+          "type": "object"
+        },
+        "WorkstreamSpec": {
+          "properties": {
+            "agent_id": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "worktree": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "agent_id",
+            "project"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "Control-plane messages. `op` tags the variant on the wire.\n\nOptional `seq`/`re` fields are omitted when absent, preserving the exact v0\nshapes. An op this build has never heard of does **not** decode to a\ncatch-all variant: it fails to decode, which is what [`Frame::UnknownControl`]\nis for, and the daemon answers it with a per-request `proto_error` naming the\nop. A `#[serde(other)]` arm here would swallow the request instead, and a\nclient waiting on its `re` would wait forever.",
+      "oneOf": [
+        {
+          "properties": {
+            "caps": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "client": {
+              "type": "string"
+            },
+            "min_proto": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "hello",
+              "type": "string"
+            },
+            "proto": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "role": {
+              "$ref": "#/$defs/ChannelRole"
+            }
+          },
+          "required": [
+            "op",
+            "proto",
+            "min_proto",
+            "role",
+            "client"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "caps": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "client_id": {
+              "type": "string"
+            },
+            "home": {
+              "default": "",
+              "description": "This account's home directory on the device, so a client that has\nto name a path over here — a project picker, a `~`-prefixed entry —\nstarts where the user's work is instead of at `/`. Sent at the\nhandshake rather than fetched, because expanding `~` client-side\ncosts no round trip while someone is typing. Empty when the home\ndirectory cannot be determined; clients fall back to `/`.",
+              "type": "string"
+            },
+            "host": {
+              "type": "string"
+            },
+            "host_id": {
+              "type": "string"
+            },
+            "op": {
+              "const": "hello_ok",
+              "type": "string"
+            },
+            "proto": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "description": "The daemon's build, `<app version>+<build>` — the version of the\napp that shipped it (`lifecycle::BUILD_VERSION`). This is what\nlets a control plane say \"termiod 0.43 on ukvps; this app needs\n0.44\" instead of inferring age from a missing capability. Absent\nfrom a daemon that predates it, which the lifecycle loop reads as\nolder than anything that reports one.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "proto",
+            "host_id",
+            "host",
+            "client_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "op": {
+              "const": "hello_err",
+              "type": "string"
+            },
+            "supported": {
+              "items": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "op",
+            "code",
+            "supported"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "How to spawn a session's process.",
+          "properties": {
+            "argv": {
+              "default": [],
+              "description": "argv[0] is the program. Empty ⇒ the daemon picks the login shell.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "cols": {
+              "default": 80,
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cwd": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "env": {
+              "default": [],
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "name": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "op": {
+              "const": "create",
+              "type": "string"
+            },
+            "rows": {
+              "default": 24,
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "workstream": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkstreamSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "op": {
+              "const": "list",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "op": {
+              "const": "kill",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            },
+            "op": {
+              "const": "send",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "id",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "create_if_missing": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CreateSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "If the target does not exist, create it with this spec."
+            },
+            "mode": {
+              "$ref": "#/$defs/AttachMode",
+              "default": "interact"
+            },
+            "op": {
+              "const": "attach",
+              "type": "string"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "target": {
+              "description": "Session id or name to attach to.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "target",
+            "rows",
+            "cols"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Client asks to leave the stream but keep the session alive.",
+          "properties": {
+            "op": {
+              "const": "detach",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Client asks for a fresh snapshot of the screen it is attached to.\n\nThe byte stream is raw PTY output, so a client that lost any of it holds\na screen that is simply wrong — and only the host can say what the\nscreen should be. Attaching is the other way to get one; this is the\nway that does not cost an attachment.\n\nThe gap is not always the daemon's to see: a Mac relaying to a phone\ndrops frames on *its* outbound socket, downstream of everything the\ndaemon's own backlog protects.",
+          "properties": {
+            "op": {
+              "const": "request_snapshot",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Client asks for the write token, without re-attaching to get it.\n\nAttaching takes the token only when nobody holds it, so without this a\nMac and a phone on one session would rebuild their attachments every time\nthe user's hands moved, and the newcomer's grid would drag the shared PTY\nto its own width behind the muted client's back. The token follows the\ndevice being *used*: a client claims it when its user actually types.\nObservers are refused — they never claim the write token.",
+          "properties": {
+            "op": {
+              "const": "claim_writer",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "events": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "subscribe",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "events"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Resumable subscription to a durable host resource (§C.10). `since` is\nthe highest `seq` the client has already applied; omit it on a first\nsubscribe. Requires the `resources` capability.",
+          "properties": {
+            "op": {
+              "const": "subscribe_resource",
+              "type": "string"
+            },
+            "resource": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "since": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "resource"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "op": {
+              "const": "unsubscribe_resource",
+              "type": "string"
+            },
+            "resource": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "resource"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "List directories under a workspace root (§C.12, capability `files`).\nBatched and speculative: a client SHOULD name a rendered directory\ntogether with its visible child dirs. `page` continues one path's\nlisting past the per-page entry cap.",
+          "properties": {
+            "after": {
+              "description": "Resume a directory larger than one page at the entry *after* this\nname — a keyset cursor rather than an offset, so a directory being\nwritten while it is read cannot serve one entry twice and skip\nanother (`files.rs` `list`).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "op": {
+              "const": "fs_list",
+              "type": "string"
+            },
+            "paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "root": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "root",
+            "paths"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Read a file (§C.12, capability `files`). The reply is one `fs_file`\nheader followed by `F` chunks. Without a range the read is capped at\nthe 1 MiB preview budget; `offset`/`length` window the file for the\neditor later.",
+          "properties": {
+            "length": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "offset": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "op": {
+              "const": "fs_read",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Open an upload (§C.12, capability `upload`). `dest` is either a path\nunder `root` (which must then be present) or `temp:<name>` with\n`session` naming whose scratch dir receives it. Re-opening with the\nsame dest, size, and sha256 is idempotent: same id, restarted from 0\n(no resume in v1).",
+          "properties": {
+            "dest": {
+              "type": "string"
+            },
+            "mode": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "op": {
+              "const": "upload_open",
+              "type": "string"
+            },
+            "root": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "session": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sha256": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "op",
+            "dest",
+            "size",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Content search (§C.12, capability `files`): the host walks the root\nitself — ripgrep's searcher over the ignore rules, no subprocess and no\ngit — and streams `search_results` events tagged with this request's `seq`,\nthen closes with one `fs_searched` reply. Cancellable mid-stream with\n`cancel {request: <seq>}`.",
+          "properties": {
+            "limit": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "fs_search",
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "root",
+            "query",
+            "limit"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Replace the daemon's own binary without stopping it (capability\n`handoff`). The host `execve`s `binary`, keeping its pid, its children\nand every PTY master, so no session is lost to the upgrade.\n\n`binary` is the path the *client* wants the host to become, absolute and\non the host's own filesystem — normally the client's own executable,\nbecause the thing that asks for a handoff is the new build that was just\nstaged there. The socket is owner-only, and anyone who can reach it can\nalready ask for a session running anything, so naming an executable here\ngrants nothing that was not already granted.\n\nThe reply is `ok` and it means the host accepted, not that it finished:\nthe exec follows it, and it takes the connection with it. A client\nconfirms by reconnecting and reading the version at the handshake — with\nthe pid unchanged, which is the whole claim.",
+          "properties": {
+            "binary": {
+              "type": "string"
+            },
+            "op": {
+              "const": "handoff",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "binary"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Cancel an in-flight cancellable request on this channel by its request\nid (§C.12 — the ⇧⌘F escape hatch). Idempotent: cancelling what\nalready finished is `ok`, not an error.",
+          "properties": {
+            "op": {
+              "const": "cancel",
+              "type": "string"
+            },
+            "request": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "request"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The `git:` kind's diff verb (§C.13, capability `git`): a unified diff\nfor one path, rendered client-side.",
+          "properties": {
+            "context": {
+              "description": "The `-U` the client wants. A pane that folds unchanged runs into\nexpandable bands needs the whole file, not git's default three lines\nof context; absent means git's default.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "op": {
+              "const": "git_diff",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "staged": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "root",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Commit list (§C.13 read tier, capability `git`) — what the History tab\nshows. `limit` is clamped to the host's cap; `range` narrows the walk to\na revision range (`origin/main..HEAD`), which is what lets the Compare\ntab be composed from this verb plus `git.diff` rather than a verb of its\nown.",
+          "properties": {
+            "limit": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "git_log",
+              "type": "string"
+            },
+            "range": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "root": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "root",
+            "limit"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "One commit's contents and its diff (§C.13 read tier, capability `git`).\n`path` narrows the diff to a single file — the row a History entry\nexpands to — while the file list always describes the whole commit.",
+          "properties": {
+            "commit": {
+              "type": "string"
+            },
+            "op": {
+              "const": "git_show",
+              "type": "string"
+            },
+            "path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "root": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "root",
+            "commit"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The checkout's refs (§C.13 read tier, capability `git`) — the Compare\ntab's base picker in one hop, rather than a `git` per field.",
+          "properties": {
+            "op": {
+              "const": "git_branches",
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "root"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The branch measured against a base (§C.13 read tier, capability `git`):\nthe three-dot file list and how far the base has moved on — the halves\nof the Compare tab that `git.log`'s range cannot compose. `path` narrows\nto one file's ranged diff, the row a compare entry expands to, exactly\nas `git.show`'s `path` does for a commit.",
+          "properties": {
+            "base": {
+              "type": "string"
+            },
+            "op": {
+              "const": "git_compare",
+              "type": "string"
+            },
+            "path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "root": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "root",
+            "base"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Fuzzy filename lookup against the host-side name index (§C.12,\ncapability `files`). The index is built lazily after the workspace's\nfirst `subscribe_resource` and kept incremental by the watcher, so\nreplies carry `coverage` — a client shows \"still indexing\" instead of\nsilently missing files.",
+          "properties": {
+            "limit": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "fs_match",
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "root",
+            "query",
+            "limit"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "if_unmodified_since": {
+              "description": "The version the writer read, for a commit that replaces a file it\nread first (§C.12 save). The host refuses the commit when the\ndestination has moved on, which is what keeps two writers in one\ncheckout — usually a person and an agent — from silently\noverwriting each other. Omitted for a transfer that overwrites\nnothing, like a paste into a scratch directory.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "op": {
+              "const": "upload_commit",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "upload_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "upload_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "op": {
+              "const": "upload_abort",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "upload_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "upload_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "op": {
+              "const": "wait",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "target": {
+              "type": "string"
+            },
+            "timeout_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "until": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "op",
+            "target",
+            "until",
+            "timeout_ms"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Report a session's agent status.\n\nEverything past `title` used to reach only the Mac app's own socket: the\ntranscript address, the `/new` rotation signal, the running tool, and a\nfirst-prompt label are now available wherever the agent runs. All\noptional and additive — an older client ignores what it does not know,\nand a hook with nothing to say omits the field rather than sending an\nempty one.",
+          "properties": {
+            "conversation_id": {
+              "description": "The agent's own id for the conversation it is writing now. Lets a\nclient follow an in-process `/new` rotation without the id having to\nbe encoded in a transcript filename.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "op": {
+              "const": "set_status",
+              "type": "string"
+            },
+            "prompt_title": {
+              "description": "A raw first-prompt title candidate. The client normalizes and bounds\nit; the daemon passes it through untouched.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool": {
+              "description": "The tool a tool-scoped event fired for, so real work can be told from\na prose-only turn.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transcript_path": {
+              "description": "The agent's own conversation log for this session (Claude Code's\n`transcript_path`), so a caller can be handed the address of the raw\nQ&A instead of scraping the screen.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Install termio's agent integration on this box, or remove it\n(capability `agents`).\n\nThe machine that owns the files decides what goes in them: the client\nnames which agents the user enabled — a preference — and the daemon works\nout where each keeps its config, whether its CLI is even here, and what\nto merge. What used to be forty to sixty sequential `ssh` round trips is\nthis one message.\n\nThe client never names a destination. Every path written comes from a\nmanifest this box already has, so the write surface is fixed by the box\nrather than chosen by the caller.",
+          "properties": {
+            "agents": {
+              "description": "The agent ids the user has enabled, or absent for the whole catalog.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "hook_version": {
+              "description": "Version stamped into each hook command, so the first sync after an\nupgrade rewrites the hooks. Absent means this daemon's own version.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "hooks": {
+              "$ref": "#/$defs/HalfAction",
+              "default": "leave",
+              "description": "What to do with each half: install, remove, or leave alone. Stated\nper half because the two Integration switches are independent, and\none message has to stay one message when they disagree."
+            },
+            "op": {
+              "const": "install_agents",
+              "type": "string"
+            },
+            "reporter": {
+              "$ref": "#/$defs/Reporter",
+              "description": "What an installed hook runs to report status. Only the client knows\nwhether an app is listening, and where its CLI copy is."
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "skills": {
+              "$ref": "#/$defs/HalfAction",
+              "default": "leave"
+            }
+          },
+          "required": [
+            "op",
+            "reporter"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Which of these agents' CLIs are present on this box (capability\n`agents`). Read-only, and one round trip for the whole roster.",
+          "properties": {
+            "agents": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "op": {
+              "const": "probe_agents",
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "op": {
+              "const": "ok",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "op": {
+              "const": "created",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "op": {
+              "const": "sessions",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "sessions": {
+              "items": {
+                "$ref": "#/$defs/SessionInfo"
+              },
+              "type": "array"
+            },
+            "tombstones": {
+              "description": "Sessions that have died, newest first (§6). Sent with the live list\nrather than behind a second verb because the question a client is\nasking — \"what is running?\" — has a wrong answer when a daemon crash\nsilently turned it into an empty list. Additive: a client that does\nnot know the field ignores it.",
+              "items": {
+                "$ref": "#/$defs/Tombstone"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "op",
+            "sessions"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "cols": {
+              "default": 80,
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "id": {
+              "description": "v0 response field, retained for byte compatibility.",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "op": {
+              "const": "attached",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "rows": {
+              "default": 24,
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session_id": {
+              "default": "",
+              "description": "Canonical v0.1 field.",
+              "type": "string"
+            },
+            "writer": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "id",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `subscribe_resource`. `seq` is the resource's current cursor —\nwhat to pass back as `since` after a reconnect. `gap` means the client's\nbaseline is unusable and it must do a full scan before applying further\nevents (a first subscribe, or a `since` that aged out of the ring).\nReplayed batches arrive as events *after* this reply, in seq order.",
+          "properties": {
+            "gap": {
+              "default": false,
+              "type": "boolean"
+            },
+            "op": {
+              "const": "subscribed",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "resource": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "op",
+            "resource",
+            "seq"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `fs_list`. `seq` is the `fs:` resource's current cursor at\nlisting time — the freshness proof that lets clients cache listings\nuntil an `fs_changed` batch names the directory (0 when no watch is\nrunning, i.e. nothing will invalidate the cache).",
+          "properties": {
+            "listings": {
+              "items": {
+                "$ref": "#/$defs/PathListing"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "fs_listed",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "op",
+            "seq",
+            "listings"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply header for `fs_read`: `length` bytes from `offset` follow as `F`\nchunks. `truncated` means the served window stopped short of what was\nasked (the 1 MiB soft cap); `size` lets the client ask for the rest.",
+          "properties": {
+            "length": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "mtime": {
+              "default": 0,
+              "description": "The file's modification time in whole seconds — the version this\nread holds. A client that means to write the file back sends it to\n`upload_commit` as `if_unmodified_since`. Absent from a host too old\nto report it, which reads as 0: no version, so no check.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "offset": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "fs_file",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "truncated": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "size",
+            "offset",
+            "length"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Terminal reply to `fs_search`, sent after the last `search_results`\nevent: how many matches streamed and why the stream ended.",
+          "properties": {
+            "canceled": {
+              "default": false,
+              "type": "boolean"
+            },
+            "limit_hit": {
+              "default": false,
+              "type": "boolean"
+            },
+            "matches": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "fs_searched",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "matches"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `git_diff`. `truncated` marks a diff cut at the 1 MiB cap.",
+          "properties": {
+            "diff": {
+              "type": "string"
+            },
+            "op": {
+              "const": "git_diff_result",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "truncated": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "diff"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `git_log`, newest first. `truncated` means the walk stopped at\nthe limit and older commits exist — a client asks for more by raising\n`limit`, never by assuming this was the whole history.",
+          "properties": {
+            "commits": {
+              "items": {
+                "$ref": "#/$defs/GitCommitEntry"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "git_log_result",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "truncated": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "commits"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `git_show`. Two caps, two flags: `truncated` marks the diff cut\nat the 1 MiB cap, `files_truncated` a file list cut at the host's file\ncap. One flag for both would leave a client unable to say which half of\nthe reply it is missing.",
+          "properties": {
+            "commit": {
+              "$ref": "#/$defs/GitCommitEntry"
+            },
+            "diff": {
+              "type": "string"
+            },
+            "files": {
+              "items": {
+                "$ref": "#/$defs/GitCommitFile"
+              },
+              "type": "array"
+            },
+            "files_truncated": {
+              "default": false,
+              "type": "boolean"
+            },
+            "op": {
+              "const": "git_show_result",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "truncated": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "commit",
+            "files",
+            "diff"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `git_branches`. `current` is absent on a detached or unborn\nHEAD, where \"the branch this checkout is on\" has no answer.\n`default_branch` is the remote's own recorded default\n(`refs/remotes/origin/HEAD`) as a remote-tracking name — the base a\nforge would default a pull request to.",
+          "properties": {
+            "branches": {
+              "items": {
+                "$ref": "#/$defs/GitBranchEntry"
+              },
+              "type": "array"
+            },
+            "current": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "default_branch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "op": {
+              "const": "git_branches_result",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "truncated": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "branches"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `git_compare`. `problem` set means no comparison could be made\nand the other fields are empty — stated as its own field rather than an\n`error`, because \"this base is gone\" is an answer about the checkout,\nnot a failed request. `behind` counts commits on the base this branch\nlacks (two-dot, tips apart), while `files` is three-dot from the merge\nbase — the change a merge would introduce.",
+          "properties": {
+            "behind": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "commits": {
+              "default": [],
+              "description": "The commits the merge would bring, newest first — carried here\nrather than composed from a separate `git_log` so the file list,\nthe commits and the behind count all describe one pinned head.",
+              "items": {
+                "$ref": "#/$defs/GitCommitEntry"
+              },
+              "type": "array"
+            },
+            "commits_truncated": {
+              "default": false,
+              "type": "boolean"
+            },
+            "diff": {
+              "type": "string"
+            },
+            "files": {
+              "items": {
+                "$ref": "#/$defs/GitCommitFile"
+              },
+              "type": "array"
+            },
+            "files_truncated": {
+              "default": false,
+              "type": "boolean"
+            },
+            "op": {
+              "const": "git_compare_result",
+              "type": "string"
+            },
+            "problem": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GitCompareProblem"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "truncated": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "files",
+            "diff"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `fs_match`: workspace-relative paths, best first. `coverage`\nis how much of the tree the index has walked (0.0–1.0); the index is\nevictable state, never correctness-bearing.",
+          "properties": {
+            "coverage": {
+              "format": "float",
+              "type": "number"
+            },
+            "op": {
+              "const": "fs_matched",
+              "type": "string"
+            },
+            "paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "paths",
+            "coverage"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `upload_open`. `offset` is where the next chunk should start:\n0 for a fresh upload, and the bytes already landed when this open\nresumed one the daemon still holds. Purely additive — a client that\nignores the field starts at 0, which the daemon reads as \"restart\" and\nserves by rewinding, exactly as it did before resume existed.",
+          "properties": {
+            "offset": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "upload_opened",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "upload_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "upload_id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Credit-of-one grant: `offset` is the total received so far — the next\nchunk the host expects. The client sends chunk N+1 only after the ack\nfor chunk N, which bounds a keystroke's wait on a shared pipe to one\nchunk (§C.12).",
+          "properties": {
+            "offset": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "upload_ack",
+              "type": "string"
+            },
+            "upload_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "upload_id",
+            "offset"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "mtime": {
+              "default": 0,
+              "description": "The version the write produced, in whole seconds. A client saving\nthe same file again sends this back as `if_unmodified_since`;\nwithout it the second save would claim the version the file was\n*opened* at and be refused by its own first write.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "op": {
+              "const": "upload_committed",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `probe_agents`.",
+          "properties": {
+            "agents": {
+              "items": {
+                "$ref": "#/$defs/AgentPresence"
+              },
+              "type": "array"
+            },
+            "op": {
+              "const": "agents_probed",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "agents"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to `install_agents`, one row per agent per kind. Every agent the\nrequest selected appears, including the ones that were refused and the\nones whose dialect this daemon does not write yet: a silent no-op is what\n\"no hooks on the VPS\" looked like, and it is the failure this must not\nhave.",
+          "properties": {
+            "op": {
+              "const": "agents_installed",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "results": {
+              "items": {
+                "$ref": "#/$defs/InstallResult"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "op",
+            "results"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Sent when the attached session's process exits (retained for v0).",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "op": {
+              "const": "exited",
+              "type": "string"
+            },
+            "status": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "op",
+            "id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "exit_status": {
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "op": {
+              "const": "wait_result",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "session": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "timed_out": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "session",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Sent to the client that just took the write token. The name is v0's,\nfrom when the token carried the grid with it; it now says only that this\nattachment may type. Retained because it is the one writer signal a\nclient without the `events` capability receives.",
+          "properties": {
+            "op": {
+              "const": "resize_claim",
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            },
+            "writer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "session"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/ErrorCode",
+              "default": "internal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "op": {
+              "const": "error",
+              "type": "string"
+            },
+            "re": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "retryable": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "op",
+            "message"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "Control"
+    },
+    "event": {
+      "$defs": {
+        "GitFileStatus": {
+          "description": "A file's git status (§C.13): two axes for tracked files, plus\n`untracked | ignored | unmerged {first_head, second_head}` with the\nmerge-conflict path set first-class.",
+          "oneOf": [
+            {
+              "enum": [
+                "untracked",
+                "ignored"
+              ],
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "tracked": {
+                  "properties": {
+                    "index_status": {
+                      "$ref": "#/$defs/GitStatusCode"
+                    },
+                    "worktree_status": {
+                      "$ref": "#/$defs/GitStatusCode"
+                    }
+                  },
+                  "required": [
+                    "index_status",
+                    "worktree_status"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "tracked"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unmerged": {
+                  "properties": {
+                    "first_head": {
+                      "$ref": "#/$defs/GitUnmergedCode"
+                    },
+                    "second_head": {
+                      "$ref": "#/$defs/GitUnmergedCode"
+                    }
+                  },
+                  "required": [
+                    "first_head",
+                    "second_head"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "unmerged"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "GitStatusCode": {
+          "description": "One axis of a tracked file's two-axis status (§C.13). The vocabulary is\nadopted from Zed verbatim — battle-tested and 1:1 with the\nGitHub-Desktop-shaped changes pane.",
+          "enum": [
+            "unmodified",
+            "modified",
+            "type_changed",
+            "added",
+            "deleted",
+            "renamed",
+            "copied"
+          ],
+          "type": "string"
+        },
+        "GitStatusEntry": {
+          "description": "One changed path in a `git_changed` batch (§C.13).\n\nThe line counts ride the status rather than waiting for a diff, because the\nrow that shows the path shows `+N −M` beside it — a client that had to ask\nper file would need one round trip per row to draw one list. Zed carries the\nsame numbers on the same message (`git.proto` `StatusEntry.diff_stat_added`),\nfor the same reason.",
+          "properties": {
+            "additions": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "binary": {
+              "description": "The counts are not numbers for this file — git reported `-`, or it is an\nuntracked file that sniffs as binary. `+0 −0` would be a lie, not a zero.",
+              "type": "boolean"
+            },
+            "deletions": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "original_path": {
+              "description": "Where a renamed file came from, for the row that says `old → new`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/GitFileStatus"
+            }
+          },
+          "required": [
+            "path",
+            "status"
+          ],
+          "type": "object"
+        },
+        "GitUnmergedCode": {
+          "enum": [
+            "updated",
+            "added",
+            "deleted"
+          ],
+          "type": "string"
+        },
+        "SearchMatch": {
+          "description": "One `fs.search` hit (§C.12): workspace-relative path, 1-based line, the\nmatching line's text.",
+          "properties": {
+            "after": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "before": {
+              "description": "The lines just before and after, for an excerpt. Capped by the host; a\nclient that wants only the matching line ignores them.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "line": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            },
+            "spans": {
+              "description": "Where the query matched inside `text`, as byte ranges. Produced by the\nsame case rule that decided the line matched at all, so a client paints\nhits instead of re-deriving them with a second, differently-behaved\nmatcher. Empty from a host too old to report them.",
+              "items": {
+                "items": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "text": {
+              "description": "The matching line, or a window of it when the line is long. `text_offset`\nsays where the window starts, so a client can show that it was cut.",
+              "type": "string"
+            },
+            "text_offset": {
+              "description": "Byte offset of `text` within the real line. Non-zero only for a windowed\nlong line, and always chosen so the first match is inside the window —\ntruncating from the left would send a line with the match cut off it,\nwhich no client can highlight.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "path",
+            "line",
+            "text"
+          ],
+          "type": "object"
+        },
+        "SessionInfo": {
+          "description": "A row in `termiod list`.",
+          "properties": {
+            "agent_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "alive": {
+              "type": "boolean"
+            },
+            "attached_clients": {
+              "default": 0,
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "child_cwd": {
+              "description": "The child's *current* directory, which `cd` moves and `cwd` (the\ndirectory the session was created in) does not.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "child_executable": {
+              "description": "The binary the child is running, as the kernel resolved it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "child_executable_replaced": {
+              "description": "Whether that binary has been replaced on disk since it was pinned — an\nagent that updated itself and quit, told apart from one that just quit.",
+              "type": "boolean"
+            },
+            "clients": {
+              "description": "v0 field retained for old consumers.",
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "command": {
+              "type": "string"
+            },
+            "created_unix": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "foreground_argv": {
+              "description": "Argv of that process — the agent's identity, read from the kernel rather\nthan scraped off the screen.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "foreground_job": {
+              "description": "Whether something other than the session's own child holds the\nforeground, i.e. a command is running rather than a shell idling at its\nprompt. This is the signal a client keys \"closing this loses work\" off.\n\nDerived from the foreground *process group*, not from `foreground_pid`:\na pipeline whose leader has already exited is still a running job, and\ncomparing the surviving member's pid against the shell would say so\ntwice over — but comparing a *missing* one would say the opposite.",
+              "type": "boolean"
+            },
+            "foreground_pid": {
+              "description": "The live process inside the tty's foreground process group whose argv is\nreported below. This is the program the user is talking to, which after\nthe first minute of a session is rarely the one in `command`.\n\nA pid, not the process group id. The two agree whenever the group leader\nis still running, which is every simple command; they part in a pipeline\nwhose leader has exited while a later stage still runs.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "pid": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "project": {
+              "default": null,
+              "description": "The workstream's project root. A client attached straight to this host\nhas no other source for it, and without it the roster is a flat list of\nsessions with nothing to group them under.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "status": {
+              "default": "unknown",
+              "type": "string"
+            },
+            "title": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "writer_client_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "cwd",
+            "command",
+            "pid",
+            "rows",
+            "cols",
+            "clients",
+            "created_unix",
+            "alive"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "Event-plane messages. Unknown event types are ignored additively.",
+      "oneOf": [
+        {
+          "properties": {
+            "ev": {
+              "const": "ready",
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ev",
+            "session"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A session's agent status changed.\n\nQueued into the session's own per-client channel, the same FIFO its `D`\ndata goes through, so it cannot overtake output the daemon has already\nread and needs no sequence number. (`SetStatus.seq` is a request id, not\nan ordering token.) What no token could fix is upstream: an agent may run\nits hook before the daemon has read the bytes it just wrote. That race is\nbounded by one read, so `working` arriving a few milliseconds early is\nnot worth a buffering client.",
+          "properties": {
+            "blocking": {
+              "default": false,
+              "description": "The session is blocked on a person, from an observable condition with\na matching resolved transition — not a one-shot bell. A viewer keeps\nthe dot through a selection change, because reading a permission\nprompt is not answering it.\n\nAlways serialized, unlike the other additive fields: absent means an\nolder daemon, and every `needs_you` such a daemon sent was blocking.\nA client reads a missing field as `true`, so the field can only ever\n*narrow* the claim — which is what makes it safe to add.",
+              "type": "boolean"
+            },
+            "conversation_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ev": {
+              "const": "status",
+              "type": "string"
+            },
+            "prompt_title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "session": {
+              "type": "string"
+            },
+            "source": {
+              "description": "Which channel produced this status: `hook`, `title`, `progress`,\n`screen`, or `streak`. Additive, and absent from an older daemon —\nwhich a client reads as `hook`, because that is the only channel an\nolder daemon had.\n\nA client needs it for exactly one decision: `done` from a hook is the\nagent's own word and reads `done` everywhere, while a turn this host\nconcluded on its own is judged against the viewer's own selection\n(§3.3 of the retirement RFC). Nothing else about presentation is\ncarried here.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transcript_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "turn_ended": {
+              "description": "This status is the end of a turn that the host derived rather than\nwas told about. The one bit a viewer needs to apply its own focus.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ev",
+            "session",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A session has been working for a full window with no sign of progress\n(device architecture §4.7). Watch-plane only: the session's status stays\n`working`, because from outside an agent a quiet long build and a wedged\nloop are indistinguishable — which is exactly why this plane signals and\nnever kills. Edge-triggered: one event per quiet window, re-armed by\nprogress.",
+          "properties": {
+            "ev": {
+              "const": "stalled",
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            },
+            "transcript_lines_grown": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "working_seconds": {
+              "description": "How long the turn has been running, for the evidence line a client\nwords itself.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ev",
+            "session",
+            "working_seconds",
+            "transcript_lines_grown"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "ev": {
+              "const": "writer_changed",
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            },
+            "writer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "ev",
+            "session"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "ev": {
+              "const": "resized",
+              "type": "string"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ev",
+            "session",
+            "rows",
+            "cols"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "ev": {
+              "const": "session_exited",
+              "type": "string"
+            },
+            "info": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The session's last `SessionInfo`, sampled after the child was reaped\nand carried on the event so the answer travels with the news. Nobody\ncan ask for it afterwards: the session actor stops the moment this is\nsent, and `list` no longer has a row. It always reports\n`alive: false`, and `child_executable_replaced` is evaluated at exit\ntime — the whole reason the record has to be built here rather than\nreconstructed from an earlier poll.\n\nOptional because an old daemon does not send it. A client that finds\nit absent keeps whatever it last read from `list`, which is exactly\ntoday's behaviour."
+            },
+            "session": {
+              "type": "string"
+            },
+            "status": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ev",
+            "session",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "This attachment's stream was cut and restarted at a fresh boundary. It\narrives after the `S`/`ready` pair that re-establishes JOIN, and it means\nthe bytes between the previous boundary and this one were never\ndelivered — the screen is right, but nothing scrolled past is recoverable.",
+          "properties": {
+            "ev": {
+              "const": "resynced",
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ev",
+            "session",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The host's VT no longer describes any boundary in this session's output,\nso it can no longer answer a snapshot. Attach and resync fall back to\nring replay, which can open mid-escape.",
+          "properties": {
+            "ev": {
+              "const": "vt_stale",
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ev",
+            "session",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A filesystem batch for an `fs:` resource (§C.10). `seq` is monotonic per\nresource and is what a reconnecting client passes back as `since`.\n`full_rescan` means the path set is not authoritative — re-walk what is\nrealized. `git_meta` means index/HEAD/refs moved; object-store churn is\ndropped host-side and never appears here.",
+          "properties": {
+            "ev": {
+              "const": "fs_changed",
+              "type": "string"
+            },
+            "full_rescan": {
+              "default": false,
+              "type": "boolean"
+            },
+            "git_meta": {
+              "default": false,
+              "type": "boolean"
+            },
+            "paths": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "resource": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ev",
+            "resource",
+            "seq"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A batch of `fs.search` hits (§C.12), addressed to the requesting\nconnection alone. `request` echoes the `fs_search` seq so several\nsearches can share one channel.",
+          "properties": {
+            "ev": {
+              "const": "search_results",
+              "type": "string"
+            },
+            "matches": {
+              "items": {
+                "$ref": "#/$defs/SearchMatch"
+              },
+              "type": "array"
+            },
+            "request": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ev",
+            "request",
+            "matches"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A status delta for the `status:` resource — the third consumer of\n§C.10's one mechanism, and the one whose producer is the host's own\nstatus engine rather than a filesystem watch.\n\nCarries the same facts as `Event::Status` plus the cursor. Both exist on\npurpose: the event is how an attached client hears about its *own*\nsession without a second subscription; the resource is how a roster\nhears about every session and can resume at a cursor after a reconnect.",
+          "properties": {
+            "blocking": {
+              "type": "boolean"
+            },
+            "ev": {
+              "const": "status_changed",
+              "type": "string"
+            },
+            "resource": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session": {
+              "type": "string"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stalled_transcript_lines_grown": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "stalled_working_seconds": {
+              "description": "Present only on the one `stalled` signal per quiet window.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "turn_ended": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ev",
+            "resource",
+            "seq",
+            "session",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A status delta for a `git:` resource (§C.13) — the second consumer of\n§C.10's one mechanism. `updated_statuses` and `removed_paths` are a\ndelta against the subscriber's baseline; branch metadata rides along\nwhole so clients never merge it.",
+          "properties": {
+            "ahead_behind": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              ],
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "branch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "conflicts": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "ev": {
+              "const": "git_changed",
+              "type": "string"
+            },
+            "head": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "removed_paths": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "resource": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "total": {
+              "description": "How many paths the status run named, when the list was cut below\nthat (`git::STATUS_CAP`) — a batch is one frame, and an uncapped\n`--untracked-files=all` over a tree with no `.gitignore` would\nexceed `MAX_FRAME_SIZE` and take the whole connection with it.\nCarried so a partial list cannot read as a complete one, and so the\npane can say how much of it is missing.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "updated_statuses": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/GitStatusEntry"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "ev",
+            "resource",
+            "seq"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Roster delta used by control-channel `subscribe`.",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "ev": {
+              "const": "roster",
+              "type": "string"
+            },
+            "info": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ev",
+            "session",
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "ev": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ev"
+          ],
+          "type": "object"
+        }
+      ],
+      "title": "Event"
+    }
+  },
+  "supported_protocols": [
+    1
+  ],
+  "title": "Termio Session Protocol"
+}
