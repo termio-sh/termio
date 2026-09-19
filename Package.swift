@@ -71,6 +71,11 @@ let package = Package(
                 // by `MarkdownReaderRenderer`. `.process` flattens the woff2s to the
                 // bundle root, where the name-based lookup expects them.
                 .process("Resources/Fonts"),
+                // The faces Excalidraw sets a drawing's text in, embedded into the
+                // preview page as base64 @font-face by `ExcalidrawReaderRenderer`.
+                // `.process` flattens them to the bundle root, where the manifest's
+                // name-based lookup expects them; see the folder's README.md.
+                .process("Resources/ExcalidrawFonts"),
                 .copy("Resources/agents"),
                 .copy("Resources/terminal.json"),
                 // UI strings: per-language .lproj folders generated from the String

@@ -127,6 +127,12 @@ struct FileEditorView: View {
     /// `load()` alongside the file read: the walk-up-for-`.git` is filesystem work, and this
     /// init re-runs on every parent render.
     @State private var relativePath: String?
+    /// The file's raw bytes, held only for a drawing — it renders from what is on disk, and
+    /// a scene embedded in a PNG has no text face to render from at all.
+    @State private var fileData: Data?
+    /// Whether the file decoded as UTF-8, and so has a source face. False only for a
+    /// drawing embedded in a PNG; every other file that reaches here is text.
+    @State private var hasTextSource = true
 
     init(url: URL, settings: AppSettings, readOnly: Bool = false, jumpLine: Int? = nil,
          displayName: String? = nil,
@@ -157,7 +163,8 @@ struct FileEditorView: View {
         // The actual load (and the git-root walk) happens once, in `.task`.
         // A jump-to-line open (content-search hit, cmd-click) targets the *source*, so it
         // must land in Edit — Preview has no lines to jump to and would swallow the scroll.
-        _mode = State(initialValue: Self.isMarkdown(displayURL) && jumpLine == nil ? .preview : .edit)
+        let previews = Self.isMarkdown(displayURL) || ExcalidrawRenderer.isDrawing(displayURL)
+        _mode = State(initialValue: previews && jumpLine == nil ? .preview : .edit)
         self.language = Self.highlightLanguage(for: displayURL)
     }
     private var fileName: String { displayName ?? url.lastPathComponent }
@@ -168,6 +175,10 @@ struct FileEditorView: View {
         ["md", "markdown", "mdx"].contains(url.pathExtension.lowercased())
     }
     private var isMarkdown: Bool { Self.isMarkdown(displayURL) }
+    /// Excalidraw drawings get the same Edit/Preview toggle, defaulting to the picture.
+    private var isDrawing: Bool { ExcalidrawRenderer.isDrawing(displayURL) }
+    /// Whether this file has a Preview face at all.
+    private var hasPreview: Bool { isMarkdown || isDrawing }
 
     private var isDirty: Bool { text != savedText }
 
@@ -297,9 +308,19 @@ struct FileEditorView: View {
     /// here is a structural branch, so SwiftUI rebuilt one side on every flip — a fresh `WKWebView`
     /// and page load one way, a whole-document re-highlight and TextKit re-layout the other.
     @ViewBuilder private var editorContent: some View {
-        let showsReader = isMarkdown && mode == .preview
+        let showsReader = hasPreview && mode == .preview
         ZStack {
-            if mountedReader {
+            if isDrawing {
+                // The drawing renders from the bytes on disk rather than the buffer, so it
+                // has no reason to stay mounted behind the source the way Markdown does.
+                if showsReader, let fileData {
+                    ExcalidrawReaderView(
+                        data: fileData, settings: settings, colorScheme: colorScheme,
+                        isActive: true
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else if mountedReader {
                 // `previewSource`, not `text`: a reader that outlives its own visibility would
                 // re-render the whole document into a hidden web view on every keystroke.
                 MarkdownReaderView(
@@ -314,7 +335,7 @@ struct FileEditorView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(showsReader)
             }
-            if mountedEditor {
+            if mountedEditor, hasTextSource {
                 sourceEditor(isActive: !showsReader)
                     .allowsHitTesting(!showsReader)
             }
@@ -325,7 +346,9 @@ struct FileEditorView: View {
     /// it, so typing in Edit never renders a document nobody is looking at.
     private func activateMode() {
         guard loaded else { return }
-        if isMarkdown && mode == .preview {
+        if isDrawing {
+            if mode == .edit { mountedEditor = true }
+        } else if isMarkdown && mode == .preview {
             previewSource = text
             mountedReader = true
         } else {
@@ -436,8 +459,10 @@ struct FileEditorView: View {
                     .lineLimit(1)
             }
             Spacer()
-            // Markdown reads as a document by default; the toggle keeps the source one click away.
-            if isMarkdown {
+            // Markdown and drawings read as documents by default; the toggle keeps the
+            // source one click away — unless there is no source to show, which is the case
+            // for a drawing embedded in a PNG.
+            if hasPreview, hasTextSource {
                 modeToggle
             }
             // The content-area window controls (hide list / maximize / close) ride the header's
@@ -627,7 +652,8 @@ struct FileEditorView: View {
     /// also flip `highlightDisabled` so the editor renders them as plain text.
     private func load() async {
         let url = url
-        let result: (text: String?, bytes: Int, relativePath: String?) =
+        let isDrawing = self.isDrawing
+        let result: (text: String?, data: Data?, bytes: Int, relativePath: String?) =
             await Task.detached(priority: .userInitiated) {
                 // The repo-relative header path rides the same background hop as the read:
                 // GitRoot walks ancestors with filesystem checks, which stalls on network mounts.
@@ -635,12 +661,24 @@ struct FileEditorView: View {
                 let relative = GitRoot.find(for: file).map {
                     String(file.path.dropFirst($0.path.count + 1))
                 }
-                guard let data = try? Data(contentsOf: url) else { return (nil, 0, relative) }
-                return (String(data: data, encoding: .utf8), data.count, relative)
+                guard let data = try? Data(contentsOf: url) else { return (nil, nil, 0, relative) }
+                // A drawing keeps its bytes: that is what the renderer decodes, and for a
+                // scene embedded in a PNG they are the only readable form of the file.
+                return (String(data: data, encoding: .utf8), isDrawing ? data : nil,
+                        data.count, relative)
             }.value
         relativePath = result.relativePath
+        fileData = result.data
+        // A drawing that isn't UTF-8 is a PNG with a scene in it, not a file termio failed
+        // to open — it previews, it just has no source face behind the toggle.
+        hasTextSource = result.text != nil
         guard let contents = result.text else {
-            loadFailed = true
+            if isDrawing, result.data != nil {
+                mode = .preview
+                loaded = true
+            } else {
+                loadFailed = true
+            }
             return
         }
         highlightDisabled = result.bytes >= Self.highlightByteLimit
