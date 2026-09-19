@@ -163,7 +163,7 @@ struct FileEditorView: View {
         // The actual load (and the git-root walk) happens once, in `.task`.
         // A jump-to-line open (content-search hit, cmd-click) targets the *source*, so it
         // must land in Edit — Preview has no lines to jump to and would swallow the scroll.
-        let previews = Self.isMarkdown(displayURL) || ExcalidrawRenderer.isDrawing(displayURL)
+        let previews = Self.isMarkdown(displayURL) || ExcalidrawCanvasView.isDrawing(displayURL)
         _mode = State(initialValue: previews && jumpLine == nil ? .preview : .edit)
         self.language = Self.highlightLanguage(for: displayURL)
     }
@@ -176,11 +176,14 @@ struct FileEditorView: View {
     }
     private var isMarkdown: Bool { Self.isMarkdown(displayURL) }
     /// Excalidraw drawings get the same Edit/Preview toggle, defaulting to the picture.
-    private var isDrawing: Bool { ExcalidrawRenderer.isDrawing(displayURL) }
+    private var isDrawing: Bool { ExcalidrawCanvasView.isDrawing(displayURL) }
     /// Whether this file has a Preview face at all.
     private var hasPreview: Bool { isMarkdown || isDrawing }
 
-    private var isDirty: Bool { text != savedText }
+    /// The canvas writes the file itself, so its unsaved window is reported rather than
+    /// derived from the text buffer — which a drawing never goes through.
+    @State private var canvasDirty = false
+    private var isDirty: Bool { text != savedText || canvasDirty }
 
     /// The editor font, borrowed from the terminal so an opened file reads in the same face the
     /// agent's output does. Falls back to the system monospace when no family is pinned.
@@ -273,7 +276,7 @@ struct FileEditorView: View {
         // Auto-save: debounce a write after each edit; Escape closes (flushing first). A read-only
         // peek never writes, so neither the debounce nor the exit flush is armed.
         .onChange(of: text) {
-            if !readOnly { scheduleSave() }
+            if !readOnly, !isDrawing { scheduleSave() }
         }
         // Both directions, and from the first render: a save clears the flag as
         // surely as a keystroke sets it, and the mount is what resets whatever
@@ -311,12 +314,18 @@ struct FileEditorView: View {
         let showsReader = hasPreview && mode == .preview
         ZStack {
             if isDrawing {
-                // The drawing renders from the bytes on disk rather than the buffer, so it
-                // has no reason to stay mounted behind the source the way Markdown does.
+                // Mounted only while it shows: the canvas is a full editor in a web view,
+                // and it writes the file itself, so there is nothing to keep alive behind
+                // the source the way the Markdown reader's rendered page is.
                 if showsReader, let fileData {
-                    ExcalidrawReaderView(
-                        data: fileData, settings: settings, colorScheme: colorScheme,
-                        isActive: true
+                    ExcalidrawCanvasView(
+                        fileURL: url,
+                        data: fileData,
+                        readOnly: readOnly,
+                        settings: settings,
+                        colorScheme: colorScheme,
+                        onDirtyChange: { canvasDirty = $0 },
+                        onError: { saveError = localized("Save failed: \($0)") }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -372,7 +381,9 @@ struct FileEditorView: View {
                 currentLineColor: currentLineColor,
                 occurrenceHighlightColor: occurrenceHighlightColor,
                 indentGuideColor: indentGuideColor,
-                isEditable: !readOnly,
+                // A drawing's source is shown to be read, not edited: the canvas is the
+                // writer, and a second one would race it for the same file.
+                isEditable: !readOnly && !isDrawing,
                 jumpToLine: jumpLine,
                 findQuery: findBarVisible ? findQuery : "",
                 findOptions: findOptions,
@@ -494,8 +505,10 @@ struct FileEditorView: View {
     /// track to sit on over termio's transparent chrome.
     private var modeToggle: some View {
         HStack(spacing: 0) {
-            modeSegment(.edit, icon: .edit, help: localized("Edit source"))
-            modeSegment(.preview, icon: .view, help: localized("Preview"))
+            modeSegment(.edit, icon: .edit,
+                        help: isDrawing ? localized("Show source") : localized("Edit source"))
+            modeSegment(.preview, icon: .view,
+                        help: isDrawing ? localized("Canvas") : localized("Preview"))
         }
         .background { modePill }
         .padding(2)
@@ -690,7 +703,7 @@ struct FileEditorView: View {
     /// Writes the buffer to disk if it differs from what's already there. The single place a save
     /// happens, shared by the debounce, the close button, and the disappear safety net.
     private func writeIfNeeded() {
-        guard !readOnly, loaded, text != savedText else { return }
+        guard !readOnly, !isDrawing, loaded, text != savedText else { return }
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
             saveError = nil

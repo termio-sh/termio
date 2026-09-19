@@ -21,88 +21,193 @@ it, so both are stubbed at build time, taking the bundle from 8.2MB to 2.9MB.
 
 ```sh
 npm i @excalidraw/excalidraw@0.18.1 react react-dom esbuild
-esbuild entry.js --bundle --format=iife --minify \
+esbuild entry.jsx --bundle --format=iife --minify \
   --define:process.env.NODE_ENV='"production"' --outfile=excalidraw-render.js
 ```
 
 `entry.js` is the whole of the termio-side source:
 
-```js
-import { exportToSvg, loadFromBlob } from "@excalidraw/excalidraw";
+```jsx
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  Excalidraw, exportToBlob, exportToSvg, loadFromBlob, loadLibraryFromBlob,
+  serializeAsJSON, serializeLibraryAsJSON, THEME,
+} from "@excalidraw/excalidraw";
+import "./node_modules/@excalidraw/excalidraw/dist/prod/index.css";
 
-// A drawing ships in one of three containers: the scene as JSON, embedded in an
-// SVG's <metadata>, or in a PNG's tEXt chunk. Which one is decided by sniffing the
-// bytes, not by the file's extension — `.excalidraw` is conventional, not enforced,
-// and feeding one container's bytes to another's decoder is pathologically slow
-// (a 145KB PNG offered to the JSON and SVG decoders takes ~40s to be rejected).
-function containersFor(bytes) {
-  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
-    return ["image/png"];
-  }
-  // Text, so it is JSON or SVG; the first non-space character says which. The other
-  // is kept as a fallback only because both are cheap to reject.
-  const head = new TextDecoder().decode(bytes.subarray(0, 512)).trimStart();
-  return head.startsWith("<")
-    ? ["image/svg+xml", "application/json"]
-    : ["application/json", "image/svg+xml"];
-}
+// ---------------------------------------------------------------- containers
 
-// Nothing but whitespace — the file `touch` or a New File command leaves behind. It is a
-// drawing with no elements yet, not a file that failed to decode, so it never reaches a
-// decoder (which would reject it) and resolves to an empty scene instead.
-function isBlank(bytes) {
-  for (let i = 0; i < bytes.length; i++) {
-    if (bytes[i] > 0x20) return false;
-  }
-  return true;
-}
+const JSON_TYPE = "application/json";
+const SVG_TYPE = "image/svg+xml";
+const PNG_TYPE = "image/png";
 
-async function loadScene(base64) {
+function bytesFromBase64(base64) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  if (isBlank(bytes)) return { elements: [] };
+  return bytes;
+}
+
+function base64FromBytes(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+// Nothing but whitespace — the file a New File command leaves behind. An empty drawing,
+// not a file that failed to decode, so it never reaches a decoder (which would reject it).
+function isBlank(bytes) {
+  for (let i = 0; i < bytes.length; i++) if (bytes[i] > 0x20) return false;
+  return true;
+}
+
+// Which container these bytes are, decided by sniffing rather than by the file's
+// extension: `.excalidraw` is conventional, not enforced, and feeding one container's
+// bytes to another's decoder is pathologically slow (a 145KB PNG offered to the JSON and
+// SVG decoders takes ~40s to be rejected).
+function containersFor(bytes) {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return [PNG_TYPE];
+  }
+  const head = new TextDecoder().decode(bytes.subarray(0, 512)).trimStart();
+  return head.startsWith("<") ? [SVG_TYPE, JSON_TYPE] : [JSON_TYPE, SVG_TYPE];
+}
+
+/// Decodes a file into `{ scene, container }`. `container` is what the bytes turned out to
+/// be, so a save can write the same shape back rather than silently converting the file.
+async function loadScene(base64, declaredContainer) {
+  const bytes = bytesFromBase64(base64);
+  if (isBlank(bytes)) return { scene: { elements: [] }, container: declaredContainer || JSON_TYPE };
   let lastError;
-  for (const type of containersFor(bytes)) {
+  for (const container of containersFor(bytes)) {
     try {
-      const body = type === "image/png" ? bytes : new TextDecoder().decode(bytes);
-      return await loadFromBlob(new Blob([body], { type }), null, null);
+      const body = container === PNG_TYPE ? bytes : new TextDecoder().decode(bytes);
+      const scene = await loadFromBlob(new Blob([body], { type: container }), null, null);
+      return { scene, container };
     } catch (error) { lastError = error; }
   }
   throw new Error(lastError ? lastError.message : "no excalidraw scene in this file");
 }
 
-// Returns `{ empty }` for a drawing with nothing in it and `{ empty: false, svg }`
-// otherwise; a file that holds no scene at all throws, and the host shows it as source.
-// The distinction is the host's to render: an empty drawing is a normal state, a file that
-// won't decode is not, and `exportToSvg` on no elements returns only a padding-sized box
-// that would read as a broken render.
-window.termioRenderExcalidraw = async (base64, options) => {
-  const scene = await loadScene(base64);
-  const elements = (scene.elements || []).filter((element) => !element.isDeleted);
-  if (elements.length === 0) return { empty: true };
-  const svg = await exportToSvg({
-    elements,
-    appState: {
-      ...(scene.appState || {}),
-      // No background rect: the page behind the drawing is already the app's canvas, and
-      // in dark mode Excalidraw's theme filter (`invert(93%) hue-rotate(180deg)`) is
-      // applied to the whole SVG — so a background painted here would be inverted back
-      // to a light grey slab sitting on a dark page.
-      exportBackground: false,
-      exportWithDarkMode: !!options.dark,
-      exportEmbedScene: false,
+/// Serializes a scene back into the container it was read from, so editing a
+/// `.excalidraw.png` keeps producing a PNG with the scene embedded in it.
+async function saveScene({ elements, appState, files, container }) {
+  const live = elements.filter((element) => !element.isDeleted);
+  if (container === SVG_TYPE) {
+    const svg = await exportToSvg({
+      elements: live, appState: { ...appState, exportEmbedScene: true }, files,
+      // Excalidraw inlines fonts by subsetting them in a module Web Worker loaded from
+      // its asset path. A single-file bundle has no such chunk, so that await never
+      // settles — the host splices the bundled faces into the exported SVG instead.
+      skipInliningFonts: true,
+    });
+    return base64FromBytes(new TextEncoder().encode(svg.outerHTML));
+  }
+  if (container === PNG_TYPE) {
+    const blob = await exportToBlob({
+      elements: live, appState: { ...appState, exportEmbedScene: true }, files,
+      getDimensions: (width, height) => ({ width: width * 2, height: height * 2, scale: 2 }),
+    });
+    return base64FromBytes(new Uint8Array(await blob.arrayBuffer()));
+  }
+  return base64FromBytes(new TextEncoder().encode(
+    serializeAsJSON(live, appState, files || {}, "local")));
+}
+
+// -------------------------------------------------------------- the canvas
+
+function host(message) {
+  window.webkit?.messageHandlers?.termioExcalidraw?.postMessage(message);
+}
+
+/// A cheap identity for "the drawing as it stands". Excalidraw bumps an element's
+/// `version` on every mutation, so the sum plus the count changes whenever the picture
+/// does and not when only the selection or the pointer moves.
+function sceneVersion(elements) {
+  let sum = 0;
+  for (const element of elements) sum += element.version;
+  return elements.length + ":" + sum;
+}
+
+function Canvas({ initial, container, dark, readOnly, libraryItems }) {
+  const [api, setApi] = useState(null);
+  const saving = useRef(null);
+  // Seeded from the scene as loaded, so mounting is not itself a change. Excalidraw
+  // normalizes a scene on load (and `scrollToContent` fires onChange), which would
+  // otherwise write the file just for having opened it.
+  const lastVersion = useRef(sceneVersion(initial.elements || []));
+
+  useEffect(() => { host({ type: "ready" }); }, []);
+
+  // Excalidraw fires onChange for pointer moves and selection too, so the scene is
+  // serialized only when the elements actually changed, and never more than once every
+  // 400ms — writing a file on every frame of a drag would thrash the disk.
+  const onChange = useCallback((elements, appState, files) => {
+    if (readOnly) return;
+    const version = sceneVersion(elements);
+    if (version === lastVersion.current) return;
+    lastVersion.current = version;
+    clearTimeout(saving.current);
+    saving.current = setTimeout(async () => {
+      try {
+        host({ type: "change", scene: await saveScene({ elements, appState, files, container }) });
+      } catch (error) {
+        host({ type: "error", message: String(error && error.message) });
+      }
+    }, 400);
+  }, [container, readOnly]);
+
+  useEffect(() => {
+    window.termioExcalidrawSetTheme = (isDark) =>
+      api?.updateScene({ appState: { theme: isDark ? THEME.DARK : THEME.LIGHT } });
+    return () => { delete window.termioExcalidrawSetTheme; };
+  }, [api]);
+
+  return React.createElement(Excalidraw, {
+    excalidrawAPI: setApi,
+    initialData: { ...initial, libraryItems, scrollToContent: true },
+    theme: dark ? THEME.DARK : THEME.LIGHT,
+    viewModeEnabled: readOnly,
+    // No scene loading or saving from inside the canvas: the file on disk is the
+    // document, and termio owns reading and writing it.
+    UIOptions: { canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: false } },
+    onChange,
+    // The shape library is a personal collection, so it lives in a file the host owns
+    // rather than in this web view's storage, which a rebuild would wipe.
+    onLibraryChange: (items) => host({ type: "library", library: serializeLibraryAsJSON(items) }),
+    // An element's link is somebody else's URL. It goes to the host, which decides
+    // whether it opens a sibling file or the browser; the canvas never navigates.
+    onLinkOpen: (element, event) => {
+      host({ type: "link", url: element.link });
+      event.preventDefault();
     },
-    files: scene.files || {},
-    exportPadding: 24,
-    // Declared once by the page that shows the result instead: inlining awaits a font
-    // fetch that never resolves offline, and would repeat woff2 in every drawing.
-    skipInliningFonts: true,
-    // An embeddable element carries a third-party URL. Rendering it would put a live
-    // iframe in a page that shows somebody else's file; it draws as a placeholder.
-    renderEmbeddables: false,
   });
-  return { empty: false, svg: svg.outerHTML };
+}
+
+async function loadLibrary(json) {
+  if (!json) return [];
+  try {
+    return await loadLibraryFromBlob(new Blob([json], { type: JSON_TYPE }));
+  } catch (error) {
+    // A library that won't parse is not a reason to refuse to open the drawing.
+    host({ type: "error", message: `library: ${error && error.message}` });
+    return [];
+  }
+}
+
+window.termioExcalidrawMount = async (options) => {
+  const root = document.getElementById("root");
+  try {
+    const { scene, container } = await loadScene(options.scene, options.container);
+    createRoot(root).render(React.createElement(Canvas, {
+      initial: scene, container, dark: !!options.dark, readOnly: !!options.readOnly,
+      libraryItems: await loadLibrary(options.library),
+    }));
+    return { ok: true, container };
+  } catch (error) {
+    return { ok: false, message: String(error && error.message) };
+  }
 };
 ```
 

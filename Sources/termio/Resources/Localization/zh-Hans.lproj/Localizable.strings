@@ -890,6 +890,8 @@
 	<string>没有可运行的命令。</string>
 	<key>No description provided.</key>
 	<string>未提供描述。</string>
+	<key>No drawing in this file.</key>
+	<string>这个文件里没有图。</string>
 	<key>No file changes</key>
 	<string>没有文件更改</string>
 	<key>No hosts yet — add one, or write a Host block in ~/.ssh/config.</key>
@@ -1512,6 +1514,8 @@
 	<string>该设备上的 termiod 版本过旧，无法查询其 Agent。</string>
 	<key>This diff is too large to show here — open the file on GitHub.</key>
 	<string>此差异太大，无法在此显示，请在 GitHub 上打开该文件。</string>
+	<key>This drawing is empty.</key>
+	<string>这幅图是空的。</string>
 	<key>This file is binary — open it on GitHub to view.</key>
 	<string>此文件为二进制文件，请在 GitHub 上打开查看。</string>
 	<key>This folder has no git “origin” remote to clone.</key>

@@ -11,7 +11,7 @@ enum FileActivation {
         // four shapes it writes end in `.svg`/`.png` with the scene embedded inside, and
         // Quick Look would show the exported picture instead of the drawing termio renders
         // at the app's theme. They route to the editor overlay's Preview face instead.
-        guard !ExcalidrawRenderer.isDrawing(url) else { return false }
+        guard !ExcalidrawCanvasView.isDrawing(url) else { return false }
         return previewExtensions.contains(url.pathExtension.lowercased())
     }
 
@@ -28,7 +28,7 @@ enum FileActivation {
         // A drawing's diff is a wall of scene JSON, or — when it ships as a PNG — not text
         // at all. Either way the picture is the readable form, so the Changes pane opens
         // the file rather than the diff, exactly as it does for an image.
-        if ExcalidrawRenderer.isDrawing(url) { return true }
+        if ExcalidrawCanvasView.isDrawing(url) { return true }
         guard isPreviewable(url) else { return false }
         let ext = url.pathExtension.lowercased()
         return ext != "html" && ext != "htm"
