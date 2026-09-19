@@ -28,10 +28,22 @@ enum ExcalidrawReaderRenderer {
         """
     }
 
+    /// The page shown when a drawing has nothing in it yet — a file a New File command just
+    /// made, or one whose elements were all deleted. A normal state, so it says what is
+    /// true and nothing more; it is deliberately not the failure page, which claims
+    /// something is wrong with the file.
+    static func emptyDocument(theme: DocumentTheme) -> String {
+        message(localized("This drawing is empty."), theme: theme)
+    }
+
     /// The page shown when a file that should hold a drawing doesn't — the bytes decode to
     /// no scene, or the engine failed to load. Says so in the reader's own voice rather
-    /// than leaving an empty canvas; the source is a flip away.
+    /// than leaving a blank canvas; the source is a flip away.
     static func failureDocument(theme: DocumentTheme) -> String {
+        message(localized("No drawing in this file."), theme: theme)
+    }
+
+    private static func message(_ text: String, theme: DocumentTheme) -> String {
         """
         <!doctype html>
         <html>
@@ -43,9 +55,15 @@ enum ExcalidrawReaderRenderer {
         \(css)
         </style>
         </head>
-        <body><p class="empty">No drawing in this file.</p></body>
+        <body><p class="empty">\(escape(text))</p></body>
         </html>
         """
+    }
+
+    private static func escape(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
     }
 
     private static let css = """

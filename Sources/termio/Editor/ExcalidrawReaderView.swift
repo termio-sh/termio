@@ -17,11 +17,11 @@ struct ExcalidrawReaderView: View {
     /// rendering keys off this rather than off being alive.
     var isActive: Bool = true
 
-    /// The rendered drawing, filled in by the task below. Drawing one needs a DOM and is
-    /// therefore asynchronous, so the page shows the app background until it arrives.
-    @State private var svg: String?
-    /// Whether a render has finished and produced nothing — the file holds no scene. Kept
-    /// apart from `svg == nil` so the empty state doesn't flash before the first render.
+    /// What the file turned out to hold, filled in by the task below. Rendering needs a DOM
+    /// and is therefore asynchronous, so the page shows the app background until it lands.
+    @State private var drawing: ExcalidrawRenderer.Drawing?
+    /// Whether a render has finished and found no scene at all. Kept apart from
+    /// `drawing == nil` so the failure page doesn't flash before the first render.
     @State private var failed = false
 
     var body: some View {
@@ -29,22 +29,31 @@ struct ExcalidrawReaderView: View {
         let drawingTheme = ExcalidrawRenderer.Theme(theme)
         // Anything already rendered goes into the first pass, so reopening a file or
         // flipping the theme back shows the drawing without a blank frame.
-        let drawn = svg ?? ExcalidrawRenderer.shared.cachedDrawing(for: data, theme: drawingTheme)
+        let drawn = drawing ?? ExcalidrawRenderer.shared.cachedDrawing(for: data, theme: drawingTheme)
         ExcalidrawWebView(html: page(drawn: drawn, theme: theme), isActive: isActive)
             .task(id: RenderRequest(theme: drawingTheme, active: isActive)) {
                 guard isActive, drawn == nil else { return }
                 let rendered = await ExcalidrawRenderer.shared.drawing(for: data, theme: drawingTheme)
-                svg = rendered
+                drawing = rendered
                 failed = rendered == nil
             }
     }
 
-    private func page(drawn: String?, theme: DocumentTheme) -> String {
-        if let drawn { return ExcalidrawReaderRenderer.document(svg: drawn, theme: theme) }
-        if failed { return ExcalidrawReaderRenderer.failureDocument(theme: theme) }
-        // Still rendering: the bare themed background, so the flip into Preview doesn't
-        // flash white before the picture lands.
-        return ExcalidrawReaderRenderer.document(svg: "", theme: theme)
+    private func page(drawn: ExcalidrawRenderer.Drawing?, theme: DocumentTheme) -> String {
+        switch drawn {
+        case .drawing(let svg):
+            return ExcalidrawReaderRenderer.document(svg: svg, theme: theme)
+        case .empty:
+            // A drawing with nothing in it — a file just created, or one emptied out. Not
+            // the failure page: nothing is wrong with the file.
+            return ExcalidrawReaderRenderer.emptyDocument(theme: theme)
+        case nil where failed:
+            return ExcalidrawReaderRenderer.failureDocument(theme: theme)
+        case nil:
+            // Still rendering: the bare themed background, so the flip into Preview
+            // doesn't flash white before the picture lands.
+            return ExcalidrawReaderRenderer.document(svg: "", theme: theme)
+        }
     }
 
     /// What a render depends on: change the colors and it runs again. It carries `active`
