@@ -62,6 +62,69 @@ final class ExcalidrawFileTests: XCTestCase {
     }
 }
 
+/// The canvas colour termio hands Excalidraw in dark mode.
+///
+/// Excalidraw's dark theme draws the canvas through `invert(93%) hue-rotate(180deg)`, so
+/// the terminal's own colour passed straight in comes back as its near-opposite — a pale
+/// slab on a dark page. What goes in is the colour that *becomes* the terminal's.
+final class ExcalidrawCanvasColorTests: XCTestCase {
+    /// The filter as the browser applies it, so the test checks a round trip rather than
+    /// restating the implementation's arithmetic.
+    private func darkFilter(_ hex: String) -> String {
+        let value = { (offset: Int) -> CGFloat in
+            let start = hex.index(hex.startIndex, offsetBy: 1 + offset * 2)
+            let end = hex.index(start, offsetBy: 2)
+            return CGFloat(UInt8(hex[start..<end], radix: 16) ?? 0) / 255
+        }
+        // invert(93%): v·(1 − 2a) + a
+        let amount: CGFloat = 0.93
+        let inverted = (0..<3).map { value($0) * (1 - 2 * amount) + amount }
+        // hue-rotate(180deg)
+        let (r, g, b) = (inverted[0], inverted[1], inverted[2])
+        let out = [-0.574 * r + 1.430 * g + 0.144 * b,
+                    0.426 * r + 0.430 * g + 0.144 * b,
+                    0.426 * r + 1.430 * g - 0.856 * b]
+        let channel = { (v: CGFloat) in Int((min(max(v, 0), 1) * 255).rounded()) }
+        return String(format: "#%02x%02x%02x", channel(out[0]), channel(out[1]), channel(out[2]))
+    }
+
+    /// Whatever termio passes must land back on the terminal's colour once Excalidraw has
+    /// filtered it — that is the whole contract, across every theme a user might be on.
+    /// Within a step per channel: both ends round to 8-bit.
+    func testColorSurvivesExcalidrawsDarkFilter() {
+        for terminal in ["#212121", "#1e1e2e", "#282c34", "#2e3440", "#1a1b26"] {
+            let passed = ExcalidrawCanvasView.beforeDarkFilter(color(terminal))
+            let landed = darkFilter(passed)
+            for offset in 0..<3 {
+                XCTAssertEqual(channel(landed, offset) * 255, channel(terminal, offset) * 255,
+                               accuracy: 1,
+                               "\(terminal) landed on \(landed) (passed \(passed))")
+            }
+        }
+    }
+
+    /// The filter cannot reach pure black: `invert(93%)` keeps 7% of the original, so the
+    /// darkest thing it can produce — from a pre-image of white — is `#121212`, which is
+    /// exactly the canvas colour Excalidraw's own dark theme ships. A terminal darker than
+    /// that lands on the floor rather than on its own colour, and there is nothing to be
+    /// done about it short of not using Excalidraw's dark theme at all.
+    func testATerminalDarkerThanTheFilterReachesLandsOnItsFloor() {
+        let passed = ExcalidrawCanvasView.beforeDarkFilter(color("#000000"))
+        XCTAssertEqual(passed, "#ffffff")
+        XCTAssertEqual(darkFilter(passed), "#121212")
+    }
+
+    private func color(_ hex: String) -> NSColor {
+        NSColor(srgbRed: channel(hex, 0), green: channel(hex, 1), blue: channel(hex, 2), alpha: 1)
+    }
+
+    private func channel(_ hex: String, _ offset: Int) -> CGFloat {
+        let start = hex.index(hex.startIndex, offsetBy: 1 + offset * 2)
+        let end = hex.index(start, offsetBy: 2)
+        return CGFloat(UInt8(hex[start..<end], radix: 16) ?? 0) / 255
+    }
+}
+
 /// The canvas, driven the way `FileEditorView` drives it: the page it builds, loaded into
 /// a real WebKit view, answering the calls the coordinator makes.
 ///

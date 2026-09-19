@@ -47,11 +47,12 @@ struct ExcalidrawCanvasView: NSViewRepresentable {
 
     func updateNSView(_ view: WKWebView, context: Context) {
         context.coordinator.representable = self
-        context.coordinator.applyTheme(isDark: isDark)
+        context.coordinator.apply(isDark: isDark, canvas: canvasColor)
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(fileURL: fileURL, data: data, readOnly: readOnly, isDark: isDark)
+        Coordinator(fileURL: fileURL, data: data, readOnly: readOnly,
+                    isDark: isDark, canvas: canvasColor)
     }
 
     static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
@@ -63,6 +64,53 @@ struct ExcalidrawCanvasView: NSViewRepresentable {
 
     private var isDark: Bool {
         settings.chromeTheme(for: colorScheme)?.isDark ?? (colorScheme == .dark)
+    }
+
+    /// The colour to hand the canvas so it paints in the terminal's background — what makes
+    /// a drawing sit inside termio rather than on a white slab dropped into it.
+    ///
+    /// Not simply the terminal colour, because Excalidraw's dark theme draws the canvas
+    /// through `invert(93%) hue-rotate(180deg)`: a dark colour passed there comes back light
+    /// (the canvas rendered as a pale grey slab on a dark page). What it needs is the
+    /// colour that *becomes* the terminal's after that filter, so the value is run backwards
+    /// through it first. In light mode no filter applies and the colour passes straight.
+    private var canvasColor: String {
+        let terminal = settings.terminalBackgroundColor
+        return isDark ? ExcalidrawCanvasView.beforeDarkFilter(terminal) : hex(terminal)
+    }
+
+    /// Excalidraw's dark-mode filter, run backwards.
+    ///
+    /// `hue-rotate(180deg)` is its own inverse — two of them make a full turn — so undoing
+    /// `invert(93%) hue-rotate(180deg)` is that same rotation followed by undoing the
+    /// invert, which is affine per channel: a channel goes forward as `v·(1 − 2a) + a`, so
+    /// it comes back as `(a − v) / (2a − 1)`.
+    static func beforeDarkFilter(_ color: NSColor) -> String {
+        guard let srgb = color.usingColorSpace(.sRGB) else { return "#ffffff" }
+        let rotated = hueRotated180(
+            red: srgb.redComponent, green: srgb.greenComponent, blue: srgb.blueComponent)
+        let amount = 0.93
+        let undo = { (value: CGFloat) in (amount - value) / (2 * amount - 1) }
+        return hexString(red: undo(rotated.red), green: undo(rotated.green), blue: undo(rotated.blue))
+    }
+
+    /// The `hue-rotate(180deg)` colour matrix, with cos = −1 and sin = 0 folded in.
+    private static func hueRotated180(red: CGFloat, green: CGFloat, blue: CGFloat)
+        -> (red: CGFloat, green: CGFloat, blue: CGFloat) {
+        (red: -0.574 * red + 1.430 * green + 0.144 * blue,
+         green: 0.426 * red + 0.430 * green + 0.144 * blue,
+         blue: 0.426 * red + 1.430 * green - 0.856 * blue)
+    }
+
+    private func hex(_ color: NSColor) -> String {
+        guard let srgb = color.usingColorSpace(.sRGB) else { return "#ffffff" }
+        return ExcalidrawCanvasView.hexString(
+            red: srgb.redComponent, green: srgb.greenComponent, blue: srgb.blueComponent)
+    }
+
+    private static func hexString(red: CGFloat, green: CGFloat, blue: CGFloat) -> String {
+        let channel = { (value: CGFloat) in Int((min(max(value, 0), 1) * 255).rounded()) }
+        return String(format: "#%02x%02x%02x", channel(red), channel(green), channel(blue))
     }
 
     /// Whether this file is one termio opens as a drawing. `.excalidraw` is the scene
@@ -136,6 +184,7 @@ struct ExcalidrawCanvasView: NSViewRepresentable {
         private let data: Data
         private let readOnly: Bool
         private var isDark: Bool
+        private var canvas: String
         private var mounted = false
 
         /// The most recent bytes the canvas produced, and the write that is waiting to put
@@ -144,11 +193,12 @@ struct ExcalidrawCanvasView: NSViewRepresentable {
         private var pending: Data?
         private var writeTask: Task<Void, Never>?
 
-        init(fileURL: URL, data: Data, readOnly: Bool, isDark: Bool) {
+        init(fileURL: URL, data: Data, readOnly: Bool, isDark: Bool, canvas: String) {
             self.fileURL = fileURL
             self.data = data
             self.readOnly = readOnly
             self.isDark = isDark
+            self.canvas = canvas
         }
 
         func attach(view: WKWebView, representable: ExcalidrawCanvasView) {
@@ -156,10 +206,17 @@ struct ExcalidrawCanvasView: NSViewRepresentable {
             self.representable = representable
         }
 
-        func applyTheme(isDark: Bool) {
-            guard mounted, isDark != self.isDark else { return }
+        /// Pushes the app's appearance into a canvas that is already up. Both halves move
+        /// together: the theme decides whether Excalidraw's dark filter is on, and the
+        /// canvas colour is computed against that filter, so sending one without the other
+        /// paints the terminal's colour through the wrong transform.
+        func apply(isDark: Bool, canvas: String) {
+            guard mounted, isDark != self.isDark || canvas != self.canvas else { return }
             self.isDark = isDark
-            view?.evaluateJavaScript("window.termioExcalidrawSetTheme?.(\(isDark));")
+            self.canvas = canvas
+            let escaped = canvas.replacingOccurrences(of: "\"", with: "")
+            view?.evaluateJavaScript(
+                "window.termioExcalidrawSetTheme?.(\(isDark), \"\(escaped)\");")
         }
 
         // MARK: Mounting
@@ -176,6 +233,7 @@ struct ExcalidrawCanvasView: NSViewRepresentable {
                     arguments: ["options": [
                         "scene": data.base64EncodedString(),
                         "dark": isDark,
+                        "canvas": canvas,
                         "readOnly": readOnly,
                         "library": ExcalidrawLibrary.read() as Any,
                     ]],

@@ -240,6 +240,8 @@
 	<string>Built-in</string>
 	<key>Cancel</key>
 	<string>Cancel</string>
+	<key>Canvas</key>
+	<string>Canvas</string>
 	<key>Can’t Compare</key>
 	<string>Can’t Compare</string>
 	<key>Can’t Search</key>
@@ -890,8 +892,6 @@
 	<string>No command to run.</string>
 	<key>No description provided.</key>
 	<string>No description provided.</string>
-	<key>No drawing in this file.</key>
-	<string>No drawing in this file.</string>
 	<key>No file changes</key>
 	<string>No file changes</string>
 	<key>No hosts yet — add one, or write a Host block in ~/.ssh/config.</key>
@@ -1304,6 +1304,8 @@
 	<string>Show Project Files</string>
 	<key>Show Replace</key>
 	<string>Show Replace</string>
+	<key>Show source</key>
+	<string>Show source</string>
 	<key>Shows files and folders ignored by Git in a muted color.</key>
 	<string>Shows files and folders ignored by Git in a muted color.</string>
 	<key>Shows the Issues pane in the inspector for projects whose remote is on GitHub.</key>
@@ -1514,8 +1516,6 @@
 	<string>This device’s termiod is too old to report its agents.</string>
 	<key>This diff is too large to show here — open the file on GitHub.</key>
 	<string>This diff is too large to show here — open the file on GitHub.</string>
-	<key>This drawing is empty.</key>
-	<string>This drawing is empty.</string>
 	<key>This file is binary — open it on GitHub to view.</key>
 	<string>This file is binary — open it on GitHub to view.</string>
 	<key>This folder has no git “origin” remote to clone.</key>

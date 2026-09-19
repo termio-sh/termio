@@ -38,6 +38,8 @@ import "./node_modules/@excalidraw/excalidraw/dist/prod/index.css";
 
 // ---------------------------------------------------------------- containers
 
+const DEFAULT_BACKGROUND = "#ffffff";
+
 const JSON_TYPE = "application/json";
 const SVG_TYPE = "image/svg+xml";
 const PNG_TYPE = "image/png";
@@ -92,8 +94,21 @@ async function loadScene(base64, declaredContainer) {
 
 /// Serializes a scene back into the container it was read from, so editing a
 /// `.excalidraw.png` keeps producing a PNG with the scene embedded in it.
-async function saveScene({ elements, appState, files, container }) {
+/// termio paints the canvas in the terminal's colour so a drawing sits in the app rather
+/// than on a white slab. That is a view setting, not the document's: unless the colour was
+/// picked in Excalidraw's own background swatches, the file keeps the one it came with.
+function documentBackground({ current, shown, original }) {
+  return current === shown ? (original ?? DEFAULT_BACKGROUND) : current;
+}
+
+async function saveScene({ elements, appState, files, container, background }) {
   const live = elements.filter((element) => !element.isDeleted);
+  appState = {
+    ...appState,
+    viewBackgroundColor: documentBackground({
+      current: appState.viewBackgroundColor, shown: background.shown, original: background.original,
+    }),
+  };
   if (container === SVG_TYPE) {
     const svg = await exportToSvg({
       elements: live, appState: { ...appState, exportEmbedScene: true }, files,
@@ -130,8 +145,15 @@ function sceneVersion(elements) {
   return elements.length + ":" + sum;
 }
 
-function Canvas({ initial, container, dark, readOnly, libraryItems }) {
+function Canvas({ initial, container, dark: mountDark, canvas: mountCanvas, readOnly, libraryItems }) {
   const [api, setApi] = useState(null);
+  // Held in state rather than read from props: `theme` is a controlled prop, so a canvas
+  // that took it straight from the mount options could never follow the app afterwards —
+  // `updateScene` sets it and the prop immediately puts it back.
+  const [dark, setDark] = useState(mountDark);
+  const [canvas, setCanvas] = useState(mountCanvas);
+  // What the file asked for, so a save can put it back when nobody chose otherwise.
+  const original = useRef(initial.appState?.viewBackgroundColor ?? null);
   const saving = useRef(null);
   // Seeded from the scene as loaded, so mounting is not itself a change. Excalidraw
   // normalizes a scene on load (and `scrollToContent` fires onChange), which would
@@ -151,22 +173,40 @@ function Canvas({ initial, container, dark, readOnly, libraryItems }) {
     clearTimeout(saving.current);
     saving.current = setTimeout(async () => {
       try {
-        host({ type: "change", scene: await saveScene({ elements, appState, files, container }) });
+        host({ type: "change", scene: await saveScene({
+          elements, appState, files, container,
+          background: { shown: canvas, original: original.current },
+        }) });
       } catch (error) {
         host({ type: "error", message: String(error && error.message) });
       }
     }, 400);
-  }, [container, readOnly]);
+  }, [container, readOnly, canvas]);
 
+  // The app's appearance, pushed in by the host whenever the chrome theme changes.
   useEffect(() => {
-    window.termioExcalidrawSetTheme = (isDark) =>
-      api?.updateScene({ appState: { theme: isDark ? THEME.DARK : THEME.LIGHT } });
+    window.termioExcalidrawSetTheme = (isDark, canvasColor) => {
+      setDark(isDark);
+      if (canvasColor) setCanvas(canvasColor);
+    };
     return () => { delete window.termioExcalidrawSetTheme; };
-  }, [api]);
+  }, []);
+
+  // The canvas colour is appState, which Excalidraw owns once it is mounted, so it is
+  // pushed through the API rather than passed as a prop.
+  useEffect(() => {
+    if (!api || !canvas) return;
+    api.updateScene({ appState: { viewBackgroundColor: canvas } });
+  }, [api, canvas]);
 
   return React.createElement(Excalidraw, {
     excalidrawAPI: setApi,
-    initialData: { ...initial, libraryItems, scrollToContent: true },
+    initialData: {
+      ...initial,
+      appState: { ...(initial.appState || {}), viewBackgroundColor: mountCanvas || DEFAULT_BACKGROUND },
+      libraryItems,
+      scrollToContent: true,
+    },
     theme: dark ? THEME.DARK : THEME.LIGHT,
     viewModeEnabled: readOnly,
     // No scene loading or saving from inside the canvas: the file on disk is the
@@ -201,8 +241,8 @@ window.termioExcalidrawMount = async (options) => {
   try {
     const { scene, container } = await loadScene(options.scene, options.container);
     createRoot(root).render(React.createElement(Canvas, {
-      initial: scene, container, dark: !!options.dark, readOnly: !!options.readOnly,
-      libraryItems: await loadLibrary(options.library),
+      initial: scene, container, dark: !!options.dark, canvas: options.canvas,
+      readOnly: !!options.readOnly, libraryItems: await loadLibrary(options.library),
     }));
     return { ok: true, container };
   } catch (error) {
