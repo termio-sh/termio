@@ -47,10 +47,21 @@ function containersFor(bytes) {
     : ["application/json", "image/svg+xml"];
 }
 
+// Nothing but whitespace — the file `touch` or a New File command leaves behind. It is a
+// drawing with no elements yet, not a file that failed to decode, so it never reaches a
+// decoder (which would reject it) and resolves to an empty scene instead.
+function isBlank(bytes) {
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] > 0x20) return false;
+  }
+  return true;
+}
+
 async function loadScene(base64) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  if (isBlank(bytes)) return { elements: [] };
   let lastError;
   for (const type of containersFor(bytes)) {
     try {
@@ -61,10 +72,17 @@ async function loadScene(base64) {
   throw new Error(lastError ? lastError.message : "no excalidraw scene in this file");
 }
 
+// Returns `{ empty }` for a drawing with nothing in it and `{ empty: false, svg }`
+// otherwise; a file that holds no scene at all throws, and the host shows it as source.
+// The distinction is the host's to render: an empty drawing is a normal state, a file that
+// won't decode is not, and `exportToSvg` on no elements returns only a padding-sized box
+// that would read as a broken render.
 window.termioRenderExcalidraw = async (base64, options) => {
   const scene = await loadScene(base64);
+  const elements = (scene.elements || []).filter((element) => !element.isDeleted);
+  if (elements.length === 0) return { empty: true };
   const svg = await exportToSvg({
-    elements: (scene.elements || []).filter((element) => !element.isDeleted),
+    elements,
     appState: {
       ...(scene.appState || {}),
       // No background rect: the page behind the drawing is already the app's canvas, and
@@ -84,7 +102,7 @@ window.termioRenderExcalidraw = async (base64, options) => {
     // iframe in a page that shows somebody else's file; it draws as a placeholder.
     renderEmbeddables: false,
   });
-  return svg.outerHTML;
+  return { empty: false, svg: svg.outerHTML };
 };
 ```
 

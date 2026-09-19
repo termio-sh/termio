@@ -43,7 +43,16 @@ final class ExcalidrawRenderer: NSObject {
         let theme: Theme
     }
 
-    private var cache: [Key: String] = [:]
+    /// What a file's bytes turned out to hold. An empty drawing is a normal state — the
+    /// file a New File command leaves behind, or one whose elements were all deleted — and
+    /// is deliberately not the same answer as a file that holds no scene at all, which is
+    /// `nil` and shows as source.
+    enum Drawing: Hashable {
+        case drawing(String)
+        case empty
+    }
+
+    private var cache: [Key: Drawing] = [:]
     private var webView: WKWebView?
     private var window: NSWindow?
     private var loadContinuations: [CheckedContinuation<Void, Never>] = []
@@ -69,28 +78,28 @@ final class ExcalidrawRenderer: NSObject {
     /// The drawing for these bytes if it has already been rendered, for the synchronous
     /// first pass — reopening a file or flipping the theme back shows the picture
     /// immediately instead of flashing a placeholder.
-    func cachedDrawing(for data: Data, theme: Theme) -> String? {
+    func cachedDrawing(for data: Data, theme: Theme) -> Drawing? {
         cache[Key(digest: Self.digest(data), theme: theme)]
     }
 
-    /// Renders the drawing, or returns `nil` if these bytes hold no scene. A caller that
-    /// gets `nil` shows the file as source, which is the readable failure.
-    func drawing(for data: Data, theme: Theme) async -> String? {
+    /// Renders the drawing, or returns `nil` if these bytes hold no scene at all. A caller
+    /// that gets `nil` shows the file as source, which is the readable failure.
+    func drawing(for data: Data, theme: Theme) async -> Drawing? {
         let key = Key(digest: Self.digest(data), theme: theme)
-        if let svg = cache[key] { return svg }
-        guard let svg = await render(data, theme: theme) else { return nil }
+        if let drawing = cache[key] { return drawing }
+        guard let drawing = await render(data, theme: theme) else { return nil }
         // A drawing's SVG is tens of KB and a session opens a handful; the cap is a
         // runaway guard, not a working-set limit.
         if cache.count >= 32 { cache.removeAll(keepingCapacity: true) }
-        cache[key] = svg
-        return svg
+        cache[key] = drawing
+        return drawing
     }
 
     private static func digest(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    private func render(_ data: Data, theme: Theme) async -> String? {
+    private func render(_ data: Data, theme: Theme) async -> Drawing? {
         guard let webView = await harness() else { return nil }
         do {
             let result = try await webView.callAsyncJavaScript(
@@ -103,12 +112,14 @@ final class ExcalidrawRenderer: NSObject {
                     "options": ["dark": theme.isDark],
                 ],
                 contentWorld: .page)
-            guard let svg = result as? String, !svg.isEmpty else { return nil }
+            guard let payload = result as? [String: Any] else { return nil }
+            if payload["empty"] as? Bool == true { return .empty }
+            guard let svg = payload["svg"] as? String, !svg.isEmpty else { return nil }
             guard isInert(svg) else {
                 Log.markdown.error("excalidraw: dropped a drawing whose SVG carried script")
                 return nil
             }
-            return svg
+            return .drawing(svg)
         } catch {
             // A file with no scene in it lands here; the caller keeps showing source.
             Log.markdown.info("excalidraw: \(error.localizedDescription, privacy: .public)")

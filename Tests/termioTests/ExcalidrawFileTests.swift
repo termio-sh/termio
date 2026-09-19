@@ -90,11 +90,19 @@ final class ExcalidrawFileTests: XCTestCase {
             URL(fileURLWithPath: "/tmp/page.html")))
     }
 
-    /// A file that holds no scene gets a page that says so, not an empty canvas that reads
+    /// A file that holds no scene gets a page that says so, not a blank canvas that reads
     /// as a drawing still loading.
     func testFailurePageSaysThereIsNoDrawing() {
         let page = ExcalidrawReaderRenderer.failureDocument(theme: .reader(dark: true))
         XCTAssertTrue(page.contains("No drawing in this file."))
+    }
+
+    /// An empty drawing is a normal state and must not borrow the failure page's wording:
+    /// a file a New File command just made is not a file with something wrong with it.
+    func testEmptyPageDoesNotClaimTheFileIsBroken() {
+        let page = ExcalidrawReaderRenderer.emptyDocument(theme: .reader(dark: false))
+        XCTAssertTrue(page.contains("This drawing is empty."))
+        XCTAssertFalse(page.contains("No drawing in this file."))
     }
 }
 
@@ -125,7 +133,9 @@ final class ExcalidrawRenderIntegrationTests: XCTestCase {
         let data = try fixture("drawing.excalidraw")
         let theme = ExcalidrawRenderer.Theme(.reader(dark: false))
         let rendered = await ExcalidrawRenderer.shared.drawing(for: data, theme: theme)
-        let svg = try XCTUnwrap(rendered, "the bundled engine did not return a drawing")
+        guard case .drawing(let svg)? = rendered else {
+            return XCTFail("the bundled engine did not return a drawing")
+        }
 
         XCTAssertTrue(svg.hasPrefix("<svg"))
         XCTAssertTrue(svg.contains("termio preview"), "the scene's text is missing")
@@ -139,7 +149,8 @@ final class ExcalidrawRenderIntegrationTests: XCTestCase {
         XCTAssertFalse(svg.lowercased().contains("<foreignobject"))
 
         // Second call for the same bytes and theme comes from the cache.
-        XCTAssertEqual(ExcalidrawRenderer.shared.cachedDrawing(for: data, theme: theme), svg)
+        XCTAssertEqual(ExcalidrawRenderer.shared.cachedDrawing(for: data, theme: theme),
+                       .drawing(svg))
     }
 
     /// The distinctive container: a PNG with the scene in a tEXt chunk. It decodes to the
@@ -155,7 +166,9 @@ final class ExcalidrawRenderIntegrationTests: XCTestCase {
         let started = Date()
         let rendered = await ExcalidrawRenderer.shared.drawing(
             for: data, theme: ExcalidrawRenderer.Theme(.reader(dark: false)))
-        let svg = try XCTUnwrap(rendered, "the scene embedded in the PNG did not decode")
+        guard case .drawing(let svg)? = rendered else {
+            return XCTFail("the scene embedded in the PNG did not decode")
+        }
         XCTAssertTrue(svg.hasPrefix("<svg"))
         XCTAssertTrue(svg.contains("<text"), "the scene's text is missing")
         XCTAssertLessThan(Date().timeIntervalSince(started), 5,
@@ -169,5 +182,24 @@ final class ExcalidrawRenderIntegrationTests: XCTestCase {
         let drawing = await ExcalidrawRenderer.shared.drawing(
             for: data, theme: ExcalidrawRenderer.Theme(.reader(dark: false)))
         XCTAssertNil(drawing)
+    }
+
+    /// The file a New File command leaves behind. It is an empty drawing, not a file that
+    /// failed to decode — the decoders reject empty bytes, so the engine has to answer
+    /// before it reaches them. A scene whose elements are all gone is the same state.
+    @MainActor
+    func testEmptyFilesAreAnEmptyDrawingNotAFailure() async throws {
+        try XCTSkipUnless(Self.canRunWebKit, "needs a window server for the WebKit harness")
+        let theme = ExcalidrawRenderer.Theme(.reader(dark: false))
+        let empties: [(String, Data)] = [
+            ("zero bytes", Data()),
+            ("whitespace only", Data("\n  \n".utf8)),
+            ("a scene with no elements",
+             Data(#"{"type":"excalidraw","version":2,"elements":[],"appState":{}}"#.utf8)),
+        ]
+        for (label, data) in empties {
+            let drawing = await ExcalidrawRenderer.shared.drawing(for: data, theme: theme)
+            XCTAssertEqual(drawing, .empty, "\(label) should be an empty drawing")
+        }
     }
 }
