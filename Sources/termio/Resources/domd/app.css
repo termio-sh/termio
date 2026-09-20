@@ -1,0 +1,280 @@
+/* Typography ported from Sources/termio/Editor/MarkdownReaderRenderer.swift, so the
+   rendered face and the Preview it replaces are the same document in the same face.
+   Values are that stylesheet's, not approximations of it.
+
+   Theme tokens: domd's own stylesheet reads --color-base-* off .DOMD-Root, so a host
+   theme is a handful of variables rather than a fork of its CSS. Swift writes the
+   concrete values into :root at load; these are the fallbacks. */
+
+/* The prose face. The reader inlines these as base64 because `loadHTMLString` gives
+   its WebContent process no bundle access; this page has a scheme handler and the CSP
+   already allows `font-src 'self'`, so it fetches them instead — served once and
+   cached rather than rebuilt into every document. Variable wght 400-700, so bold prose
+   sits at 600 and headings at 700 without a second file. */
+@font-face {
+  font-family: "iA Writer Quattro"; font-weight: 400 700; font-style: normal;
+  font-display: swap; src: url("iAWriterQuattroV.woff2") format("woff2");
+}
+@font-face {
+  font-family: "iA Writer Quattro"; font-weight: 400 700; font-style: italic;
+  font-display: swap; src: url("iAWriterQuattroV-Italic.woff2") format("woff2");
+}
+
+:root {
+  --domd-page-bg: #ffffff; --domd-page-fg: #1d1d1f; --domd-panel: #f5f5f7;
+  --domd-border: rgba(0,0,0,.12); --domd-accent: #0a84ff;
+  --color-base-100: var(--domd-page-bg); --color-base-200: var(--domd-panel);
+  --color-base-300: var(--domd-panel); --color-base-content: var(--domd-page-fg);
+  --color-info-content: var(--domd-accent); --color-info: var(--domd-accent);
+  /* Swift overwrites both (see MarkdownEditorView.applyAppearance); these are the
+     fallbacks for the page opened outside the app. --font-mono is the user's terminal
+     face, so code here matches the source face you flipped from. */
+  --font-prose: "iA Writer Quattro", "PingFang SC", "PingFang TC", "Hiragino Sans GB",
+                -apple-system, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --muted: color-mix(in srgb, var(--domd-page-fg) 55%, transparent);
+  --line: var(--domd-border);
+  --soft: color-mix(in srgb, var(--domd-page-fg) 4%, transparent);
+  /* domd.css reads these for the kernel's own elements. */
+  --domd-font-family: var(--font-prose);
+  --domd-font-size-base: 17px;
+  --domd-font-size-h1: 28px; --domd-font-size-h2: 22px; --domd-font-size-h3: 19px;
+  --domd-font-size-h4: 17px; --domd-font-size-h5: 17px; --domd-font-size-h6: 17px;
+}
+html[data-appearance="dark"] {
+  --muted: color-mix(in srgb, var(--domd-page-fg) 62%, transparent);
+  --soft: color-mix(in srgb, #ffffff 5%, transparent);
+}
+
+* { box-sizing: border-box; }
+/* Never let the page grow wider than the pane: a long code line or unbreakable token
+   would otherwise pin the body width so prose stops reflowing on resize. */
+html, body { margin: 0; max-width: 100%; overflow-x: hidden;
+  background: var(--domd-page-bg); color: var(--domd-page-fg); }
+::selection { background: color-mix(in srgb, var(--domd-accent) 20%, transparent); }
+
+/* `margin: 0 auto` self-adjusts: while the pane is narrower than the measure the auto
+   margins collapse to 0 and the prose stays flush-left under the file-name header;
+   once it is wider the leftover splits evenly and the column centres. The measure is
+   in `ch` so it tracks the face and size — 720px does not, and at 17px Quattro it is
+   about 62ch, which wraps every line somewhere else. +40px keeps the 20px side padding
+   from eating into the 76ch of actual text (border-box puts padding inside max-width). */
+#root {
+  max-width: calc(76ch + 40px); margin: 0 auto; padding: 36px 20px 160px;
+  font: 17px/1.6 var(--font-prose);
+  /* NOT antialiased — grayscale smoothing thins the strokes and reads 轻飘飘; the
+     default subpixel smoothing keeps the face solid, like the editor. */
+  -webkit-font-smoothing: auto; text-rendering: optimizeLegibility;
+  font-feature-settings: "kern", "liga", "calt";
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.DOMD-Root { outline: none; font-size: inherit; line-height: inherit; }
+
+/* A CJK document, decided from the source by the host (MarkdownReaderRenderer.isCJK).
+   Han glyphs fill their em square and carry no ascender/descender rhythm, so the Latin
+   1.6 reads as a wall; 1.8 is the leading Chinese web typography settles on. Headings
+   lose the optical negative tracking — that is a Latin correction and on a square grid
+   it only crowds. */
+/* Every rule here is scoped through `#root`, deliberately: the base rules above are
+   `#root :where(…)`, and `:where()` contributes no specificity, so a CJK rule written
+   as `html.cjk :where(h2)` would LOSE to `#root :where(h2)` and silently do nothing.
+   Matching the `#root` prefix is what makes these win. */
+html.cjk #root { line-height: 1.8; letter-spacing: 0.02em; text-autospace: normal; }
+html.cjk #root :where(h1, h2, h3, h4, h5, h6, .DOMD-H1, .DOMD-H2, .DOMD-H3,
+                      .DOMD-H4, .DOMD-H5, .DOMD-H6) { letter-spacing: 0; line-height: 1.4; }
+/* Tracking is for prose only. A monospaced grid, a URL and a key cap all mean
+   something by their exact width. */
+html.cjk #root :where(code, pre, kbd, a, .DOMD-Code, .DOMD-Pre, .DOMD-Kbd,
+                      .DOMD-Link) { letter-spacing: normal; }
+/* Chinese has no italic tradition — an oblique Han glyph is synthesized by the
+   rasterizer and reads as a rendering fault. Emphasis becomes weight instead. */
+html.cjk #root :where(em, .DOMD-Em) { font-style: normal; font-weight: 600; }
+/* Strict breaking keeps a line from opening on 、。) and lets closing punctuation hang
+   into the margin instead of forcing an early wrap. */
+html.cjk #root :where(p, li, blockquote, .DOMD-P, .DOMD-li,
+                      .DOMD-Blockquote) { line-break: strict; }
+html.cjk #root { hanging-punctuation: allow-end; }
+/* 标点挤压. The reader compresses punctuation by wrapping each mark in a
+   `.punctuation-half` / `-quarter` span (MarkdownHTML.swift:308) — a source
+   transformation this face cannot make, because here the text IS the model and an
+   injected span would change what toMarkdown emits. `palt` asks the font for the same
+   thing: PingFang ships proportional-alternate metrics for CJK punctuation, so the
+   compression comes from the face instead of from the markup. */
+html.cjk #root { font-feature-settings: "kern", "liga", "calt", "palt"; }
+
+/* Headings carry hierarchy through weight + space, not rules or colour — no
+   underlines (that GitHub look is the main "webpage" tell). */
+#root :where(h1, .DOMD-H1) { font-size: 28px; font-weight: 700; letter-spacing: -0.019em;
+  line-height: 1.2; margin: 0 0 0.7em; padding: 0; }
+#root :where(h2, .DOMD-H2) { font-size: 22px; font-weight: 700; letter-spacing: -0.014em;
+  line-height: 1.3; margin: 2em 0 0.5em; padding: 0; }
+#root :where(h3, .DOMD-H3) { font-size: 19px; font-weight: 700; line-height: 1.35;
+  margin: 1.7em 0 0.35em; padding: 0; }
+#root :where(h4, h5, h6, .DOMD-H4, .DOMD-H5, .DOMD-H6) { font-size: 17px; font-weight: 700;
+  margin: 1.5em 0 0.35em; padding: 0; }
+#root .DOMD-Root > *:first-child { margin-top: 0; }
+
+#root :where(p, .DOMD-P) { margin: 0 0 1.2em; line-height: inherit; }
+/* Quiet links: a faint underline, no hover jump — reading, not browsing. */
+#root :where(a, .DOMD-Link) { color: var(--domd-accent); text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--domd-accent) 30%, transparent);
+  text-underline-offset: 3px; }
+#root :where(strong, .DOMD-Bold) { font-weight: 600; }
+#root :where(del, .DOMD-Del) { color: var(--muted); }
+/* Indented + muted, no accent bar or box. */
+#root :where(blockquote, .DOMD-Blockquote) { margin: 1.3em 0; padding: 0 0 0 20px;
+  border-left: 2px solid var(--line); color: var(--muted); }
+/* Lists. The reader's adaptive gutter: each list reserves its own marker width plus
+   about a word space, and an ordered list widens a digit at a time — whole-list, so its
+   text column stays straight — as it reaches 10 and 100 items. Sizing every list for
+   "10." instead strands single digits from their text.
+
+   DEVIATION from the reader, and the reason: the reader replaces `::marker` with CSS
+   counters because its renderer emits every `<ol>` at 1, so a counter costs nothing.
+   domd carries the real start ordinal as an attribute (`<ol start="3">`), which a CSS
+   counter cannot read — a counter here would silently renumber every list that does not
+   begin at 1. So the native marker stays and the gutter is `padding-left`, which puts
+   WebKit's right-aligned marker exactly where the reader's counter sits. */
+#root :where(ul, ol, .DOMD-Ul, .DOMD-Ol, .DOMD-CheckBoxUl) {
+  --gutter: 1.3em;
+  margin: 0 0 1.2em; padding-left: var(--gutter); list-style-position: outside;
+}
+#root :where(ol, .DOMD-Ol) { --gutter: 1.8em; }
+#root :where(ol, .DOMD-Ol):has(> :nth-child(10)) { --gutter: 2.4em; }
+#root :where(ol, .DOMD-Ol):has(> :nth-child(100)) { --gutter: 3em; }
+/* The checkbox is wider than a bullet and needs the room back. */
+#root :where(ul, .DOMD-Ul, .DOMD-CheckBoxUl):has(.DOMD-CheckBoxLi) { --gutter: 1.7em; }
+#root :where(ul, .DOMD-Ul) { list-style-type: disc; }
+#root :where(li, .DOMD-li, .DOMD-CheckBoxLi) { margin: 0.35em 0; }
+#root :where(li, .DOMD-li)::marker { color: var(--muted); }
+/* A nested list tightens up rather than repeating the block gap. */
+#root :where(li, .DOMD-li, .DOMD-CheckBoxLi) :where(ul, ol, .DOMD-Ul, .DOMD-Ol) {
+  margin: 0.35em 0;
+}
+/* The paragraph inside a list item is the item, not a block of its own. */
+#root :where(.DOMD-LiP, li > p) { margin: 0; }
+
+/* Task items. DEVIATION from the reader, and the reason: the reader draws a static
+   Hugeicons box because its page is read-only. Here the checkbox is a live control —
+   clicking it writes the document through the kernel's own toggle — so replacing it
+   with a drawn glyph would trade a working control for a picture of one. The native
+   input is restyled instead: same size, same muted/accent colours, same gutter. */
+#root .DOMD-CheckBoxLi { list-style: none; }
+/* The kernel gives the checkbox element no class of its own, so it is addressed by
+   element inside the label it lives in. */
+#root .DOMD-CheckBoxLabel { margin-left: calc(-1 * var(--gutter)); }
+#root .DOMD-CheckBoxLabel input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  /* A form control does not inherit the prose size, so `em` here would resolve
+     against the browser's own 13.33px default and the box would come out small. */
+  font: inherit;
+  width: 1.05em; height: 1.05em; margin: 0; vertical-align: -0.16em;
+  border: 1.5px solid var(--muted); border-radius: 4px;
+  background: transparent; cursor: pointer;
+}
+#root .DOMD-CheckBoxLabel input[type="checkbox"]:checked {
+  background-color: var(--domd-accent); border-color: var(--domd-accent);
+  /* The tick is drawn rather than set in a glyph, so it scales with the box. */
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+  background-size: 100% 100%; background-repeat: no-repeat;
+}
+
+/* Tables: horizontal rules only, like a native document — no grid, no outer box.
+   `width: max-content` lays the table out at its natural content width so the browser's
+   column balancing works unsquashed, and `max-width` + `overflow` makes an oversized
+   table scroll as a whole instead of crushing its widest column or widening the page.
+   Cells reset the body's anywhere-wrapping — mid-word breaks are what make columns look
+   lopsided. */
+#root :where(table, .DOMD-Table) { border-collapse: collapse; margin: 1.4em 0;
+  font-size: 15px; display: block; width: max-content; max-width: 100%;
+  overflow-x: auto; border: none; }
+#root :where(th, td, .DOMD-TH, .DOMD-TD) { border: none;
+  border-bottom: 1px solid var(--line); padding: 7px 16px 7px 0; text-align: left;
+  overflow-wrap: normal; word-break: normal; }
+#root :where(th, .DOMD-TH) { font-weight: 600; color: var(--muted);
+  border-bottom-color: var(--domd-page-fg); }
+#root :where(.DOMD-TR, tr) :where(p, .DOMD-P) { margin: 0; }
+/* Raw-HTML layout tables (the README screenshot-grid idiom: `<td width="50%">`) are page
+   structure, not data — let them fill the measure and keep their cell ratios instead of
+   shrink-wrapping to content, and drop the data-table rules. */
+#root :where(table, .DOMD-Table):has(td[width]) { display: table; width: 100%;
+  table-layout: fixed; }
+#root :where(table, .DOMD-Table):has(td[width]) td { border-bottom: none;
+  vertical-align: middle; }
+
+#root :where(hr, .DOMD-Hr) { border: none; border-top: 1px solid var(--line);
+  height: 0; margin: 2.4em 0; background: none; }
+#root .DOMD-HrDiv { height: auto; margin: 2.4em 0; }
+#root :where(em, .DOMD-Em) { font-style: italic; margin-right: 0; }
+#root :where(.DOMD-EmBold) { font-weight: 700; font-style: italic; margin-right: 0; }
+/* An image's alt text, when the kernel shows it, is apparatus rather than prose. */
+#root .DOMD-Img + .DOMD-Plain, #root .image { color: var(--muted); font-size: 15px; }
+
+/* math ------------------------------------------------------------------- */
+.domd-math-source { display: none; }
+.domd-math math { font-size: 1.05em; }
+.domd-math-display { display: block; text-align: center; margin: 1rem 0; }
+.domd-math-display math { font-size: 1.2em; }
+.domd-footnote-ref { color: var(--domd-accent); font-size: .78em; }
+
+/* mermaid ---------------------------------------------------------------- */
+.domd-mermaid { border: 1px solid var(--domd-border); border-radius: 8px; padding: 14px;
+                background: var(--domd-panel); margin: 1rem 0; overflow-x: auto; }
+.domd-mermaid-source { display: none; }
+.domd-diagram svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+.domd-diagram-pending, .domd-diagram-failed { font-size: 12px; opacity: .6;
+                                              font-family: ui-monospace, monospace; }
+.domd-diagram-failed { color: #d1242f; opacity: 1; }
+
+/* GitHub alerts ---------------------------------------------------------- */
+.domd-alert { border-left-color: var(--domd-alert-tint, var(--domd-accent)) !important; }
+.domd-alert-badge { display: block; font-size: 12px; font-weight: 650; letter-spacing: .02em;
+                    color: var(--domd-alert-tint, var(--domd-accent)); margin-bottom: 2px; }
+.domd-alert[data-alert="NOTE"] { --domd-alert-tint: #0a84ff; }
+.domd-alert[data-alert="TIP"] { --domd-alert-tint: #1a7f37; }
+.domd-alert[data-alert="IMPORTANT"] { --domd-alert-tint: #8250df; }
+.domd-alert[data-alert="WARNING"] { --domd-alert-tint: #bf8700; }
+.domd-alert[data-alert="CAUTION"] { --domd-alert-tint: #d1242f; }
+/* the literal `[!NOTE]` is document text — hidden in the view, kept in the model */
+.domd-alert > .DOMD-P > .DOMD-Plain:first-child { display: none; }
+
+/* YAML front matter is an Hr plus a paragraph to domd, which makes it
+   position-addressable in CSS without a parser hook. */
+.DOMD-Root > .DOMD-HrDiv:first-child { display: none; }
+.DOMD-Root > .DOMD-HrDiv:first-child + .DOMD-P {
+  background: var(--domd-panel); border: 1px solid var(--domd-border);
+  border-left: 3px solid var(--domd-accent); border-radius: 6px; padding: 10px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  line-height: 1.7; white-space: pre-wrap; opacity: .85;
+}
+.DOMD-Root > .DOMD-HrDiv:first-child + .DOMD-P > .DOMD-Plain:last-child { display: none; }
+
+/* termio's brand is monochrome — mark state with ink, never hue. */
+.DOMD-Mark, .DOMD-InlineRule_mark, .DOMD-Root mark {
+  background: color-mix(in srgb, var(--color-base-content) 16%, transparent);
+  color: inherit; border-radius: 3px;
+}
+
+/* raw HTML ---------------------------------------------------------------
+   The source text stays in the DOM because toMarkdown reads it back; only the
+   sanitized rendering is shown. Same shape as the mermaid fence above. */
+.domd-html-source, .domd-comment-source, .domd-emoji-source { display: none; }
+.domd-html-rendered :where(img) { max-width: 100%; height: auto; }
+.domd-html-rendered :where(details) {
+  border: 1px solid var(--domd-border); border-radius: 8px;
+  padding: 10px 14px; margin: 1rem 0; background: var(--domd-panel);
+}
+.domd-html-rendered :where(summary) { cursor: default; font-weight: 600; }
+.domd-html-rendered :where(dl) { margin: 1rem 0; }
+.domd-html-rendered :where(dt) { font-weight: 650; margin-top: .6rem; }
+.domd-html-rendered :where(dd) { margin: .15rem 0 0 1.4rem; opacity: .85; }
+.domd-html-rendered :where(div[align="center"]) { text-align: center; }
+.domd-html-rendered :where(div[align="right"]) { text-align: right; }
+.domd-html-rendered :where(table) { border-collapse: collapse; margin: 1rem 0; }
+.domd-html-rendered :where(th, td) {
+  border: 1px solid var(--domd-border); padding: 5px 10px;
+}
+.domd-html-rendered :where(a) { color: var(--domd-accent); text-decoration: none; }
+.domd-html-rendered :where(abbr[title]) { text-decoration: underline dotted; cursor: help; }
+/* An image the scheme handler cannot serve must not leave a broken-icon hole. */
+.domd-html-rendered :where(img):-moz-broken { opacity: .35; }
