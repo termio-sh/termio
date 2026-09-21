@@ -254,6 +254,12 @@ extension TermioStore {
     /// its status came from a local hook or from the daemon.
     func applyTermiodStatus(_ report: Termiod.StatusPayload, for id: Session.ID) {
         guard session(id) != nil else { return }
+        let runtime = runtime(for: id)
+        let isWorking = report.status == "working"
+        if runtime.isAgentWorking != isWorking {
+            runtime.isAgentWorking = isWorking
+            sessionRuntimeDidChange.send()
+        }
 
         // Everything from here to the state switch used to sit behind the app's
         // own hook socket and reach only agents on this Mac. One report path
@@ -517,6 +523,8 @@ extension TermioStore {
         runtime(for: id).connectionNotice = attempts <= Self.reconnectBurstAttempts
             ? localized("Reconnecting…")
             : localized("Can’t reach \(place)")
+        runtime(for: id).isAgentWorking = false
+        sessionRuntimeDidChange.send()
         guard attempts == 1 else { return }
         Log.termiod.error("""
         lost the connection to \(session.id.uuidString, privacy: .public) on \
@@ -543,6 +551,7 @@ extension TermioStore {
     func applyTermiodReattached(for id: Session.ID) {
         guard runtimes[id]?.connectionNotice != nil else { return }
         runtimes[id]?.connectionNotice = nil
+        sessionRuntimeDidChange.send()
         Log.termiod.info("reattached \(id.uuidString, privacy: .public)")
     }
 
