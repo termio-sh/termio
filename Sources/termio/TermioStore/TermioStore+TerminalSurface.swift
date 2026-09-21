@@ -132,33 +132,78 @@ extension TermioStore {
     }
 
     /// The shortest a *clean* agent exit can be and still describe a session the
-    /// user actually had. An agent that quits in under a second never drew a
-    /// frame: what ended was the launch line itself — a command that resolved to
-    /// nothing, a shell that ran an assignment and stopped. Reverting to a shell
-    /// there replaces the only evidence with a prompt that looks like success,
-    /// which is how a launch line silently truncated by an `exec` prefix reached
-    /// users as "termio opens a plain terminal and never starts my agent".
-    static let agentLaunchFloorMilliseconds: UInt64 = 1_000
+    /// user actually had. Below it the launch line is what ended, not a session,
+    /// and reverting to a shell would replace the only evidence with a prompt
+    /// that looks like success — how a truncated launch line reached users as
+    /// "termio opens a plain terminal and never starts my agent".
+    ///
+    /// Ghostty answers the same question with `abnormal-command-exit-runtime`,
+    /// default **250 ms**, and its macOS branch counts a zero exit inside that
+    /// window as abnormal for the same reason this does. Ours has to be far
+    /// larger, because the two are not timing the same thing: ghostty spawns
+    /// `/bin/sh -c` (measured at 0 ms of startup here), while termio spawns the
+    /// user's *login, interactive* shell so agent CLIs are found on the real
+    /// `PATH` (`launchArgv`). Ten runs of `zsh -ilc true` on a development Mac:
+    ///
+    ///     3400  1940  5180  1990  700  910  930  940  800  1020  ms
+    ///
+    /// Every one of those milliseconds is startup files, and all of them land in
+    /// the process's lifetime before the agent is even reached. 10 s clears the
+    /// worst of that with room to spare while staying far below any session
+    /// someone actually worked in.
+    ///
+    /// This is deliberately a one-sided net. A machine whose rc files take
+    /// longer than this can still hide a failed launch, and no constant fixes
+    /// that — only a signal that separates "the shell was starting up" from "the
+    /// agent was running" would, which today's exit event does not carry. The
+    /// error is cheap in the direction it does fail: a false park costs one
+    /// keypress, where a false revert costs the user an evening.
+    static let agentLaunchFloorMilliseconds: UInt64 = 10_000
+
+    /// How long the **process** lived — which is not how long this client
+    /// watched it.
+    ///
+    /// `TermiodSessionLink` times from its own construction, and that is an
+    /// *attach*, not a spawn. Sessions outlive the app on purpose, so an agent
+    /// running for hours that quits a moment after the app reattaches has an
+    /// attach age of milliseconds; judged on that it would read as a launch that
+    /// never started, and park on a session the user had every right to get a
+    /// shell back from. The daemon stamps `createdUnix` when it spawns, so that
+    /// is the only clock that answers how old the process is.
+    ///
+    /// The two are combined rather than one replacing the other. An attach can
+    /// never precede the spawn, so the client's own measure is a floor under the
+    /// true age — taking the larger keeps a remote box's clock running ahead of
+    /// this Mac's from making a long-lived session look newly started.
+    static func processAgeMilliseconds(createdUnix: UInt64?, sinceAttach: UInt64,
+                                       now: Date = Date()) -> UInt64 {
+        guard let createdUnix, createdUnix > 0 else { return sinceAttach }
+        let seconds = now.timeIntervalSince1970 - Double(createdUnix)
+        guard seconds > 0 else { return sinceAttach }
+        return max(UInt64(seconds * 1000), sinceAttach)
+    }
 
     /// The exit policy, as a decision with no side effects, so the in-process PTY
     /// and the daemon link run the *same* one rather than two that drift.
     ///
-    /// Both backends know the same four things at exit: the code, how long the
-    /// process ran, what the row is, and whether the launch binary was replaced
+    /// Both backends know the same four things at exit: the code, how old the
+    /// process was, what the row is, and whether the launch binary was replaced
     /// underneath the running process. Only the last differs in how it is
     /// *learned* — the local PTY pins the executable itself, the daemon owns the
     /// process and reports it — which is a producer difference, not a policy one.
     ///
     /// - Parameters:
-    ///   - runtimeMilliseconds: how long the process lived, which is what separates
-    ///     a session the user quit from a launch line that never started one.
+    ///   - processAgeMilliseconds: how long the process lived, from
+    ///     `processAgeMilliseconds(createdUnix:sinceAttach:)` — never this
+    ///     client's own attach age, which says nothing about a session it joined
+    ///     late.
     ///   - isAgentSession: a declared agent, not a plain terminal and not `ssh`.
     ///   - isPlainTerminal: the row's declared agent is `.terminal` (an SSH
     ///     terminal is one of these, which is why the two flags are separate
     ///     rather than one being the negation of the other).
     ///   - executableReplaced: `false` when nothing knows — an absent answer must
     ///     never respawn a process the user quit.
-    static func sessionExit(code: Int32, runtimeMilliseconds: UInt64, isAgentSession: Bool,
+    static func sessionExit(code: Int32, processAgeMilliseconds: UInt64, isAgentSession: Bool,
                             isPlainTerminal: Bool, executableReplaced: Bool) -> SessionExit {
         // A non-zero exit always parks: its error output is the only record of
         // what went wrong, and closing or respawning over it loses that.
@@ -167,7 +212,7 @@ extension TermioStore {
             if executableReplaced { return .relaunch }
             // Clean, but over before the agent could have drawn anything, so
             // there was no session to hand back from.
-            return runtimeMilliseconds < agentLaunchFloorMilliseconds ? .park : .revertToShell
+            return processAgeMilliseconds < agentLaunchFloorMilliseconds ? .park : .revertToShell
         }
         return isPlainTerminal ? .close : .park
     }

@@ -569,9 +569,12 @@ extension TermioStore {
         // self-update check is no longer missing here: the app cannot pin a
         // process it does not own, but the daemon that owns it can, and the exit
         // event carries its answer.
+        // The link's own clock starts at attach, and a session outlives the app
+        // — so the daemon's spawn stamp is what the launch floor has to judge.
         let outcome = TermioStore.sessionExit(
             code: code,
-            runtimeMilliseconds: runtimeMilliseconds,
+            processAgeMilliseconds: TermioStore.processAgeMilliseconds(
+                createdUnix: information?.createdUnix, sinceAttach: runtimeMilliseconds),
             isAgentSession: isAgentSession,
             isPlainTerminal: isPlainTerminal,
             executableReplaced: information?.childExecutableReplaced == true)

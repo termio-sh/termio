@@ -345,6 +345,54 @@ final class TermiodStatusTests: XCTestCase {
         XCTAssertEqual(TermioStore.launchArgv(command: "").last, "-il")
     }
 
+    // MARK: - How old the process was
+
+    /// The daemon's spawn stamp outranks this client's attach age. A session
+    /// outlives the app, so an agent running for an hour that quits just after
+    /// the app reattaches has an attach age of milliseconds — judged on that it
+    /// would park on a session the user was entitled to get a shell back from.
+    func testTheProcessAgeComesFromTheDaemonsSpawnStampNotTheAttach() {
+        let now = Date()
+        let anHourOld = UInt64(now.timeIntervalSince1970) - 3_600
+        let age = TermioStore.processAgeMilliseconds(
+            createdUnix: anHourOld, sinceAttach: 40, now: now)
+        XCTAssertGreaterThanOrEqual(age, 3_600_000)
+        XCTAssertEqual(
+            TermioStore.sessionExit(code: 0, processAgeMilliseconds: age, isAgentSession: true,
+                                    isPlainTerminal: false, executableReplaced: false),
+            .revertToShell)
+    }
+
+    /// A daemon too old to report a spawn stamp, or one whose clock runs ahead
+    /// of this Mac's, falls back to the attach age — which is a floor under the
+    /// true age, never an overestimate, so the larger of the two is taken.
+    func testAMissingOrSkewedSpawnStampFallsBackToTheAttachAge() {
+        let now = Date()
+        XCTAssertEqual(
+            TermioStore.processAgeMilliseconds(createdUnix: nil, sinceAttach: 250, now: now), 250)
+        XCTAssertEqual(
+            TermioStore.processAgeMilliseconds(createdUnix: 0, sinceAttach: 250, now: now), 250)
+        let inTheFuture = UInt64(now.timeIntervalSince1970) + 600
+        XCTAssertEqual(
+            TermioStore.processAgeMilliseconds(createdUnix: inTheFuture, sinceAttach: 250,
+                                               now: now),
+            250)
+    }
+
+    /// A launch that failed is over inside the time the login shell itself takes
+    /// to start — measured at 0.7 s to 5.2 s of startup files on a development
+    /// Mac, which is why the floor sits well above ghostty's 250 ms.
+    func testAFailedLaunchIsStillCaughtAfterASlowLoginShell() {
+        let now = Date()
+        let fiveSecondsAgo = UInt64(now.timeIntervalSince1970) - 5
+        let age = TermioStore.processAgeMilliseconds(
+            createdUnix: fiveSecondsAgo, sinceAttach: 5_000, now: now)
+        XCTAssertEqual(
+            TermioStore.sessionExit(code: 0, processAgeMilliseconds: age, isAgentSession: true,
+                                    isPlainTerminal: false, executableReplaced: false),
+            .park)
+    }
+
     // MARK: - The exit policy both backends run
 
     /// A clean agent quit hands the pane back to a shell, and the same quit
@@ -352,11 +400,11 @@ final class TermiodStatusTests: XCTestCase {
     /// One policy, whichever machine the PTY was on.
     func testACleanAgentQuitRevertsUnlessItsBinaryWasReplaced() {
         XCTAssertEqual(
-            TermioStore.sessionExit(code: 0, runtimeMilliseconds: 30_000, isAgentSession: true,
+            TermioStore.sessionExit(code: 0, processAgeMilliseconds: 30_000, isAgentSession: true,
                                     isPlainTerminal: false, executableReplaced: false),
             .revertToShell)
         XCTAssertEqual(
-            TermioStore.sessionExit(code: 0, runtimeMilliseconds: 30_000, isAgentSession: true,
+            TermioStore.sessionExit(code: 0, processAgeMilliseconds: 30_000, isAgentSession: true,
                                     isPlainTerminal: false, executableReplaced: true),
             .relaunch)
     }
@@ -367,19 +415,19 @@ final class TermiodStatusTests: XCTestCase {
     /// that made a truncated launch line read as "termio just opens a terminal".
     func testAnAgentThatDiesAtLaunchParksInsteadOfRevertingToAShell() {
         XCTAssertEqual(
-            TermioStore.sessionExit(code: 0, runtimeMilliseconds: 0, isAgentSession: true,
+            TermioStore.sessionExit(code: 0, processAgeMilliseconds: 0, isAgentSession: true,
                                     isPlainTerminal: false, executableReplaced: false),
             .park)
         XCTAssertEqual(
             TermioStore.sessionExit(code: 0,
-                                    runtimeMilliseconds: TermioStore
+                                    processAgeMilliseconds: TermioStore
                                         .agentLaunchFloorMilliseconds - 1,
                                     isAgentSession: true, isPlainTerminal: false,
                                     executableReplaced: false),
             .park)
         XCTAssertEqual(
             TermioStore.sessionExit(code: 0,
-                                    runtimeMilliseconds: TermioStore
+                                    processAgeMilliseconds: TermioStore
                                         .agentLaunchFloorMilliseconds,
                                     isAgentSession: true, isPlainTerminal: false,
                                     executableReplaced: false),
@@ -387,7 +435,7 @@ final class TermiodStatusTests: XCTestCase {
         // A binary replaced underneath a running agent is still a relaunch: the
         // self-update ends the process fast and asks for exactly that.
         XCTAssertEqual(
-            TermioStore.sessionExit(code: 0, runtimeMilliseconds: 0, isAgentSession: true,
+            TermioStore.sessionExit(code: 0, processAgeMilliseconds: 0, isAgentSession: true,
                                     isPlainTerminal: false, executableReplaced: true),
             .relaunch)
     }
@@ -397,7 +445,7 @@ final class TermiodStatusTests: XCTestCase {
     /// separate rather than one being the negation of the other.
     func testACleanTerminalExitClosesThePane() {
         XCTAssertEqual(
-            TermioStore.sessionExit(code: 0, runtimeMilliseconds: 0, isAgentSession: false,
+            TermioStore.sessionExit(code: 0, processAgeMilliseconds: 0, isAgentSession: false,
                                     isPlainTerminal: true, executableReplaced: false),
             .close)
     }
@@ -408,7 +456,7 @@ final class TermiodStatusTests: XCTestCase {
         for agent in [true, false] {
             for terminal in [true, false] {
                 XCTAssertEqual(
-                    TermioStore.sessionExit(code: 1, runtimeMilliseconds: 30_000,
+                    TermioStore.sessionExit(code: 1, processAgeMilliseconds: 30_000,
                                             isAgentSession: agent,
                                             isPlainTerminal: terminal,
                                             executableReplaced: true),
