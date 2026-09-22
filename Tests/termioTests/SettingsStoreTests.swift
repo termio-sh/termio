@@ -201,6 +201,16 @@ final class AppSettingsFileBackingTests: XCTestCase {
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
+    func testDisplayAwakePreferenceDefaultsOffAndPersists() throws {
+        let settings = makeSettings()
+        XCTAssertFalse(settings.keepDisplayAwakeWhileWorking)
+        settings.keepDisplayAwakeWhileWorking = true
+        XCTAssertEqual(try fileContents()["agents.keepDisplayAwakeWhileWorking"] as? Bool, true)
+        XCTAssertTrue(makeSettings().keepDisplayAwakeWhileWorking)
+        settings.keepDisplayAwakeWhileWorking = false
+        XCTAssertFalse(makeSettings().keepDisplayAwakeWhileWorking)
+    }
+
     func testChangingASettingWritesItToTheFile() throws {
         let settings = makeSettings()
         settings.fontSize = 17

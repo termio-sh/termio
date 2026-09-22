@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private lazy var store = TermioStore.restored(settings: settings)
     private lazy var usageMonitor = UsageMonitor(settings: settings)
     private var menuBar: MenuBarController?
+    private var agentDisplayAwake: AgentDisplayAwakeController?
     /// Rebuilds the main menu when the user rebinds a shortcut in Settings.
     private var keybindingsObserver: NSObjectProtocol?
     private var companionServer: CompanionServer?
@@ -438,6 +439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         terminalContextMenu = TerminalContextMenu(store: store, pasteInterceptor: pasteInterceptor)
         paneDragRearrange = PaneDragRearrange(store: store)
 
+        agentDisplayAwake = AgentDisplayAwakeController(store: store)
         menuBar = MenuBarController(store: store) { [weak self] id in
             // The tray's "come look at this" — same verb as a notification click
             // and `termio sessions focus` (select + acknowledge + raise).
@@ -624,6 +626,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// happen here is the bookkeeping only the running app holds.
     /// Only a real quit reaches here; closing the window does not.
     func applicationWillTerminate(_ notification: Notification) {
+        agentDisplayAwake?.stop()
         // A delivered banner taps back into a window that is going away.
         TaskNotificationCenter.shared.withdrawAll()
         // Tree edits are debounced (see `persistSoon`), so flush before the
