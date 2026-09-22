@@ -368,9 +368,12 @@ struct FileEditorView: View {
         if isMarkdown && mode == .preview {
             previewSource = text
             // The pair an edit is merged against arrives from the page (`onCanonical`),
-            // which answers for the document it was actually handed. Dropped here so a
-            // stale pair can never be merged against while the new one is in flight;
-            // until it lands an edit is adopted as-is.
+            // which answers for the document it was actually handed. The baseline is
+            // dropped here so a stale pair can never be merged against while the new one
+            // is in flight — until it lands an edit is adopted as-is — and the document
+            // side is seeded with what is about to be pushed, so the two are never
+            // half-set even if the page never answers.
+            renderedFaceOrigin = text
             renderedFaceCanonical = nil
             mountedReader = true
         } else {
