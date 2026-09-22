@@ -7,9 +7,13 @@ Markdown text *is* the model, so the rendered face edits the same bytes the
 source face does rather than a converted document.
 
 `app.js` is a built bundle: the kernel, React 19.3.0, react-dom and immer,
-compiled to one IIFE (`esbuild --bundle --format=iife`). The build input lives
-in `.domd-proto/app/src` on the prototype branch. IIFE rather than ESM because
-a `WKWebView` loading over a custom scheme gets no module CORS.
+compiled to one IIFE. IIFE rather than ESM because a `WKWebView` loading over a
+custom scheme gets no module CORS. Its input is `web/domd` — `pnpm install &&
+pnpm build` there writes this file, and the result is byte-identical to what is
+checked in. Edit the page there, never here.
+
+`app.css` and `index.html` are the exception: they are termio's own, authored
+here directly, and nothing builds them.
 
 `domd.css` is the kernel's own `style.css`, verbatim. `app.css` is termio's —
 theme tokens, the math / mermaid / alert / front-matter faces. The kernel is
