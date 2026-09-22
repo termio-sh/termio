@@ -1442,6 +1442,8 @@
 	<string>测试</string>
 	<key>Test Connection</key>
 	<string>测试连接</string>
+	<key>The Markdown editor reported a problem.</key>
+	<string>Markdown 编辑器报告了一个问题。</string>
 	<key>The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with.</key>
 	<string>新建聊天（⌘N）启动的 Agent。“上次使用”跟随你最近一次聊天所用的 Agent。</string>
 	<key>The base branch has commits this branch doesn’t have, as of the last fetch.</key>
@@ -1546,6 +1548,8 @@
 	<string>该设备上的 termiod 版本过旧，无法查询其 Agent。</string>
 	<key>This diff is too large to show here — open the file on GitHub.</key>
 	<string>此差异太大，无法在此显示，请在 GitHub 上打开该文件。</string>
+	<key>This document could not be handed to the editor.</key>
+	<string>无法将此文稿交给编辑器。</string>
 	<key>This file is binary — open it on GitHub to view.</key>
 	<string>此文件为二进制文件，请在 GitHub 上打开查看。</string>
 	<key>This folder has no git “origin” remote to clone.</key>
