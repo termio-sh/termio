@@ -34,6 +34,10 @@ struct MarkdownEditorView: NSViewRepresentable {
     let handle: MarkdownEditorHandle
     /// An edit made in this face, already debounced on the page side.
     let onEdit: (String) -> Void
+    /// The kernel's own serialization of the document it was just handed, before any edit.
+    /// The host merges an edit against it so the file keeps its own formatting rather than
+    /// taking the kernel's canonical one — see `MarkdownWriteBack`.
+    let onCanonical: (String) -> Void
     /// A page-side failure worth surfacing rather than swallowing.
     let onFailure: (String) -> Void
 
@@ -110,6 +114,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         private var onEdit: (String) -> Void = { _ in }
+        private var onCanonical: (String) -> Void = { _ in }
         private var onFailure: (String) -> Void = { _ in }
         private var isEditable = false
         private var isActive = false
@@ -136,6 +141,7 @@ struct MarkdownEditorView: NSViewRepresentable {
                        appearance: Appearance, source: String) {
             self.webView = webView
             onEdit = owner.onEdit
+            onCanonical = owner.onCanonical
             onFailure = owner.onFailure
             isEditable = owner.isEditable
             isActive = owner.isActive
@@ -146,6 +152,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         func update(owner: MarkdownEditorView, webView: WKWebView,
                     appearance next: Appearance, source: String) {
             onEdit = owner.onEdit
+            onCanonical = owner.onCanonical
             onFailure = owner.onFailure
             self.webView = webView
 
@@ -261,7 +268,26 @@ struct MarkdownEditorView: NSViewRepresentable {
                 onFailure(localized("This document could not be handed to the editor."))
                 return
             }
-            evaluate("window.termioDomd?.load(\(encoded))", on: webView)
+            // The load and the baseline read are one evaluation because `load` is
+            // synchronous: what comes back is the kernel's serialization of exactly the
+            // document just handed over, with no edit in it. That is the base an edit is
+            // merged against — without it a typed character would carry the whole
+            // document's canonical formatting into the file (see `MarkdownWriteBack`).
+            // A page that did not fully hydrate answers `null` and nothing is merged.
+            webView.evaluateJavaScript("""
+                window.termioDomd?.load(\(encoded));
+                window.termioDomd?.isHydrated() ? window.termioDomd.markdown() : null;
+                """) { [weak self] value, error in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if let error {
+                        self.onFailure(error.localizedDescription)
+                        return
+                    }
+                    guard let canonical = value as? String else { return }
+                    self.onCanonical(canonical)
+                }
+            }
         }
 
         private func configurePage(on webView: WKWebView) {

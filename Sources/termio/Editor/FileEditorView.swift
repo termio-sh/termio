@@ -86,6 +86,11 @@ struct FileEditorView: View {
     /// Reaches the rendered face's page so the flip out of it can pull the document
     /// before changing face. Filled in by the view when it mounts.
     @State private var readerBridge = MarkdownEditorHandle()
+    /// The buffer as the rendered face was handed it, and the page's own serialization of
+    /// that same document. Together they are the base an edit coming back out of that face
+    /// is merged against, so the file keeps its own formatting — see `adoptRenderedFace`.
+    @State private var renderedFaceOrigin = ""
+    @State private var renderedFaceCanonical: String?
     /// Set when the file is too large for syntax highlighting (see `highlightByteLimit`).
     @State private var highlightDisabled = false
     @State private var saveError: String?
@@ -331,9 +336,9 @@ struct FileEditorView: View {
                         // its edits go straight in — auto-save and the dirty flag then behave
                         // exactly as they do for the source face.
                         guard isMarkdown, mode == .preview, !readOnly else { return }
-                        previewSource = markdown
-                        text = markdown
+                        adoptRenderedFace(markdown)
                     },
+                    onCanonical: { markdown in renderedFaceCanonical = markdown },
                     onFailure: { message in saveError = message }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -357,10 +362,34 @@ struct FileEditorView: View {
         guard loaded else { return }
         if isMarkdown && mode == .preview {
             previewSource = text
+            // The document this face is about to be handed, and the base an edit coming
+            // back out of it is merged against. The page answers with its own
+            // serialization of it (`onCanonical`); until it does there is nothing to
+            // merge against and an edit is adopted as-is.
+            renderedFaceOrigin = text
+            renderedFaceCanonical = nil
             mountedReader = true
         } else {
             mountedEditor = true
         }
+    }
+
+    /// Takes a document reported by the rendered face into the buffer, in the file's own
+    /// formatting rather than the kernel's.
+    ///
+    /// The page's document is canonical Markdown: re-padded tables, blank lines around
+    /// blocks, a `0.` list renumbered. Adopting it whole would turn one typed character
+    /// into a whole-file rewrite, so only what changed is carried across — see
+    /// `MarkdownWriteBack`. `previewSource` still takes the page's own text, because it
+    /// is what the page holds and pushing anything else back would reset the caret.
+    private func adoptRenderedFace(_ markdown: String) {
+        previewSource = markdown
+        guard let canonical = renderedFaceCanonical else {
+            text = markdown
+            return
+        }
+        text = MarkdownWriteBack.merge(edited: markdown, canonical: canonical,
+                                       original: renderedFaceOrigin)
     }
 
     /// The only way the mode changes from the UI.
@@ -379,10 +408,7 @@ struct FileEditorView: View {
             return
         }
         readerBridge.flush { markdown in
-            if let markdown {
-                previewSource = markdown
-                text = markdown
-            }
+            if let markdown { adoptRenderedFace(markdown) }
             mode = next
         }
     }
@@ -582,10 +608,7 @@ struct FileEditorView: View {
             return
         }
         readerBridge.flush { markdown in
-            if let markdown {
-                previewSource = markdown
-                text = markdown
-            }
+            if let markdown { adoptRenderedFace(markdown) }
             body()
         }
     }
