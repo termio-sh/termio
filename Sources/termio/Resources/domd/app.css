@@ -71,7 +71,18 @@ html, body { height: 100%; }
      the space between blocks: a 13.5px fence measuring its margin in its own em
      opened a 17.5px gap where the paragraphs around it opened 27px. Measured. */
   --prose-size: 18px;
-  --leading: 1.5;
+  /* 1.7, and the reason is the caret, not the reading. Measured in WebKit: the caret
+     in a contenteditable is the FONT's ascent+descent and nothing else — 23px at 18px
+     Quattro, unchanged whether line-height is 1.2, 1.5 or 2.4. Leading cannot make the
+     caret shorter; it can only change how much of the line the caret occupies.
+     At 1.5 that was 85% — a bar that spans the row and reaches toward its neighbours.
+     At 1.7 it is 75%, with 3.8px of air above and below, and it reads as a caret
+     sitting in a line. Tightening leading is the wrong instinct here and actively
+     backfires: below about 1.28 the 23px caret is taller than its own line box and
+     overflows into the lines around it.
+     `--block-gap` deliberately does NOT track this, so the paragraph break stays at a
+     fixed 27px of air rather than growing every time the leading does. */
+  --leading: 1.7;
   --block-gap: calc(var(--prose-size) * 1.5);
   min-height: 100%; display: flex; flex-direction: column;
   /* 66ch, not 76ch. Quattro is duospaced, so a line holds more characters than it
