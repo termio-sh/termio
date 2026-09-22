@@ -192,6 +192,8 @@ final class DomdBundleResourceTests: XCTestCase {
     /// the bundle root rather than in the vendored folder. The handler resolves them
     /// there; if that ever moves, this is what says so.
     func testEngineFilesAreAtTheBundleRoot() throws {
+        // highlight.min.js joined this set when the rendered face gained syntax
+        // highlighting; it is the same file and the same path the reader uses.
         for name in DomdResource.engineFiles {
             let url = Bundle.termioResources.url(
                 forResource: (name as NSString).deletingPathExtension, withExtension: "js")
@@ -209,6 +211,36 @@ final class DomdBundleResourceTests: XCTestCase {
                 withExtension: (name as NSString).pathExtension,
                 subdirectory: "domd")
             XCTAssertNotNil(url, "the kernel's \(name) is not shipped")
+        }
+    }
+
+    /// The shipped bundle still carries the hydration refusal.
+    ///
+    /// The kernel has three load paths and only one of them is synchronous: measured at
+    /// 0.12.3, a 2402-line document loaded through `initMd` or `resetMDChunked` yields
+    /// 3882 of 19299 bytes immediately, and what it yields is a PREFIX of the real
+    /// document. `flush` answers null only when the document is UNCHANGED, so a
+    /// truncation would read as a legitimate edit and be written to disk — the one case
+    /// that must be refused is the one that would otherwise sail through. The page
+    /// refuses while it is not holding the whole document; this is the line that says
+    /// the refusal is still in the build.
+    func testTheBundleStillCarriesTheHydrationRefusal() throws {
+        let url = try XCTUnwrap(Bundle.termioResources.url(
+            forResource: "app", withExtension: "js", subdirectory: "domd"))
+        let bundle = try String(contentsOf: url, encoding: .utf8)
+        // Only the guard is asserted here. Which load path the page uses is NOT —
+        // `resetMDChunked` is the kernel's own method and is in the bundle either way,
+        // so grepping for it would test domd, not termio. The guard is the protection
+        // that holds whichever path is used, because it checks the RESULT.
+        XCTAssertTrue(bundle.contains("isHydrated"),
+                      "the page no longer reports whether it holds the whole document")
+        // The code rules were deleted once by a bad splice and nothing caught it: the
+        // kernel's own .DOMD-Pre simply won, leaving 17px Consolas with no padding.
+        // A stylesheet that no longer sizes code is the shape of that regression.
+        let css = try String(contentsOf: XCTUnwrap(Bundle.termioResources.url(
+            forResource: "app", withExtension: "css", subdirectory: "domd")), encoding: .utf8)
+        for rule in ["DOMD-PreCode", "DOMD-Code", "DOMD-Kbd", "DOMD-Img"] {
+            XCTAssertTrue(css.contains(rule), "the stylesheet no longer styles \(rule)")
         }
     }
 
@@ -287,5 +319,73 @@ final class DomdImageResolutionTests: XCTestCase {
         let resolved = DomdResource.imageURL(forRelativePath: relative, under: root)
         XCTAssertEqual(resolved?.path, root.appendingPathComponent(reference).path)
         XCTAssertTrue(FileManager.default.fileExists(atPath: resolved?.path ?? ""))
+    }
+}
+
+/// When the rendered face may hold first responder.
+///
+/// Both faces stay mounted in the ZStack, so this rule has two jobs that pull opposite
+/// ways: the visible face must actually get focus (without it the surface reads as
+/// unclickable), and the dormant one must never take it from the source editor beside
+/// it. The old code claimed focus once, from the page's `ready` message, at a moment
+/// when the view might not be in a window yet — and a Markdown file opens straight into
+/// the rendered face, so there was no later "became active" transition to retry on.
+final class DomdFocusTests: XCTestCase {
+    func testTheVisibleFaceInAWindowClaimsFocus() {
+        XCTAssertTrue(DomdFocus.shouldClaim(isActive: true, isHidden: false, hasWindow: true))
+    }
+
+    /// The regression that made the face unclickable: asked before there was a window,
+    /// the answer is no — and because nothing retried, no was permanent.
+    func testAFaceWithNoWindowYetClaimsNothing() {
+        XCTAssertFalse(DomdFocus.shouldClaim(isActive: true, isHidden: false, hasWindow: false))
+    }
+
+    /// The opposite hazard: a dormant face is still mounted, and must not pull the caret
+    /// out of the source editor the user is typing in.
+    func testTheDormantFaceNeverClaimsFocus() {
+        XCTAssertFalse(DomdFocus.shouldClaim(isActive: false, isHidden: true, hasWindow: true))
+        XCTAssertFalse(DomdFocus.shouldClaim(isActive: false, isHidden: false, hasWindow: true))
+        XCTAssertFalse(DomdFocus.shouldClaim(isActive: true, isHidden: true, hasWindow: true))
+    }
+}
+
+/// Who gets the Escape key.
+///
+/// Two claimants sit on opposite sides of the web view: the page's full-screen viewer,
+/// whose listener lives in the document, and the editor's own close, which is AppKit's
+/// `cancelOperation:` and never passes through the DOM at all. `stopPropagation` cannot
+/// reach across that boundary, so the host is told when the overlay is up and consumes
+/// the keystroke on its side. Consuming — not merely reading — is what makes it
+/// deterministic: the page's "closed" report and `cancelOperation:` race, and whichever
+/// lands first, exactly one Escape is absorbed.
+final class DomdViewerEscapeTests: XCTestCase {
+    @MainActor
+    private func coordinator(viewerOpen: Bool) -> MarkdownEditorView.Coordinator {
+        let made = MarkdownEditorView.Coordinator()
+        made.receiveForTesting(["type": "viewer", "state": viewerOpen ? "open" : "closed"])
+        return made
+    }
+
+    @MainActor
+    func testEscapeIsNotClaimedWhenTheViewerIsClosed() {
+        XCTAssertFalse(coordinator(viewerOpen: false).consumeViewerEscape())
+    }
+
+    @MainActor
+    func testEscapeIsClaimedOnceWhileTheViewerIsOpen() {
+        let made = coordinator(viewerOpen: true)
+        XCTAssertTrue(made.consumeViewerEscape(), "the overlay should take the first Escape")
+        // The second belongs to the editor again: one keystroke closes one thing.
+        XCTAssertFalse(made.consumeViewerEscape())
+    }
+
+    /// The page closing itself (a click on the overlay) gives the key back without one
+    /// having to be pressed.
+    @MainActor
+    func testClosingTheViewerReleasesTheClaim() {
+        let made = coordinator(viewerOpen: true)
+        made.receiveForTesting(["type": "viewer", "state": "closed"])
+        XCTAssertFalse(made.consumeViewerEscape())
     }
 }

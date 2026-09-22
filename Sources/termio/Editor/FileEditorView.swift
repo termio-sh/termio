@@ -278,7 +278,14 @@ struct FileEditorView: View {
         .onChange(of: jumpLine) {
             if jumpLine != nil, mode == .preview { requestModeChange(to: .edit) }
         }
-        .onExitCommand { close() }
+        // Escape has two claimants once the rendered face can go full screen. The page's
+        // overlay gets it first when it is up — its own listener has already closed it by
+        // the time this runs, and consuming the claim here is what stops the same
+        // keystroke also closing the whole editor.
+        .onExitCommand {
+            if readerBridge.consumeViewerEscape() { return }
+            close()
+        }
         .alert(
             localized("\(fileName) changed on \(remote?.host ?? "")"),
             isPresented: Binding(get: { conflict != nil },

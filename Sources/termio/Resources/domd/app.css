@@ -37,9 +37,9 @@
   --soft: color-mix(in srgb, var(--domd-page-fg) 4%, transparent);
   /* domd.css reads these for the kernel's own elements. */
   --domd-font-family: var(--font-prose);
-  --domd-font-size-base: 17px;
-  --domd-font-size-h1: 28px; --domd-font-size-h2: 22px; --domd-font-size-h3: 19px;
-  --domd-font-size-h4: 17px; --domd-font-size-h5: 17px; --domd-font-size-h6: 17px;
+  --domd-font-size-base: 18px;
+  --domd-font-size-h1: 30px; --domd-font-size-h2: 23px; --domd-font-size-h3: 20px;
+  --domd-font-size-h4: 18px; --domd-font-size-h5: 18px; --domd-font-size-h6: 18px;
 }
 html[data-appearance="dark"] {
   --muted: color-mix(in srgb, var(--domd-page-fg) 62%, transparent);
@@ -59,9 +59,27 @@ html, body { margin: 0; max-width: 100%; overflow-x: hidden;
    in `ch` so it tracks the face and size — 720px does not, and at 17px Quattro it is
    about 62ch, which wraps every line somewhere else. +40px keeps the 20px side padding
    from eating into the 76ch of actual text (border-box puts padding inside max-width). */
+/* The column fills the pane's height, and the editable element fills the column.
+   Measured before this: with a short document in a tall pane, a click below the last
+   line landed on `div`/`html`, not on `.DOMD-Root` — no caret, which reads exactly as
+   "the face is not clickable". The editor has to be the thing under the pointer, not a
+   box the height of its own text. */
+html, body { height: 100%; }
 #root {
-  max-width: calc(76ch + 40px); margin: 0 auto; padding: 36px 20px 160px;
-  font: 17px/1.6 var(--font-prose);
+  /* The whole scale hangs off these three. `--block-gap` is resolved to a length
+     here rather than left as an em, because a block's own em is the wrong unit for
+     the space between blocks: a 13.5px fence measuring its margin in its own em
+     opened a 17.5px gap where the paragraphs around it opened 27px. Measured. */
+  --prose-size: 18px;
+  --leading: 1.5;
+  --block-gap: calc(var(--prose-size) * 1.5);
+  min-height: 100%; display: flex; flex-direction: column;
+  /* 66ch, not 76ch. Quattro is duospaced, so a line holds more characters than it
+     holds `ch`: at 76ch the measured prose line ran 82.7 characters, well past the
+     45-75 a line can be read without losing its place. 66ch measures 71.8. */
+  max-width: calc(66ch + 40px); margin: 0 auto; padding: 36px 20px 160px;
+  font-size: var(--prose-size); line-height: var(--leading);
+  font-family: var(--font-prose);
   /* NOT antialiased — grayscale smoothing thins the strokes and reads 轻飘飘; the
      default subpixel smoothing keeps the face solid, like the editor. */
   -webkit-font-smoothing: auto; text-rendering: optimizeLegibility;
@@ -69,6 +87,34 @@ html, body { margin: 0; max-width: 100%; overflow-x: hidden;
   overflow-wrap: anywhere; word-break: break-word;
 }
 .DOMD-Root { outline: none; font-size: inherit; line-height: inherit; }
+/* The kernel sets `-webkit-font-smoothing: antialiased` on .DOMD-Root, and the whole
+   document lives inside it — so the `auto` declared on #root above was inherited by
+   nothing and never took effect. Grayscale smoothing thins the strokes and reads
+   轻飘飘; reclaiming it here is what makes the page look like the editor again.
+   Inheritance always loses to a direct rule, whatever the specificity. */
+#root .DOMD-Root { -webkit-font-smoothing: auto; -moz-osx-font-smoothing: auto;
+  /* THE PROSE FACE, declared here rather than only on #root, because #root's
+     font-family was inherited by nothing. domd.css defines `--domd-font-family` ON
+     `.DOMD-Root` itself (`:where(.DOMD-Root){--domd-font-family: ui-sans-serif, …}`)
+     and then sets `font-family: var(--domd-font-family)` from it. A custom property
+     declared on the element beats one inherited from :root no matter what the
+     specificity of the :root rule is — `:where()` never entered into it, because the
+     two declarations are on different elements. Measured: every paragraph and heading
+     in the document rendered in system sans, with the i/M advance ratio of SF Pro
+     (0.260) rather than Quattro's (0.333) — while `#root` itself, which nothing
+     draws text in, reported Quattro. Redefining the token here fixes the family and
+     anything else domd.css derives from it in one place.
+     This also repairs the measure: `66ch` is computed from #root's font, so while the
+     text was drawn in a narrower face the column held 85.8 characters, not 71.8. */
+  --domd-font-family: var(--font-prose);
+  font-family: var(--font-prose);
+  /* Fills the column, so the empty space under the last paragraph is still the editor. */
+  flex: 1 1 auto; }
+/* The provider renders a wrapper between #root and .DOMD-Root, so the fill has to be
+   handed down the chain or it stops at the wrapper and the editor stays the height of
+   its own text. Measured: without this, a click in the lower third of the pane lands on
+   that wrapper, not on the editor. */
+#root > * { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 
 /* A CJK document, decided from the source by the host (MarkdownReaderRenderer.isCJK).
    Han glyphs fill their em square and carry no ascender/descender rhythm, so the Latin
@@ -104,17 +150,24 @@ html.cjk #root { font-feature-settings: "kern", "liga", "calt", "palt"; }
 
 /* Headings carry hierarchy through weight + space, not rules or colour — no
    underlines (that GitHub look is the main "webpage" tell). */
-#root :where(h1, .DOMD-H1) { font-size: 28px; font-weight: 700; letter-spacing: -0.019em;
+/* Sized in em of the prose, not in px. Hardcoded px made h4 SMALLER than the body
+   the moment the prose moved to 18px — a heading that reads as less than the text it
+   heads. In em the staircase cannot invert. */
+#root :where(h1, .DOMD-H1) { font-size: 1.65em; font-weight: 700; letter-spacing: -0.019em;
   line-height: 1.2; margin: 0 0 0.7em; padding: 0; }
-#root :where(h2, .DOMD-H2) { font-size: 22px; font-weight: 700; letter-spacing: -0.014em;
+#root :where(h2, .DOMD-H2) { font-size: 1.3em; font-weight: 700; letter-spacing: -0.014em;
   line-height: 1.3; margin: 2em 0 0.5em; padding: 0; }
-#root :where(h3, .DOMD-H3) { font-size: 19px; font-weight: 700; line-height: 1.35;
+#root :where(h3, .DOMD-H3) { font-size: 1.12em; font-weight: 700; line-height: 1.35;
   margin: 1.7em 0 0.35em; padding: 0; }
-#root :where(h4, h5, h6, .DOMD-H4, .DOMD-H5, .DOMD-H6) { font-size: 17px; font-weight: 700;
+#root :where(h4, h5, h6, .DOMD-H4, .DOMD-H5, .DOMD-H6) { font-size: 1em; font-weight: 700;
   margin: 1.5em 0 0.35em; padding: 0; }
 #root .DOMD-Root > *:first-child { margin-top: 0; }
 
-#root :where(p, .DOMD-P) { margin: 0 0 1.2em; line-height: inherit; }
+/* One full line of air, not 0.75 of one. Measured on the old values, a paragraph
+   break advanced the baseline 1.75 line-pitches — LESS than the two pitches that make
+   a break read as a break, so the gap between paragraphs was weaker than the gap
+   between their own lines. */
+#root :where(p, .DOMD-P) { margin: 0 0 var(--block-gap); line-height: inherit; }
 /* Quiet links: a faint underline, no hover jump — reading, not browsing. */
 #root :where(a, .DOMD-Link) { color: var(--domd-accent); text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--domd-accent) 30%, transparent);
@@ -122,7 +175,7 @@ html.cjk #root { font-feature-settings: "kern", "liga", "calt", "palt"; }
 #root :where(strong, .DOMD-Bold) { font-weight: 600; }
 #root :where(del, .DOMD-Del) { color: var(--muted); }
 /* Indented + muted, no accent bar or box. */
-#root :where(blockquote, .DOMD-Blockquote) { margin: 1.3em 0; padding: 0 0 0 20px;
+#root :where(blockquote, .DOMD-Blockquote) { margin: var(--block-gap) 0; padding: 0 0 0 20px;
   border-left: 2px solid var(--line); color: var(--muted); }
 /* Lists. The reader's adaptive gutter: each list reserves its own marker width plus
    about a word space, and an ordered list widens a digit at a time — whole-list, so its
@@ -137,7 +190,7 @@ html.cjk #root { font-feature-settings: "kern", "liga", "calt", "palt"; }
    WebKit's right-aligned marker exactly where the reader's counter sits. */
 #root :where(ul, ol, .DOMD-Ul, .DOMD-Ol, .DOMD-CheckBoxUl) {
   --gutter: 1.3em;
-  margin: 0 0 1.2em; padding-left: var(--gutter); list-style-position: outside;
+  margin: 0 0 var(--block-gap); padding-left: var(--gutter); list-style-position: outside;
 }
 #root :where(ol, .DOMD-Ol) { --gutter: 1.8em; }
 #root :where(ol, .DOMD-Ol):has(> :nth-child(10)) { --gutter: 2.4em; }
@@ -179,13 +232,64 @@ html.cjk #root { font-feature-settings: "kern", "liga", "calt", "palt"; }
   background-size: 100% 100%; background-repeat: no-repeat;
 }
 
+/* Code stays in the terminal face, on a whisper of tint — no borders or pills.
+   These rules were lost once to a bad splice and the loss was invisible in the
+   stylesheet: the kernel's own .DOMD-Pre simply won by default, leaving 17px Consolas
+   with no padding. The measurement, not the source, is what catches that. */
+#root :where(code, .DOMD-Code) { font: 0.82em var(--font-mono);
+  background: var(--soft); border-radius: 4px; padding: 0.1em 0.35em; }
+#root :where(pre, .DOMD-Pre) { background: var(--soft); border: none; border-radius: 8px;
+  padding: 15px 18px; margin: var(--block-gap) 0; overflow-x: auto; max-width: 100%;
+  font-family: var(--font-mono); font-size: 13.5px; line-height: 1.6; }
+#root :where(pre, .DOMD-Pre) :where(code, .DOMD-PreCode) { background: none; padding: 0;
+  font-family: var(--font-mono); font-size: 13.5px; line-height: 1.6; }
+/* A fence's own hidden scaffolding must not reserve line height. */
+#root :where(pre, .DOMD-Pre) .DOMD-PreCodeEmpty { font-size: 13.5px; line-height: 1.6; }
+#root :where(kbd, .DOMD-Kbd) { font: 0.78em var(--font-mono); background: var(--soft);
+  border: 1px solid var(--line); border-radius: 4px; padding: 0.15em 0.4em;
+  vertical-align: 0.05em; }
+/* `height: auto` against the pixel height GitHub writes onto a pasted `<img>`; a
+   clamped width with that height still set stretches the picture vertically. */
+#root :where(img, video, .DOMD-Img) { max-width: 100%; height: auto; margin: 0.6em 0;
+  border-radius: 6px; }
+
+/* Uniform line boxes, so the caret is the same height on every line.
+   In a contenteditable the caret takes the height of the tallest inline box on its
+   line, so any inline decoration with its own taller line-height makes the caret jump
+   from line to line — an editing defect, not a cosmetic one. Each of these is pinned
+   so it can contribute no more leading than the prose around it. The emoji is the one
+   that actually threatens it: Apple Color Emoji carries far larger metrics than the
+   text face, and it only started appearing here when shortcodes began rendering.
+   NOT reproduced in headless Chrome (every line box measures 20px there) — this is
+   hardening against a WebKit behaviour that measurement in this environment cannot
+   reach, and it is written so it cannot change the layout where the problem is absent. */
+#root :where(code, .DOMD-Code, kbd, .DOMD-Kbd) { line-height: inherit; }
+#root .domd-emoji { font-size: 1em; line-height: 1; vertical-align: -0.08em; }
+/* A raised or lowered box reports its full leading to the line; zeroing it keeps the
+   offset without letting the box grow. */
+#root :where(sup, sub, .domd-footnote-ref) { line-height: 0; }
+/* Inline math legitimately needs its own height for a fraction or a radical; a display
+   formula has its own line and is free to be tall. */
+#root .domd-math math { line-height: normal; }
+/* The kernel's own `.DOMD-Root img { display: inline }` (0,1,1) beats its
+   `.DOMD-Img { display: block }` (0,1,0), so an image sits down INTO the text line and
+   the line box — and with it the caret — grows to the height of the picture. Measured:
+   a one-line paragraph containing an image is 189px tall against 27px without one.
+   Only .DOMD-Img is pinned; a small inline image inside raw HTML keeps its flow. */
+#root .DOMD-Img { display: block; }
+/* inline-block reports its whole box, margins included, to the line. */
+#root .DOMD-InlinePlain { display: inline; }
+/* 22px + 5px of margin overruns the 27.2px line-height budget outright. */
+#root .DOMD-FunctionIcon { width: 1em; height: 1em; margin-bottom: 0;
+                           vertical-align: -0.12em; }
+
 /* Tables: horizontal rules only, like a native document — no grid, no outer box.
    `width: max-content` lays the table out at its natural content width so the browser's
    column balancing works unsquashed, and `max-width` + `overflow` makes an oversized
    table scroll as a whole instead of crushing its widest column or widening the page.
    Cells reset the body's anywhere-wrapping — mid-word breaks are what make columns look
    lopsided. */
-#root :where(table, .DOMD-Table) { border-collapse: collapse; margin: 1.4em 0;
+#root :where(table, .DOMD-Table) { border-collapse: collapse; margin: var(--block-gap) 0;
   font-size: 15px; display: block; width: max-content; max-width: 100%;
   overflow-x: auto; border: none; }
 #root :where(th, td, .DOMD-TH, .DOMD-TD) { border: none;
@@ -203,8 +307,14 @@ html.cjk #root { font-feature-settings: "kern", "liga", "calt", "palt"; }
   vertical-align: middle; }
 
 #root :where(hr, .DOMD-Hr) { border: none; border-top: 1px solid var(--line);
-  height: 0; margin: 2.4em 0; background: none; }
-#root .DOMD-HrDiv { height: auto; margin: 2.4em 0; }
+  height: 0; margin: calc(var(--block-gap) * 1.5) 0; background: none; }
+#root .DOMD-HrDiv { height: auto; margin: calc(var(--block-gap) * 1.5) 0; }
+/* The kernel wraps the rule as `.DOMD-HrDiv > div > hr` and makes the wrapper a flex
+   container, which is a margin-collapsing boundary: the margin above puts 2.4em on the
+   wrapper AND 2.4em on the rule inside it, and the inner pair cannot collapse out.
+   Measured: 164.2px of space, ink to ink, around a 1px line. Zeroed here so the
+   divider's air is declared once, on the wrapper. */
+#root .DOMD-HrDiv :where(hr, .DOMD-Hr) { margin: 0; }
 #root :where(em, .DOMD-Em) { font-style: italic; margin-right: 0; }
 #root :where(.DOMD-EmBold) { font-weight: 700; font-style: italic; margin-right: 0; }
 /* An image's alt text, when the kernel shows it, is apparatus rather than prose. */
@@ -278,3 +388,31 @@ html.cjk #root { font-feature-settings: "kern", "liga", "calt", "palt"; }
 .domd-html-rendered :where(abbr[title]) { text-decoration: underline dotted; cursor: help; }
 /* An image the scheme handler cannot serve must not leave a broken-icon hole. */
 .domd-html-rendered :where(img):-moz-broken { opacity: .35; }
+
+/* Full-screen viewer (see viewer.js) ------------------------------------- */
+/* The chip is the affordance, because a click on this surface has to keep meaning
+   "put the caret here". It lives outside the editable tree and is positioned over
+   whatever is hovered. It appears on the next frame, no fade — hover cues snap here. */
+.domd-zoom { position: fixed; z-index: 11; display: none;
+  width: 26px; height: 26px; padding: 5px; border: none; border-radius: 6px;
+  appearance: none; background: var(--domd-panel); color: var(--muted); cursor: pointer; }
+.domd-zoom.visible { display: block; }
+.domd-zoom svg { display: block; width: 100%; height: 100%; fill: none;
+  stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* The overlay is the page's own background, opaque: full screen means the document
+   steps aside, not a web-style dimmed modal. It opens and closes in one frame. */
+.domd-lightbox { display: none; position: fixed; inset: 0; z-index: 12;
+  background: var(--domd-page-bg); cursor: zoom-out;
+  align-items: center; justify-content: center; padding: 3vh 3vw; }
+.domd-lightbox.open { display: flex; }
+html.domd-lightbox-open, html.domd-lightbox-open body { overflow: hidden; }
+.domd-lightbox-stage { width: 100%; height: 100%; display: flex;
+  align-items: center; justify-content: center; overflow: hidden; }
+.domd-lightbox-stage > * { transform-origin: center center; }
+/* A diagram is vector, so it grows to fill the pane (its viewBox keeps the aspect); a
+   raster never scales past its natural size — enlarged pixels read as a bug. */
+.domd-lightbox-stage.is-diagram > svg { width: 100%; height: 100%; }
+.domd-lightbox-stage.is-diagram { cursor: grab; }
+.domd-lightbox img { max-width: 100%; max-height: 100%; width: auto; height: auto;
+  border-radius: 6px; }

@@ -51,12 +51,18 @@ struct MarkdownEditorView: NSViewRepresentable {
         // The kernel's own state; a page reload must never inherit the last document's.
         config.websiteDataStore = .nonPersistent()
 
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = DomdWebView(frame: .zero, configuration: config)
         view.setValue(false, forKey: "drawsBackground")
         view.navigationDelegate = context.coordinator
         view.isHidden = !isActive
         context.coordinator.configure(
             owner: self, webView: view, appearance: appearance, source: source)
+        // The retry: whenever the view gains a window, ask again. Idempotent, so an
+        // extra call costs nothing and a missed one is no longer permanent.
+        view.onWindowChange = { [weak coordinator = context.coordinator, weak view] in
+            guard let coordinator, let view else { return }
+            coordinator.claimFocusIfWanted(view)
+        }
         handle.coordinator = context.coordinator
         view.load(URLRequest(url: pageURL))
         return view
@@ -116,6 +122,10 @@ struct MarkdownEditorView: NSViewRepresentable {
         private var pageIsReady = false
         /// A document pushed before the page could accept it, replayed on `ready`.
         private var pendingLoad: String?
+        /// Whether the page's full-screen viewer is up. Escape belongs to it while it is,
+        /// and the host has to know because the two claimants are on opposite sides of
+        /// the web view: the page's own listener never sees AppKit's `cancelOperation:`.
+        private var viewerIsOpen = false
         /// Callers waiting on `flush` — the flip out of this face. Answered by the
         /// page, or by `failWaiters` if it never replies.
         private var flushWaiters: [(String?) -> Void] = []
@@ -158,7 +168,7 @@ struct MarkdownEditorView: NSViewRepresentable {
                 pushedSource = source
                 loadDocument(source, into: webView)
             }
-            if becameActive { claimFocus(webView) }
+            if becameActive { claimFocusIfWanted(webView) }
         }
 
         func detach(from webView: WKWebView) {
@@ -166,6 +176,20 @@ struct MarkdownEditorView: NSViewRepresentable {
             failWaiters()
             webView.configuration.userContentController
                 .removeScriptMessageHandler(forName: "domd")
+        }
+
+        /// Claims the Escape keystroke if the page's viewer is up, and gives it up in
+        /// the same call.
+        ///
+        /// Consuming rather than merely reading is what makes the ordering deterministic:
+        /// the page closes its overlay on its own Escape and reports "closed", but that
+        /// message and AppKit's `cancelOperation:` race. Whichever arrives first, exactly
+        /// one Escape is absorbed here, so the overlay closes OR the editor does — never
+        /// both on one keypress.
+        func consumeViewerEscape() -> Bool {
+            guard viewerIsOpen else { return false }
+            viewerIsOpen = false
+            return true
         }
 
         /// The document as the page has it *now*, pending debounce included.
@@ -268,6 +292,16 @@ struct MarkdownEditorView: NSViewRepresentable {
                 // from and the two read as one document.
                 ("--font-mono", MarkdownReaderRenderer.monoStack(appearance.fontFamily)),
             ]
+            // The reader's own highlight theme, injected unchanged, so a fence is
+            // coloured identically in both faces. Small (about 1KB) and re-sent only
+            // when the appearance changes.
+            // The reader's own highlight theme, handed over unchanged. The page
+            // rewrites its `.hljs-*` selectors to the `.token.*` the kernel emits —
+            // the translation lives there, beside the tokenizer that needs the same
+            // map, so a colour is still defined in exactly one file.
+            if let css = DomdScript.string(MarkdownSkin.highlightTheme(dark: theme.isDark)) {
+                evaluate("window.termioDomdSetHighlightTheme?.(\(css))", on: webView)
+            }
             let writes = tokens.compactMap { name, value -> String? in
                 guard let encodedName = DomdScript.string(name),
                       let encodedValue = DomdScript.string(value) else { return nil }
@@ -277,12 +311,20 @@ struct MarkdownEditorView: NSViewRepresentable {
             configurePage(on: webView)
         }
 
-        /// Takes first responder so ⌘C and typing reach the page rather than the terminal
-        /// surface beneath the overlay. Deferred because a view being made is not yet in a
-        /// window, and re-checked on arrival: by then the mode may have flipped back.
-        private func claimFocus(_ webView: WKWebView) {
-            DispatchQueue.main.async { [weak webView] in
-                guard let webView, !webView.isHidden, let window = webView.window else { return }
+        /// Takes first responder so typing and ⌘C reach the page rather than the terminal
+        /// surface beneath the overlay.
+        ///
+        /// Idempotent and safe to call from anywhere: it re-reads the conditions rather
+        /// than trusting the moment it was called. `DomdFocus.shouldClaim` is the rule,
+        /// and the `isActive` half of it is what keeps a dormant face — still mounted in
+        /// the ZStack beside the source editor — from stealing the caret.
+        func claimFocusIfWanted(_ webView: WKWebView) {
+            DispatchQueue.main.async { [weak self, weak webView] in
+                guard let self, let webView, let window = webView.window else { return }
+                guard DomdFocus.shouldClaim(isActive: self.isActive,
+                                            isHidden: webView.isHidden,
+                                            hasWindow: true) else { return }
+                guard window.firstResponder !== webView else { return }   // already ours
                 window.makeFirstResponder(webView)
             }
         }
@@ -299,19 +341,10 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard let appearance else { return }
-            // The page reads its first document out of this before React mounts, so the
-            // first paint is the real document rather than an empty sheet that fills in.
-            guard let payload = DomdScript.object([
-                "markdown": pushedSource,
-                "editable": isEditable,
-                "appearance": appearance.isDark ? "dark" : "light",
-                "cjk": appearance.isCJK,
-            ]) else {
-                onFailure(localized("This document could not be handed to the editor."))
-                return
-            }
+            // Colours and fonts only. The document is not handed over here: this runs
+            // after the page's own scripts, by which time the editor has already
+            // mounted and would never read it. It arrives on `ready` instead.
             applyAppearance(appearance, to: webView)
-            evaluate("window.__domdInitialState = \(payload)", on: webView)
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -345,16 +378,34 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         func userContentController(_ controller: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
-            guard let body = message.body as? [String: Any],
-                  let type = body["type"] as? String else { return }
+            guard let body = message.body as? [String: Any] else { return }
+            receive(body)
+        }
+
+        /// The page's messages, separated from the `WKScriptMessage` that carries them so
+        /// the routing can be exercised without a live web view.
+        func receiveForTesting(_ body: [String: Any]) { receive(body) }
+
+        private func receive(_ body: [String: Any]) {
+            guard let type = body["type"] as? String else { return }
             switch type {
             case "ready":
                 pageIsReady = true
-                if let pending = pendingLoad, let webView {
+                // The document is delivered HERE, and only here.
+                //
+                // The page mounts while its own <script> runs, which is before
+                // `didFinish` can inject anything — so an initial state written there
+                // is read by nobody, and the first `update()` sees `source` already
+                // equal to `pushedSource` and loads nothing. The face came up empty.
+                // Pushing on the page's own readiness signal removes the ordering
+                // assumption entirely: one delivery path, driven by the side that
+                // knows when it is ready.
+                if let webView {
+                    let document = pendingLoad ?? pushedSource
                     pendingLoad = nil
-                    loadDocument(pending, into: webView)
+                    loadDocument(document, into: webView)
+                    claimFocusIfWanted(webView)
                 }
-                if let webView { claimFocus(webView) }
             case "edit":
                 // A dormant or view-only page is not the buffer's owner and its word
                 // is ignored, whatever it says.
@@ -362,6 +413,13 @@ struct MarkdownEditorView: NSViewRepresentable {
                 reportedSource = markdown
                 pushedSource = markdown
                 onEdit(markdown)
+            case "viewer":
+                viewerIsOpen = (body["state"] as? String) == "open"
+            case "diagnostic":
+                // The page's own view of a click: whether it arrived, what it landed on,
+                // and whether a caret followed. Logged rather than surfaced — it answers
+                // "did the click reach the page at all" without a banner.
+                Log.markdownFace.debug("\((body["message"] as? String) ?? "", privacy: .public)")
             case "error":
                 onFailure((body["message"] as? String)
                     ?? localized("The Markdown editor reported a problem."))
@@ -370,6 +428,43 @@ struct MarkdownEditorView: NSViewRepresentable {
             }
         }
 
+    }
+}
+
+/// Whether the rendered face should be holding first responder right now.
+///
+/// Pure so the rule can be tested: both faces stay mounted in the ZStack, so a DORMANT
+/// rendered face must never take focus from the source editor beside it, and a face
+/// that is not yet in a window cannot take it at all. Getting the second wrong is how
+/// the face ends up unclickable; getting the first wrong is how the source editor loses
+/// the caret out from under the user.
+enum DomdFocus {
+    static func shouldClaim(isActive: Bool, isHidden: Bool, hasWindow: Bool) -> Bool {
+        isActive && !isHidden && hasWindow
+    }
+}
+
+/// The face's own `WKWebView`.
+///
+/// Two AppKit behaviours the rendered face needs and the default does not give:
+///
+/// - `acceptsFirstMouse`: without it AppKit spends the first click activating the view
+///   and the page never sees it — the "first click does nothing, the second works"
+///   symptom. An editor surface should take the caret on the click that reaches it.
+/// - `viewDidMoveToWindow`: focus can only be claimed once there is a window to claim it
+///   in. The page's `ready` message is the natural moment to ask, but the view may not be
+///   in a window yet, and nothing used to retry — a Markdown file opens straight into the
+///   rendered face, so there is no later "became active" transition to catch it either.
+final class DomdWebView: WKWebView {
+    /// Called when the view lands in a window, so a focus claim that was too early can
+    /// be retried. Set by the coordinator.
+    var onWindowChange: (() -> Void)?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowChange?()
     }
 }
 
@@ -383,6 +478,12 @@ struct MarkdownEditorView: NSViewRepresentable {
 @MainActor
 final class MarkdownEditorHandle {
     fileprivate weak var coordinator: MarkdownEditorView.Coordinator?
+
+    /// Whether this Escape belongs to the page's full-screen viewer rather than to the
+    /// editor. Consumes the claim, so one keystroke closes one thing.
+    func consumeViewerEscape() -> Bool {
+        coordinator?.consumeViewerEscape() ?? false
+    }
 
     /// The document as the page has it now, debounced edits included; `nil` when there is
     /// no page to ask. The caller must not change face until this answers.
@@ -485,7 +586,9 @@ enum DomdResource: Equatable {
     /// The vendored page's files. An allow-list rather than a directory walk, so a
     /// crafted path can never read the rest of the resource bundle.
     static let pageFiles: Set<String> = ["index.html", "app.js", "app.css", "domd.css"]
-    static let engineFiles: Set<String> = ["katex.min.js", "mermaid.min.js"]
+    static let engineFiles: Set<String> = [
+        "katex.min.js", "mermaid.min.js", "highlight.min.js",
+    ]
 
     /// The bundled iA Writer Quattro V faces (SIL OFL; licence beside the woff2s in
     /// Resources/Fonts). An explicit allow-list for the same reason the others are one:
