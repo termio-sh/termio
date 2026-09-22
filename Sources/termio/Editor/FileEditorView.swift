@@ -86,9 +86,11 @@ struct FileEditorView: View {
     /// Reaches the rendered face's page so the flip out of it can pull the document
     /// before changing face. Filled in by the view when it mounts.
     @State private var readerBridge = MarkdownEditorHandle()
-    /// The buffer as the rendered face was handed it, and the page's own serialization of
-    /// that same document. Together they are the base an edit coming back out of that face
-    /// is merged against, so the file keeps its own formatting — see `adoptRenderedFace`.
+    /// A document the rendered face was handed, and the page's own serialization of that
+    /// same document. The pair is the base an edit coming back out of that face is merged
+    /// against, so the file keeps its own formatting — see `adoptRenderedFace`. Both are
+    /// written together, by the page, because merging against a mismatched pair would
+    /// rewrite lines nobody touched.
     @State private var renderedFaceOrigin = ""
     @State private var renderedFaceCanonical: String?
     /// Set when the file is too large for syntax highlighting (see `highlightByteLimit`).
@@ -338,7 +340,10 @@ struct FileEditorView: View {
                         guard isMarkdown, mode == .preview, !readOnly else { return }
                         adoptRenderedFace(markdown)
                     },
-                    onCanonical: { markdown in renderedFaceCanonical = markdown },
+                    onCanonical: { document, canonical in
+                        renderedFaceOrigin = document
+                        renderedFaceCanonical = canonical
+                    },
                     onFailure: { message in saveError = message }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -362,11 +367,10 @@ struct FileEditorView: View {
         guard loaded else { return }
         if isMarkdown && mode == .preview {
             previewSource = text
-            // The document this face is about to be handed, and the base an edit coming
-            // back out of it is merged against. The page answers with its own
-            // serialization of it (`onCanonical`); until it does there is nothing to
-            // merge against and an edit is adopted as-is.
-            renderedFaceOrigin = text
+            // The pair an edit is merged against arrives from the page (`onCanonical`),
+            // which answers for the document it was actually handed. Dropped here so a
+            // stale pair can never be merged against while the new one is in flight;
+            // until it lands an edit is adopted as-is.
             renderedFaceCanonical = nil
             mountedReader = true
         } else {

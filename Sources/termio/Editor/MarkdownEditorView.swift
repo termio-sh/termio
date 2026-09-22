@@ -34,10 +34,11 @@ struct MarkdownEditorView: NSViewRepresentable {
     let handle: MarkdownEditorHandle
     /// An edit made in this face, already debounced on the page side.
     let onEdit: (String) -> Void
-    /// The kernel's own serialization of the document it was just handed, before any edit.
-    /// The host merges an edit against it so the file keeps its own formatting rather than
-    /// taking the kernel's canonical one — see `MarkdownWriteBack`.
-    let onCanonical: (String) -> Void
+    /// A document handed to the page, paired with the kernel's own serialization of it
+    /// before any edit. The host merges an edit against that pair so the file keeps its own
+    /// formatting rather than taking the kernel's canonical one — see `MarkdownWriteBack`.
+    /// The two travel together because a merge against a mismatched pair is worse than none.
+    let onCanonical: (_ document: String, _ canonical: String) -> Void
     /// A page-side failure worth surfacing rather than swallowing.
     let onFailure: (String) -> Void
 
@@ -114,7 +115,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         private var onEdit: (String) -> Void = { _ in }
-        private var onCanonical: (String) -> Void = { _ in }
+        private var onCanonical: (String, String) -> Void = { _, _ in }
         private var onFailure: (String) -> Void = { _ in }
         private var isEditable = false
         private var isActive = false
@@ -285,7 +286,7 @@ struct MarkdownEditorView: NSViewRepresentable {
                         return
                     }
                     guard let canonical = value as? String else { return }
-                    self.onCanonical(canonical)
+                    self.onCanonical(markdown, canonical)
                 }
             }
         }
