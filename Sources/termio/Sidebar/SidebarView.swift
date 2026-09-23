@@ -53,13 +53,30 @@ private struct WaitingElsewhereEntry: Identifiable {
     var id: Session.ID { session.id }
 }
 
-/// A muted top-level *section* header — the tier above project folders. Used for the
-/// two special groupings, Terminals and Pinned: a small leading SF Symbol in the same
-/// icon column as the rows below, plus an uppercase, tracked, grey label. Collapsible
-/// (tap the row), with an optional right-click menu (Terminals' New/Close actions).
-/// Deliberately distinct from `ProjectHeader` so a section never reads as a folder.
+struct SidebarCollapseState {
+    enum Section: Hashable {
+        case pinned, projects
+    }
+
+    var projects: Set<Project.ID> = []
+    // A pinned worktree also appears under its project, with independent disclosure.
+    var worktrees: [Section: Set<Worktree.ID>] = [:]
+
+    mutating func setCollapsed(_ collapsed: Bool, projectIDs: Set<Project.ID>,
+                               worktreeIDs: Set<Worktree.ID>, in section: Section) {
+        if collapsed {
+            projects.formUnion(projectIDs)
+            worktrees[section, default: []].formUnion(worktreeIDs)
+        } else {
+            projects.subtract(projectIDs)
+            worktrees[section, default: []].subtract(worktreeIDs)
+        }
+    }
+}
+
 private struct SidebarSectionHeader: View {
     @EnvironmentObject var settings: AppSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let title: String
     let chrome: ChromeTheme?
     var isCollapsed: Bool = false
@@ -69,26 +86,51 @@ private struct SidebarSectionHeader: View {
     var isFirstSection: Bool = false
     var toggleCollapsed: () -> Void = {}
     var menuItems: [SidebarMenuItem] = []
+    var expandAll: (() -> Void)?
+    var collapseAll: (() -> Void)?
+    var canExpandAll = true
+    var canCollapseAll = true
     @State private var isMenuOpen = false
 
     var body: some View {
         HStack(spacing: 5) {
-            // No leading glyph: the rows below already carry a column of icons, so a
-            // section icon on top of that just reads as clutter. The label alone — same
-            // interface font as the rows (size + family), set apart only by uppercase +
-            // tracking + a heavier semibold weight — is the section marker.
-            Text(title)
-                .font(settings.interfaceFont)
-                .fontWeight(.semibold)
-                .tracking(0.6)
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
-            // Disclosure arrow right after the label: a Hugeicons chevron pointing right
-            // when the section is folded, rotated a quarter-turn down when it's open.
-            HugeIconView(icon: .chevronRight, size: 7.5, color: .secondary, lineWidthOverride: 1.75)
-                .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                .animation(.easeInOut(duration: 0.18), value: isCollapsed)
-            Spacer(minLength: 4)
+            Button(action: toggleCollapsed) {
+                HStack(spacing: 5) {
+                    // No leading glyph: the rows below already carry a column of icons, so a
+                    // section icon on top of that just reads as clutter. The label alone — same
+                    // interface font as the rows (size + family), set apart only by uppercase +
+                    // tracking + a heavier semibold weight — is the section marker.
+                    Text(title)
+                        .font(settings.interfaceFont)
+                        .fontWeight(.semibold)
+                        .tracking(0.6)
+                        .textCase(.uppercase)
+                        .foregroundStyle(.secondary)
+                    // Disclosure arrow right after the label: a Hugeicons chevron pointing right
+                    // when the section is folded, rotated a quarter-turn down when it's open.
+                    HugeIconView(icon: .chevronRight, size: 7.5, color: .secondary, lineWidthOverride: 1.75)
+                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: isCollapsed)
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityValue(isCollapsed ? localized("Collapsed") : localized("Expanded"))
+
+            if let expandAll, let collapseAll {
+                HStack(spacing: 2) {
+                    TreeHeaderButton(codicon: .expandAll, help: localized("Expand All"), action: expandAll)
+                        .accessibilityLabel(localized("Expand All"))
+                        .disabled(!canExpandAll)
+                        .opacity(canExpandAll ? 1 : 0.35)
+                    TreeHeaderButton(codicon: .collapseAll, help: localized("Collapse All in Section"), action: collapseAll)
+                        .accessibilityLabel(localized("Collapse All in Section"))
+                        .disabled(!canCollapseAll)
+                        .opacity(canCollapseAll ? 1 : 0.35)
+                }
+            }
         }
         // Generous top padding is the separator between sections — whitespace, not a
         // rule — so each group reads as its own block without a hairline. It lives in
@@ -115,7 +157,6 @@ private struct SidebarSectionHeader: View {
         // pushes the section labels off the column the rows below them establish.
         .padding(.leading, -sidebarLeadingTrim)
         .contentShape(Rectangle())
-        .onTapGesture { toggleCollapsed() }
         .background {
             // Only sections that offer actions (Terminals) get a right-click menu; the
             // Pinned label has none, so it stays a passive divider.
@@ -137,11 +178,11 @@ struct SidebarView: View {
     // The terminal theme is split light/dark and libghostty tracks the system
     // appearance; the chrome borrows whichever side is currently showing.
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // Which projects are folded shut. Held here, not in ProjectHeader, because the
     // header and the session rows are siblings — only the parent can both toggle the
     // fold and omit the collapsed project's rows.
-    @State private var collapsedProjects: Set<Project.ID> = []
-    @State private var collapsedWorktrees: Set<Worktree.ID> = []
+    @State private var collapseState = SidebarCollapseState()
     @State private var pinnedCollapsed = false
     @State private var projectsCollapsed = false
     @State private var terminalsCollapsed = false
@@ -232,14 +273,9 @@ struct SidebarView: View {
             // above the ephemeral Terminals/Chats sections — because it's the items the user
             // deliberately elevated (mirroring the iOS "Needs You" strip at the home top).
             if hasPinned {
-                SidebarSectionHeader(
-                    title: localized("Pinned"),
-                    chrome: chrome,
-                    isCollapsed: pinnedCollapsed,
-                    isFirstSection: true,
-                    toggleCollapsed: {
-                        withAnimation(.easeInOut(duration: 0.18)) { pinnedCollapsed.toggle() }
-                    }
+                projectSectionHeader(
+                    title: localized("Pinned"), section: .pinned, projects: pinnedProjects,
+                    additionalWorktrees: pinnedWorktrees.map(\.worktree), isFirstSection: true
                 )
                 if !pinnedCollapsed {
                     ForEach(waitingElsewhere) { entry in
@@ -269,7 +305,7 @@ struct SidebarView: View {
                     isCollapsed: terminalsCollapsed,
                     isFirstSection: !hasPinned,
                     toggleCollapsed: {
-                        withAnimation(.easeInOut(duration: 0.18)) { terminalsCollapsed.toggle() }
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { terminalsCollapsed.toggle() }
                     },
                     menuItems: [
                         newTerminalMenuItem(store: store) { store.addScratchSession(agent: .terminal) },
@@ -300,7 +336,7 @@ struct SidebarView: View {
                     isCollapsed: chatsCollapsed,
                     isFirstSection: !hasPinned && !hasTerminals,
                     toggleCollapsed: {
-                        withAnimation(.easeInOut(duration: 0.18)) { chatsCollapsed.toggle() }
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { chatsCollapsed.toggle() }
                     },
                     menuItems: [
                         .action(localized("New Chat")) { store.addDefaultChat() },
@@ -321,14 +357,9 @@ struct SidebarView: View {
             // The user's opened projects, under their own section header — the same
             // section treatment as Terminals and Pinned, one tier above the folder rows.
             if !others.isEmpty {
-                SidebarSectionHeader(
-                    title: localized("Projects"),
-                    chrome: chrome,
-                    isCollapsed: projectsCollapsed,
-                    isFirstSection: !hasPinned && !hasTerminals && !hasChats,
-                    toggleCollapsed: {
-                        withAnimation(.easeInOut(duration: 0.18)) { projectsCollapsed.toggle() }
-                    }
+                projectSectionHeader(
+                    title: localized("Projects"), section: .projects, projects: others,
+                    isFirstSection: !hasPinned && !hasTerminals && !hasChats
                 )
                 if !projectsCollapsed {
                     ForEach(others) { projectBlock($0, marksDevice: marksDevice) }
@@ -346,6 +377,47 @@ struct SidebarView: View {
         .contentMargins(.bottom, 12, for: .scrollContent)
         .environment(\.defaultMinListRowHeight, 1)
         .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
+    }
+
+    private func projectSectionHeader(
+        title: String, section: SidebarCollapseState.Section, projects: [Project],
+        additionalWorktrees: [Worktree] = [], isFirstSection: Bool
+    ) -> some View {
+        let projectIDs = Set(projects.map(\.id))
+        let worktreeIDs = Set(projects.flatMap(\.worktrees).map(\.id) + additionalWorktrees.map(\.id))
+        let sectionCollapsed = section == .pinned ? pinnedCollapsed : projectsCollapsed
+        let collapsedWorktrees = collapseState.worktrees[section, default: []]
+        let hasTargets = !projectIDs.isEmpty || !worktreeIDs.isEmpty
+        let canExpand = sectionCollapsed || !collapseState.projects.isDisjoint(with: projectIDs)
+            || !collapsedWorktrees.isDisjoint(with: worktreeIDs)
+        let canCollapse = sectionCollapsed || !projectIDs.isSubset(of: collapseState.projects)
+            || !worktreeIDs.isSubset(of: collapsedWorktrees)
+        let setCollapsed: (Bool) -> Void = { collapsed in
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                if section == .pinned {
+                    pinnedCollapsed = false
+                } else {
+                    projectsCollapsed = false
+                }
+                collapseState.setCollapsed(collapsed, projectIDs: projectIDs,
+                                           worktreeIDs: worktreeIDs, in: section)
+            }
+        }
+        return SidebarSectionHeader(
+            title: title, chrome: chrome, isCollapsed: sectionCollapsed, isFirstSection: isFirstSection,
+            toggleCollapsed: {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                    if section == .pinned {
+                        pinnedCollapsed.toggle()
+                    } else {
+                        projectsCollapsed.toggle()
+                    }
+                }
+            },
+            expandAll: hasTargets ? { setCollapsed(false) } : nil,
+            collapseAll: hasTargets ? { setCollapsed(true) } : nil,
+            canExpandAll: canExpand, canCollapseAll: canCollapse
+        )
     }
 
     /// Agents blocked on the user outside the workspace on screen. Sorted by the
@@ -369,11 +441,11 @@ struct SidebarView: View {
     private func projectBlock(_ project: Project, marksDevice: Bool) -> some View {
         ProjectHeader(
             project: project,
-            isCollapsed: collapsedProjects.contains(project.id),
+            isCollapsed: collapseState.projects.contains(project.id),
             toggleCollapsed: { toggleCollapsed(project.id) },
             chrome: chrome
         )
-        if !collapsedProjects.contains(project.id) {
+        if !collapseState.projects.contains(project.id) {
             let primarySessions = primarySessions(for: project)
             let primarySplitMarks = splitLinkMarks(for: primarySessions)
             ForEach(primarySessions) { session in
@@ -384,12 +456,12 @@ struct SidebarView: View {
                 ProjectHeader(
                     project: project,
                     worktree: worktree,
-                    isCollapsed: collapsedWorktrees.contains(worktree.id),
-                    toggleCollapsed: { toggleWorktreeCollapsed(worktree.id) },
+                    isCollapsed: collapseState.worktrees[project.pinned ? .pinned : .projects, default: []].contains(worktree.id),
+                    toggleCollapsed: { toggleWorktreeCollapsed(worktree.id, in: project.pinned ? .pinned : .projects) },
                     chrome: chrome,
                     leadingIndent: 16
                 )
-                if !collapsedWorktrees.contains(worktree.id) {
+                if !collapseState.worktrees[project.pinned ? .pinned : .projects, default: []].contains(worktree.id) {
                     let sessions = project.sessions.filter {
                         $0.worktreePath == worktree.path && store.isOnCurrentDevice($0)
                     }
@@ -417,13 +489,13 @@ struct SidebarView: View {
         ProjectHeader(
             project: project,
             worktree: worktree,
-            isCollapsed: collapsedWorktrees.contains(worktree.id),
-            toggleCollapsed: { toggleWorktreeCollapsed(worktree.id) },
+            isCollapsed: collapseState.worktrees[.pinned, default: []].contains(worktree.id),
+            toggleCollapsed: { toggleWorktreeCollapsed(worktree.id, in: .pinned) },
             chrome: chrome,
             leadingIndent: 0,
             breadcrumb: project.name
         )
-        if !collapsedWorktrees.contains(worktree.id) {
+        if !collapseState.worktrees[.pinned, default: []].contains(worktree.id) {
             let sessions = project.sessions.filter { $0.worktreePath == worktree.path }
             let splitMarks = splitLinkMarks(for: sessions)
             ForEach(sessions) { session in
@@ -446,22 +518,18 @@ struct SidebarView: View {
     }
 
     private func toggleCollapsed(_ id: Project.ID) {
-        withAnimation(.easeInOut(duration: 0.18)) {
-            if collapsedProjects.contains(id) {
-                collapsedProjects.remove(id)
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+            if collapseState.projects.contains(id) {
+                collapseState.projects.remove(id)
             } else {
-                collapsedProjects.insert(id)
+                collapseState.projects.insert(id)
             }
         }
     }
 
-    private func toggleWorktreeCollapsed(_ id: Worktree.ID) {
-        withAnimation(.easeInOut(duration: 0.18)) {
-            if collapsedWorktrees.contains(id) {
-                collapsedWorktrees.remove(id)
-            } else {
-                collapsedWorktrees.insert(id)
-            }
+    private func toggleWorktreeCollapsed(_ id: Worktree.ID, in section: SidebarCollapseState.Section) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+            collapseState.worktrees[section, default: []].formSymmetricDifference([id])
         }
     }
 

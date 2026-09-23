@@ -346,8 +346,12 @@
 	<string>关闭它会停止 %lld 个会话。磁盘上的文件夹不受影响。</string>
 	<key>Collapse All</key>
 	<string>全部折叠</string>
+	<key>Collapse All in Section</key>
+	<string>全部收缩</string>
 	<key>Collapse Results</key>
 	<string>折叠结果</string>
+	<key>Collapsed</key>
+	<string>已收缩</string>
 	<key>Command</key>
 	<string>命令</string>
 	<key>Command Palette…</key>
@@ -568,8 +572,12 @@
 	<string>所有已配对的 iPhone 都会退出登录，需重新扫描新的二维码才能重新连接。</string>
 	<key>Exited with status %lld.</key>
 	<string>退出状态 %lld。</string>
+	<key>Expand All</key>
+	<string>全部展开</string>
 	<key>Expand Results</key>
 	<string>展开结果</string>
+	<key>Expanded</key>
+	<string>已展开</string>
 	<key>Family</key>
 	<string>系列</string>
 	<key>File</key>

@@ -346,8 +346,12 @@
 	<string>Closing it stops %lld session(s). The folders on disk are left alone.</string>
 	<key>Collapse All</key>
 	<string>Collapse All</string>
+	<key>Collapse All in Section</key>
+	<string>Collapse All</string>
 	<key>Collapse Results</key>
 	<string>Collapse Results</string>
+	<key>Collapsed</key>
+	<string>Collapsed</string>
 	<key>Command</key>
 	<string>Command</string>
 	<key>Command Palette…</key>
@@ -568,8 +572,12 @@
 	<string>Every paired iPhone is signed out and must re-scan the new QR to reconnect.</string>
 	<key>Exited with status %lld.</key>
 	<string>Exited with status %lld.</string>
+	<key>Expand All</key>
+	<string>Expand All</string>
 	<key>Expand Results</key>
 	<string>Expand Results</string>
+	<key>Expanded</key>
+	<string>Expanded</string>
 	<key>Family</key>
 	<string>Family</string>
 	<key>File</key>
