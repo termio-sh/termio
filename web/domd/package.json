@@ -1,0 +1,16 @@
+{
+  "name": "termio-domd-page",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Build input for the rendered Markdown face's page bundle.",
+  "scripts": {
+    "build": "esbuild src/app.jsx --bundle --format=iife --minify --loader:.jsx=jsx --outfile=../../Sources/termio/Resources/domd/app.js"
+  },
+  "dependencies": {
+    "@do-md/core-react": "0.12.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

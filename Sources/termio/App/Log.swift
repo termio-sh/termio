@@ -22,6 +22,10 @@ enum Log {
     static let pty = Logger(subsystem: subsystem, category: "pty")
     static let termiod = Logger(subsystem: subsystem, category: "termiod")
     static let companion = Logger(subsystem: subsystem, category: "companion")
+    /// The rendered Markdown face (`MarkdownEditorView`). Its page reports what a click
+    /// landed on, which is the only way to tell "the click never arrived" from "it
+    /// arrived and no caret followed" without attaching a debugger.
+    static let markdownFace = Logger(subsystem: subsystem, category: "markdown-face")
     static let files = Logger(subsystem: subsystem, category: "files")
     static let issues = Logger(subsystem: subsystem, category: "issues")
     static let focus = Logger(subsystem: subsystem, category: "focus")

@@ -7128,6 +7128,16 @@
         }
       }
     },
+    "The Markdown editor reported a problem.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markdown 编辑器报告了一个问题。"
+          }
+        }
+      }
+    },
     "The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with.": {
       "localizations": {
         "zh-Hans": {
@@ -7634,6 +7644,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "此差异太大，无法在此显示，请在 GitHub 上打开该文件。"
+          }
+        }
+      }
+    },
+    "This document could not be handed to the editor.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法将此文稿交给编辑器。"
           }
         }
       }
