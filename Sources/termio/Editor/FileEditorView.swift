@@ -401,22 +401,28 @@ struct FileEditorView: View {
 
     /// The only way the mode changes from the UI.
     ///
-    /// Leaving the rendered face pulls the document out of it **first** and only then
-    /// flips, because that face is the buffer's owner right up to the moment it stops
-    /// being visible and its reporting is debounced. Flipping first and reading second is
-    /// how the last keystrokes before a flip get silently eaten.
+    /// The face changes **now**. Leaving the rendered face still has to pull the document
+    /// out of it — that face owns the buffer right up to the moment it stops being
+    /// visible, and its reporting is debounced — but that pull is a round trip into a web
+    /// view, measured at 10–30ms on a thousand-line document, and a flip that waits on it
+    /// is a flip that visibly lags a click it should answer instantly.
     ///
-    /// If the page cannot answer, the flip still happens and the buffer keeps the last
-    /// value the page reported — never a guess, and never an empty document.
+    /// So the answer is adopted late, and only if the buffer has not moved since: once
+    /// the source face is up the user can type into it, and a late answer must never
+    /// overwrite what they typed there. That is the whole hazard of flipping first, and
+    /// it is closed by the check rather than by waiting. If the page cannot answer, the
+    /// buffer keeps the last value it reported — never a guess, never an empty document.
     private func requestModeChange(to next: Mode) {
         guard next != mode else { return }
         guard mode == .preview, isMarkdown, !readOnly else {
             mode = next
             return
         }
+        let before = text
+        mode = next
         readerBridge.flush { markdown in
-            if let markdown { adoptRenderedFace(markdown) }
-            mode = next
+            guard let markdown, text == before else { return }
+            adoptRenderedFace(markdown)
         }
     }
 
