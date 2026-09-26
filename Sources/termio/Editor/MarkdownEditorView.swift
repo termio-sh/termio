@@ -85,12 +85,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     }
 
     private var appearance: Appearance {
-        // `isCJK` reads the document, not the theme, but it travels with the other
-        // page-level switches because it is applied the same way: a class on the root,
-        // decided once by the host. `MarkdownReaderRenderer.isCJK` is the one
-        // implementation, so the two faces can never disagree about a document.
-        Appearance(theme: theme, fontFamily: fontFamily, isDark: theme.isDark,
-                   isCJK: MarkdownReaderRenderer.isCJK(source))
+        Appearance(theme: theme, fontFamily: fontFamily, isDark: theme.isDark)
     }
 
     private var pageURL: URL {
@@ -101,13 +96,15 @@ struct MarkdownEditorView: NSViewRepresentable {
     }
 
     /// Everything about the page's look that can change without rebuilding it.
+    ///
+    /// The CJK register is deliberately not here. It is a property of the document, not
+    /// of the theme, and this struct is rebuilt on every SwiftUI update — so riding here
+    /// it was re-decided on every keystroke to answer a question only a new document can
+    /// change. It is decided once per document instead, in `loadDocument`.
     struct Appearance: Equatable {
         let theme: DocumentTheme
         let fontFamily: String
         let isDark: Bool
-        /// Whether to set this document in the CJK register — looser leading, tracking,
-        /// and no optical negative tracking on headings. See `MarkdownReaderRenderer.isCJK`.
-        let isCJK: Bool
     }
 
     // MARK: - Coordinator
@@ -126,6 +123,12 @@ struct MarkdownEditorView: NSViewRepresentable {
         private var pushedSource = ""
         private var reportedSource: String?
         private var pageIsReady = false
+        /// Whether the document now in the page is set in the CJK register — looser
+        /// leading and tracking, no optical negative tracking on headings. Decided once
+        /// per document (see `loadDocument`), because deciding it walks every scalar in
+        /// the document: about 5ms on an 80KB file, which is not a thing to do on a
+        /// keystroke. See `MarkdownReaderRenderer.isCJK`.
+        private var pageIsCJK = false
         /// A document pushed before the page could accept it, replayed on `ready`.
         private var pendingLoad: String?
         /// Whether the page's full-screen viewer is up. Escape belongs to it while it is,
@@ -269,6 +272,14 @@ struct MarkdownEditorView: NSViewRepresentable {
                 onFailure(localized("This document could not be handed to the editor."))
                 return
             }
+            // The register the document is set in, re-decided only because the document
+            // itself changed. Pushed before the load so the page is never briefly drawn
+            // in the wrong one.
+            let isCJK = MarkdownReaderRenderer.isCJK(markdown)
+            if isCJK != pageIsCJK {
+                pageIsCJK = isCJK
+                configurePage(on: webView)
+            }
             // The load and the baseline read are one evaluation because `load` is
             // synchronous: what comes back is the kernel's serialization of exactly the
             // document just handed over, with no edit in it. That is the base an edit is
@@ -296,7 +307,7 @@ struct MarkdownEditorView: NSViewRepresentable {
             guard let payload = DomdScript.object([
                 "editable": isEditable,
                 "appearance": appearance.isDark ? "dark" : "light",
-                "cjk": appearance.isCJK,
+                "cjk": pageIsCJK,
             ]) else { return }
             evaluate("window.termioDomdConfigure?.(\(payload))", on: webView)
         }
