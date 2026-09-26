@@ -94,11 +94,20 @@ export function installViewer(post) {
 
   const hideChip = () => { chip.classList.remove("visible"); target = null; };
 
+  // A diagram sits in its own panel, and the chip belongs on that panel's corner
+  // rather than on the drawing: anchored to the svg it landed inside the graph, over
+  // the last node's label, where it is both unreadable and in the way. An image has
+  // no panel, so it keeps its own corner.
+  const chipAnchor = (node) => node.closest(".domd-mermaid") ?? node;
+
   const placeChip = (node) => {
+    // The size guard reads the node, not the panel: a thumbnail in a wide block is
+    // still too small to be worth a chip.
     const box = node.getBoundingClientRect();
     if (box.width < 48 || box.height < 48) return hideChip();
-    chip.style.top = `${Math.round(box.top + 6)}px`;
-    chip.style.left = `${Math.round(box.right - 32)}px`;
+    const anchor = chipAnchor(node).getBoundingClientRect();
+    chip.style.top = `${Math.round(anchor.top + 6)}px`;
+    chip.style.left = `${Math.round(anchor.right - 32)}px`;
     chip.classList.add("visible");
   };
 
