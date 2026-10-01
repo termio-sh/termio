@@ -254,12 +254,7 @@ extension TermioStore {
     /// its status came from a local hook or from the daemon.
     func applyTermiodStatus(_ report: Termiod.StatusPayload, for id: Session.ID) {
         guard session(id) != nil else { return }
-        let runtime = runtime(for: id)
-        let isWorking = report.status == "working"
-        if runtime.isAgentWorking != isWorking {
-            runtime.isAgentWorking = isWorking
-            sessionRuntimeDidChange.send()
-        }
+        applyTermiodActivity(report.status, for: id)
 
         // Everything from here to the state switch used to sit behind the app's
         // own hook socket and reach only agents on this Mac. One report path
@@ -387,6 +382,14 @@ extension TermioStore {
         }
     }
 
+    private func applyTermiodActivity(_ status: String, for id: Session.ID) {
+        let runtime = runtime(for: id)
+        let isWorking = status == "working"
+        guard runtime.isAgentWorking != isWorking else { return }
+        runtime.isAgentWorking = isWorking
+        sessionRuntimeDidChange.send()
+    }
+
     // MARK: - Host-reported process facts
 
     /// Lands a roster push on the session's row.
@@ -409,6 +412,9 @@ extension TermioStore {
                                  identifiesAgent: Bool,
                                  followsWorkingDirectory: Bool) {
         guard session(id) != nil else { return }
+        // Attachments receive the current status in a roster snapshot, without
+        // a status event until the next report or transition.
+        applyTermiodActivity(information.status, for: id)
         // The daemon's own id for the process behind this row, remembered so a
         // later close can journal it — the identity the roster sweep matches a
         // pending kill by (`journalClaims`).

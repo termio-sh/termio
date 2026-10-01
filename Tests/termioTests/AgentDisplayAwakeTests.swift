@@ -39,6 +39,86 @@ final class AgentDisplayAwakeTests: XCTestCase {
         store.applyTermiodStatus(Termiod.StatusPayload(session: "test", status: status, title: nil), for: id)
     }
 
+    private func applySnapshot(_ status: String, for id: Session.ID, in store: TermioStore) throws {
+        let payload: [String: Any] = [
+            "id": id.uuidString, "name": id.uuidString, "pid": 4242, "alive": true,
+            "cwd": "/tmp", "command": "claude", "status": status,
+            "created_unix": 0, "attached_clients": 1,
+        ]
+        let information = try JSONDecoder().decode(
+            Termiod.SessionInformation.self, from: JSONSerialization.data(withJSONObject: payload))
+        store.applyTermiodInformation(information, for: id,
+                                     identifiesAgent: false, followsWorkingDirectory: false)
+    }
+
+    func testInitialWorkingSnapshotAcquiresWithoutAStatusEvent() async throws {
+        let (store, agent, _) = try makeStore()
+        store.settings.keepDisplayAwakeWhileWorking = true
+        let acquired = expectation(description: "Working snapshot acquires assertion")
+        let controller = AgentDisplayAwakeController(store: store, createAssertion: {
+            acquired.fulfill(); return 1
+        }, releaseAssertion: { _ in true })
+        defer { controller.stop() }
+
+        try applySnapshot("working", for: agent.id, in: store)
+
+        await fulfillment(of: [acquired], timeout: 2)
+        XCTAssertTrue(store.runtime(for: agent.id).isAgentWorking)
+        XCTAssertEqual(store.status(for: agent.id), .idle)
+    }
+
+    func testReconnectRestoresFromSnapshotInEitherCallbackOrder() throws {
+        let (store, agent, _) = try makeStore()
+        store.settings.keepDisplayAwakeWhileWorking = true
+        report("working", for: agent.id, in: store)
+        var created = 0
+        var released = 0
+        let controller = AgentDisplayAwakeController(store: store, createAssertion: {
+            created += 1; return IOPMAssertionID(created)
+        }, releaseAssertion: { _ in released += 1; return true })
+        defer { controller.stop() }
+
+        for snapshotArrivesFirst in [true, false] {
+            store.applyTermiodConnectionLost(for: agent.id, attempts: 1, surface: nil)
+            controller.refresh()
+            XCTAssertEqual(released, created)
+
+            if snapshotArrivesFirst {
+                try applySnapshot("working", for: agent.id, in: store)
+                controller.refresh()
+                XCTAssertEqual(created, released, "A lost connection must still gate the assertion")
+                store.applyTermiodReattached(for: agent.id)
+            } else {
+                store.applyTermiodReattached(for: agent.id)
+                controller.refresh()
+                XCTAssertEqual(created, released, "Reattachment alone must not revive stale activity")
+                try applySnapshot("working", for: agent.id, in: store)
+            }
+            controller.refresh()
+            XCTAssertEqual(created, released + 1, "A current working snapshot must restore protection")
+        }
+    }
+
+    func testNonWorkingSnapshotsReleaseProtection() throws {
+        let (store, agent, _) = try makeStore()
+        store.settings.keepDisplayAwakeWhileWorking = true
+        var created = 0
+        var released = 0
+        let controller = AgentDisplayAwakeController(store: store, createAssertion: {
+            created += 1; return IOPMAssertionID(created)
+        }, releaseAssertion: { _ in released += 1; return true })
+        defer { controller.stop() }
+
+        for status in ["needs_you", "done", "idle", "failed", "unknown"] {
+            report("working", for: agent.id, in: store)
+            controller.refresh()
+            XCTAssertEqual(created, released + 1)
+            try applySnapshot(status, for: agent.id, in: store)
+            controller.refresh()
+            XCTAssertEqual(released, created)
+        }
+    }
+
     func testDefaultOffAndOnlyWorkingHoldsOneAssertion() throws {
         let (store, agent, terminal) = try makeStore()
         var created = 0
