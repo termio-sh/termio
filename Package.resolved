@@ -1,5 +1,5 @@
 {
-  "originHash" : "98d3384024675f7f43d300b386f873ad3bf521947cca766fd82cef9b94a1dac2",
+  "originHash" : "b3de4adbebd72f2e211af651776654fcb9aaeda7b0378ea200533213d956ca5c",
   "pins" : [
     {
       "identity" : "highlightr",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/termio-sh/libghostty-swift",
       "state" : {
-        "revision" : "dafdd1479f4ea5bcf5e270d7cf02393b7ff79051",
-        "version" : "1.1.2"
+        "revision" : "312024076530919bc28611f687fd24213b187f69",
+        "version" : "1.1.4"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Lakr233/MSDisplayLink.git",
       "state" : {
-        "revision" : "87eb0af130744c8cbe2e31b6e1a5bcd659f1c220",
-        "version" : "2.2.0"
+        "revision" : "ac406dbb7dd329e256a555f929cd9cb94d809c7b",
+        "version" : "2.2.1"
       }
     },
     {
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-cmark.git",
       "state" : {
-        "revision" : "924936d0427cb25a61169739a7660230bffa6ea6",
-        "version" : "0.8.0"
+        "revision" : "08ddb528923cc1a6527e02b7a1aee9e516ca749a",
+        "version" : "0.9.0"
       }
     },
     {
@@ -51,8 +51,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-markdown.git",
       "state" : {
-        "revision" : "3c6f9523da3a1ec2fd829673e472d95b8097a3b8",
-        "version" : "0.8.0"
+        "revision" : "25cb61d3482054b09ae76ca4f281b1bfe7fe5a43",
+        "version" : "0.9.0"
       }
     }
   ],
