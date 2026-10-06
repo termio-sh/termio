@@ -1,5 +1,5 @@
 {
-  "originHash" : "98d3384024675f7f43d300b386f873ad3bf521947cca766fd82cef9b94a1dac2",
+  "originHash" : "8cdb48bb117f1e73cfaf77fc11fc2d5cda3396ab3e24267852ecfe8b64feb6d3",
   "pins" : [
     {
       "identity" : "highlightr",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/termio-sh/libghostty-swift",
       "state" : {
-        "revision" : "dafdd1479f4ea5bcf5e270d7cf02393b7ff79051",
-        "version" : "1.1.2"
+        "revision" : "2c5e294fe32b101b0911f7ee3a8f50af4ac05543",
+        "version" : "1.1.5"
       }
     },
     {
