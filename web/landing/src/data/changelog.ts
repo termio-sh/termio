@@ -17,6 +17,21 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.55.1",
+    date: "2026-10-07",
+    title: "Closing a session stops its agent",
+    changes: {
+      improved: [
+        "The terminal engine moves to the latest Ghostty, with its fixes to character sets, single shifts, and line selection at the prompt.",
+      ],
+      fixed: [
+        "Closing a session stops its agent, even when a launch command runs the agent under a shell.",
+        "An agent that updates itself mid-session relaunches as the new version, instead of leaving its pane at a shell.",
+        "A remote session that is slow to connect is no longer closed as if its agent had failed to start.",
+      ],
+    },
+  },
+  {
     version: "0.55.0",
     date: "2026-09-21",
     title: "Highlights go into a PDF without rewriting it",
