@@ -14,7 +14,7 @@ let package = Package(
         // live resize" suspicion that briefly rolled this back to Lakr233 was a
         // misdiagnosis — the real bug was termio's own PTY spawn shape (see
         // docs/bug/terminal-resize-no-reflow-HANDOFF.md §0).
-        .package(url: "https://github.com/termio-sh/libghostty-swift", from: "1.1.5"),
+        .package(url: "https://github.com/termio-sh/libghostty-swift", from: "1.1.6"),
         // Sparkle powers in-app auto-update (the "Check for Updates…" menu item and
         // background update checks). It reads the appcast published with each GitHub
         // release; the matching EdDSA public key is embedded in packaging/Info.plist.

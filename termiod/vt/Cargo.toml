@@ -9,7 +9,7 @@ publish = false
 # script. What stays here is termiod's own snapshot boundary: the wire cell is
 # ours, not the engine's.
 #
-# Pinned to termio-sh/libghostty-rs, our fork, which builds ghostty 35a81a9 —
+# Pinned to termio-sh/libghostty-rs, our fork, which builds ghostty b699ea7 —
 # the same one libghostty-swift ships to the Mac and iOS clients, so the host
 # and its clients run one VT. That parity is why this engine was chosen over
 # alacritty_terminal in the first place.
@@ -30,8 +30,8 @@ publish = false
 # being skipped.
 #
 # Track libghostty-swift when it releases: its title carries the ghostty it
-# built (`1.1.5 · ghostty v1.3.1-2867-g35a81a9`), and that sha is the one to
+# built (`1.1.6 · ghostty v1.3.1-2878-gb699ea7`), and that sha is the one to
 # match here. Since ghostty#13759 dropped iOS from the full build, that release
 # also carries a patch putting iOS back, so the two forks move together.
 [dependencies]
-libghostty-vt = { git = "https://github.com/termio-sh/libghostty-rs", rev = "a785eebfe361a0937dfceb69eddf8fee814c0647" }
+libghostty-vt = { git = "https://github.com/termio-sh/libghostty-rs", rev = "a413cc433198f797283fa4a1d70299e9334c4660" }
