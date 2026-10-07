@@ -30,6 +30,15 @@ updates:
       swift-packages:
         patterns:
           - "*"
+    ignore:
+      # libghostty-swift declares MSDisplayLink `from: "2.1.0"`, which is
+      # upToNextMajor, so a 3.x pin cannot resolve while termio depends on the
+      # wrapper. The failure is silent rather than loud: xcodebuild drops the
+      # unsatisfiable pin, re-resolves to the newest 2.x and builds green, so
+      # the bad pin reads as verified. PR #708 proposed 3.0.1 for /ios and was
+      # closed for this. Drop the entry when the wrapper widens its range.
+      - dependency-name: "github.com/lakr233/msdisplaylink"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
