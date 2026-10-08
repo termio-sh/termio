@@ -25,8 +25,8 @@ import SwiftUI
 struct RemoteHostsSettingsTab: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var store: TermioStore
-    /// Opens an SSH terminal to the alias in the main window (wired to
-    /// `TermioStore.addSSHSession` by the app delegate).
+    /// Opens a daemon-backed terminal on the alias in the main window (wired to
+    /// `TermioStore.addRemoteTerminal` by the app delegate).
     let onConnect: (String) -> Void
     /// Runs `ssh-copy-id <alias>` with a public key, for a host whose probe found
     /// it wants a password (wired to `TermioStore.addKeyInstallSession`).
