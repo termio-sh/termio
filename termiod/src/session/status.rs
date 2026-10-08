@@ -18,9 +18,11 @@
 //! promotion rules and the stall verdict are testable as arithmetic — which is
 //! how the Swift cases came across.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use regex::{Regex, RegexBuilder};
+use termiod_vt::{ProgramState, VtEvent};
 
 use crate::agent::manifest::StatusRules;
 
@@ -46,6 +48,8 @@ pub enum Activity {
 pub enum StatusSource {
     /// `termio agent report` — the agent's own words.
     Hook,
+    /// `OSC 7501` — also the program's own words, said in-band.
+    Program,
     /// The agent's live `OSC 0/2` title.
     Title,
     /// ConEmu-style `OSC 9;4` progress.
@@ -60,6 +64,7 @@ impl StatusSource {
     pub fn as_str(self) -> &'static str {
         match self {
             StatusSource::Hook => "hook",
+            StatusSource::Program => "program",
             StatusSource::Title => "title",
             StatusSource::Progress => "progress",
             StatusSource::Screen => "screen",
@@ -68,15 +73,17 @@ impl StatusSource {
     }
 
     /// Whether a `done` from this source is the device's own conclusion, which
-    /// the viewer then judges against its selection. A hook's is not.
+    /// the viewer then judges against its selection. A program's own report is
+    /// not, whichever channel it arrived on.
     pub fn is_derived(self) -> bool {
-        !matches!(self, StatusSource::Hook)
+        !matches!(self, StatusSource::Hook | StatusSource::Program)
     }
 }
 
-/// The protocol states this engine can reach. `failed` is hook-only — nothing
-/// observable from outside an agent distinguishes a failed turn from a quiet
-/// one — so it is not in this enum and passes through as a hook report.
+/// The protocol states this engine can reach. `failed` only ever comes from
+/// the program's own word — a hook, or an `OSC 7501` `error` — because nothing
+/// observable from outside distinguishes a failed turn from a quiet one, so it
+/// is not in this enum and passes through as an opaque status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
     Working,
@@ -181,6 +188,9 @@ pub enum OscSignal {
     Title(String),
     /// `OSC 9;4` progress, classified to busy/idle.
     Progress(Activity),
+    /// What the session's `OSC 7501` records add up to, sent when that moves.
+    /// `None` once no record is left.
+    ProgramStatus(Option<ProgramState>),
 }
 
 /// Parses the two in-band status channels out of a raw PTY chunk: the `OSC 0/2`
@@ -332,6 +342,133 @@ pub fn classify_progress(payload: &[u8]) -> Option<Activity> {
         }
         // 2 = error, 4 = paused — not a clean transition.
         _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Program status records (OSC 7501)
+// ---------------------------------------------------------------------------
+
+/// The `OSC 7501` records a session's programs have reported, kept by the
+/// rules of the spec: one record per id, each report replacing its record
+/// whole, `clear` removing an id and everything beneath it, and a new prompt
+/// dropping the `working` and `blocked` records whose program has gone.
+///
+/// The engine parses the reports; it keeps no records, so they live here, on
+/// the sidecar thread that feeds it. A handoff loses them with the VT, and the
+/// ring replayed into the next VT rebuilds them from the same bytes.
+#[derive(Debug, Default)]
+pub struct ProgramRecords {
+    records: HashMap<String, (ProgramState, u64)>,
+    /// Bumped on every report, so the record updated longest ago is the one
+    /// to evict at the cap.
+    clock: u64,
+}
+
+impl ProgramRecords {
+    /// The spec's bound: keep at most 256, allow at least 64.
+    const MAX: usize = 256;
+
+    pub fn apply(&mut self, event: &VtEvent) {
+        match event {
+            VtEvent::ProgramStatus {
+                state: ProgramState::Clear,
+                id,
+            } => self.clear(id),
+            VtEvent::ProgramStatus { state, id } => {
+                self.clock += 1;
+                if !self.records.contains_key(id) && self.records.len() >= Self::MAX {
+                    if let Some(oldest) = self
+                        .records
+                        .iter()
+                        .min_by_key(|(_, (_, at))| *at)
+                        .map(|(id, _)| id.clone())
+                    {
+                        self.records.remove(&oldest);
+                    }
+                }
+                self.records.insert(id.clone(), (*state, self.clock));
+            }
+            // `done` and `error` wait for the user; what was running is gone.
+            VtEvent::PromptStart => self
+                .records
+                .retain(|_, (state, _)| matches!(state, ProgramState::Done | ProgramState::Error)),
+            VtEvent::Reply(_) => {}
+        }
+    }
+
+    fn clear(&mut self, id: &str) {
+        if id.is_empty() {
+            self.records.clear();
+            return;
+        }
+        self.records.retain(|record, _| {
+            record != id
+                && !record
+                    .strip_prefix(id)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        });
+    }
+
+    /// The one state a session row can show. What needs the user outranks
+    /// what failed, which outranks what is still running; a finished record
+    /// only shows once nothing else is happening.
+    pub fn summary(&self) -> Option<ProgramState> {
+        let rank = |state: ProgramState| match state {
+            ProgramState::Blocked => 0,
+            ProgramState::Error => 1,
+            ProgramState::Working => 2,
+            ProgramState::Done => 3,
+            ProgramState::Idle | ProgramState::Clear => 4,
+        };
+        self.records
+            .values()
+            .map(|(state, _)| *state)
+            .min_by_key(|state| rank(*state))
+    }
+}
+
+/// The sidecar thread's half of `OSC 7501`: it keeps the records, collects
+/// the engine's replies, and says when the records' summary moves.
+#[derive(Debug, Default)]
+pub struct ProgramFeed {
+    records: ProgramRecords,
+    /// Off until the carried replay has been parsed; see
+    /// `SidecarCommand::ReplayEnd`.
+    answering: bool,
+    reply: Vec<u8>,
+    sent: Option<ProgramState>,
+}
+
+impl ProgramFeed {
+    pub fn note(&mut self, events: Vec<VtEvent>) {
+        for event in events {
+            match event {
+                VtEvent::Reply(bytes) => {
+                    if self.answering {
+                        self.reply.extend_from_slice(&bytes);
+                    }
+                }
+                other => self.records.apply(&other),
+            }
+        }
+    }
+
+    pub fn answer_queries(&mut self) {
+        self.answering = true;
+    }
+
+    pub fn take_reply(&mut self) -> Option<Vec<u8>> {
+        (!self.reply.is_empty()).then(|| std::mem::take(&mut self.reply))
+    }
+
+    pub fn take_signal(&mut self) -> Option<OscSignal> {
+        let summary = self.records.summary();
+        if summary == self.sent {
+            return None;
+        }
+        self.sent = summary;
+        Some(OscSignal::ProgramStatus(summary))
     }
 }
 
@@ -612,6 +749,9 @@ struct SessionStatus {
     /// client looking at the row — reading a permission prompt is not answering
     /// it. Clients read it to decide whether their own selection clears the dot.
     blocking_attention: bool,
+    /// What the session's `OSC 7501` records add up to. While any record is
+    /// live, the program speaks for itself and the derived channels stand down.
+    program: Option<ProgramState>,
 }
 
 impl SessionStatus {
@@ -629,6 +769,7 @@ impl SessionStatus {
             last_screen_activity: None,
             stall: None,
             blocking_attention: false,
+            program: None,
         }
     }
 
@@ -870,21 +1011,79 @@ impl StatusEngine {
                 self.end_stall_watch();
                 self.set_state(State::Idle, StatusSource::Hook)
             }
-            other => {
-                // `failed`, and anything an agent invents. Carried verbatim so
-                // a client can render what the agent actually said, with the
-                // derived channels held off it until the next hook or turn.
+            // `failed`, and anything an agent invents. Carried verbatim so a
+            // client can render what the agent actually said, with the derived
+            // channels held off it until the next hook or turn.
+            other => self.set_opaque(other, StatusSource::Hook),
+        }
+    }
+
+    fn set_opaque(&mut self, status: &str, source: StatusSource) -> Option<StatusChange> {
+        self.session.clear_working();
+        self.end_stall_watch();
+        self.session.opaque = Some(status.to_string());
+        self.session.state = State::Idle;
+        Some(StatusChange {
+            state: State::Idle,
+            source,
+            turn_ended: false,
+        })
+    }
+
+    // -- Program status (OSC 7501) ----------------------------------------
+
+    /// What the session's `OSC 7501` records now add up to.
+    ///
+    /// A report is the program's own word, so it ranks with a hook: whichever
+    /// spoke last wins. Unlike a hook it lasts — the record stays until the
+    /// program replaces or clears it, or a new prompt shows the program has
+    /// gone — so while one is live the title, progress and screen channels
+    /// stand down and the stale sweep leaves a `working` record alone.
+    ///
+    /// `error` goes out as `failed`, the word the wire already carries for a
+    /// failed run.
+    pub fn note_program_status(
+        &mut self,
+        summary: Option<ProgramState>,
+        now: Instant,
+    ) -> Option<StatusChange> {
+        let previous = std::mem::replace(&mut self.session.program, summary);
+        match summary {
+            Some(ProgramState::Working) => {
+                self.session.last_working_at = Some(now);
+                self.begin_stall_watch(now);
+                self.set_state(State::Working, StatusSource::Program)
+            }
+            Some(ProgramState::Blocked) => {
+                self.end_stall_watch();
+                self.flag_blocking_attention(StatusSource::Program)
+            }
+            Some(ProgramState::Error) => {
+                if previous == summary {
+                    return None;
+                }
+                self.set_opaque("failed", StatusSource::Program)
+            }
+            Some(ProgramState::Done) => {
                 self.session.clear_working();
                 self.end_stall_watch();
-                self.session.opaque = Some(other.to_string());
-                self.session.state = State::Idle;
-                Some(StatusChange {
-                    state: State::Idle,
-                    source: StatusSource::Hook,
-                    turn_ended: false,
-                })
+                self.set_state(State::Done, StatusSource::Program)
+            }
+            // A record set leaving nothing, or nothing but `idle`: the program
+            // is at rest. Nothing to end if no record was ever live.
+            Some(ProgramState::Idle | ProgramState::Clear) | None => {
+                if previous.is_none() && summary.is_none() {
+                    return None;
+                }
+                self.session.clear_working();
+                self.end_stall_watch();
+                self.set_state(State::Idle, StatusSource::Program)
             }
         }
+    }
+
+    fn program_speaks(&self) -> bool {
+        self.session.program.is_some()
     }
 
     // -- Title ------------------------------------------------------------
@@ -917,6 +1116,9 @@ impl StatusEngine {
         }
         let previous = self.session.last_title_activity;
         self.session.last_title_activity = Some(activity);
+        if self.program_speaks() {
+            return None;
+        }
         match activity {
             Activity::Working => {
                 if self.session.state == State::NeedsYou || !self.facts.is_agent() {
@@ -961,6 +1163,9 @@ impl StatusEngine {
         }
         let previous = self.session.last_progress_activity;
         self.session.last_progress_activity = Some(activity);
+        if self.program_speaks() {
+            return None;
+        }
         match activity {
             Activity::Working => {
                 if self.session.state == State::NeedsYou {
@@ -1006,6 +1211,9 @@ impl StatusEngine {
         }
         let previous = self.session.last_screen_activity;
         self.session.last_screen_activity = Some(activity);
+        if self.program_speaks() {
+            return None;
+        }
         match activity {
             Activity::Working => {
                 self.begin_stall_watch(now);
@@ -1079,6 +1287,7 @@ impl StatusEngine {
         }
         if self.session.state != State::Idle
             || self.session.opaque.is_some()
+            || self.program_speaks()
             || !self.facts.is_agent()
             // An agent whose declared screen rules already own its status is
             // never guessed over.
@@ -1118,6 +1327,12 @@ impl StatusEngine {
     /// anyway — so the timeout is long enough never to interrupt a genuine long
     /// turn, and is purely a recovery path for an agent that died mid-turn.
     pub fn sweep_stale_working(&mut self, now: Instant) -> Option<StatusChange> {
+        // A `working` record is the program saying so, and it lasts until the
+        // program or a prompt says otherwise. Quiet output is not evidence
+        // against it.
+        if self.session.program == Some(ProgramState::Working) {
+            return None;
+        }
         let since = self.session.last_working_at?;
         if now.saturating_duration_since(since) <= STALE_WORKING_TIMEOUT {
             return None;
@@ -1584,6 +1799,179 @@ mod tests {
         );
     }
 
+    // -- Program status (OSC 7501) ----------------------------------------
+
+    fn report(state: ProgramState, id: &str) -> VtEvent {
+        VtEvent::ProgramStatus {
+            state,
+            id: id.to_string(),
+        }
+    }
+
+    fn records(events: &[VtEvent]) -> ProgramRecords {
+        let mut records = ProgramRecords::default();
+        for event in events {
+            records.apply(event);
+        }
+        records
+    }
+
+    /// The summary ranks what needs the user first, a failure next, running
+    /// work after that, and a finished record last.
+    #[test]
+    fn program_records_rank_blocked_over_error_over_working_over_done() {
+        let mut set = records(&[
+            report(ProgramState::Done, "a"),
+            report(ProgramState::Working, "b"),
+        ]);
+        assert_eq!(set.summary(), Some(ProgramState::Working));
+        set.apply(&report(ProgramState::Error, "c"));
+        assert_eq!(set.summary(), Some(ProgramState::Error));
+        set.apply(&report(ProgramState::Blocked, "d"));
+        assert_eq!(set.summary(), Some(ProgramState::Blocked));
+    }
+
+    /// A report replaces its own record, and nothing else's.
+    #[test]
+    fn program_report_replaces_its_record() {
+        let set = records(&[
+            report(ProgramState::Blocked, ""),
+            report(ProgramState::Working, "build"),
+            report(ProgramState::Working, ""),
+        ]);
+        assert_eq!(set.summary(), Some(ProgramState::Working));
+    }
+
+    /// `clear` takes an id and every record beneath it, but not a sibling that
+    /// merely shares its prefix; an empty id takes everything.
+    #[test]
+    fn program_clear_removes_the_subtree_only() {
+        let mut set = records(&[
+            report(ProgramState::Blocked, "build"),
+            report(ProgramState::Blocked, "build/test"),
+            report(ProgramState::Working, "builder"),
+            report(ProgramState::Clear, "build"),
+        ]);
+        assert_eq!(set.summary(), Some(ProgramState::Working));
+        set.apply(&report(ProgramState::Clear, ""));
+        assert_eq!(set.summary(), None);
+    }
+
+    /// A new prompt means the program that was running has gone, so its
+    /// `working` and `blocked` records go with it. `done` and `error` wait for
+    /// the user.
+    #[test]
+    fn a_prompt_drops_running_records_and_keeps_results() {
+        let mut set = records(&[
+            report(ProgramState::Blocked, "a"),
+            report(ProgramState::Working, "b"),
+            report(ProgramState::Done, "c"),
+            VtEvent::PromptStart,
+        ]);
+        assert_eq!(set.summary(), Some(ProgramState::Done));
+        set.apply(&report(ProgramState::Error, "d"));
+        set.apply(&VtEvent::PromptStart);
+        assert_eq!(set.summary(), Some(ProgramState::Error));
+    }
+
+    /// At the cap, a new id evicts the record updated longest ago.
+    #[test]
+    fn program_records_evict_the_oldest_at_the_cap() {
+        let mut set = records(&[report(ProgramState::Blocked, "first")]);
+        for index in 1..ProgramRecords::MAX {
+            set.apply(&report(ProgramState::Idle, &format!("r{index}")));
+        }
+        assert_eq!(set.summary(), Some(ProgramState::Blocked));
+        set.apply(&report(ProgramState::Idle, "one-more"));
+        assert_eq!(set.records.len(), ProgramRecords::MAX);
+        assert_eq!(set.summary(), Some(ProgramState::Idle));
+    }
+
+    /// The carried replay rebuilds records but never answers: its queries were
+    /// answered when they first arrived. And the summary is sent only when it
+    /// moves.
+    #[test]
+    fn program_feed_answers_only_after_the_replay() {
+        let query = VtEvent::Reply(b"\x1b]7501;?\x07".to_vec());
+        let mut feed = ProgramFeed::default();
+        feed.note(vec![query.clone(), report(ProgramState::Working, "")]);
+        assert_eq!(feed.take_reply(), None);
+        assert_eq!(
+            feed.take_signal(),
+            Some(OscSignal::ProgramStatus(Some(ProgramState::Working)))
+        );
+        feed.answer_queries();
+        feed.note(vec![query, report(ProgramState::Working, "")]);
+        assert_eq!(feed.take_reply(), Some(b"\x1b]7501;?\x07".to_vec()));
+        assert_eq!(feed.take_signal(), None);
+    }
+
+    /// A report is the program's own word: blocked lights the blocking dot, and
+    /// a finished turn is `done` on every client, not the viewer's to judge.
+    #[test]
+    fn a_program_report_drives_the_session_like_a_hook() {
+        let mut engine = StatusEngine::new(origin(), SessionFacts::default());
+        let working = engine.note_program_status(Some(ProgramState::Working), at(1));
+        assert_eq!(
+            working.map(|change| change.source),
+            Some(StatusSource::Program)
+        );
+        assert_eq!(engine.state(), State::Working);
+
+        engine.note_program_status(Some(ProgramState::Blocked), at(2));
+        assert_eq!(engine.state(), State::NeedsYou);
+        assert!(engine.blocking_attention());
+
+        let done = engine.note_program_status(Some(ProgramState::Done), at(3));
+        assert_eq!(engine.state(), State::Done);
+        assert!(done.is_some_and(|change| !change.turn_ended));
+
+        engine.note_program_status(Some(ProgramState::Error), at(4));
+        assert_eq!(engine.wire_status(), "failed");
+
+        engine.note_program_status(None, at(5));
+        assert_eq!(engine.wire_status(), "idle");
+    }
+
+    /// A plain shell has no agent, but a build that speaks `OSC 7501` still
+    /// reports: the protocol is the program's word, not a heuristic.
+    #[test]
+    fn a_program_report_reaches_a_plain_shell() {
+        let mut engine = StatusEngine::new(origin(), SessionFacts::default());
+        assert!(engine
+            .note_program_status(Some(ProgramState::Working), at(1))
+            .is_some());
+    }
+
+    /// While a record is live, the derived channels stand down: a title that
+    /// calms does not end a turn the program says is running, and a long quiet
+    /// stretch does not sweep it.
+    #[test]
+    fn a_live_record_outranks_the_derived_channels() {
+        let mut engine = title_engine();
+        engine.note_program_status(Some(ProgramState::Working), at(0));
+        engine.note_title("\u{280b} Fix the resize bug", at(1));
+        assert_eq!(engine.note_title("Fix the resize bug", at(2)), None);
+        assert_eq!(engine.sweep_stale_working(at(600)), None);
+        assert_eq!(engine.state(), State::Working);
+
+        // Once the record is gone the channels speak again.
+        engine.note_program_status(None, at(601));
+        engine.note_title("\u{280b} Next turn", at(602));
+        assert_eq!(engine.state(), State::Working);
+    }
+
+    /// A hook and a report are both the program's word, so the last one wins.
+    #[test]
+    fn a_hook_and_a_report_last_one_wins() {
+        let mut engine = StatusEngine::new(origin(), agent_facts());
+        engine.note_program_status(Some(ProgramState::Working), at(1));
+        engine.note_hook("needs_you", at(2));
+        assert_eq!(engine.state(), State::NeedsYou);
+        engine.note_program_status(Some(ProgramState::Done), at(3));
+        assert_eq!(engine.state(), State::Done);
+    }
+
     // -- AgentTitleStatusTests, ported ------------------------------------
 
     fn title_engine() -> StatusEngine {
@@ -1694,7 +2082,7 @@ mod tests {
             .into_iter()
             .filter_map(|signal| match signal {
                 OscSignal::Progress(activity) => Some(activity),
-                OscSignal::Title(_) => None,
+                OscSignal::Title(_) | OscSignal::ProgramStatus(_) => None,
             })
             .collect()
     }

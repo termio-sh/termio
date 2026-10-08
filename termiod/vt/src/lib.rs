@@ -5,6 +5,7 @@
 //! engine-neutral types so the wire protocol never depends on the engine's
 //! in-memory cell layout.
 
+use std::cell::RefCell;
 use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -13,7 +14,9 @@ use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use libghostty_vt::render::{CellIterator, Dirty, RenderState, RowIterator};
 use libghostty_vt::screen::{CellContentTag, RowSemanticPrompt, Screen};
 use libghostty_vt::style::{RgbColor, StyleColor};
-use libghostty_vt::terminal::{Mode, Point, PointCoordinate};
+use libghostty_vt::terminal::{
+    Mode, Point, PointCoordinate, ProgramStatusState, SemanticPromptKind,
+};
 use libghostty_vt::{Error, Terminal, TerminalOptions};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -170,6 +173,37 @@ fn last_occurrence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .rposition(|window| window == needle)
 }
 
+/// What a program says it is doing, in an `OSC 7501` report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramState {
+    Idle,
+    Working,
+    Done,
+    Blocked,
+    Error,
+    /// Not a state: removes the addressed record and every record beneath it.
+    Clear,
+}
+
+/// Something the engine reported while it parsed, in byte order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VtEvent {
+    /// An `OSC 7501` report the engine accepted. `id` is empty for the root
+    /// record. A full reset arrives as a `Clear` with an empty id.
+    ProgramStatus { state: ProgramState, id: String },
+    /// `OSC 133;A` — a new shell prompt.
+    PromptStart,
+    /// The engine's answer to `OSC 7501 ; ?`, to be written back to the PTY.
+    Reply(Vec<u8>),
+}
+
+/// The prefix of the only reply this VT may send. Every other query — DA,
+/// DSR, colour reports — is already answered by the client surface that holds
+/// the write token, so answering it here as well would answer it twice. The
+/// support query is different: no client surface answers it, and the records
+/// it advertises live in this process.
+const PROGRAM_STATUS_REPLY: &[u8] = b"\x1b]7501;";
+
 /// A terminal plus reusable render iterators. This type is deliberately
 /// `!Send`/`!Sync`; construct and use it on the sidecar thread that owns it.
 pub struct VtTerminal {
@@ -177,29 +211,91 @@ pub struct VtTerminal {
     render_state: RenderState<'static>,
     row_iterator: RowIterator<'static>,
     row_cells: CellIterator<'static>,
+    events: Rc<RefCell<Vec<VtEvent>>>,
     _thread_confined: PhantomData<Rc<()>>,
+}
+
+/// Registers the engine callbacks whose events `take_events` hands out.
+///
+/// Program status reports and prompt starts come from the same `vt_write`, so
+/// they stay in byte order: a report printed after a prompt is not dropped by
+/// that prompt's cleanup. Setting the program status callback is also what
+/// makes the engine answer the support query.
+fn listen(
+    terminal: &mut Terminal<'static, 'static>,
+    events: &Rc<RefCell<Vec<VtEvent>>>,
+) -> Result<()> {
+    let reports = events.clone();
+    check(
+        terminal.on_program_status(move |_terminal, report| {
+            let state = match report.state() {
+                Ok(ProgramStatusState::Idle) => ProgramState::Idle,
+                Ok(ProgramStatusState::Working) => ProgramState::Working,
+                Ok(ProgramStatusState::Done) => ProgramState::Done,
+                Ok(ProgramStatusState::Blocked) => ProgramState::Blocked,
+                Ok(ProgramStatusState::Error) => ProgramState::Error,
+                Ok(ProgramStatusState::Clear) => ProgramState::Clear,
+                // A state a newer engine added. The spec lets a terminal
+                // ignore what it does not understand.
+                Ok(_) | Err(_) => return,
+            };
+            reports.borrow_mut().push(VtEvent::ProgramStatus {
+                state,
+                id: report.id().to_string(),
+            });
+        }),
+        "Terminal::on_program_status",
+    )?;
+    let prompts = events.clone();
+    check(
+        terminal.on_semantic_prompt(move |_terminal, event| {
+            if event.kind() == Some(SemanticPromptKind::PromptStart) {
+                prompts.borrow_mut().push(VtEvent::PromptStart);
+            }
+        }),
+        "Terminal::on_semantic_prompt",
+    )?;
+    let replies = events.clone();
+    check(
+        terminal.on_pty_write(move |_terminal, data| {
+            if data.starts_with(PROGRAM_STATUS_REPLY) {
+                replies.borrow_mut().push(VtEvent::Reply(data.to_vec()));
+            }
+        }),
+        "Terminal::on_pty_write",
+    )?;
+    Ok(())
 }
 
 impl VtTerminal {
     pub fn new(rows: u16, cols: u16) -> Result<Self> {
+        let mut terminal = check(
+            Terminal::new(TerminalOptions {
+                cols,
+                rows,
+                max_scrollback: 1_000,
+            }),
+            "Terminal::new",
+        )?;
+        let events = Rc::new(RefCell::new(Vec::new()));
+        listen(&mut terminal, &events)?;
         Ok(Self {
-            terminal: check(
-                Terminal::new(TerminalOptions {
-                    cols,
-                    rows,
-                    max_scrollback: 1_000,
-                }),
-                "Terminal::new",
-            )?,
+            terminal,
             render_state: check(RenderState::new(), "RenderState::new")?,
             row_iterator: check(RowIterator::new(), "RowIterator::new")?,
             row_cells: check(CellIterator::new(), "CellIterator::new")?,
+            events,
             _thread_confined: PhantomData,
         })
     }
 
     pub fn vt_write(&mut self, bytes: &[u8]) {
         self.terminal.vt_write(bytes);
+    }
+
+    /// Everything the engine reported since the last call, in byte order.
+    pub fn take_events(&mut self) -> Vec<VtEvent> {
+        std::mem::take(&mut *self.events.borrow_mut())
     }
 
     /// Resize the authoritative screen **without reflowing** it — tmux/xterm
@@ -801,7 +897,38 @@ fn style_color(color: StyleColor) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use super::{Color, Rgb, VtTerminal};
+    use super::{Color, ProgramState, Rgb, VtEvent, VtTerminal};
+
+    /// The events arrive in the order the bytes did, and the only reply that
+    /// leaves this VT is the support query's: DA1 is the writer's surface's to
+    /// answer, and answering it here too would type the answer twice.
+    #[test]
+    fn program_status_events_keep_byte_order_and_only_its_reply() {
+        let mut terminal = VtTerminal::new(3, 20).expect("terminal");
+        terminal.vt_write(b"\x1b[c\x1b]7501;?\x07");
+        terminal.vt_write(b"\x1b]7501;state=working\x07\x1b]133;A\x07");
+        terminal.vt_write(b"\x1b]7501;state=done:id=build\x07\x1bc");
+        assert_eq!(
+            terminal.take_events(),
+            [
+                VtEvent::Reply(b"\x1b]7501;?\x07".to_vec()),
+                VtEvent::ProgramStatus {
+                    state: ProgramState::Working,
+                    id: String::new()
+                },
+                VtEvent::PromptStart,
+                VtEvent::ProgramStatus {
+                    state: ProgramState::Done,
+                    id: "build".into()
+                },
+                VtEvent::ProgramStatus {
+                    state: ProgramState::Clear,
+                    id: String::new()
+                },
+            ]
+        );
+        assert!(terminal.take_events().is_empty());
+    }
 
     fn screen(input: &str) -> Vec<super::Cell> {
         let mut terminal = VtTerminal::new(1, 8).expect("terminal");

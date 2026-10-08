@@ -34,7 +34,7 @@ use foreground::{Foreground, ForegroundResolution};
 
 pub mod status;
 
-use status::{OscScanner, OscSignal, StallStep, StatusEngine};
+use status::{OscScanner, OscSignal, ProgramFeed, StallStep, StatusEngine};
 
 mod wire;
 
@@ -2018,6 +2018,7 @@ fn start(
         session.send_sidecar(SidecarCommand::Write(chunk.clone()));
         session.push_ring(chunk);
     }
+    session.send_sidecar(SidecarCommand::ReplayEnd);
     // `push_ring` may have set this itself, if what was carried no longer fits
     // the cap; either way the previous actor's verdict still applies.
     session.ring_reconstructs_screen &= replay.faithful;
@@ -2141,6 +2142,7 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
             // the VT rather than ahead of it: a sidecar that goes stale stops
             // being fed, so status falls back to what hooks report.
             let mut osc = OscScanner::default();
+            let mut programs = ProgramFeed::default();
             let mut watch_screen = false;
             let mut watch_text = false;
             let mut screen_signature: Option<u64> = None;
@@ -2186,6 +2188,7 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                         pending_bytes = pending_bytes.saturating_add(bytes.len() as u64);
                         if let Some(terminal) = terminal.as_mut() {
                             terminal.vt_write(&bytes);
+                            programs.note(terminal.take_events());
                         }
                         parsed.release(bytes.len());
                         loop {
@@ -2196,6 +2199,7 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                                         pending_bytes.saturating_add(bytes.len() as u64);
                                     if let Some(terminal) = terminal.as_mut() {
                                         terminal.vt_write(&bytes);
+                                        programs.note(terminal.take_events());
                                     }
                                     parsed.release(bytes.len());
                                 }
@@ -2206,6 +2210,14 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                                 Err(std_mpsc::TryRecvError::Empty) => break,
                                 Err(std_mpsc::TryRecvError::Disconnected) => return,
                             }
+                        }
+                        if let Some(reply) = programs.take_reply() {
+                            if result_tx.send(SidecarResult::Reply(reply)).is_err() {
+                                break;
+                            }
+                        }
+                        if let Some(signal) = programs.take_signal() {
+                            signals.push(signal);
                         }
                         if !signals.is_empty() && result_tx.send(SidecarResult::Osc(signals)).is_err()
                         {
@@ -2244,6 +2256,7 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                             }
                         }
                     }
+                    SidecarCommand::ReplayEnd => programs.answer_queries(),
                     SidecarCommand::Resize { rows, cols, reflow } => {
                         if fault.is_none() {
                             if let Some(terminal) = terminal.as_mut() {
@@ -2563,11 +2576,19 @@ async fn run(
                                 OscSignal::Progress(activity) => {
                                     session.status_engine.note_progress(activity, now)
                                 }
+                                OscSignal::ProgramStatus(summary) => {
+                                    session.status_engine.note_program_status(summary, now)
+                                }
                             };
                             if let Some(change) = change {
                                 session.apply_status_change(change);
                             }
                         }
+                    }
+                    // Not the writer's input: the terminal answering a query,
+                    // so it bypasses the write token like any terminal's reply.
+                    Some(SidecarResult::Reply(bytes)) => {
+                        let _ = session.input_tx.send(bytes);
                     }
                     Some(SidecarResult::Screen(tick)) => {
                         let now = std::time::Instant::now();
@@ -3275,7 +3296,7 @@ mod tests {
             // The status half of the sidecar's output. These cases assert the
             // snapshot FIFO's boundaries; the engine has its own tests, and
             // routing them here would put a wall clock in an ordering test.
-            SidecarResult::Osc(_) | SidecarResult::Screen(_) => {}
+            SidecarResult::Osc(_) | SidecarResult::Screen(_) | SidecarResult::Reply(_) => {}
         }
     }
 
