@@ -1,0 +1,429 @@
+/* Typography ported from Sources/termio/Editor/MarkdownReaderRenderer.swift, so the
+   rendered face and the Preview it replaces are the same document in the same face.
+   Values are that stylesheet's, not approximations of it.
+
+   Theme tokens: domd's own stylesheet reads --color-base-* off .DOMD-Root, so a host
+   theme is a handful of variables rather than a fork of its CSS. Swift writes the
+   concrete values into :root at load; these are the fallbacks. */
+
+/* The prose face. The reader inlines these as base64 because `loadHTMLString` gives
+   its WebContent process no bundle access; this page has a scheme handler and the CSP
+   already allows `font-src 'self'`, so it fetches them instead — served once and
+   cached rather than rebuilt into every document. Variable wght 400-700, so bold prose
+   sits at 600 and headings at 700 without a second file. */
+@font-face {
+  font-family: "iA Writer Quattro"; font-weight: 400 700; font-style: normal;
+  font-display: swap; src: url("iAWriterQuattroV.woff2") format("woff2");
+}
+@font-face {
+  font-family: "iA Writer Quattro"; font-weight: 400 700; font-style: italic;
+  font-display: swap; src: url("iAWriterQuattroV-Italic.woff2") format("woff2");
+}
+
+:root {
+  --domd-page-bg: #ffffff; --domd-page-fg: #1d1d1f; --domd-panel: #f5f5f7;
+  --domd-border: rgba(0,0,0,.12); --domd-accent: #0a84ff;
+  --color-base-100: var(--domd-page-bg); --color-base-200: var(--domd-panel);
+  --color-base-300: var(--domd-panel); --color-base-content: var(--domd-page-fg);
+  --color-info-content: var(--domd-accent); --color-info: var(--domd-accent);
+  /* Swift overwrites both (see MarkdownEditorView.applyAppearance); these are the
+     fallbacks for the page opened outside the app. --font-mono is the user's terminal
+     face, so code here matches the source face you flipped from. */
+  --font-prose: "iA Writer Quattro", "PingFang SC", "PingFang TC", "Hiragino Sans GB",
+                -apple-system, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --muted: color-mix(in srgb, var(--domd-page-fg) 55%, transparent);
+  --line: var(--domd-border);
+  --soft: color-mix(in srgb, var(--domd-page-fg) 4%, transparent);
+  /* domd.css reads these for the kernel's own elements. */
+  --domd-font-family: var(--font-prose);
+  --domd-font-size-base: 18px;
+  --domd-font-size-h1: 30px; --domd-font-size-h2: 23px; --domd-font-size-h3: 20px;
+  --domd-font-size-h4: 18px; --domd-font-size-h5: 18px; --domd-font-size-h6: 18px;
+}
+html[data-appearance="dark"] {
+  --muted: color-mix(in srgb, var(--domd-page-fg) 62%, transparent);
+  --soft: color-mix(in srgb, #ffffff 5%, transparent);
+}
+
+* { box-sizing: border-box; }
+/* Never let the page grow wider than the pane: a long code line or unbreakable token
+   would otherwise pin the body width so prose stops reflowing on resize. */
+html, body { margin: 0; max-width: 100%; overflow-x: hidden;
+  background: var(--domd-page-bg); color: var(--domd-page-fg); }
+::selection { background: color-mix(in srgb, var(--domd-accent) 20%, transparent); }
+
+/* `margin: 0 auto` self-adjusts: while the pane is narrower than the measure the auto
+   margins collapse to 0 and the prose stays flush-left under the file-name header;
+   once it is wider the leftover splits evenly and the column centres. The measure is
+   in `ch` so it tracks the face and size — 720px does not, and at 17px Quattro it is
+   about 62ch, which wraps every line somewhere else. +40px keeps the 20px side padding
+   from eating into the 76ch of actual text (border-box puts padding inside max-width). */
+/* The column fills the pane's height, and the editable element fills the column.
+   Measured before this: with a short document in a tall pane, a click below the last
+   line landed on `div`/`html`, not on `.DOMD-Root` — no caret, which reads exactly as
+   "the face is not clickable". The editor has to be the thing under the pointer, not a
+   box the height of its own text. */
+html, body { height: 100%; }
+#root {
+  /* The whole scale hangs off these three. `--block-gap` is resolved to a length
+     here rather than left as an em, because a block's own em is the wrong unit for
+     the space between blocks: a 13.5px fence measuring its margin in its own em
+     opened a 17.5px gap where the paragraphs around it opened 27px. Measured. */
+  --prose-size: 18px;
+  /* 1.7, and the reason is the caret, not the reading. Measured in WebKit: the caret
+     in a contenteditable is the FONT's ascent+descent and nothing else — 23px at 18px
+     Quattro, unchanged whether line-height is 1.2, 1.5 or 2.4. Leading cannot make the
+     caret shorter; it can only change how much of the line the caret occupies.
+     At 1.5 that was 85% — a bar that spans the row and reaches toward its neighbours.
+     At 1.7 it is 75%, with 3.8px of air above and below, and it reads as a caret
+     sitting in a line. Tightening leading is the wrong instinct here and actively
+     backfires: below about 1.28 the 23px caret is taller than its own line box and
+     overflows into the lines around it.
+     `--block-gap` deliberately does NOT track this, so the paragraph break stays at a
+     fixed 27px of air rather than growing every time the leading does. */
+  --leading: 1.7;
+  --block-gap: calc(var(--prose-size) * 1.5);
+  min-height: 100%; display: flex; flex-direction: column;
+  /* 66ch, not 76ch. Quattro is duospaced, so a line holds more characters than it
+     holds `ch`: at 76ch the measured prose line ran 82.7 characters, well past the
+     45-75 a line can be read without losing its place. 66ch measures 71.8. */
+  max-width: calc(66ch + 40px); margin: 0 auto; padding: 36px 20px 160px;
+  font-size: var(--prose-size); line-height: var(--leading);
+  font-family: var(--font-prose);
+  /* NOT antialiased — grayscale smoothing thins the strokes and reads 轻飘飘; the
+     default subpixel smoothing keeps the face solid, like the editor. */
+  -webkit-font-smoothing: auto; text-rendering: optimizeLegibility;
+  font-feature-settings: "kern", "liga", "calt";
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.DOMD-Root { outline: none; font-size: inherit; line-height: inherit; }
+/* The kernel sets `-webkit-font-smoothing: antialiased` on .DOMD-Root, and the whole
+   document lives inside it — so the `auto` declared on #root above was inherited by
+   nothing and never took effect. Grayscale smoothing thins the strokes and reads
+   轻飘飘; reclaiming it here is what makes the page look like the editor again.
+   Inheritance always loses to a direct rule, whatever the specificity. */
+#root .DOMD-Root { -webkit-font-smoothing: auto; -moz-osx-font-smoothing: auto;
+  /* THE PROSE FACE, declared here rather than only on #root, because #root's
+     font-family was inherited by nothing. domd.css defines `--domd-font-family` ON
+     `.DOMD-Root` itself (`:where(.DOMD-Root){--domd-font-family: ui-sans-serif, …}`)
+     and then sets `font-family: var(--domd-font-family)` from it. A custom property
+     declared on the element beats one inherited from :root no matter what the
+     specificity of the :root rule is — `:where()` never entered into it, because the
+     two declarations are on different elements. Measured: every paragraph and heading
+     in the document rendered in system sans, with the i/M advance ratio of SF Pro
+     (0.260) rather than Quattro's (0.333) — while `#root` itself, which nothing
+     draws text in, reported Quattro. Redefining the token here fixes the family and
+     anything else domd.css derives from it in one place.
+     This also repairs the measure: `66ch` is computed from #root's font, so while the
+     text was drawn in a narrower face the column held 85.8 characters, not 71.8. */
+  --domd-font-family: var(--font-prose);
+  font-family: var(--font-prose);
+  /* Fills the column, so the empty space under the last paragraph is still the editor. */
+  flex: 1 1 auto; }
+/* The provider renders a wrapper between #root and .DOMD-Root, so the fill has to be
+   handed down the chain or it stops at the wrapper and the editor stays the height of
+   its own text. Measured: without this, a click in the lower third of the pane lands on
+   that wrapper, not on the editor. */
+#root > * { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+
+/* A CJK document, decided from the source by the host (MarkdownReaderRenderer.isCJK).
+   Han glyphs fill their em square and carry no ascender/descender rhythm, so the Latin
+   1.6 reads as a wall; 1.8 is the leading Chinese web typography settles on. Headings
+   lose the optical negative tracking — that is a Latin correction and on a square grid
+   it only crowds. */
+/* Every rule here is scoped through `#root`, deliberately: the base rules above are
+   `#root :where(…)`, and `:where()` contributes no specificity, so a CJK rule written
+   as `html.cjk :where(h2)` would LOSE to `#root :where(h2)` and silently do nothing.
+   Matching the `#root` prefix is what makes these win. */
+html.cjk #root { line-height: 1.8; letter-spacing: 0.02em; text-autospace: normal; }
+html.cjk #root :where(h1, h2, h3, h4, h5, h6, .DOMD-H1, .DOMD-H2, .DOMD-H3,
+                      .DOMD-H4, .DOMD-H5, .DOMD-H6) { letter-spacing: 0; line-height: 1.4; }
+/* Tracking is for prose only. A monospaced grid, a URL and a key cap all mean
+   something by their exact width. */
+html.cjk #root :where(code, pre, kbd, a, .DOMD-Code, .DOMD-Pre, .DOMD-Kbd,
+                      .DOMD-Link) { letter-spacing: normal; }
+/* Chinese has no italic tradition — an oblique Han glyph is synthesized by the
+   rasterizer and reads as a rendering fault. Emphasis becomes weight instead. */
+html.cjk #root :where(em, .DOMD-Em) { font-style: normal; font-weight: 600; }
+/* Strict breaking keeps a line from opening on 、。) and lets closing punctuation hang
+   into the margin instead of forcing an early wrap. */
+html.cjk #root :where(p, li, blockquote, .DOMD-P, .DOMD-li,
+                      .DOMD-Blockquote) { line-break: strict; }
+html.cjk #root { hanging-punctuation: allow-end; }
+/* 标点挤压. The reader compresses punctuation by wrapping each mark in a
+   `.punctuation-half` / `-quarter` span (MarkdownHTML.swift:308) — a source
+   transformation this face cannot make, because here the text IS the model and an
+   injected span would change what toMarkdown emits. `palt` asks the font for the same
+   thing: PingFang ships proportional-alternate metrics for CJK punctuation, so the
+   compression comes from the face instead of from the markup. */
+html.cjk #root { font-feature-settings: "kern", "liga", "calt", "palt"; }
+
+/* Headings carry hierarchy through weight + space, not rules or colour — no
+   underlines (that GitHub look is the main "webpage" tell). */
+/* Sized in em of the prose, not in px. Hardcoded px made h4 SMALLER than the body
+   the moment the prose moved to 18px — a heading that reads as less than the text it
+   heads. In em the staircase cannot invert. */
+#root :where(h1, .DOMD-H1) { font-size: 1.65em; font-weight: 700; letter-spacing: -0.019em;
+  line-height: 1.2; margin: 0 0 0.7em; padding: 0; }
+#root :where(h2, .DOMD-H2) { font-size: 1.3em; font-weight: 700; letter-spacing: -0.014em;
+  line-height: 1.3; margin: 2em 0 0.5em; padding: 0; }
+#root :where(h3, .DOMD-H3) { font-size: 1.12em; font-weight: 700; line-height: 1.35;
+  margin: 1.7em 0 0.35em; padding: 0; }
+#root :where(h4, h5, h6, .DOMD-H4, .DOMD-H5, .DOMD-H6) { font-size: 1em; font-weight: 700;
+  margin: 1.5em 0 0.35em; padding: 0; }
+#root .DOMD-Root > *:first-child { margin-top: 0; }
+
+/* One full line of air, not 0.75 of one. Measured on the old values, a paragraph
+   break advanced the baseline 1.75 line-pitches — LESS than the two pitches that make
+   a break read as a break, so the gap between paragraphs was weaker than the gap
+   between their own lines. */
+#root :where(p, .DOMD-P) { margin: 0 0 var(--block-gap); line-height: inherit; }
+/* Quiet links: a faint underline, no hover jump — reading, not browsing. */
+#root :where(a, .DOMD-Link) { color: var(--domd-accent); text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--domd-accent) 30%, transparent);
+  text-underline-offset: 3px; }
+#root :where(strong, .DOMD-Bold) { font-weight: 600; }
+#root :where(del, .DOMD-Del) { color: var(--muted); }
+/* Indented + muted, no accent bar or box. */
+#root :where(blockquote, .DOMD-Blockquote) { margin: var(--block-gap) 0; padding: 0 0 0 20px;
+  border-left: 2px solid var(--line); color: var(--muted); }
+/* Lists. The reader's adaptive gutter: each list reserves its own marker width plus
+   about a word space, and an ordered list widens a digit at a time — whole-list, so its
+   text column stays straight — as it reaches 10 and 100 items. Sizing every list for
+   "10." instead strands single digits from their text.
+
+   DEVIATION from the reader, and the reason: the reader replaces `::marker` with CSS
+   counters because its renderer emits every `<ol>` at 1, so a counter costs nothing.
+   domd carries the real start ordinal as an attribute (`<ol start="3">`), which a CSS
+   counter cannot read — a counter here would silently renumber every list that does not
+   begin at 1. So the native marker stays and the gutter is `padding-left`, which puts
+   WebKit's right-aligned marker exactly where the reader's counter sits. */
+#root :where(ul, ol, .DOMD-Ul, .DOMD-Ol, .DOMD-CheckBoxUl) {
+  --gutter: 1.3em;
+  margin: 0 0 var(--block-gap); padding-left: var(--gutter); list-style-position: outside;
+}
+#root :where(ol, .DOMD-Ol) { --gutter: 1.8em; }
+#root :where(ol, .DOMD-Ol):has(> :nth-child(10)) { --gutter: 2.4em; }
+#root :where(ol, .DOMD-Ol):has(> :nth-child(100)) { --gutter: 3em; }
+/* The checkbox is wider than a bullet and needs the room back. */
+#root :where(ul, .DOMD-Ul, .DOMD-CheckBoxUl):has(.DOMD-CheckBoxLi) { --gutter: 1.7em; }
+#root :where(ul, .DOMD-Ul) { list-style-type: disc; }
+#root :where(li, .DOMD-li, .DOMD-CheckBoxLi) { margin: 0.35em 0; }
+#root :where(li, .DOMD-li)::marker { color: var(--muted); }
+/* A nested list tightens up rather than repeating the block gap. */
+#root :where(li, .DOMD-li, .DOMD-CheckBoxLi) :where(ul, ol, .DOMD-Ul, .DOMD-Ol) {
+  margin: 0.35em 0;
+}
+/* The paragraph inside a list item is the item, not a block of its own. */
+#root :where(.DOMD-LiP, li > p) { margin: 0; }
+
+/* Task items. DEVIATION from the reader, and the reason: the reader draws a static
+   Hugeicons box because its page is read-only. Here the checkbox is a live control —
+   clicking it writes the document through the kernel's own toggle — so replacing it
+   with a drawn glyph would trade a working control for a picture of one. The native
+   input is restyled instead: same size, same muted/accent colours, same gutter. */
+#root .DOMD-CheckBoxLi { list-style: none; }
+/* The kernel gives the checkbox element no class of its own, so it is addressed by
+   element inside the label it lives in. */
+#root .DOMD-CheckBoxLabel { margin-left: calc(-1 * var(--gutter)); }
+#root .DOMD-CheckBoxLabel input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  /* A form control does not inherit the prose size, so `em` here would resolve
+     against the browser's own 13.33px default and the box would come out small. */
+  font: inherit;
+  width: 1.05em; height: 1.05em; margin: 0; vertical-align: -0.16em;
+  border: 1.5px solid var(--muted); border-radius: 4px;
+  background: transparent; cursor: pointer;
+}
+#root .DOMD-CheckBoxLabel input[type="checkbox"]:checked {
+  background-color: var(--domd-accent); border-color: var(--domd-accent);
+  /* The tick is drawn rather than set in a glyph, so it scales with the box. */
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+  background-size: 100% 100%; background-repeat: no-repeat;
+}
+
+/* Code stays in the terminal face, on a whisper of tint — no borders or pills.
+   These rules were lost once to a bad splice and the loss was invisible in the
+   stylesheet: the kernel's own .DOMD-Pre simply won by default, leaving 17px Consolas
+   with no padding. The measurement, not the source, is what catches that. */
+#root :where(code, .DOMD-Code) { font: 0.82em var(--font-mono);
+  background: var(--soft); border-radius: 4px; padding: 0.1em 0.35em; }
+#root :where(pre, .DOMD-Pre) { background: var(--soft); border: none; border-radius: 8px;
+  padding: 15px 18px; margin: var(--block-gap) 0; overflow-x: auto; max-width: 100%;
+  font-family: var(--font-mono); font-size: 13.5px; line-height: 1.6; }
+#root :where(pre, .DOMD-Pre) :where(code, .DOMD-PreCode) { background: none; padding: 0;
+  font-family: var(--font-mono); font-size: 13.5px; line-height: 1.6; }
+/* A fence's own hidden scaffolding must not reserve line height. */
+#root :where(pre, .DOMD-Pre) .DOMD-PreCodeEmpty { font-size: 13.5px; line-height: 1.6; }
+#root :where(kbd, .DOMD-Kbd) { font: 0.78em var(--font-mono); background: var(--soft);
+  border: 1px solid var(--line); border-radius: 4px; padding: 0.15em 0.4em;
+  vertical-align: 0.05em; }
+/* `height: auto` against the pixel height GitHub writes onto a pasted `<img>`; a
+   clamped width with that height still set stretches the picture vertically. */
+#root :where(img, video, .DOMD-Img) { max-width: 100%; height: auto; margin: 0.6em 0;
+  border-radius: 6px; }
+
+/* Uniform line boxes, so the caret is the same height on every line.
+   In a contenteditable the caret takes the height of the tallest inline box on its
+   line, so any inline decoration with its own taller line-height makes the caret jump
+   from line to line — an editing defect, not a cosmetic one. Each of these is pinned
+   so it can contribute no more leading than the prose around it. The emoji is the one
+   that actually threatens it: Apple Color Emoji carries far larger metrics than the
+   text face, and it only started appearing here when shortcodes began rendering.
+   NOT reproduced in headless Chrome (every line box measures 20px there) — this is
+   hardening against a WebKit behaviour that measurement in this environment cannot
+   reach, and it is written so it cannot change the layout where the problem is absent. */
+#root :where(code, .DOMD-Code, kbd, .DOMD-Kbd) { line-height: inherit; }
+#root .domd-emoji { font-size: 1em; line-height: 1; vertical-align: -0.08em; }
+/* A raised or lowered box reports its full leading to the line; zeroing it keeps the
+   offset without letting the box grow. */
+#root :where(sup, sub, .domd-footnote-ref) { line-height: 0; }
+/* Inline math legitimately needs its own height for a fraction or a radical; a display
+   formula has its own line and is free to be tall. */
+#root .domd-math math { line-height: normal; }
+/* The kernel's own `.DOMD-Root img { display: inline }` (0,1,1) beats its
+   `.DOMD-Img { display: block }` (0,1,0), so an image sits down INTO the text line and
+   the line box — and with it the caret — grows to the height of the picture. Measured:
+   a one-line paragraph containing an image is 189px tall against 27px without one.
+   Only .DOMD-Img is pinned; a small inline image inside raw HTML keeps its flow. */
+#root .DOMD-Img { display: block; }
+/* inline-block reports its whole box, margins included, to the line. */
+#root .DOMD-InlinePlain { display: inline; }
+/* 22px + 5px of margin overruns the 27.2px line-height budget outright. */
+#root .DOMD-FunctionIcon { width: 1em; height: 1em; margin-bottom: 0;
+                           vertical-align: -0.12em; }
+
+/* Tables: horizontal rules only, like a native document — no grid, no outer box.
+   `width: max-content` lays the table out at its natural content width so the browser's
+   column balancing works unsquashed, and `max-width` + `overflow` makes an oversized
+   table scroll as a whole instead of crushing its widest column or widening the page.
+   Cells reset the body's anywhere-wrapping — mid-word breaks are what make columns look
+   lopsided. */
+#root :where(table, .DOMD-Table) { border-collapse: collapse; margin: var(--block-gap) 0;
+  font-size: 15px; display: block; width: max-content; max-width: 100%;
+  overflow-x: auto; border: none; }
+#root :where(th, td, .DOMD-TH, .DOMD-TD) { border: none;
+  border-bottom: 1px solid var(--line); padding: 7px 16px 7px 0; text-align: left;
+  overflow-wrap: normal; word-break: normal; }
+#root :where(th, .DOMD-TH) { font-weight: 600; color: var(--muted);
+  border-bottom-color: var(--domd-page-fg); }
+#root :where(.DOMD-TR, tr) :where(p, .DOMD-P) { margin: 0; }
+/* Raw-HTML layout tables (the README screenshot-grid idiom: `<td width="50%">`) are page
+   structure, not data — let them fill the measure and keep their cell ratios instead of
+   shrink-wrapping to content, and drop the data-table rules. */
+#root :where(table, .DOMD-Table):has(td[width]) { display: table; width: 100%;
+  table-layout: fixed; }
+#root :where(table, .DOMD-Table):has(td[width]) td { border-bottom: none;
+  vertical-align: middle; }
+
+#root :where(hr, .DOMD-Hr) { border: none; border-top: 1px solid var(--line);
+  height: 0; margin: calc(var(--block-gap) * 1.5) 0; background: none; }
+#root .DOMD-HrDiv { height: auto; margin: calc(var(--block-gap) * 1.5) 0; }
+/* The kernel wraps the rule as `.DOMD-HrDiv > div > hr` and makes the wrapper a flex
+   container, which is a margin-collapsing boundary: the margin above puts 2.4em on the
+   wrapper AND 2.4em on the rule inside it, and the inner pair cannot collapse out.
+   Measured: 164.2px of space, ink to ink, around a 1px line. Zeroed here so the
+   divider's air is declared once, on the wrapper. */
+#root .DOMD-HrDiv :where(hr, .DOMD-Hr) { margin: 0; }
+#root :where(em, .DOMD-Em) { font-style: italic; margin-right: 0; }
+#root :where(.DOMD-EmBold) { font-weight: 700; font-style: italic; margin-right: 0; }
+/* An image's alt text, when the kernel shows it, is apparatus rather than prose. */
+#root .DOMD-Img + .DOMD-Plain, #root .image { color: var(--muted); font-size: 15px; }
+
+/* math ------------------------------------------------------------------- */
+.domd-math-source { display: none; }
+.domd-math math { font-size: 1.05em; }
+.domd-math-display { display: block; text-align: center; margin: 1rem 0; }
+.domd-math-display math { font-size: 1.2em; }
+.domd-footnote-ref { color: var(--domd-accent); font-size: .78em; }
+
+/* mermaid ---------------------------------------------------------------- */
+.domd-mermaid { border: 1px solid var(--domd-border); border-radius: 8px; padding: 14px;
+                background: var(--domd-panel); margin: 1rem 0; overflow-x: auto; }
+.domd-mermaid-source { display: none; }
+.domd-diagram svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+.domd-diagram-pending, .domd-diagram-failed { font-size: 12px; opacity: .6;
+                                              font-family: ui-monospace, monospace; }
+.domd-diagram-failed { color: #d1242f; opacity: 1; }
+
+/* GitHub alerts ---------------------------------------------------------- */
+.domd-alert { border-left-color: var(--domd-alert-tint, var(--domd-accent)) !important; }
+.domd-alert-badge { display: block; font-size: 12px; font-weight: 650; letter-spacing: .02em;
+                    color: var(--domd-alert-tint, var(--domd-accent)); margin-bottom: 2px; }
+.domd-alert[data-alert="NOTE"] { --domd-alert-tint: #0a84ff; }
+.domd-alert[data-alert="TIP"] { --domd-alert-tint: #1a7f37; }
+.domd-alert[data-alert="IMPORTANT"] { --domd-alert-tint: #8250df; }
+.domd-alert[data-alert="WARNING"] { --domd-alert-tint: #bf8700; }
+.domd-alert[data-alert="CAUTION"] { --domd-alert-tint: #d1242f; }
+/* the literal `[!NOTE]` is document text — hidden in the view, kept in the model */
+.domd-alert > .DOMD-P > .DOMD-Plain:first-child { display: none; }
+
+/* YAML front matter is an Hr plus a paragraph to domd, which makes it
+   position-addressable in CSS without a parser hook. */
+.DOMD-Root > .DOMD-HrDiv:first-child { display: none; }
+.DOMD-Root > .DOMD-HrDiv:first-child + .DOMD-P {
+  background: var(--domd-panel); border: 1px solid var(--domd-border);
+  border-left: 3px solid var(--domd-accent); border-radius: 6px; padding: 10px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  line-height: 1.7; white-space: pre-wrap; opacity: .85;
+}
+.DOMD-Root > .DOMD-HrDiv:first-child + .DOMD-P > .DOMD-Plain:last-child { display: none; }
+
+/* termio's brand is monochrome — mark state with ink, never hue. */
+.DOMD-Mark, .DOMD-InlineRule_mark, .DOMD-Root mark {
+  background: color-mix(in srgb, var(--color-base-content) 16%, transparent);
+  color: inherit; border-radius: 3px;
+}
+
+/* raw HTML ---------------------------------------------------------------
+   The source text stays in the DOM because toMarkdown reads it back; only the
+   sanitized rendering is shown. Same shape as the mermaid fence above. */
+.domd-html-source, .domd-comment-source, .domd-emoji-source { display: none; }
+.domd-html-rendered :where(img) { max-width: 100%; height: auto; }
+.domd-html-rendered :where(details) {
+  border: 1px solid var(--domd-border); border-radius: 8px;
+  padding: 10px 14px; margin: 1rem 0; background: var(--domd-panel);
+}
+.domd-html-rendered :where(summary) { cursor: default; font-weight: 600; }
+.domd-html-rendered :where(dl) { margin: 1rem 0; }
+.domd-html-rendered :where(dt) { font-weight: 650; margin-top: .6rem; }
+.domd-html-rendered :where(dd) { margin: .15rem 0 0 1.4rem; opacity: .85; }
+.domd-html-rendered :where(div[align="center"]) { text-align: center; }
+.domd-html-rendered :where(div[align="right"]) { text-align: right; }
+.domd-html-rendered :where(table) { border-collapse: collapse; margin: 1rem 0; }
+.domd-html-rendered :where(th, td) {
+  border: 1px solid var(--domd-border); padding: 5px 10px;
+}
+.domd-html-rendered :where(a) { color: var(--domd-accent); text-decoration: none; }
+.domd-html-rendered :where(abbr[title]) { text-decoration: underline dotted; cursor: help; }
+/* An image the scheme handler cannot serve must not leave a broken-icon hole. */
+.domd-html-rendered :where(img):-moz-broken { opacity: .35; }
+
+/* Full-screen viewer (see viewer.js) ------------------------------------- */
+/* The chip is the affordance, because a click on this surface has to keep meaning
+   "put the caret here". It lives outside the editable tree and is positioned over
+   whatever is hovered. It appears on the next frame, no fade — hover cues snap here. */
+.domd-zoom { position: fixed; z-index: 11; display: none;
+  width: 26px; height: 26px; padding: 5px; border: none; border-radius: 6px;
+  appearance: none; background: var(--domd-panel); color: var(--muted); cursor: pointer; }
+.domd-zoom.visible { display: block; }
+.domd-zoom svg { display: block; width: 100%; height: 100%; fill: none;
+  stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* The overlay is the page's own background, opaque: full screen means the document
+   steps aside, not a web-style dimmed modal. It opens and closes in one frame. */
+.domd-lightbox { display: none; position: fixed; inset: 0; z-index: 12;
+  background: var(--domd-page-bg); cursor: zoom-out;
+  align-items: center; justify-content: center; padding: 3vh 3vw; }
+.domd-lightbox.open { display: flex; }
+html.domd-lightbox-open, html.domd-lightbox-open body { overflow: hidden; }
+.domd-lightbox-stage { width: 100%; height: 100%; display: flex;
+  align-items: center; justify-content: center; overflow: hidden; }
+.domd-lightbox-stage > * { transform-origin: center center; }
+/* A diagram is vector, so it grows to fill the pane (its viewBox keeps the aspect); a
+   raster never scales past its natural size — enlarged pixels read as a bug. */
+.domd-lightbox-stage.is-diagram > svg { width: 100%; height: 100%; }
+.domd-lightbox-stage.is-diagram { cursor: grab; }
+.domd-lightbox img { max-width: 100%; max-height: 100%; width: auto; height: auto;
+  border-radius: 6px; }

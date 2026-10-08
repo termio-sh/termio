@@ -80,8 +80,19 @@ struct FileEditorView: View {
     /// neither is built before it is first asked for.
     @State private var mountedEditor = false
     @State private var mountedReader = false
-    /// What Preview renders — the buffer as of the last flip into Preview, not the live one.
+    /// What the rendered face was last given — the buffer as of the flip into it, not the
+    /// live one. While that face is visible it writes this and `text` together.
     @State private var previewSource = ""
+    /// Reaches the rendered face's page so the flip out of it can pull the document
+    /// before changing face. Filled in by the view when it mounts.
+    @State private var readerBridge = MarkdownEditorHandle()
+    /// A document the rendered face was handed, and the page's own serialization of that
+    /// same document. The pair is the base an edit coming back out of that face is merged
+    /// against, so the file keeps its own formatting — see `adoptRenderedFace`. Both are
+    /// written together, by the page, because merging against a mismatched pair would
+    /// rewrite lines nobody touched.
+    @State private var renderedFaceOrigin = ""
+    @State private var renderedFaceCanonical: String?
     /// Set when the file is too large for syntax highlighting (see `highlightByteLimit`).
     @State private var highlightDisabled = false
     @State private var saveError: String?
@@ -272,9 +283,16 @@ struct FileEditorView: View {
         // content-search hit): the jump needs the source editor's lines, so flip to Edit
         // first — Preview has no text view to scroll and would swallow it.
         .onChange(of: jumpLine) {
-            if jumpLine != nil, mode == .preview { mode = .edit }
+            if jumpLine != nil, mode == .preview { requestModeChange(to: .edit) }
         }
-        .onExitCommand { close() }
+        // Escape has two claimants once the rendered face can go full screen. The page's
+        // overlay gets it first when it is up — its own listener has already closed it by
+        // the time this runs, and consuming the claim here is what stops the same
+        // keystroke also closing the whole editor.
+        .onExitCommand {
+            if readerBridge.consumeViewerEscape() { return }
+            close()
+        }
         .alert(
             localized("\(fileName) changed on \(remote?.host ?? "")"),
             isPresented: Binding(get: { conflict != nil },
@@ -286,6 +304,10 @@ struct FileEditorView: View {
             })
         // A safety flush if the overlay goes away without the close button (file switch, app quit).
         .onDisappear {
+            // No flush here: the view is already going away, so the page may be gone
+            // too and an async pull would answer into nothing. `close()` is the path
+            // that settles the rendered face; this is the safety net behind it for the
+            // ways the overlay disappears without it (a file switch, app quit).
             if !readOnly { saveTask?.cancel(); writeIfNeeded() }
         }
     }
@@ -300,16 +322,29 @@ struct FileEditorView: View {
         let showsReader = isMarkdown && mode == .preview
         ZStack {
             if mountedReader {
-                // `previewSource`, not `text`: a reader that outlives its own visibility would
-                // re-render the whole document into a hidden web view on every keystroke.
-                MarkdownReaderView(
+                // `previewSource`, not `text`: while the source face owns the buffer this
+                // one must not be handed every keystroke, which would reset its caret. The
+                // flip is what exchanges the document — see `activateMode` and `requestModeChange`.
+                MarkdownEditorView(
                     source: previewSource,
                     fileURL: url,
-                    settings: settings,
-                    colorScheme: colorScheme,
-                    addToChat: addToChat,
-                    canAddToChat: canAddToChat,
-                    isActive: showsReader
+                    theme: DocumentTheme.resolveReader(settings: settings, colorScheme: colorScheme),
+                    fontFamily: settings.fontFamily,
+                    isEditable: !readOnly,
+                    isActive: showsReader,
+                    handle: readerBridge,
+                    onEdit: { markdown in
+                        // The rendered face owns the buffer while it is the visible one, so
+                        // its edits go straight in — auto-save and the dirty flag then behave
+                        // exactly as they do for the source face.
+                        guard isMarkdown, mode == .preview, !readOnly else { return }
+                        adoptRenderedFace(markdown)
+                    },
+                    onCanonical: { document, canonical in
+                        renderedFaceOrigin = document
+                        renderedFaceCanonical = canonical
+                    },
+                    onFailure: { message in saveError = message }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(showsReader)
@@ -321,15 +356,73 @@ struct FileEditorView: View {
         }
     }
 
-    /// Mounts the face the mode names and hands Preview the current buffer. Only the flip refreshes
-    /// it, so typing in Edit never renders a document nobody is looking at.
+    /// Mounts the face the mode names and hands it the current buffer. Only the flip
+    /// refreshes it, so typing in one face never re-renders a document nobody is looking at.
+    ///
+    /// Both faces can write `text`, so the flip is also where ownership changes hands.
+    /// Entering the rendered face is the easy direction — the buffer is current, push it.
+    /// Leaving it is the one with an ordering hazard, and `requestModeChange` handles that
+    /// before `mode` ever moves.
     private func activateMode() {
         guard loaded else { return }
         if isMarkdown && mode == .preview {
             previewSource = text
+            // The pair an edit is merged against arrives from the page (`onCanonical`),
+            // which answers for the document it was actually handed. The baseline is
+            // dropped here so a stale pair can never be merged against while the new one
+            // is in flight — until it lands an edit is adopted as-is — and the document
+            // side is seeded with what is about to be pushed, so the two are never
+            // half-set even if the page never answers.
+            renderedFaceOrigin = text
+            renderedFaceCanonical = nil
             mountedReader = true
         } else {
             mountedEditor = true
+        }
+    }
+
+    /// Takes a document reported by the rendered face into the buffer, in the file's own
+    /// formatting rather than the kernel's.
+    ///
+    /// The page's document is canonical Markdown: re-padded tables, blank lines around
+    /// blocks, a `0.` list renumbered. Adopting it whole would turn one typed character
+    /// into a whole-file rewrite, so only what changed is carried across — see
+    /// `MarkdownWriteBack`. `previewSource` still takes the page's own text, because it
+    /// is what the page holds and pushing anything else back would reset the caret.
+    private func adoptRenderedFace(_ markdown: String) {
+        previewSource = markdown
+        guard let canonical = renderedFaceCanonical else {
+            text = markdown
+            return
+        }
+        text = MarkdownWriteBack.merge(edited: markdown, canonical: canonical,
+                                       original: renderedFaceOrigin)
+    }
+
+    /// The only way the mode changes from the UI.
+    ///
+    /// The face changes **now**. Leaving the rendered face still has to pull the document
+    /// out of it — that face owns the buffer right up to the moment it stops being
+    /// visible, and its reporting is debounced — but that pull is a round trip into a web
+    /// view, measured at 10–30ms on a thousand-line document, and a flip that waits on it
+    /// is a flip that visibly lags a click it should answer instantly.
+    ///
+    /// So the answer is adopted late, and only if the buffer has not moved since: once
+    /// the source face is up the user can type into it, and a late answer must never
+    /// overwrite what they typed there. That is the whole hazard of flipping first, and
+    /// it is closed by the check rather than by waiting. If the page cannot answer, the
+    /// buffer keeps the last value it reported — never a guess, never an empty document.
+    private func requestModeChange(to next: Mode) {
+        guard next != mode else { return }
+        guard mode == .preview, isMarkdown, !readOnly else {
+            mode = next
+            return
+        }
+        let before = text
+        mode = next
+        readerBridge.flush { markdown in
+            guard let markdown, text == before else { return }
+            adoptRenderedFace(markdown)
         }
     }
 
@@ -490,7 +583,7 @@ struct FileEditorView: View {
             // A filled hit shape so the whole segment — not just the icon's thin
             // stroke — takes the click.
             .contentShape(.capsule)
-            .onTapGesture { mode = segment }
+            .onTapGesture { requestModeChange(to: segment) }
             .help(help)
     }
 
@@ -512,7 +605,25 @@ struct FileEditorView: View {
     /// lets the muscle-memory ⌘S commit immediately (and the unsaved dot clears at once).
     private func saveNow() {
         saveTask?.cancel()
-        writeIfNeeded()
+        withRenderedFaceSettled { writeIfNeeded() }
+    }
+
+    /// Runs `body` once the buffer is certain to hold what the user last typed.
+    ///
+    /// The rendered face reports its edits on a debounce, so at any instant the buffer
+    /// may be up to that debounce behind the page. Anything that commits the buffer —
+    /// ⌘S, closing, the overlay going away — has to pull from the page first, or it
+    /// writes a document that is missing the last keystrokes. When that face is not the
+    /// one in use there is nothing to wait for and `body` runs immediately.
+    private func withRenderedFaceSettled(_ body: @escaping () -> Void) {
+        guard isMarkdown, mode == .preview, !readOnly, loaded else {
+            body()
+            return
+        }
+        readerBridge.flush { markdown in
+            if let markdown { adoptRenderedFace(markdown) }
+            body()
+        }
     }
 
     /// (Re)arms the debounced write — the previous pending save is cancelled so only a quiet pause
@@ -533,8 +644,10 @@ struct FileEditorView: View {
     /// Closes the overlay, flushing any pending edit first so nothing is lost on the way out.
     private func close() {
         saveTask?.cancel()
-        writeIfNeeded()
-        onClose()
+        withRenderedFaceSettled {
+            writeIfNeeded()
+            onClose()
+        }
     }
 
     /// The device refused the save: the file changed after it was read. Overwrite

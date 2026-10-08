@@ -1442,6 +1442,8 @@
 	<string>Test</string>
 	<key>Test Connection</key>
 	<string>Test Connection</string>
+	<key>The Markdown editor reported a problem.</key>
+	<string>The Markdown editor reported a problem.</string>
 	<key>The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with.</key>
 	<string>The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with.</string>
 	<key>The base branch has commits this branch doesn’t have, as of the last fetch.</key>
@@ -1546,6 +1548,8 @@
 	<string>This device’s termiod is too old to report its agents.</string>
 	<key>This diff is too large to show here — open the file on GitHub.</key>
 	<string>This diff is too large to show here — open the file on GitHub.</string>
+	<key>This document could not be handed to the editor.</key>
+	<string>This document could not be handed to the editor.</string>
 	<key>This file is binary — open it on GitHub to view.</key>
 	<string>This file is binary — open it on GitHub to view.</string>
 	<key>This folder has no git “origin” remote to clone.</key>

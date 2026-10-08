@@ -71,6 +71,11 @@ let package = Package(
                 // by `MarkdownReaderRenderer`. `.process` flattens the woff2s to the
                 // bundle root, where the name-based lookup expects them.
                 .process("Resources/Fonts"),
+                // The rendered Markdown face: the vendored domd kernel bundle plus
+                // its GPL notices (see Resources/domd/README.md). A folder copy, not
+                // `.process`, so the subdirectory survives for the scheme handler's
+                // lookup and the licence files ship verbatim beside the page.
+                .copy("Resources/domd"),
                 .copy("Resources/agents"),
                 .copy("Resources/terminal.json"),
                 // UI strings: per-language .lproj folders generated from the String
