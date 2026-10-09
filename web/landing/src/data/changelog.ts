@@ -17,6 +17,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.56.1",
+    date: "2026-10-09",
+    title: "Fewer hooks for Claude Code and Pi",
+    changes: {
+      improved: [
+        "Claude Code keeps one hook, for the tool it is running. Pi needs none, and Termio removes the extension it installed before.",
+      ],
+    },
+  },
+  {
     version: "0.56.0",
     date: "2026-10-09",
     title: "Agents report their own status over the terminal",
