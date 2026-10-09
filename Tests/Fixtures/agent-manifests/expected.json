@@ -120,34 +120,9 @@
         "directory": null,
         "events": [
           {
-            "matcher": "clear",
-            "name": "SessionStart",
-            "state": "idle"
-          },
-          {
-            "matcher": null,
-            "name": "UserPromptSubmit",
-            "state": "working"
-          },
-          {
             "matcher": "*",
             "name": "PreToolUse",
             "state": "working"
-          },
-          {
-            "matcher": "*",
-            "name": "PostToolUse",
-            "state": "working"
-          },
-          {
-            "matcher": "*",
-            "name": "PermissionRequest",
-            "state": "attention"
-          },
-          {
-            "matcher": null,
-            "name": "Stop",
-            "state": "done"
           }
         ],
         "file": "~/.claude/settings.json",
@@ -866,26 +841,10 @@
       "emitsProgressStatus": false,
       "hooks": {
         "capturesTranscript": false,
-        "conversation": "context",
+        "conversation": null,
         "dialect": "piPlugin",
         "directory": "~/.pi/agent/extensions",
-        "events": [
-          {
-            "matcher": null,
-            "name": "session_start",
-            "state": "idle"
-          },
-          {
-            "matcher": null,
-            "name": "agent_start",
-            "state": "working"
-          },
-          {
-            "matcher": null,
-            "name": "agent_end",
-            "state": "done"
-          }
-        ],
+        "events": [],
         "file": null,
         "promptTitle": null,
         "tool": null,
