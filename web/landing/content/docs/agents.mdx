@@ -1,6 +1,6 @@
 ---
 title: Running multiple agents
-description: Keep a fleet of agents side by side, read their live status at a glance, and know which signal each agent reports through — hooks, its terminal title, or the screen as a last resort.
+description: Keep a fleet of agents side by side, read their live status at a glance, and know which signal each agent reports through — the program status protocol, hooks, its terminal title, or the screen as a last resort.
 ---
 
 Termio is built for running more than one agent at once. The sidebar is your
@@ -58,8 +58,11 @@ and takes an absolute path in the command field.
 
 Status isn’t guessed the same way for every agent, and the difference is worth
 knowing when a dot doesn’t move. Each agent declares its own channels in its
-[manifest](/docs/atp): **hooks** are the agent reporting its own turns and are
-authoritative wherever they exist; **title** is an in-band signal read off the
+[manifest](/docs/atp), except one: **program status** is the agent reporting
+its state over the terminal with the [program status protocol](https://mitchellh.com/writing/program-status-osc7501)
+(`OSC 7501`), and outranks every other signal while it speaks. **Hooks** are the
+agent reporting its own turns and are authoritative wherever program status is
+absent; **title** is an in-band signal read off the
 terminal title; **progress** is the `OSC 9;4` progress sequence. An agent that
 declares none of these is read from the pane itself — from whether its output is
 still moving, not from matching words on the screen, which only happens for an
@@ -67,11 +70,11 @@ agent whose manifest spells the patterns out.
 
 | Agent | Status signal | Resumes its conversation |
 | --- | --- | --- |
-| Claude Code | Hooks + title | Yes |
+| Claude Code | Program status + hooks + title | Yes |
 | Codex | Hooks + title | Yes |
 | Grok | Hooks + title + progress | Yes |
 | Qwen Code | Hooks + title | Yes |
-| Pi | Hooks | Yes |
+| Pi | Program status + hooks | Yes |
 | OpenCode | Hooks (plugin) | Yes |
 | OpenCode 2 | Hooks (plugin) | — |
 | Amp | Hooks | — |
@@ -83,6 +86,9 @@ agent whose manifest spells the patterns out.
 | Crush | Screen rules + progress | — |
 | Antigravity | Output activity | — |
 | Hermes | Output activity | — |
+
+Program status needs Claude Code 2.1.295 or Pi 1.1.0 and later. An older
+version reports through its hooks, as before.
 
 “Resumes its conversation” means reopening the session puts the agent back in the
 *same* conversation rather than a blank one — see [What

@@ -1,10 +1,10 @@
 ---
 title: 同时运行多个 Agent
-description: 让一支 Agent 队伍并排工作，一眼读出它们的实时状态，并知道每个 Agent 是通过哪条信号汇报的——hooks、终端标题，还是最后才用的屏幕。
+description: 让一支 Agent 队伍并排工作，一眼读出它们的实时状态，并知道每个 Agent 是通过哪条信号汇报的——program status 协议、hooks、终端标题，还是最后才用的屏幕。
 x-i18n:
   source_path: agents.mdx
-  source_hash: 349afb1ffd8ebf0212d7b30bb7938d4fbb549fa37259b5717b39266707440b56
-  generated_at: 2026-09-19
+  source_hash: cb283b40abca89d9729e8661093314643068916a9e6a18ec313ac4763b2de0dd
+  generated_at: 2026-10-09
 ---
 
 Termio 就是为同时运行多个 Agent 造的。侧栏是你的控制台：每个会话是一行，每一行都汇报
@@ -57,18 +57,20 @@ Termio 却说找不到，那几乎总是 `PATH` 的问题；Agent 页会把这�
 ## 每个 Agent 汇报什么 [#what-each-agent-reports]
 
 状态并不是对每个 Agent 都用同一种方式猜出来的，而当一个状态点不动时，这个差别值得知道。
-每个 Agent 在自己的[清单](/zh-CN/docs/atp)里声明它的通道：**hooks** 是 Agent 自己汇报
-每一轮，只要它存在就是权威；**标题**是从终端标题里读出来的带内信号；**进度**是 `OSC 9;4`
+每个 Agent 在自己的[清单](/zh-CN/docs/atp)里声明它的通道，只有一个例外：**program status**
+是 Agent 用 [program status 协议](https://mitchellh.com/writing/program-status-osc7501)（`OSC 7501`）通过终端汇报自己的状态，它在汇报时
+高于其他所有信号。**hooks** 是 Agent 自己汇报每一轮，在没有 program status 的地方就是权威；
+**标题**是从终端标题里读出来的带内信号；**进度**是 `OSC 9;4`
 进度序列。这些都没声明的 Agent，就从窗格本身来读——看它的输出还动不动，而不是去匹配屏幕上
 的词；后者只发生在清单把模式写明了的 Agent 身上。
 
 | Agent | 状态信号 | 能恢复对话 |
 | --- | --- | --- |
-| Claude Code | hooks + 标题 | 是 |
+| Claude Code | program status + hooks + 标题 | 是 |
 | Codex | hooks + 标题 | 是 |
 | Grok | hooks + 标题 + 进度 | 是 |
 | Qwen Code | hooks + 标题 | 是 |
-| Pi | hooks | 是 |
+| Pi | program status + hooks | 是 |
 | OpenCode | hooks（插件） | 是 |
 | OpenCode 2 | hooks（插件） | —— |
 | Amp | hooks | —— |
@@ -80,6 +82,9 @@ Termio 却说找不到，那几乎总是 `PATH` 的问题；Agent 页会把这�
 | Crush | 屏幕规则 + 进度 | —— |
 | Antigravity | 输出活动 | —— |
 | Hermes | 输出活动 | —— |
+
+program status 需要 Claude Code 2.1.295 或 Pi 1.1.0 及更新版本。更早的版本照旧通过 hooks
+汇报。
 
 「能恢复对话」的意思是，重新打开会话会把 Agent 放回*同一段*对话，而不是一段空白——参见
 [什么会留下来](/zh-CN/docs/persistence)。没有这一项的 Agent 会在同一个目录里重新跑一遍。

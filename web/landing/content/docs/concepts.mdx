@@ -118,13 +118,19 @@ tray summarizes everything, so you can watch a fleet from another app.
 Termio doesn’t guess from pixels where it doesn’t have to. It reads, in order of
 authority:
 
-1. **The agent’s own hooks.** On first run Termio writes its status hooks into the
+1. **The program’s own status report.** A program that speaks the
+   [program status protocol](https://mitchellh.com/writing/program-status-osc7501) (`OSC 7501`) tells Termio what it is doing
+   over the terminal itself — Claude Code from 2.1.295 and Pi from 1.1.0 do.
+   Nothing is installed, and it works the same on a remote machine.
+2. **The agent’s own hooks.** On first run Termio writes its status hooks into the
    config of each agent that supports them, so the agent reports its own turns.
-   Nothing for you to configure. See [Session control](/docs/session-control).
-2. **In-band terminal signals.** Progress and title sequences an agent already
+   While a program reports its own status, its hooks only add detail, such as
+   the tool it is running. Nothing for you to configure. See
+   [Session control](/docs/session-control).
+3. **In-band terminal signals.** Progress and title sequences an agent already
    emits (`OSC 9;4`, `OSC 777`) are read straight off the stream — that’s how Grok
    reports busy and idle without hooks.
-3. **The screen, as a last resort.** For an agent with neither, Termio watches the
+4. **The screen, as a last resort.** For an agent with neither, Termio watches the
    pane for the shape of a prompt waiting on input, and promotes a status only
    after the reading holds.
 

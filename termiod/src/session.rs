@@ -34,7 +34,7 @@ use foreground::{Foreground, ForegroundResolution};
 
 pub mod status;
 
-use status::{OscScanner, OscSignal, StallStep, StatusEngine};
+use status::{OscScanner, OscSignal, ProgramFeed, StallStep, StatusEngine, SupportQuery};
 
 mod wire;
 
@@ -408,6 +408,7 @@ struct Session {
     /// See `session/status.rs` and
     /// `docs/design/20260831-companion-second-protocol-retires.md` §3.
     status_engine: StatusEngine,
+    support_query: SupportQuery,
     /// The transcript address the last hook report carried, kept for the stall
     /// detector's probe 3. Deliberately not on `SessionInfo`: it describes one
     /// report, and a stale path surviving in a roster is a fact nobody
@@ -548,6 +549,16 @@ impl Session {
                 self.ring_bytes -= evicted.len();
                 self.ring_reconstructs_screen = false;
             }
+        }
+    }
+
+    /// Answers `OSC 7501 ; ?` in live output before it goes out; see
+    /// `SupportQuery`. Only while the VT is live: it is what keeps the
+    /// records, so a stale VT would advertise reports nobody reads.
+    fn answer_support_query(&mut self, chunk: &[u8]) {
+        let reply = self.support_query.scan(chunk);
+        if !reply.is_empty() && self.vt.is_live() {
+            let _ = self.input_tx.send(reply);
         }
     }
 
@@ -1992,6 +2003,7 @@ fn start(
         settle_nudge_at: None,
         events,
         vt: Vt::live(sidecar.commands, sidecar.queue),
+        support_query: SupportQuery::default(),
         status_engine: StatusEngine::new(
             std::time::Instant::now(),
             status::resolve_facts(
@@ -2141,6 +2153,7 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
             // the VT rather than ahead of it: a sidecar that goes stale stops
             // being fed, so status falls back to what hooks report.
             let mut osc = OscScanner::default();
+            let mut programs = ProgramFeed::default();
             let mut watch_screen = false;
             let mut watch_text = false;
             let mut screen_signature: Option<u64> = None;
@@ -2186,6 +2199,7 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                         pending_bytes = pending_bytes.saturating_add(bytes.len() as u64);
                         if let Some(terminal) = terminal.as_mut() {
                             terminal.vt_write(&bytes);
+                            programs.note(terminal.take_events());
                         }
                         parsed.release(bytes.len());
                         loop {
@@ -2196,6 +2210,7 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                                         pending_bytes.saturating_add(bytes.len() as u64);
                                     if let Some(terminal) = terminal.as_mut() {
                                         terminal.vt_write(&bytes);
+                                        programs.note(terminal.take_events());
                                     }
                                     parsed.release(bytes.len());
                                 }
@@ -2206,6 +2221,9 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                                 Err(std_mpsc::TryRecvError::Empty) => break,
                                 Err(std_mpsc::TryRecvError::Disconnected) => return,
                             }
+                        }
+                        if let Some(signal) = programs.take_signal() {
+                            signals.push(signal);
                         }
                         if !signals.is_empty() && result_tx.send(SidecarResult::Osc(signals)).is_err()
                         {
@@ -2563,6 +2581,9 @@ async fn run(
                                 OscSignal::Progress(activity) => {
                                     session.status_engine.note_progress(activity, now)
                                 }
+                                OscSignal::ProgramStatus(summary) => {
+                                    session.status_engine.note_program_status(summary, now)
+                                }
                             };
                             if let Some(change) = change {
                                 session.apply_status_change(change);
@@ -2598,6 +2619,7 @@ async fn run(
                     Ok(0) => break,
                     Ok(n) => {
                         let chunk = Bytes::copy_from_slice(&buf[..n]);
+                        session.answer_support_query(&chunk);
                         // This refcount clone + unbounded send is strictly
                         // fire-and-forget. Fan-out never waits for VT parsing,
                         // and it runs even when the VT has gone stale.
@@ -3228,6 +3250,7 @@ mod tests {
                 settle_nudge_at: None,
                 events,
                 vt: Vt::live(sidecar_tx, sidecar_queue),
+                support_query: super::SupportQuery::default(),
                 status_engine: super::StatusEngine::new(
                     std::time::Instant::now(),
                     super::status::SessionFacts::default(),
@@ -4466,6 +4489,7 @@ mod tests {
             settle_nudge_at: None,
             events,
             vt: Vt::live(sidecar_tx, Arc::new(SidecarQueue::new())),
+            support_query: super::SupportQuery::default(),
             status_engine: super::StatusEngine::new(
                 std::time::Instant::now(),
                 super::status::SessionFacts::default(),

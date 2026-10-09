@@ -1317,8 +1317,8 @@ pub enum Event {
     Status {
         session: String,
         status: String,
-        /// Which channel produced this status: `hook`, `title`, `progress`,
-        /// `screen`, or `streak`. Additive, and absent from an older daemon —
+        /// Which channel produced this status: `hook`, `program` (`OSC 7501`),
+        /// `title`, `progress`, `screen`, or `streak`. Additive, and absent from an older daemon —
         /// which a client reads as `hook`, because that is the only channel an
         /// older daemon had.
         ///
