@@ -407,6 +407,13 @@ fn sync_hooks(
             if !present.contains(&agent.id) {
                 return None;
             }
+            // A spec with no events is an agent whose status moved to its own
+            // channel (OSC 7501): it still says where termio's hooks lived, so
+            // the ones an earlier version wrote are taken out and none written.
+            if spec.events.is_empty() {
+                uninstall_hooks(agent, spec);
+                return None;
+            }
             Some(install_hooks(agent, spec, request))
         })
         .collect()
@@ -1898,6 +1905,37 @@ pub(super) mod tests {
             .expect("a plugin dialect")
             .uninstall();
         assert!(!directory.join("termio.js").exists());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// An agent that now reports its own status (OSC 7501) keeps its hook spec
+    /// with no events. The plugin an earlier version wrote is taken out on the
+    /// next sync, and no new one is written or reported.
+    #[test]
+    fn a_hook_spec_with_no_events_removes_what_was_installed() {
+        let directory = scratch("retired-hooks");
+        let manifest = |events: &str| {
+            format!(
+                r#"{{"id":"pi","name":"Pi","command":"/bin/sh",
+                    "hooks":{{"type":"plugin","dir":"{}","dialect":"pi","events":[{events}]}}}}"#,
+                directory.display()
+            )
+        };
+        let request = local_request("/usr/local/bin/termio");
+
+        let before = AgentCatalog {
+            all: vec![definition_of(&manifest(r#"{"on":"agent_end","state":"done"}"#))],
+            bundled: Vec::new(),
+        };
+        assert_eq!(sync_hooks(&before, &request, &present_set(&before, &request)).len(), 1);
+        assert!(directory.join("termio.js").exists(), "the earlier version's plugin");
+
+        let after = AgentCatalog {
+            all: vec![definition_of(&manifest(""))],
+            bundled: Vec::new(),
+        };
+        assert!(sync_hooks(&after, &request, &present_set(&after, &request)).is_empty());
+        assert!(!directory.join("termio.js").exists(), "a retired plugin must go");
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

@@ -74,7 +74,7 @@ agent whose manifest spells the patterns out.
 | Codex | Hooks + title | Yes |
 | Grok | Hooks + title + progress | Yes |
 | Qwen Code | Hooks + title | Yes |
-| Pi | Program status + hooks | Yes |
+| Pi | Program status | Yes |
 | OpenCode | Hooks (plugin) | Yes |
 | OpenCode 2 | Hooks (plugin) | — |
 | Amp | Hooks | — |
@@ -87,8 +87,10 @@ agent whose manifest spells the patterns out.
 | Antigravity | Output activity | — |
 | Hermes | Output activity | — |
 
-Program status needs Claude Code 2.1.295 or Pi 1.1.0 and later. An older
-version reports through its hooks, as before.
+Program status needs Claude Code 2.1.295 or Pi 1.1.0 and later. Claude Code’s
+hook now only adds the tool it is running; Pi needs no hook at all. An older
+version reports less: Claude Code’s dot follows its terminal title, and Pi’s
+follows its output.
 
 “Resumes its conversation” means reopening the session puts the agent back in the
 *same* conversation rather than a blank one — see [What

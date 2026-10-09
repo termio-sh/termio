@@ -25,12 +25,7 @@
     "capturesTranscript": true,
     "tool": "tool_name",
     "events": [
-      { "on": "SessionStart", "state": "idle", "matcher": "clear" },
-      { "on": "UserPromptSubmit", "state": "working" },
-      { "on": "PreToolUse", "state": "working", "matcher": "*" },
-      { "on": "PostToolUse", "state": "working", "matcher": "*" },
-      { "on": "PermissionRequest", "state": "attention", "matcher": "*" },
-      { "on": "Stop", "state": "done" }
+      { "on": "PreToolUse", "state": "working", "matcher": "*" }
     ]
   }
 }
