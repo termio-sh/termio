@@ -17,6 +17,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.56.0",
+    date: "2026-10-09",
+    title: "Agents report their own status over the terminal",
+    changes: {
+      new: [
+        "Program status: Claude Code 2.1.295 and Pi 1.1.0 tell Termio whether they are working, waiting on you, or done over the terminal itself (OSC 7501). It needs no hooks and works the same on a remote machine. Older versions keep reporting through hooks.",
+      ],
+    },
+  },
+  {
     version: "0.55.1",
     date: "2026-10-07",
     title: "Closing a session stops its agent",
