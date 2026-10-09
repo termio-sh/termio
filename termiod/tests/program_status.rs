@@ -1,6 +1,7 @@
 //! Acceptance for the program status protocol (`OSC 7501`) through a real
-//! daemon and a real PTY: the host answers the support query once, and a
-//! program's report reaches an attached client as a status event.
+//! daemon and a real PTY: the host answers the support query ahead of anything
+//! a client sends back, and a program's report reaches an attached client as a
+//! status event.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -78,6 +79,11 @@ fn the_host_answers_the_query_and_carries_a_report() {
     // The program does what a real one would: asks, reads the answer off its
     // own tty in raw mode, and only then reports. A host that never answered
     // would leave `head` waiting and the marker empty.
+    //
+    // This client plays the writer's surface at its fastest: the moment the
+    // query reaches it, it types a DA1 reply. Claude Code and pi read a DA1
+    // reply that arrives first as "not supported", so the host's answer has to
+    // be in the PTY before anything a client can send.
     let marker = format!("{}/reply", daemon.dir);
     let script = format!(
         r"stty raw -echo; printf '\033]7501;?\033\\'; head -c 10 > {marker}; printf '\033]7501;state=blocked:kind=permission\033\\'; sleep 5"
@@ -95,9 +101,12 @@ fn the_host_answers_the_query_and_carries_a_report() {
     let deadline = Instant::now() + Duration::from_secs(8);
     let mut blocked = None;
     while Instant::now() < deadline && blocked.is_none() {
-        let Some((_, payload)) = read_frame(&mut stream) else {
+        let Some((kind, payload)) = read_frame(&mut stream) else {
             break;
         };
+        if kind == b'D' && payload.windows(9).any(|window| window == b"\x1b]7501;?") {
+            write_frame(&mut stream, b'D', b"\x1b[?62;22c");
+        }
         let text = String::from_utf8_lossy(&payload);
         if text.contains("\"ev\":\"status\"") && text.contains("\"status\":\"needs_you\"") {
             blocked = Some(text.into_owned());

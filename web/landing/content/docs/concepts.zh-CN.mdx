@@ -3,8 +3,8 @@ title: 核心概念
 description: Termio 由这几个名词构成——设备、工作区、项目、会话、窗格、worktree——再加上一套状态模型，告诉你哪个 Agent 需要你。
 x-i18n:
   source_path: concepts.mdx
-  source_hash: 934a30aa19567219208309ae39b0f1c8fa44a80879adf0147a7332bc54e3627d
-  generated_at: 2026-09-19
+  source_hash: a28a88f23c3fc3f4b11963f14551399c4b2ed74b6a998db78b03a6e53b102051
+  generated_at: 2026-10-09
 ---
 
 Termio 是一个用来同时运行多个编程 Agent 的终端。应用里的一切都由六个名词和一套状态
@@ -105,12 +105,15 @@ Termio 直接从 git 读取（`git worktree list`），而不是自己另存一�
 
 能不靠猜的地方，Termio 就不从像素上猜。它按可信度依次读取：
 
-1. **Agent 自己的 hooks。** 首次运行时，Termio 会把状态 hooks 写进每个支持 hooks 的
-   Agent 配置里，让 Agent 自己汇报每一轮。你不需要配置任何东西。参见
-   [会话控制](/zh-CN/docs/session-control)。
-2. **终端内的带内信号。** Agent 本来就会发出的进度和标题序列（`OSC 9;4`、`OSC 777`）
+1. **程序自己汇报的状态。** 支持 [program status 协议](https://mitchellh.com/writing/program-status-osc7501)（`OSC 7501`）的程序，
+   会直接通过终端告诉 Termio 它在做什么——Claude Code 从 2.1.295 起、Pi 从 1.1.0 起都支持。
+   不用安装任何东西，在远程机器上也一样。
+2. **Agent 自己的 hooks。** 首次运行时，Termio 会把状态 hooks 写进每个支持 hooks 的
+   Agent 配置里，让 Agent 自己汇报每一轮。程序自己汇报状态时，hooks 只补充细节，比如它正在
+   运行的工具。你不需要配置任何东西。参见[会话控制](/zh-CN/docs/session-control)。
+3. **终端内的带内信号。** Agent 本来就会发出的进度和标题序列（`OSC 9;4`、`OSC 777`）
    会被直接从流里读出——Grok 就是这样在没有 hooks 的情况下汇报忙碌与空闲的。
-3. **屏幕，作为最后手段。** 对两者都没有的 Agent，Termio 会观察窗格里是否出现「正在
+4. **屏幕，作为最后手段。** 对两者都没有的 Agent，Termio 会观察窗格里是否出现「正在
    等待输入」的提示形态，并且只有在这一判读稳定持续后才提升状态。
 
 <Cards>

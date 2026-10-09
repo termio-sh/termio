@@ -193,16 +193,7 @@ pub enum VtEvent {
     ProgramStatus { state: ProgramState, id: String },
     /// `OSC 133;A` — a new shell prompt.
     PromptStart,
-    /// The engine's answer to `OSC 7501 ; ?`, to be written back to the PTY.
-    Reply(Vec<u8>),
 }
-
-/// The prefix of the only reply this VT may send. Every other query — DA,
-/// DSR, colour reports — is already answered by the client surface that holds
-/// the write token, so answering it here as well would answer it twice. The
-/// support query is different: no client surface answers it, and the records
-/// it advertises live in this process.
-const PROGRAM_STATUS_REPLY: &[u8] = b"\x1b]7501;";
 
 /// A terminal plus reusable render iterators. This type is deliberately
 /// `!Send`/`!Sync`; construct and use it on the sidecar thread that owns it.
@@ -219,8 +210,11 @@ pub struct VtTerminal {
 ///
 /// Program status reports and prompt starts come from the same `vt_write`, so
 /// they stay in byte order: a report printed after a prompt is not dropped by
-/// that prompt's cleanup. Setting the program status callback is also what
-/// makes the engine answer the support query.
+/// that prompt's cleanup.
+///
+/// No `on_pty_write`, so the engine answers no query. The writer's surface
+/// answers the terminal's queries, and termiod answers `OSC 7501 ; ?` on its
+/// read path (`SupportQuery`), ahead of anything a client can say.
 fn listen(
     terminal: &mut Terminal<'static, 'static>,
     events: &Rc<RefCell<Vec<VtEvent>>>,
@@ -254,15 +248,6 @@ fn listen(
             }
         }),
         "Terminal::on_semantic_prompt",
-    )?;
-    let replies = events.clone();
-    check(
-        terminal.on_pty_write(move |_terminal, data| {
-            if data.starts_with(PROGRAM_STATUS_REPLY) {
-                replies.borrow_mut().push(VtEvent::Reply(data.to_vec()));
-            }
-        }),
-        "Terminal::on_pty_write",
     )?;
     Ok(())
 }
@@ -899,11 +884,10 @@ fn style_color(color: StyleColor) -> Color {
 mod tests {
     use super::{Color, ProgramState, Rgb, VtEvent, VtTerminal};
 
-    /// The events arrive in the order the bytes did, and the only reply that
-    /// leaves this VT is the support query's: DA1 is the writer's surface's to
-    /// answer, and answering it here too would type the answer twice.
+    /// The events arrive in the order the bytes did. A query is not one of
+    /// them: the read path answers it.
     #[test]
-    fn program_status_events_keep_byte_order_and_only_its_reply() {
+    fn program_status_events_keep_byte_order() {
         let mut terminal = VtTerminal::new(3, 20).expect("terminal");
         terminal.vt_write(b"\x1b[c\x1b]7501;?\x07");
         terminal.vt_write(b"\x1b]7501;state=working\x07\x1b]133;A\x07");
@@ -911,7 +895,6 @@ mod tests {
         assert_eq!(
             terminal.take_events(),
             [
-                VtEvent::Reply(b"\x1b]7501;?\x07".to_vec()),
                 VtEvent::ProgramStatus {
                     state: ProgramState::Working,
                     id: String::new()

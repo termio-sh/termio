@@ -393,7 +393,6 @@ impl ProgramRecords {
             VtEvent::PromptStart => self
                 .records
                 .retain(|_, (state, _)| matches!(state, ProgramState::Done | ProgramState::Error)),
-            VtEvent::Reply(_) => {}
         }
     }
 
@@ -428,38 +427,19 @@ impl ProgramRecords {
     }
 }
 
-/// The sidecar thread's half of `OSC 7501`: it keeps the records, collects
-/// the engine's replies, and says when the records' summary moves.
+/// The sidecar thread's half of `OSC 7501`: it keeps the records and says
+/// when their summary moves.
 #[derive(Debug, Default)]
 pub struct ProgramFeed {
     records: ProgramRecords,
-    /// Off until the carried replay has been parsed; see
-    /// `SidecarCommand::ReplayEnd`.
-    answering: bool,
-    reply: Vec<u8>,
     sent: Option<ProgramState>,
 }
 
 impl ProgramFeed {
     pub fn note(&mut self, events: Vec<VtEvent>) {
         for event in events {
-            match event {
-                VtEvent::Reply(bytes) => {
-                    if self.answering {
-                        self.reply.extend_from_slice(&bytes);
-                    }
-                }
-                other => self.records.apply(&other),
-            }
+            self.records.apply(&event);
         }
-    }
-
-    pub fn answer_queries(&mut self) {
-        self.answering = true;
-    }
-
-    pub fn take_reply(&mut self) -> Option<Vec<u8>> {
-        (!self.reply.is_empty()).then(|| std::mem::take(&mut self.reply))
     }
 
     pub fn take_signal(&mut self) -> Option<OscSignal> {
@@ -469,6 +449,63 @@ impl ProgramFeed {
         }
         self.sent = summary;
         Some(OscSignal::ProgramStatus(summary))
+    }
+}
+
+/// Finds the support query, `OSC 7501 ; ?`, in raw PTY output, and builds
+/// the reply: the query echoed with its own terminator.
+///
+/// This runs on the read path, before the bytes go out, rather than in the VT.
+/// Claude Code and pi send the query in one batch with DA1 and read a DA1 reply
+/// that arrives first as "not supported". DA1 is answered by the writer's
+/// surface, which receives these bytes before the sidecar parses them, so a
+/// reply from the sidecar could lose that race. Queued here, the reply is in
+/// the PTY before any client has seen the query.
+///
+/// A byte compare against one fixed sequence, not a parse: it skips to the
+/// next ESC, allocates only for a reply, and reassembles a split read.
+#[derive(Debug, Default)]
+pub struct SupportQuery {
+    matched: usize,
+}
+
+impl SupportQuery {
+    const QUERY: &'static [u8] = b"\x1b]7501;?";
+
+    pub fn scan(&mut self, chunk: &[u8]) -> Vec<u8> {
+        let mut reply = Vec::new();
+        let mut index = 0;
+        while index < chunk.len() {
+            if self.matched == 0 {
+                match chunk[index..].iter().position(|byte| *byte == 0x1b) {
+                    Some(offset) => index += offset,
+                    None => break,
+                }
+            }
+            let byte = chunk[index];
+            let length = Self::QUERY.len();
+            self.matched = if self.matched < length {
+                if byte == Self::QUERY[self.matched] {
+                    self.matched + 1
+                } else {
+                    usize::from(byte == 0x1b)
+                }
+            } else if self.matched == length && byte == 0x07 {
+                reply.extend_from_slice(Self::QUERY);
+                reply.push(0x07);
+                0
+            } else if self.matched == length && byte == 0x1b {
+                length + 1
+            } else if self.matched > length && byte == b'\\' {
+                reply.extend_from_slice(Self::QUERY);
+                reply.extend_from_slice(b"\x1b\\");
+                0
+            } else {
+                usize::from(byte == 0x1b)
+            };
+            index += 1;
+        }
+        reply
     }
 }
 
@@ -990,6 +1027,13 @@ impl StatusEngine {
     pub fn note_hook(&mut self, status: &str, now: Instant) -> Option<StatusChange> {
         if matches!(status, "working" | "idle" | "needs_you" | "done" | "failed") {
             self.session.last_hook_report_at = Some(now);
+        }
+        // A program reporting through `OSC 7501` has already said this, in
+        // band. Its hook stays installed for versions that predate the
+        // protocol and for what only a hook knows — the tool, the transcript —
+        // which the caller still carries; the state is the program's.
+        if self.program_speaks() {
+            return None;
         }
         match status {
             "working" => {
@@ -1887,23 +1931,33 @@ mod tests {
         assert_eq!(set.summary(), Some(ProgramState::Idle));
     }
 
-    /// The carried replay rebuilds records but never answers: its queries were
-    /// answered when they first arrived. And the summary is sent only when it
-    /// moves.
+    /// The summary is sent only when it moves.
     #[test]
-    fn program_feed_answers_only_after_the_replay() {
-        let query = VtEvent::Reply(b"\x1b]7501;?\x07".to_vec());
+    fn program_feed_signals_only_a_change() {
         let mut feed = ProgramFeed::default();
-        feed.note(vec![query.clone(), report(ProgramState::Working, "")]);
-        assert_eq!(feed.take_reply(), None);
+        feed.note(vec![report(ProgramState::Working, "")]);
         assert_eq!(
             feed.take_signal(),
             Some(OscSignal::ProgramStatus(Some(ProgramState::Working)))
         );
-        feed.answer_queries();
-        feed.note(vec![query, report(ProgramState::Working, "")]);
-        assert_eq!(feed.take_reply(), Some(b"\x1b]7501;?\x07".to_vec()));
+        feed.note(vec![report(ProgramState::Working, "")]);
         assert_eq!(feed.take_signal(), None);
+    }
+
+    /// Both terminators, each echoed back; a query split across reads; and
+    /// near misses that must not be answered.
+    #[test]
+    fn the_support_query_is_answered_with_its_own_terminator() {
+        let mut query = SupportQuery::default();
+        assert_eq!(query.scan(b"text\x1b]7501;?\x07more"), b"\x1b]7501;?\x07");
+        assert_eq!(query.scan(b"\x1b]7501;?\x1b\\"), b"\x1b]7501;?\x1b\\");
+        assert!(query.scan(b"\x1b]75").is_empty());
+        assert_eq!(query.scan(b"01;?\x1b"), b"");
+        assert_eq!(query.scan(b"\\"), b"\x1b]7501;?\x1b\\");
+        assert!(query.scan(b"\x1b]7501;state=working\x07").is_empty());
+        assert!(query.scan(b"\x1b]7501;?x\x07").is_empty());
+        // An ESC that breaks a match can start the next one.
+        assert_eq!(query.scan(b"\x1b]75\x1b]7501;?\x07"), b"\x1b]7501;?\x07");
     }
 
     /// A report is the program's own word: blocked lights the blocking dot, and
@@ -1961,15 +2015,19 @@ mod tests {
         assert_eq!(engine.state(), State::Working);
     }
 
-    /// A hook and a report are both the program's word, so the last one wins.
+    /// While a record is live the state is the program's: a hook that says
+    /// the same thing in another way moves nothing. Once the program clears
+    /// its records, hooks speak again — the path an older version takes.
     #[test]
-    fn a_hook_and_a_report_last_one_wins() {
+    fn a_live_record_holds_the_state_against_a_hook() {
         let mut engine = StatusEngine::new(origin(), agent_facts());
-        engine.note_program_status(Some(ProgramState::Working), at(1));
-        engine.note_hook("needs_you", at(2));
+        engine.note_program_status(Some(ProgramState::Blocked), at(1));
+        assert_eq!(engine.note_hook("working", at(2)), None);
         assert_eq!(engine.state(), State::NeedsYou);
-        engine.note_program_status(Some(ProgramState::Done), at(3));
-        assert_eq!(engine.state(), State::Done);
+
+        engine.note_program_status(None, at(3));
+        engine.note_hook("working", at(4));
+        assert_eq!(engine.state(), State::Working);
     }
 
     // -- AgentTitleStatusTests, ported ------------------------------------

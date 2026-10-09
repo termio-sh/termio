@@ -88,11 +88,6 @@ pub(crate) struct ScreenTick {
 
 pub(crate) enum SidecarCommand {
     Write(Bytes),
-    /// Everything written before this was carried over from a previous actor.
-    /// Those bytes rebuild the VT and the program status records, but any
-    /// `OSC 7501 ; ?` among them was answered when it first arrived, so the
-    /// sidecar does not answer the engine's queries until it sees this.
-    ReplayEnd,
     /// What the status engine wants sampled. `screen` off stops the once-a-second
     /// grid walk entirely, which is what a plain shell costs.
     SetStatusWatch {
@@ -134,8 +129,6 @@ pub(crate) enum SidecarResult {
     /// boundary is an edge, not something to sample once a second.
     Osc(Vec<crate::session::status::OscSignal>),
     Screen(ScreenTick),
-    /// The engine's answer to `OSC 7501 ; ?`, for the PTY.
-    Reply(Vec<u8>),
 }
 
 pub(crate) struct SidecarCapture {

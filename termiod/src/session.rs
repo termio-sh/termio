@@ -34,7 +34,7 @@ use foreground::{Foreground, ForegroundResolution};
 
 pub mod status;
 
-use status::{OscScanner, OscSignal, ProgramFeed, StallStep, StatusEngine};
+use status::{OscScanner, OscSignal, ProgramFeed, StallStep, StatusEngine, SupportQuery};
 
 mod wire;
 
@@ -408,6 +408,7 @@ struct Session {
     /// See `session/status.rs` and
     /// `docs/design/20260831-companion-second-protocol-retires.md` §3.
     status_engine: StatusEngine,
+    support_query: SupportQuery,
     /// The transcript address the last hook report carried, kept for the stall
     /// detector's probe 3. Deliberately not on `SessionInfo`: it describes one
     /// report, and a stale path surviving in a roster is a fact nobody
@@ -548,6 +549,16 @@ impl Session {
                 self.ring_bytes -= evicted.len();
                 self.ring_reconstructs_screen = false;
             }
+        }
+    }
+
+    /// Answers `OSC 7501 ; ?` in live output before it goes out; see
+    /// `SupportQuery`. Only while the VT is live: it is what keeps the
+    /// records, so a stale VT would advertise reports nobody reads.
+    fn answer_support_query(&mut self, chunk: &[u8]) {
+        let reply = self.support_query.scan(chunk);
+        if !reply.is_empty() && self.vt.is_live() {
+            let _ = self.input_tx.send(reply);
         }
     }
 
@@ -1992,6 +2003,7 @@ fn start(
         settle_nudge_at: None,
         events,
         vt: Vt::live(sidecar.commands, sidecar.queue),
+        support_query: SupportQuery::default(),
         status_engine: StatusEngine::new(
             std::time::Instant::now(),
             status::resolve_facts(
@@ -2018,7 +2030,6 @@ fn start(
         session.send_sidecar(SidecarCommand::Write(chunk.clone()));
         session.push_ring(chunk);
     }
-    session.send_sidecar(SidecarCommand::ReplayEnd);
     // `push_ring` may have set this itself, if what was carried no longer fits
     // the cap; either way the previous actor's verdict still applies.
     session.ring_reconstructs_screen &= replay.faithful;
@@ -2211,11 +2222,6 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                                 Err(std_mpsc::TryRecvError::Disconnected) => return,
                             }
                         }
-                        if let Some(reply) = programs.take_reply() {
-                            if result_tx.send(SidecarResult::Reply(reply)).is_err() {
-                                break;
-                            }
-                        }
                         if let Some(signal) = programs.take_signal() {
                             signals.push(signal);
                         }
@@ -2256,7 +2262,6 @@ fn spawn_sidecar(rows: u16, cols: u16) -> anyhow::Result<Sidecar> {
                             }
                         }
                     }
-                    SidecarCommand::ReplayEnd => programs.answer_queries(),
                     SidecarCommand::Resize { rows, cols, reflow } => {
                         if fault.is_none() {
                             if let Some(terminal) = terminal.as_mut() {
@@ -2585,11 +2590,6 @@ async fn run(
                             }
                         }
                     }
-                    // Not the writer's input: the terminal answering a query,
-                    // so it bypasses the write token like any terminal's reply.
-                    Some(SidecarResult::Reply(bytes)) => {
-                        let _ = session.input_tx.send(bytes);
-                    }
                     Some(SidecarResult::Screen(tick)) => {
                         let now = std::time::Instant::now();
                         if let Some(change) =
@@ -2619,6 +2619,7 @@ async fn run(
                     Ok(0) => break,
                     Ok(n) => {
                         let chunk = Bytes::copy_from_slice(&buf[..n]);
+                        session.answer_support_query(&chunk);
                         // This refcount clone + unbounded send is strictly
                         // fire-and-forget. Fan-out never waits for VT parsing,
                         // and it runs even when the VT has gone stale.
@@ -3249,6 +3250,7 @@ mod tests {
                 settle_nudge_at: None,
                 events,
                 vt: Vt::live(sidecar_tx, sidecar_queue),
+                support_query: super::SupportQuery::default(),
                 status_engine: super::StatusEngine::new(
                     std::time::Instant::now(),
                     super::status::SessionFacts::default(),
@@ -3296,7 +3298,7 @@ mod tests {
             // The status half of the sidecar's output. These cases assert the
             // snapshot FIFO's boundaries; the engine has its own tests, and
             // routing them here would put a wall clock in an ordering test.
-            SidecarResult::Osc(_) | SidecarResult::Screen(_) | SidecarResult::Reply(_) => {}
+            SidecarResult::Osc(_) | SidecarResult::Screen(_) => {}
         }
     }
 
@@ -4487,6 +4489,7 @@ mod tests {
             settle_nudge_at: None,
             events,
             vt: Vt::live(sidecar_tx, Arc::new(SidecarQueue::new())),
+            support_query: super::SupportQuery::default(),
             status_engine: super::StatusEngine::new(
                 std::time::Instant::now(),
                 super::status::SessionFacts::default(),
