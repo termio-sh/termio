@@ -92,7 +92,7 @@ final class AppSettings: ObservableObject {
         Key.interfaceFontFamily, Key.interfaceFontSize, Key.interfaceRowPadding,
         Key.agentCommands, Key.devices,
         Key.bypassPermissionAgents, Key.agentArguments, Key.disabledAgents,
-        Key.addedAgents, Key.agentOrder, Key.agentHooksEnabled,
+        Key.addedAgents, Key.agentOrder, Key.agentHooksEnabled, Key.keepDisplayAwakeWhileWorking,
         Key.sessionControlEnabled, Key.githubIntegrationEnabled,
         Key.notifyTaskCompletion, Key.notificationSound,
         Key.analyticsEnabled,
@@ -140,6 +140,7 @@ final class AppSettings: ObservableObject {
         static let disabledAgents = "agents.disabled"
         static let addedAgents = "agents.added"
         static let agentOrder = "agents.order"
+        static let keepDisplayAwakeWhileWorking = "agents.keepDisplayAwakeWhileWorking"
         static let agentHooksEnabled = "agents.hooksEnabled"
         static let sessionControlEnabled = "agents.sessionControlEnabled"
         static let sessionControlPrompted = "agents.sessionControlPrompted"
@@ -425,6 +426,10 @@ final class AppSettings: ObservableObject {
         didSet { store.set(agentOrder, forKey: Key.agentOrder) }
     }
 
+    @Published var keepDisplayAwakeWhileWorking: Bool {
+        didSet { store.set(keepDisplayAwakeWhileWorking, forKey: Key.keepDisplayAwakeWhileWorking) }
+    }
+
     /// When on, termio installs Claude Code hooks (into `~/.claude/settings.json`)
     /// that report each turn's lifecycle, so a running agent reads as `.working`
     /// and a tool-in-use can be named — precision the zero-config bell/OSC signals
@@ -599,6 +604,7 @@ final class AppSettings: ObservableObject {
             Key.interfaceFontSize: 13.0,
             Key.interfaceRowPadding: 2.0,
             Key.agentHooksEnabled: false,
+            Key.keepDisplayAwakeWhileWorking: false,
             Key.sessionControlEnabled: false,
             // On by default: the pane is read-only and only appears for projects
             // with a GitHub remote, so there is nothing to opt into until then.
@@ -655,6 +661,7 @@ final class AppSettings: ObservableObject {
         addedAgents = Set(store.stringArray(Key.addedAgents) ?? [])
         agentOrder = store.stringArray(Key.agentOrder) ?? []
         agentHooksEnabled = store.bool(Key.agentHooksEnabled)
+        keepDisplayAwakeWhileWorking = store.bool(Key.keepDisplayAwakeWhileWorking)
         sessionControlEnabled = store.bool(Key.sessionControlEnabled)
         githubIntegrationEnabled = store.bool(Key.githubIntegrationEnabled)
         usageAuthorizedAgents = Set(defaults.stringArray(forKey: Key.usageAuthorizedAgents) ?? [])

@@ -998,7 +998,9 @@ final class TermioStore: ObservableObject {
     /// The daemon attachment behind each session: each
     /// session's attach channel into the local termiod daemon, which owns the
     /// PTY so the session outlives this app instance.
-    var termiodLinks: [Session.ID: TermiodSessionLink] = [:]
+    var termiodLinks: [Session.ID: TermiodSessionLink] = [:] {
+        didSet { sessionRuntimeDidChange.send() }
+    }
     /// Why a termiod session died, keyed by the daemon's session name — which,
     /// for sessions this app created, is the `Session.ID` uuid string. Learned
     /// from the roster reply (`Termiod.roster`), which carries the daemon's

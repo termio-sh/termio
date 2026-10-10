@@ -254,6 +254,7 @@ extension TermioStore {
     /// its status came from a local hook or from the daemon.
     func applyTermiodStatus(_ report: Termiod.StatusPayload, for id: Session.ID) {
         guard session(id) != nil else { return }
+        applyTermiodActivity(report.status, for: id)
 
         // Everything from here to the state switch used to sit behind the app's
         // own hook socket and reach only agents on this Mac. One report path
@@ -381,6 +382,14 @@ extension TermioStore {
         }
     }
 
+    private func applyTermiodActivity(_ status: String, for id: Session.ID) {
+        let runtime = runtime(for: id)
+        let isWorking = status == "working"
+        guard runtime.isAgentWorking != isWorking else { return }
+        runtime.isAgentWorking = isWorking
+        sessionRuntimeDidChange.send()
+    }
+
     // MARK: - Host-reported process facts
 
     /// Lands a roster push on the session's row.
@@ -403,6 +412,9 @@ extension TermioStore {
                                  identifiesAgent: Bool,
                                  followsWorkingDirectory: Bool) {
         guard session(id) != nil else { return }
+        // Attachments receive the current status in a roster snapshot, without
+        // a status event until the next report or transition.
+        applyTermiodActivity(information.status, for: id)
         // The daemon's own id for the process behind this row, remembered so a
         // later close can journal it — the identity the roster sweep matches a
         // pending kill by (`journalClaims`).
@@ -517,6 +529,8 @@ extension TermioStore {
         runtime(for: id).connectionNotice = attempts <= Self.reconnectBurstAttempts
             ? localized("Reconnecting…")
             : localized("Can’t reach \(place)")
+        runtime(for: id).isAgentWorking = false
+        sessionRuntimeDidChange.send()
         guard attempts == 1 else { return }
         Log.termiod.error("""
         lost the connection to \(session.id.uuidString, privacy: .public) on \
@@ -543,6 +557,7 @@ extension TermioStore {
     func applyTermiodReattached(for id: Session.ID) {
         guard runtimes[id]?.connectionNotice != nil else { return }
         runtimes[id]?.connectionNotice = nil
+        sessionRuntimeDidChange.send()
         Log.termiod.info("reattached \(id.uuidString, privacy: .public)")
     }
 

@@ -3714,6 +3714,26 @@
         }
       }
     },
+    "Keep display awake while agents work": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent 工作时阻止屏幕熄灭"
+          }
+        }
+      }
+    },
+    "Keeps this Mac’s display on while Termio is open and an agent is working, not while it waits for you.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Termio 运行且有 Agent 工作时阻止此 Mac 的屏幕自动熄灭，等待你操作时除外。"
+          }
+        }
+      }
+    },
     "Live agent status": {
       "localizations": {
         "zh-Hans": {

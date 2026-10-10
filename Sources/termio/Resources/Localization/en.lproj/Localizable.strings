@@ -710,6 +710,10 @@
 	<string>Join</string>
 	<key>Jump to session, project, or file…</key>
 	<string>Jump to session, project, or file…</string>
+	<key>Keep display awake while agents work</key>
+	<string>Keep display awake while agents work</string>
+	<key>Keeps this Mac’s display on while Termio is open and an agent is working, not while it waits for you.</key>
+	<string>Keeps this Mac’s display on while Termio is open and an agent is working, not while it waits for you.</string>
 	<key>Key</key>
 	<string>Key</string>
 	<key>Key file</key>

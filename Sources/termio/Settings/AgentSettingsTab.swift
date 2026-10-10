@@ -86,6 +86,14 @@ struct AgentSettingsTab: View {
                     )
                 }
                 .toggleStyle(.switch)
+                Toggle(isOn: $settings.keepDisplayAwakeWhileWorking) {
+                    SettingsLabel(
+                        title: localized("Keep display awake while agents work"),
+                        subtext: localized("Keeps this Mac’s display on while Termio is open and an agent is working, not while it waits for you."),
+                        titleFont: .headline
+                    )
+                }
+                .toggleStyle(.switch)
                 Toggle(isOn: $settings.sessionControlEnabled) {
                     SettingsLabel(
                         title: localized("Session control"),

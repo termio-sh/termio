@@ -710,6 +710,10 @@
 	<string>加入</string>
 	<key>Jump to session, project, or file…</key>
 	<string>跳转到会话、项目或文件…</string>
+	<key>Keep display awake while agents work</key>
+	<string>Agent 工作时阻止屏幕熄灭</string>
+	<key>Keeps this Mac’s display on while Termio is open and an agent is working, not while it waits for you.</key>
+	<string>Termio 运行且有 Agent 工作时阻止此 Mac 的屏幕自动熄灭，等待你操作时除外。</string>
 	<key>Key</key>
 	<string>密钥</string>
 	<key>Key file</key>
