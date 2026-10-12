@@ -1135,9 +1135,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             initialTab: initialTab,
             onSSHConnect: { [weak self] host in
                 guard let self else { return }
-                self.store.addSSHSession(host: host)
-                // The new session is selected in the store; surface the main
-                // window over Settings so the connection is immediately visible.
+                self.store.addRemoteTerminal(host: host)
+                // Remote setup finishes asynchronously; bring the main window
+                // forward so its progress and the eventual session are visible.
                 self.window.makeKeyAndOrderFront(nil)
             },
             onSetUpKey: { [weak self] host, publicKey in
@@ -1186,12 +1186,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// A host row of the New SSH Connection submenu (File menu and the toolbar `+`
-    /// share it — see `menuNeedsUpdate`) — opens a terminal running `ssh` to the
-    /// picked alias, carried in `representedObject`, grouped under the same
-    /// Terminals section as loose shells.
+    /// share it — see `menuNeedsUpdate`). The remote daemon owns the shell so
+    /// losing the SSH connection does not end the session.
     @objc func newSSHHost(_ sender: NSMenuItem) {
         guard let alias = sender.representedObject as? String else { return }
-        store.addSSHSession(host: alias)
+        store.addRemoteTerminal(host: alias)
     }
 
     /// A row of the Workspace submenu — the scope the sidebar shows and the panes
@@ -1249,7 +1248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         hostVC.rootView.completion = { [weak self, weak presenter, weak hostVC] alias in
             guard let hostVC else { return }
             presenter?.dismiss(hostVC)
-            if let alias { self?.store.addSSHSession(host: alias) }
+            if let alias { self?.store.addRemoteTerminal(host: alias) }
         }
         presenter.presentAsSheet(hostVC)
     }
