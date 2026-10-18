@@ -167,10 +167,11 @@ enum MarkdownReaderRenderer {
     }()
 
     /// The code font: the terminal face the editor uses, so code in Preview matches the
-    /// source you flip from. Empty family → the system monospace WebKit resolves for
+    /// source you flip from. Shared with the domd rendered face
+    /// (`MarkdownEditorView`) so both faces set code in the same family. Empty family → the system monospace WebKit resolves for
     /// `ui-monospace` (SF Mono), matching `resolvedTerminalFont`'s fallback. Quotes are
     /// stripped so a pathological family name can't break out of the `<style>` block.
-    private static func monoStack(_ family: String) -> String {
+    static func monoStack(_ family: String) -> String {
         let base = "ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, monospace"
         let trimmed = family.trimmingCharacters(in: .whitespaces)
             .replacingOccurrences(of: "\"", with: "")
