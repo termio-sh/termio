@@ -13,6 +13,10 @@ import SwiftUI
 // thread, which the dynamic check this buys enforces.
 final class FileBrowserHostingController: NSHostingController<AnyView>, @preconcurrency QLPreviewPanelDataSource {
     private let state: FileBrowserState
+    /// A file opened from somewhere other than the tree — a cmd-clicked video in the terminal.
+    /// While set, the shared panel previews this instead of the tree selection, so a click on a
+    /// movie doesn't depend on that file happening to be the selected row.
+    private var quickLookURL: URL?
 
     init(store: TermioStore, settings: AppSettings) {
         let state = FileBrowserState()
@@ -54,12 +58,25 @@ final class FileBrowserHostingController: NSHostingController<AnyView>, @preconc
     /// Shows the Quick Look panel for the current selection, or hides it if it is
     /// already up — Finder's spacebar toggle.
     private static func toggleQuickLook() {
+        InspectorPanelHost.shared.controller?.presentQuickLook(nil, toggle: true)
+    }
+
+    /// Pops the shared panel on `url`, or toggles the selection's preview when `url` is nil.
+    /// A URL that is already showing is closed instead, matching the spacebar toggle.
+    fileprivate func presentQuickLook(_ url: URL?, toggle: Bool) {
         guard let panel = QLPreviewPanel.shared() else { return }
-        if QLPreviewPanel.sharedPreviewPanelExists(), panel.isVisible {
+        let sameFile = url != nil && quickLookURL == url
+        quickLookURL = url
+        if QLPreviewPanel.sharedPreviewPanelExists(), panel.isVisible, toggle || sameFile {
             panel.orderOut(nil)
-        } else {
-            panel.makeKeyAndOrderFront(nil)
+            return
         }
+        // The panel asks the key window's responder chain who owns it. The inspector
+        // controller only gets that question while it is first responder, so claim it
+        // before ordering the panel front — otherwise the click previews nothing.
+        view.window?.makeFirstResponder(self)
+        panel.makeKeyAndOrderFront(nil)
+        panel.reloadData()
     }
 
     override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { true }
@@ -73,12 +90,16 @@ final class FileBrowserHostingController: NSHostingController<AnyView>, @preconc
     }
 
     func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
-        state.selectedLocalURL == nil ? 0 : 1
+        previewURL == nil ? 0 : 1
     }
 
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
-        state.selectedLocalURL as? NSURL
+        previewURL as? NSURL
     }
+
+    /// The file the panel is showing: an explicitly opened one wins over the tree selection,
+    /// which is what spacebar has always previewed.
+    private var previewURL: URL? { quickLookURL ?? state.selectedLocalURL }
 }
 
 /// The one live inspector. It is mounted in the focused card's panel (see `TerminalPane`); a card
@@ -88,6 +109,12 @@ final class InspectorPanelHost {
     static let shared = InspectorPanelHost()
 
     var controller: FileBrowserHostingController?
+
+    /// Opens `url` in the shared Quick Look panel — the preview a cmd-clicked video, audio file,
+    /// or office document gets, since the in-app preview only renders images and PDFs.
+    func quickLook(_ url: URL) {
+        controller?.presentQuickLook(url, toggle: false)
+    }
 
     /// Whether a point (window coordinates) is on the live panel while it is open. The terminal's
     /// own pointer handlers resolve their pane by geometry, and a panel laid over a narrow card's

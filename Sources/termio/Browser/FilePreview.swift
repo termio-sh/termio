@@ -1,8 +1,9 @@
 import AppKit
+import AVKit
 import SwiftUI
 import WebKit
 
-/// Read-only preview that covers the terminal pane for previewable files (image, PDF) — the
+/// Read-only preview that covers the terminal pane for previewable files (image, video, PDF) — the
 /// visual counterpart of `FileEditorView`. Double-clicking such a file opens it in place over the
 /// terminal (the surface keeps running underneath) instead of a detached Quick Look window, so a
 /// previewed image/PDF reads as part of the same workspace as the editor. Escape or the close
@@ -70,7 +71,7 @@ struct FilePreviewView: View {
     private var header: some View {
         HStack(spacing: 8) {
             DetailListColumnToggle()
-            Image(systemName: "photo")
+            Image(systemName: FileActivation.isVideo(url) ? "film" : "photo")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .frame(width: 16)
@@ -92,6 +93,15 @@ struct FilePreviewView: View {
 
     @ViewBuilder
     private var content: some View {
+        if FileActivation.isVideo(url) {
+            VideoPreview(url: url)
+        } else {
+            image
+        }
+    }
+
+    @ViewBuilder
+    private var image: some View {
         // NSImage decodes the raster formats; anything it can't (e.g. some SVGs) falls back to
         // the web view, which renders vector art reliably. The image fits the pane by default —
         // large images scale down to fit rather than overflow, small ones center.
@@ -132,6 +142,32 @@ struct FilePreviewView: View {
         allowsWebFallback: Bool
     ) -> Bool {
         !imageDecoded && allowsWebFallback
+    }
+}
+
+/// AVKit's own player for a local movie: the system transport controls, scrubbing, and
+/// full screen, with nothing of termio's to keep in step with the OS. It never plays on its
+/// own — opening a file to look at it shouldn't start sound.
+struct VideoPreview: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.controlsStyle = .floating
+        view.showsFullScreenToggleButton = true
+        view.player = AVPlayer(url: url)
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        guard (view.player?.currentItem?.asset as? AVURLAsset)?.url != url else { return }
+        view.player?.pause()
+        view.player = AVPlayer(url: url)
+    }
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+        view.player?.pause()
+        view.player = nil
     }
 }
 

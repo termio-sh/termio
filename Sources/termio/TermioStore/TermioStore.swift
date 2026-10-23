@@ -1990,6 +1990,13 @@ final class TermioStore: ObservableObject {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
               !isDirectory.boolValue else { return }
+        // Video, audio, and office files aren't in the in-app preview. Quick Look already plays
+        // them — the same panel spacebar uses on the file tree — so hand them over instead of
+        // opening the bytes as text.
+        if FileActivation.quickLooks(url) {
+            InspectorPanelHost.shared.quickLook(url)
+            return
+        }
         filePresentationGeneration &+= 1
         remotePreviewLease = nil
         openFileRemote = nil
