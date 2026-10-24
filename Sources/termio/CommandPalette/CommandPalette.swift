@@ -420,6 +420,25 @@ struct CommandPaletteView: View {
                                  icon: nil, symbol: "square.3.layers.3d", shortcut: nil) { _ in
                 NotificationCenter.default.post(name: .termioDebugDumpLayers, object: nil)
             })
+            // Writes the last frames ghostty put on screen — slot, path (async vs
+            // the layer's inline `display` render), and the gap between them — to
+            // stdout and /tmp/termio-dev-present.log. Run it right after a flash:
+            // a slot that does not advance by one is a frame that landed late.
+            actions.append(.init(id: "debug-dump-present", title: "Debug: Dump Present Order",
+                                 icon: nil, symbol: "film.stack", shortcut: nil) { _ in
+                TerminalPresentProbe.dump(reason: "manual dump")
+            })
+            // Records every frame ghostty puts on screen — by surface identity, so
+            // the order can be rebuilt without trusting the live slot inference —
+            // to /tmp/termio-dev-present-trace.log. Leave it on while reproducing.
+            actions.append(.init(
+                id: "debug-trace-present",
+                title: TerminalPresentProbe.isTracing
+                    ? "Debug: Stop Present Trace" : "Debug: Start Present Trace",
+                icon: nil, symbol: "waveform.path.ecg", shortcut: nil
+            ) { _ in
+                TerminalPresentProbe.setTracing(!TerminalPresentProbe.isTracing)
+            })
             // Renders the main window into /tmp/termio-dev-window.png and writes the full
             // AppKit view hierarchy (class, frame, hidden, layer bg) to
             // /tmp/termio-dev-views.txt — self-rendering needs no Screen Recording grant,
