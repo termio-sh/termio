@@ -247,7 +247,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // Pairing is the one Settings action people reach for away from the
         // window, phone in hand, so it is offered where Rex offers it too.
         menu.addItem(
-            withTitle: localized("Pair iPhone…"),
+            withTitle: localized("Pair a Device…"),
             action: #selector(AppDelegate.pairPhone(_:)),
             keyEquivalent: ""
         )

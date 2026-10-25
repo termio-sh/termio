@@ -87,7 +87,7 @@ final class RemoteFolderPicker: NSObject {
 
     init(alias: String) {
         self.alias = alias
-        lister = TermiodDirectoryLister(route: .ssh(alias))
+        lister = TermiodDirectoryLister(route: TermiodRoute(hostKey: alias))
         super.init()
         nodes[root.path] = root
     }

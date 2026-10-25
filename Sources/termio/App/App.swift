@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var settingsObserver: AnyCancellable?
     /// Starts/stops the companion server + tunnel as the Mobile Access toggle flips.
     private var mobileAccessObserver: AnyCancellable?
+    private var unpairObserver: AnyCancellable?
     private var attachModeObserver: AnyCancellable?
     // Drives in-app auto-update. Started only in release builds — a debug build has
     // no Developer-ID signature for Sparkle to validate the appcast's EdDSA against,
@@ -418,6 +419,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         // React to the Settings toggle. `dropFirst` skips the value already
         // handled by the launch branch above, so we never double-start.
+        // Unpair is decided in Settings, which holds no store; the live links it
+        // must end are here.
+        unpairObserver = NotificationCenter.default.publisher(for: PairedDeviceStore.didChange)
+            .compactMap { $0.userInfo?[PairedDeviceStore.unpairedHostIDKey] as? String }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] hostID in self?.store.disconnectPaired(hostID: hostID) }
         mobileAccessObserver = MobileAccess.shared.$isEnabled
             .dropFirst()
             .removeDuplicates()
@@ -1017,7 +1024,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             initialTab: initialTab,
             onSSHConnect: { [weak self] host in
                 guard let self else { return }
-                self.store.addSSHSession(host: host)
+                // A paired Mac has no ssh to open a shell over; its Connect opens
+                // a durable session through its daemon instead.
+                if TermiodRoute.isPaired(hostKey: host) {
+                    self.store.addRemoteTerminal(host: host)
+                } else {
+                    self.store.addSSHSession(host: host)
+                }
                 // The new session is selected in the store; surface the main
                 // window over Settings so the connection is immediately visible.
                 self.window.makeKeyAndOrderFront(nil)

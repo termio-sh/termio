@@ -134,6 +134,17 @@ final class PairingModel: ObservableObject {
         return companionURL
     }
 
+    /// The invite as a link another Mac pastes, carrying this Mac's name so the
+    /// other side can label it. nil until the daemon has minted one. The phone
+    /// ignores the extra field.
+    var macLink: String? {
+        guard mobile.attachesDirectly, let invite,
+              var components = URLComponents(string: invite.link) else { return nil }
+        let name = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "name", value: name)]
+        return components.string
+    }
+
     /// The address under the QR — what the user copies and what they can check
     /// against the phone. The invite link is not it: it is a `termio://` URL
     /// with a secret in it, and it says nothing about where this Mac is.
@@ -342,8 +353,8 @@ struct DeviceServingSection: View {
                     Button(localized("Show QR Code…")) { pairing.showsSheet = true }
                 } label: {
                     SettingsLabel(
-                        title: localized("Pair iPhone"),
-                        subtext: localized("On iPhone, tap the Mac pill ▸ Scan QR Code.")
+                        title: localized("Pair a Device"),
+                        subtext: localized("Scan the code with your iPhone, or copy its link to another Mac.")
                     )
                 }
 
@@ -589,20 +600,21 @@ struct DeviceServingSection: View {
 
 }
 
-/// The QR to scan, opened by Pair iPhone in the section and by Pair iPhone… in
-/// the menu bar and the command palette.
+/// The QR to scan and the link to copy, opened by Pair a Device in the section
+/// and by Pair a Device… in the menu bar and the command palette.
 struct PairingSheet: View {
     @ObservedObject private var pairing = PairingModel.shared
     @ObservedObject private var tunnel = TunnelManager.shared
     @ObservedObject private var mobile = MobileAccess.shared
     @State private var copied = false
+    @State private var linkCopied = false
 
     /// The QR with its address, or the one reason there is none yet. Mobile
     /// Access switching off while it is open leaves nothing to scan, so the
     /// sheet says that instead of keeping a code for a server that stopped.
     var body: some View {
         VStack(spacing: 16) {
-            Text(localized("Pair iPhone"))
+            Text(localized("Pair a Device"))
                 .font(.headline)
             Group {
                 if !mobile.isEnabled {
@@ -642,7 +654,25 @@ struct PairingSheet: View {
             .frame(minHeight: 120)
             footnote(localized("On iPhone, tap the Mac pill ▸ Scan QR Code."))
                 .multilineTextAlignment(.center)
+            // Another Mac has no camera pointed at this screen, so it takes the
+            // same invite as text. Only the session-host invite carries a Mac
+            // can dial; the companion wire speaks the phone's protocol alone.
+            if mobile.isEnabled, !mobile.attachesDirectly {
+                footnote(localized("To pair another Mac, turn on Direct Attach."))
+                    .multilineTextAlignment(.center)
+            } else if mobile.isEnabled {
+                footnote(localized("On another Mac, choose Remote Hosts ▸ ＋ ▸ Pair with a Mac…, then paste the link."))
+                    .multilineTextAlignment(.center)
+            }
             HStack {
+                if mobile.isEnabled, mobile.attachesDirectly, let link = pairing.macLink {
+                    Button(linkCopied ? localized("Copied") : localized("Copy Link")) {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(link, forType: .string)
+                        linkCopied = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { linkCopied = false }
+                    }
+                }
                 Spacer()
                 Button(localized("Done")) { pairing.showsSheet = false }
                     .keyboardShortcut(.defaultAction)

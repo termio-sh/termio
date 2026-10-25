@@ -40,7 +40,7 @@ enum AgentIntegrationInstaller {
         }
 
         static func device(host: String) -> Target {
-            Target(route: .ssh(host), reporter: .device)
+            Target(route: TermiodRoute(hostKey: host), reporter: .device)
         }
 
         var isLocal: Bool { reporter == .thisMac }
@@ -106,7 +106,7 @@ enum AgentIntegrationInstaller {
         -> [Termiod.AgentPresence]
     {
         try await Task.detached(priority: .userInitiated) {
-            try Termiod.probeAgents(route: .ssh(host), agents: agents, commands: commands)
+            try Termiod.probeAgents(route: TermiodRoute(hostKey: host), agents: agents, commands: commands)
         }.value
     }
 }

@@ -392,7 +392,7 @@ struct CommandPaletteView: View {
         // The pairing QR left the sidebar for this Mac's Serving section
         // (RFC §D9). Pairing is an action, so this is where it is paid back —
         // one search away instead of a duplicate settings entry.
-        actions.append(.init(id: "pair-phone", title: localized("Pair iPhone…"),
+        actions.append(.init(id: "pair-phone", title: localized("Pair a Device…"),
                              icon: .smartPhoneWifi, shortcut: nil) { _ in
             NSApp.sendAction(#selector(AppDelegate.pairPhone(_:)), to: nil, from: nil)
         })

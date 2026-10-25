@@ -199,9 +199,14 @@ enum DeviceProbe {
                 checkedAt: now, reachable: true, termiodVersion: version, agents: agents)
         }
 
-        let probe = await SSHConfigFile.testConnection(alias: alias)
-        guard case .reachable = probe else {
-            return DeviceDiscoveredState(checkedAt: now, reachable: false)
+        // A paired Mac has no SSH to test; its daemon answering the agent probe
+        // below is the reachability check.
+        let paired = TermiodRoute.isPaired(hostKey: alias)
+        if !paired {
+            let probe = await SSHConfigFile.testConnection(alias: alias)
+            guard case .reachable = probe else {
+                return DeviceDiscoveredState(checkedAt: now, reachable: false)
+            }
         }
         // One question for the whole roster. This was one blocking `ssh` per
         // agent — a dozen round trips to learn something the box knows about
@@ -222,7 +227,7 @@ enum DeviceProbe {
             // the probe just made one.
             return DeviceDiscoveredState(
                 checkedAt: now, reachable: true,
-                termiodVersion: TermiodDeviceRegistry.shared.device(for: .ssh(alias))?.daemonVersion,
+                termiodVersion: TermiodDeviceRegistry.shared.device(for: TermiodRoute(hostKey: alias))?.daemonVersion,
                 agents: agents)
         } catch {
             // Reached over ssh, but the daemon could not answer — an old
@@ -233,6 +238,7 @@ enum DeviceProbe {
                 agent probe on \(alias, privacy: .public) failed: \
                 \(error.localizedDescription, privacy: .public)
                 """)
+            if paired { return DeviceDiscoveredState(checkedAt: now, reachable: false) }
             return DeviceDiscoveredState(checkedAt: now, reachable: true, daemonAnswered: false)
         }
     }

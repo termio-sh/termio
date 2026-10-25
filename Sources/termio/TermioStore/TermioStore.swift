@@ -673,7 +673,7 @@ final class TermioStore: ObservableObject {
             // The route's device, for a session that has never attached and so
             // carries none of its own.
             routeDeviceID: alias.flatMap {
-                TermiodDeviceRegistry.shared.deviceID(for: TermiodRoute(sshAlias: $0))
+                TermiodDeviceRegistry.shared.deviceID(for: TermiodRoute(hostKey: $0))
             })
     }
 

@@ -481,7 +481,7 @@ extension TermioStore {
             // reached before the answer is known now — and a workspace carrying it
             // matches checkouts on that box without waiting for a connection.
             deviceID: device.alias.flatMap {
-                TermiodDeviceRegistry.shared.deviceID(for: TermiodRoute(sshAlias: $0))
+                TermiodDeviceRegistry.shared.deviceID(for: TermiodRoute(hostKey: $0))
             },
             isAutoCreated: false)
         workspaces.append(workspace)

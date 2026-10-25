@@ -1161,7 +1161,7 @@ extension TermioStore {
             name: name.isEmpty ? alias : name,
             at: path,
             on: alias,
-            device: TermiodDeviceRegistry.shared.deviceID(for: TermiodRoute(sshAlias: alias)))
+            device: TermiodDeviceRegistry.shared.deviceID(for: TermiodRoute(hostKey: alias)))
         addRemoteTerminal(host: alias, project: id)
     }
 

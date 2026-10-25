@@ -37,7 +37,7 @@ extension TermioStore {
         // existed, but it silently turned *every* session without an explicit
         // host — including plain "New Terminal" — into a remote one. A local
         // terminal must never become remote because of an environment variable.
-        let route = TermiodRoute(sshAlias: session.termiodRemoteHost)
+        let route = TermiodRoute(hostKey: session.termiodRemoteHost)
         let remoteHost = session.termiodRemoteHost
         // A remote session runs on the VPS, so the Mac's cwd, PATH-laden env,
         // and shell path are all wrong there — the spec carries no argv, only
@@ -553,6 +553,16 @@ extension TermioStore {
         for link in termiodLinks.values { link.retryNow() }
     }
 
+    /// Unpair ends this Mac's hold on another one at once, not at the next
+    /// dial. Every WebSocket to it closes, and pooled channels are dropped so
+    /// none is handed out dead. The links are left alone on purpose: each reads
+    /// a lost connection and redials, which fails while unpaired and reattaches
+    /// once the Mac is paired again. The sessions keep running over there.
+    func disconnectPaired(hostID: String) {
+        WebSocketBridge.closeAll(hostID: hostID)
+        Termiod.ControlPool.closeAll(route: .paired(hostID))
+    }
+
     func applyTermiodExit(for id: Session.ID,
                           code: Int32,
                           runtimeMilliseconds: UInt64,
@@ -610,7 +620,7 @@ extension TermioStore {
     /// are recorded, not a rewrite, and it must not happen before the conflict
     /// case (a cloned VM carrying a duplicate `host_id`) has an answer.
     func adoptDevice(_ device: TermiodDevice, forRoute route: TermiodRoute) {
-        let alias = route.sshAlias
+        let alias = route.hostKey
         // Identities this alias used to answer with. A machine that re-mints its
         // `host_id` — a reboot that took a pre-0.48 `host.id` with it — comes back
         // as a device nothing is keyed under, and every clone on it would read as
@@ -1010,7 +1020,7 @@ extension TermioStore {
             link.killAndClose()
         } else {
             Termiod.killSession(
-                target: name, route: TermiodRoute(sshAlias: session.termiodRemoteHost))
+                target: name, route: TermiodRoute(hostKey: session.termiodRemoteHost))
         }
         termiodLinks[session.id] = nil
     }
@@ -1139,7 +1149,7 @@ extension TermioStore {
             alias: device.alias,
             deviceID: device.deviceID ?? TermiodDeviceRegistry.shared.deviceID(for: route))
         let sweepRecords = closedSessionJournal.filter { record in
-            record.sshAlias == route.sshAlias
+            record.sshAlias == route.hostKey
                 || (record.deviceID != nil && record.deviceID == device.deviceID)
         }
         recordDaemonIDs(from: live, for: device)
@@ -1378,11 +1388,11 @@ extension TermioStore {
     /// the main thread with a borderless "Setting up host…" HUD; `completion`
     /// fires back on the main queue.
     func ensureRemoteReady(host: String, completion: @escaping (RemoteSetupResult) -> Void) {
-        let hud = RemoteSetupHUD(message: "Setting up \(host)…")
+        let hud = RemoteSetupHUD(message: "Setting up \(PairedDeviceStore.displayName(hostKey: host))…")
         hud.show()
         // While the loop may have the daemon down, a failed roster is the restart
         // in progress, not an unreachable machine (RFC §5.5).
-        let route = TermiodRoute.ssh(host)
+        let route = TermiodRoute(hostKey: host)
         upgradingRoutes.insert(route.description)
         // Only the probe leaves the main actor. `completion` is the caller's
         // closure and captures main-actor state, so it must never be sent to
@@ -1433,6 +1443,9 @@ extension TermioStore {
     private nonisolated static func performRemoteReadyCheck(
         host: String, force: Bool = false
     ) -> RemoteSetupResult {
+        if case .paired(let hostID) = TermiodRoute(hostKey: host) {
+            return pairedReadyCheck(hostID: hostID)
+        }
         let localBinary = Termiod.daemonBinaryPath()
         guard FileManager.default.isExecutableFile(atPath: localBinary) else {
             return .failure(RemoteSetupError(
@@ -1502,6 +1515,19 @@ extension TermioStore {
             return .failure(RemoteSetupError(
                 state: .failed,
                 message: "Couldn't set up termiod on \(host).\n\(report.message ?? "")"))
+        }
+    }
+
+    /// A paired Mac runs the termiod its own Termio ships and keeps current, so
+    /// there is nothing to deploy over a road that has no SSH. Ready means its
+    /// daemon answers the handshake through the WebSocket.
+    private nonisolated static func pairedReadyCheck(hostID: String) -> RemoteSetupResult {
+        do {
+            let device = try Termiod.probeDevice(route: .paired(hostID))
+            return .success(device)
+        } catch {
+            return .failure(RemoteSetupError(
+                state: .unreachable, message: error.localizedDescription))
         }
     }
 
@@ -1834,6 +1860,14 @@ extension TermioStore {
     ) {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else { return }
+        // The clone runs `git clone` over ssh, and a paired Mac has none.
+        guard !TermiodRoute.isPaired(hostKey: host) else {
+            let alert = NSAlert()
+            alert.messageText = localized("Clone on \(PairedDeviceStore.displayName(hostKey: host)) itself")
+            alert.informativeText = localized("Termio reaches a paired Mac without SSH, so it can’t clone there for you. Clone the repository on that Mac, then open the folder from here.")
+            alert.runModal()
+            return
+        }
 
         // Unpushed commits live only on this Mac and won't be in a fresh clone —
         // warn before we clone what the remote can actually see, so the divergence

@@ -74,6 +74,8 @@
 	<string>%@ stays published only until you log out of it. Termio couldn’t set it to keep services running after that.</string>
 	<key>%@ tokens</key>
 	<string>%@ tokens</string>
+	<key>%@ turned this Mac’s pairing down. Its token was rotated, or Direct Attach is off. Copy a new link from its Pairing sheet and pair again.</key>
+	<string>%@ turned this Mac’s pairing down. Its token was rotated, or Direct Attach is off. Copy a new link from its Pairing sheet and pair again.</string>
 	<key>%@ · %@ tokens</key>
 	<string>%@ · %@ tokens</string>
 	<key>%@ — %@.</key>
@@ -156,6 +158,8 @@
 	<string>Add Remote Host</string>
 	<key>Add SSH Host</key>
 	<string>Add SSH Host</string>
+	<key>Add SSH Host…</key>
+	<string>Add SSH Host…</string>
 	<key>Add a %@ Account</key>
 	<string>Add a %@ Account</string>
 	<key>Add a host you reach over SSH and Termio can run sessions on it, with agents that keep working after you disconnect.</key>
@@ -298,6 +302,8 @@
 	<string>Check Again</string>
 	<key>Check for Updates…</key>
 	<string>Check for Updates…</string>
+	<key>Check that Termio is open there with Allow Paired Devices and Direct Attach on, and that both Macs are on the same network or tailnet.</key>
+	<string>Check that Termio is open there with Allow Paired Devices and Direct Attach on, and that both Macs are on the same network or tailnet.</string>
 	<key>Checked out on %@</key>
 	<string>Checked out on %@</string>
 	<key>Checking that %@ answers…</key>
@@ -338,6 +344,8 @@
 	<string>Clone a Repository…</string>
 	<key>Clone a repository onto %@, or open a folder that’s already there — the path completes as you type.</key>
 	<string>Clone a repository onto %@, or open a folder that’s already there — the path completes as you type.</string>
+	<key>Clone on %@ itself</key>
+	<string>Clone on %@ itself</string>
 	<key>Clone to</key>
 	<string>Clone to</string>
 	<key>Close</key>
@@ -462,10 +470,18 @@
 	<string>Couldn’t load</string>
 	<key>Couldn’t open a pull request page</key>
 	<string>Couldn’t open a pull request page</string>
+	<key>Couldn’t reach %@.</key>
+	<string>Couldn’t reach %@.</string>
+	<key>Couldn’t reach %@: %@.</key>
+	<string>Couldn’t reach %@: %@.</string>
 	<key>Couldn’t remove %@.</key>
 	<string>Couldn’t remove %@.</string>
+	<key>Couldn’t remove the pairing from the keychain. Open Keychain Access, unlock the login keychain, and try again.</key>
+	<string>Couldn’t remove the pairing from the keychain. Open Keychain Access, unlock the login keychain, and try again.</string>
 	<key>Couldn’t remove worktree</key>
 	<string>Couldn’t remove worktree</string>
+	<key>Couldn’t save the pairing to the keychain: %@</key>
+	<string>Couldn’t save the pairing to the keychain: %@</string>
 	<key>Couldn’t save the password to your Keychain.</key>
 	<string>Couldn’t save the password to your Keychain.</string>
 	<key>Couldn’t start %@ on %@.</key>
@@ -736,6 +752,8 @@
 	<string>Issues</string>
 	<key>Issues a new token and revokes every paired iPhone.</key>
 	<string>Issues a new token and revokes every paired iPhone.</string>
+	<key>Its sessions keep running there. To reach it again, copy a new link from its Pairing sheet.</key>
+	<string>Its sessions keep running there. To reach it again, copy a new link from its Pairing sheet.</string>
 	<key>Join</key>
 	<string>Join</string>
 	<key>Jump to session, project, or file…</key>
@@ -942,6 +960,8 @@
 	<string>No hosts yet — add one, or write a Host block in ~/.ssh/config.</string>
 	<key>No issues found.</key>
 	<string>No issues found.</string>
+	<key>No longer paired</key>
+	<string>No longer paired</string>
 	<key>No matches</key>
 	<string>No matches</string>
 	<key>No network address found. Join a network, then reopen this pane.</key>
@@ -1010,10 +1030,14 @@
 	<string>Offline · %@</string>
 	<key>On Your Tailnet</key>
 	<string>On Your Tailnet</string>
+	<key>On another Mac, choose Remote Hosts ▸ ＋ ▸ Pair with a Mac…, then paste the link.</key>
+	<string>On another Mac, choose Remote Hosts ▸ ＋ ▸ Pair with a Mac…, then paste the link.</string>
 	<key>On iPhone, tap the Mac pill ▸ Scan QR Code.</key>
 	<string>On iPhone, tap the Mac pill ▸ Scan QR Code.</string>
 	<key>On iPhone, tap the Mac pill ▸ Scan QR Code. The token is minted on %@ and demanded on every connection.</key>
 	<string>On iPhone, tap the Mac pill ▸ Scan QR Code. The token is minted on %@ and demanded on every connection.</string>
+	<key>On the other Mac, open Settings ▸ Server ▸ Pairing ▸ Show QR Code… and click Copy Link, then paste it here.</key>
+	<string>On the other Mac, open Settings ▸ Server ▸ Pairing ▸ Show QR Code… and click Copy Link, then paste it here.</string>
 	<key>Only regular files can be previewed.</key>
 	<string>Only regular files can be previewed.</string>
 	<key>Only the first %lld items are shown — update termio on this device to list them all.</key>
@@ -1074,14 +1098,26 @@
 	<string>Pages</string>
 	<key>Pair</key>
 	<string>Pair</string>
-	<key>Pair iPhone</key>
-	<string>Pair iPhone</string>
-	<key>Pair iPhone…</key>
-	<string>Pair iPhone…</string>
+	<key>Pair a Device</key>
+	<string>Pair a Device</string>
+	<key>Pair a Device…</key>
+	<string>Pair a Device…</string>
+	<key>Pair with a Mac</key>
+	<string>Pair with a Mac</string>
+	<key>Pair with a Mac…</key>
+	<string>Pair with a Mac…</string>
+	<key>Paired Mac</key>
+	<string>Paired Mac</string>
 	<key>Paired iPhones must scan the code again after switching.</key>
 	<string>Paired iPhones must scan the code again after switching.</string>
+	<key>Paired over the network. Its Termio must be open with Allow Paired Devices and Direct Attach on.</key>
+	<string>Paired over the network. Its Termio must be open with Allow Paired Devices and Direct Attach on.</string>
+	<key>Paired · %@</key>
+	<string>Paired · %@</string>
 	<key>Pairing</key>
 	<string>Pairing</string>
+	<key>Pairing Link</key>
+	<string>Pairing Link</string>
 	<key>Pairing Token</key>
 	<string>Pairing Token</string>
 	<key>Pairs your iPhone straight to this Mac's session host. Projects with nothing running don't appear yet.</key>
@@ -1290,6 +1326,8 @@
 	<string>Saving to %@…</string>
 	<key>Scan the QR code with WeChat to join the Chinese community group.</key>
 	<string>Scan the QR code with WeChat to join the Chinese community group.</string>
+	<key>Scan the code with your iPhone, or copy its link to another Mac.</key>
+	<string>Scan the code with your iPhone, or copy its link to another Mac.</string>
 	<key>Scrollback</key>
 	<string>Scrollback</string>
 	<key>Search</key>
@@ -1478,12 +1516,16 @@
 	<string>Termio notifies you about the agents above, wherever they run.</string>
 	<key>Termio opens a terminal where %@ signs you in. Your other accounts stay signed in.</key>
 	<string>Termio opens a terminal where %@ signs you in. Your other accounts stay signed in.</string>
+	<key>Termio reaches a paired Mac without SSH, so it can’t clone there for you. Clone the repository on that Mac, then open the folder from here.</key>
+	<string>Termio reaches a paired Mac without SSH, so it can’t clone there for you. Clone the repository on that Mac, then open the folder from here.</string>
 	<key>Termio server</key>
 	<string>Termio server</string>
 	<key>Test</key>
 	<string>Test</string>
 	<key>Test Connection</key>
 	<string>Test Connection</string>
+	<key>That isn’t a Termio pairing link. Copy it again from the other Mac.</key>
+	<string>That isn’t a Termio pairing link. Copy it again from the other Mac.</string>
 	<key>The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with.</key>
 	<string>The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with.</string>
 	<key>The base branch has commits this branch doesn’t have, as of the last fetch.</key>
@@ -1548,6 +1590,8 @@
 	<string>This Mac</string>
 	<key>This Mac and the machines you reach from it</key>
 	<string>This Mac and the machines you reach from it</string>
+	<key>This Mac is no longer paired. Pair it again from Settings ▸ Remote Hosts.</key>
+	<string>This Mac is no longer paired. Pair it again from Settings ▸ Remote Hosts.</string>
 	<key>This Mac…</key>
 	<string>This Mac…</string>
 	<key>This PDF carries no table of contents.</key>
@@ -1620,6 +1664,8 @@
 	<string>This workspace is no longer on your list.</string>
 	<key>Timed out</key>
 	<string>Timed out</string>
+	<key>To pair another Mac, turn on Direct Attach.</key>
+	<string>To pair another Mac, turn on Direct Attach.</string>
 	<key>Today</key>
 	<string>Today</string>
 	<key>Toggle Full Screen</key>
@@ -1656,6 +1702,12 @@
 	<string>Ungroup</string>
 	<key>Unlock “%@” (git worktree unlock) before removing it.</key>
 	<string>Unlock “%@” (git worktree unlock) before removing it.</string>
+	<key>Unpair</key>
+	<string>Unpair</string>
+	<key>Unpair %@?</key>
+	<string>Unpair %@?</string>
+	<key>Unpair…</key>
+	<string>Unpair…</string>
 	<key>Unpin</key>
 	<string>Unpin</string>
 	<key>Unsaved changes — press ⌘S to save to %@</key>

@@ -45,6 +45,25 @@ final class TermiodDeviceRegistryTests: XCTestCase {
         XCTAssertEqual(registry.deviceID(for: .ssh("vps-wan")), "h_aaaa")
     }
 
+    /// A paired route is kept out of `devices.json`. Builds before it decode the
+    /// file with `try?` over the whole array, so one route they cannot read would
+    /// empty their registry. The route carries its `host_id`, so it still
+    /// resolves after the file is read back.
+    func testAPairedRouteIsNeverWrittenToTheFile() throws {
+        let registry = makeRegistry()
+        registry.record(hostID: "h_mini", daemonVersion: macDaemon, route: .ssh("mini"))
+        registry.record(hostID: "h_mini", daemonVersion: macDaemon, route: .paired("h_mini"))
+
+        let written = try String(
+            contentsOf: directory.appendingPathComponent("devices.json"), encoding: .utf8)
+        XCTAssertFalse(written.contains("paired:"))
+        XCTAssertTrue(written.contains("ssh:mini"))
+
+        let reread = makeRegistry()
+        XCTAssertEqual(reread.routes(forDevice: "h_mini"), [.ssh("mini")])
+        XCTAssertEqual(reread.deviceID(for: .paired("h_mini")), "h_mini")
+    }
+
     /// The route that just worked is the one to try first next time.
     func testMostRecentlyUsedRouteSortsFirst() {
         let registry = makeRegistry()

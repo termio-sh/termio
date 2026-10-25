@@ -33,6 +33,8 @@ struct DevicePane: View {
     @StateObject private var model: DevicePaneModel
     private enum ProbeState { case idle, running, result(SSHProbeResult) }
     @State private var probe: ProbeState = .idle
+    @State private var confirmUnpair = false
+    @State private var unpairFailed = false
 
     init(
         machine: KnownDevice,
@@ -249,7 +251,9 @@ struct DevicePane: View {
     /// there.
     @ViewBuilder
     private var reachedBySection: some View {
-        if !machine.isLocal {
+        if case .paired(let hostID) = machine.route {
+            pairedSection(hostID: hostID)
+        } else if !machine.isLocal {
             Section {
                 LabeledContent {
                     probeControl
@@ -272,6 +276,46 @@ struct DevicePane: View {
             } header: {
                 SectionHeaderLabel(title: localized("Reached by"))
             }
+        }
+    }
+
+    /// A paired Mac is reached by its address and a token, not by a host block,
+    /// so its road is that address and the one thing to do about it is unpair.
+    private func pairedSection(hostID: String) -> some View {
+        Section {
+            LabeledContent {
+                Button(localized("Unpair…")) { confirmUnpair = true }
+                    .confirmationDialog(
+                        localized("Unpair \(machine.name)?"),
+                        isPresented: $confirmUnpair,
+                        titleVisibility: .visible
+                    ) {
+                        Button(localized("Unpair"), role: .destructive) {
+                            // Announced only once the keychain has let go: links
+                            // would otherwise redial with the record still there.
+                            unpairFailed = !PairedDeviceStore.remove(hostID: hostID)
+                            guard !unpairFailed else { return }
+                            NotificationCenter.default.post(
+                                name: PairedDeviceStore.didChange, object: nil,
+                                userInfo: [PairedDeviceStore.unpairedHostIDKey: hostID])
+                        }
+                        Button(localized("Cancel"), role: .cancel) {}
+                    } message: {
+                        Text(localized("Its sessions keep running there. To reach it again, copy a new link from its Pairing sheet."))
+                    }
+            } label: {
+                SettingsLabel(
+                    title: PairedDeviceStore.device(hostID: hostID)?.url ?? machine.name,
+                    subtext: localized("Paired over the network. Its Termio must be open with Allow Paired Devices and Direct Attach on.")
+                )
+            }
+            if unpairFailed {
+                Text(localized("Couldn’t remove the pairing from the keychain. Open Keychain Access, unlock the login keychain, and try again."))
+                    .font(.settingsDetail)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            SectionHeaderLabel(title: localized("Reached by"))
         }
     }
 

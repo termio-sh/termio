@@ -107,6 +107,55 @@ final class DeviceSpliceIntegrationTests: XCTestCase {
         XCTAssertEqual(daemon?.connectionCount, 0, "the daemon must never be dialled for it")
     }
 
+    // MARK: - Another Mac, through the bridge
+
+    func testPairedMacReachesTheDaemonThroughTheBridge() async throws {
+        let device = PairedDevice(
+            hostID: "h_test", name: "mini", url: "http://127.0.0.1:\(port)", token: token)
+        let bridge = try await Task.detached { try WebSocketBridge.open(device, requiresPairing: false) }.value
+        defer { close(bridge.descriptor) }
+
+        // The client writes frames to a descriptor, as on every other route, and
+        // the daemon reads them byte for byte.
+        let frame = Data([0x43, 0, 0, 0, 2, 0x68, 0x69])
+        let arrived = expectation(description: "the stand-in daemon read the Mac's bytes")
+        daemon?.onBytes = { bytes in
+            if bytes == frame { arrived.fulfill() }
+        }
+        let written = frame.withUnsafeBytes { write(bridge.descriptor, $0.baseAddress, $0.count) }
+        XCTAssertEqual(written, frame.count)
+        await fulfillment(of: [arrived], timeout: 5)
+
+        // What the daemon writes in two pieces reads back as one stream.
+        daemon?.send(Data("hello".utf8))
+        daemon?.send(Data("_ok".utf8))
+        let descriptor = bridge.descriptor
+        let received = await Task.detached { () -> Data in
+            var received = Data()
+            var chunk = [UInt8](repeating: 0, count: 64)
+            while received.count < 8 {
+                let count = read(descriptor, &chunk, chunk.count)
+                guard count > 0 else { break }
+                received.append(contentsOf: chunk[0 ..< count])
+            }
+            return received
+        }.value
+        XCTAssertEqual(received, Data("hello_ok".utf8))
+    }
+
+    func testPairedMacWithAStaleTokenIsRefusedBeforeTheDaemon() async throws {
+        let device = PairedDevice(
+            hostID: "h_test", name: "mini", url: "http://127.0.0.1:\(port)", token: "revoked")
+        do {
+            let bridge = try await Task.detached { try WebSocketBridge.open(device, requiresPairing: false) }.value
+            close(bridge.descriptor)
+            XCTFail("a bridge with the wrong token was opened")
+        } catch {
+            // Refused at the handshake, which is the assertion.
+        }
+        XCTAssertEqual(daemon?.connectionCount, 0, "the daemon must never be dialled for it")
+    }
+
     // MARK: - Helpers
 
     private func webSocket(subprotocol: String) -> URLSessionWebSocketTask {

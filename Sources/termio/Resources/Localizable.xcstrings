@@ -1,6 +1,28 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ turned this Mac’s pairing down. Its token was rotated, or Direct Attach is off. Copy a new link from its Pairing sheet and pair again.": {
+      "comment": "A paired Mac refused the stored token; %@ is its name.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 拒绝了这台 Mac 的配对。它的令牌已更换，或“直接连接”已关闭。请从它的配对窗口拷贝新链接，重新配对。"
+          }
+        }
+      }
+    },
+    "Add SSH Host…": {
+      "comment": "Menu item under ＋ in Settings ▸ Remote Hosts.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加 SSH 主机…"
+          }
+        }
+      }
+    },
     "Allow Paired Devices": {
       "comment": "Master switch in Settings ▸ Server ▸ Pairing: whether paired iPhones may connect to this Mac.",
       "localizations": {
@@ -8,6 +30,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "允许已配对设备"
+          }
+        }
+      }
+    },
+    "Check that Termio is open there with Allow Paired Devices and Direct Attach on, and that both Macs are on the same network or tailnet.": {
+      "comment": "Follows a failed dial to a paired Mac. “Allow Paired Devices” and “Direct Attach” name switches in Settings ▸ Server ▸ Pairing — translate them identically.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请确认那台 Mac 上的 Termio 已打开，并开启了“允许已配对设备”和“直接连接”，且两台 Mac 在同一网络或 tailnet 中。"
+          }
+        }
+      }
+    },
+    "Clone on %@ itself": {
+      "comment": "Alert title when cloning onto a paired Mac; %@ is its name.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在 %@ 上直接克隆"
           }
         }
       }
@@ -33,6 +77,50 @@
         }
       }
     },
+    "Couldn’t reach %@.": {
+      "comment": "A paired Mac did not answer; %@ is its name.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接 %@。"
+          }
+        }
+      }
+    },
+    "Couldn’t reach %@: %@.": {
+      "comment": "A paired Mac did not answer; the first %@ is its name, the second the network's reason.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接 %1$@：%2$@。"
+          }
+        }
+      }
+    },
+    "Couldn’t remove the pairing from the keychain. Open Keychain Access, unlock the login keychain, and try again.": {
+      "comment": "Shown in a paired Mac's pane when Unpair could not delete the keychain item.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法从钥匙串中移除配对。请打开“钥匙串访问”，解锁登录钥匙串后重试。"
+          }
+        }
+      }
+    },
+    "Couldn’t save the pairing to the keychain: %@": {
+      "comment": "Error when storing a paired Mac; %@ is the system's reason.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法把配对信息存入钥匙串：%@"
+          }
+        }
+      }
+    },
     "Groups": {
       "localizations": {
         "zh-Hans": {
@@ -49,6 +137,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "横向"
+          }
+        }
+      }
+    },
+    "Its sessions keep running there. To reach it again, copy a new link from its Pairing sheet.": {
+      "comment": "Confirmation message when unpairing a Mac.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "它上面的会话会继续运行。要再次连接，请从它的配对窗口拷贝新链接。"
           }
         }
       }
@@ -85,6 +184,17 @@
         }
       }
     },
+    "No longer paired": {
+      "comment": "Row detail in Settings ▸ Remote Hosts for a Mac whose pairing was removed.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已不再配对"
+          }
+        }
+      }
+    },
     "Not Connected": {
       "comment": "Tailscale status in Settings ▸ Server ▸ Pairing when this Mac is not on a running tailnet.",
       "localizations": {
@@ -116,6 +226,17 @@
         }
       }
     },
+    "On another Mac, choose Remote Hosts ▸ ＋ ▸ Pair with a Mac…, then paste the link.": {
+      "comment": "Pairing sheet note. The ▸ path names controls — translate them identically.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在另一台 Mac 上选择“远程主机 ▸ ＋ ▸ 与 Mac 配对…”，然后粘贴链接。"
+          }
+        }
+      }
+    },
     "On iPhone, tap the Mac pill ▸ Scan QR Code.": {
       "comment": "“Mac pill” is a control in the iPhone app and ▸ separates steps in a menu path.",
       "localizations": {
@@ -123,6 +244,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "在 iPhone 上轻点 Mac 胶囊按钮 ▸ 扫描二维码。"
+          }
+        }
+      }
+    },
+    "On the other Mac, open Settings ▸ Server ▸ Pairing ▸ Show QR Code… and click Copy Link, then paste it here.": {
+      "comment": "Footer of the Pair with a Mac sheet. The ▸ path names controls — translate them identically.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在另一台 Mac 上打开“设置 ▸ Termio server ▸ 配对 ▸ 显示二维码…”，点“拷贝链接”，然后粘贴到这里。"
           }
         }
       }
@@ -148,24 +280,79 @@
         }
       }
     },
-    "Pair iPhone": {
-      "comment": "Row title in Settings ▸ Server ▸ Pairing, and the title of the QR code sheet.",
+    "Pair a Device": {
+      "comment": "Row title in Settings ▸ Server ▸ Pairing, and the pairing sheet's title.",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "配对 iPhone"
+            "value": "配对设备"
           }
         }
       }
     },
-    "Pair iPhone…": {
-      "comment": "Menu bar menu item and command palette action that open the pairing QR code.",
+    "Pair a Device…": {
+      "comment": "Menu bar item and command palette action that open the pairing sheet.",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "配对 iPhone…"
+            "value": "配对设备…"
+          }
+        }
+      }
+    },
+    "Pair with a Mac": {
+      "comment": "Header of the sheet that pairs with another Mac.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "与 Mac 配对"
+          }
+        }
+      }
+    },
+    "Pair with a Mac…": {
+      "comment": "Menu item under ＋ in Settings ▸ Remote Hosts.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "与 Mac 配对…"
+          }
+        }
+      }
+    },
+    "Paired Mac": {
+      "comment": "Fallback name for a paired Mac whose record is gone.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已配对的 Mac"
+          }
+        }
+      }
+    },
+    "Paired over the network. Its Termio must be open with Allow Paired Devices and Direct Attach on.": {
+      "comment": "Subtext under a paired Mac's address in Settings ▸ Remote Hosts.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通过网络配对。那台 Mac 上的 Termio 必须打开，并开启“允许已配对设备”和“直接连接”。"
+          }
+        }
+      }
+    },
+    "Paired · %@": {
+      "comment": "Row detail in Settings ▸ Remote Hosts; %@ is the paired Mac's address.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已配对 · %@"
           }
         }
       }
@@ -177,6 +364,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "配对"
+          }
+        }
+      }
+    },
+    "Pairing Link": {
+      "comment": "Field label for the link copied from another Mac.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配对链接"
+          }
+        }
+      }
+    },
+    "Scan the code with your iPhone, or copy its link to another Mac.": {
+      "comment": "Subtext of Pair a Device in Settings ▸ Server ▸ Pairing.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 iPhone 扫描二维码，或把链接拷贝到另一台 Mac。"
           }
         }
       }
@@ -213,6 +422,28 @@
         }
       }
     },
+    "Termio reaches a paired Mac without SSH, so it can’t clone there for you. Clone the repository on that Mac, then open the folder from here.": {
+      "comment": "Alert body when cloning onto a paired Mac.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Termio 连接已配对的 Mac 时不经过 SSH，所以无法替你在那里克隆。请在那台 Mac 上克隆仓库，再从这里打开该文件夹。"
+          }
+        }
+      }
+    },
+    "That isn’t a Termio pairing link. Copy it again from the other Mac.": {
+      "comment": "Error for a pasted value that is not a pairing link.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这不是 Termio 配对链接。请从另一台 Mac 重新拷贝。"
+          }
+        }
+      }
+    },
     "The tunnel address works from any network, and terminates on the provider's servers. Pick Custom to run your own relay instead.": {
       "comment": "Footer in Settings ▸ Server ▸ Pairing when a bundled third-party tunnel is selected. “Custom” names another entry in the same picker — translate it identically.",
       "localizations": {
@@ -220,6 +451,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "隧道地址可在任意网络使用，并终结于服务商的服务器。若要改用自己的中继，请选择“自定义”。"
+          }
+        }
+      }
+    },
+    "This Mac is no longer paired. Pair it again from Settings ▸ Remote Hosts.": {
+      "comment": "A session names a paired Mac whose pairing was removed.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 已不再配对。请在“设置 ▸ 远程主机”中重新配对。"
+          }
+        }
+      }
+    },
+    "To pair another Mac, turn on Direct Attach.": {
+      "comment": "Pairing sheet note when Direct Attach is off. “Direct Attach” names a switch — translate it identically.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要配对另一台 Mac，请开启“直接连接”。"
           }
         }
       }
@@ -253,6 +506,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "打开“允许已配对设备”后才能配对 iPhone。"
+          }
+        }
+      }
+    },
+    "Unpair": {
+      "comment": "Destructive confirmation button.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消配对"
+          }
+        }
+      }
+    },
+    "Unpair %@?": {
+      "comment": "Confirmation title; %@ is the paired Mac's name.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要取消与 %@ 的配对吗？"
+          }
+        }
+      }
+    },
+    "Unpair…": {
+      "comment": "Button in Settings ▸ Remote Hosts ▸ a paired Mac.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消配对…"
           }
         }
       }

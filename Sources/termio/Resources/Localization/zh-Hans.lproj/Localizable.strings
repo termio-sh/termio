@@ -74,6 +74,8 @@
 	<string>%@ 只在你登录期间保持发布。Termio 无法让它在登出后继续运行服务。</string>
 	<key>%@ tokens</key>
 	<string>%@ token</string>
+	<key>%@ turned this Mac’s pairing down. Its token was rotated, or Direct Attach is off. Copy a new link from its Pairing sheet and pair again.</key>
+	<string>%@ 拒绝了这台 Mac 的配对。它的令牌已更换，或“直接连接”已关闭。请从它的配对窗口拷贝新链接，重新配对。</string>
 	<key>%@ · %@ tokens</key>
 	<string>%@ · %@ token</string>
 	<key>%@ — %@.</key>
@@ -156,6 +158,8 @@
 	<string>添加远程主机</string>
 	<key>Add SSH Host</key>
 	<string>添加 SSH 主机</string>
+	<key>Add SSH Host…</key>
+	<string>添加 SSH 主机…</string>
 	<key>Add a %@ Account</key>
 	<string>添加 %@ 账户</string>
 	<key>Add a host you reach over SSH and Termio can run sessions on it, with agents that keep working after you disconnect.</key>
@@ -298,6 +302,8 @@
 	<string>重新检查</string>
 	<key>Check for Updates…</key>
 	<string>检查更新…</string>
+	<key>Check that Termio is open there with Allow Paired Devices and Direct Attach on, and that both Macs are on the same network or tailnet.</key>
+	<string>请确认那台 Mac 上的 Termio 已打开，并开启了“允许已配对设备”和“直接连接”，且两台 Mac 在同一网络或 tailnet 中。</string>
 	<key>Checked out on %@</key>
 	<string>检出在 %@</string>
 	<key>Checking that %@ answers…</key>
@@ -338,6 +344,8 @@
 	<string>克隆仓库…</string>
 	<key>Clone a repository onto %@, or open a folder that’s already there — the path completes as you type.</key>
 	<string>把一个仓库克隆到 %@，或者打开一个已经在那里的文件夹——路径会边输入边补全。</string>
+	<key>Clone on %@ itself</key>
+	<string>请在 %@ 上直接克隆</string>
 	<key>Clone to</key>
 	<string>克隆到</string>
 	<key>Close</key>
@@ -462,10 +470,18 @@
 	<string>无法载入</string>
 	<key>Couldn’t open a pull request page</key>
 	<string>无法打开 Pull Request 页面</string>
+	<key>Couldn’t reach %@.</key>
+	<string>无法连接 %@。</string>
+	<key>Couldn’t reach %@: %@.</key>
+	<string>无法连接 %1$@：%2$@。</string>
 	<key>Couldn’t remove %@.</key>
 	<string>无法移除 %@。</string>
+	<key>Couldn’t remove the pairing from the keychain. Open Keychain Access, unlock the login keychain, and try again.</key>
+	<string>无法从钥匙串中移除配对。请打开“钥匙串访问”，解锁登录钥匙串后重试。</string>
 	<key>Couldn’t remove worktree</key>
 	<string>无法移除 worktree</string>
+	<key>Couldn’t save the pairing to the keychain: %@</key>
+	<string>无法把配对信息存入钥匙串：%@</string>
 	<key>Couldn’t save the password to your Keychain.</key>
 	<string>无法把密码保存到钥匙串。</string>
 	<key>Couldn’t start %@ on %@.</key>
@@ -736,6 +752,8 @@
 	<string>Issues</string>
 	<key>Issues a new token and revokes every paired iPhone.</key>
 	<string>签发新的 Token 并撤销所有已配对的 iPhone。</string>
+	<key>Its sessions keep running there. To reach it again, copy a new link from its Pairing sheet.</key>
+	<string>它上面的会话会继续运行。要再次连接，请从它的配对窗口拷贝新链接。</string>
 	<key>Join</key>
 	<string>加入</string>
 	<key>Jump to session, project, or file…</key>
@@ -942,6 +960,8 @@
 	<string>暂无主机——添加一个，或在 ~/.ssh/config 中写入 Host 块。</string>
 	<key>No issues found.</key>
 	<string>未找到 issues。</string>
+	<key>No longer paired</key>
+	<string>已不再配对</string>
 	<key>No matches</key>
 	<string>无匹配结果</string>
 	<key>No network address found. Join a network, then reopen this pane.</key>
@@ -1010,10 +1030,14 @@
 	<string>离线 · %@</string>
 	<key>On Your Tailnet</key>
 	<string>你的 tailnet 上</string>
+	<key>On another Mac, choose Remote Hosts ▸ ＋ ▸ Pair with a Mac…, then paste the link.</key>
+	<string>在另一台 Mac 上选择“远程主机 ▸ ＋ ▸ 与 Mac 配对…”，然后粘贴链接。</string>
 	<key>On iPhone, tap the Mac pill ▸ Scan QR Code.</key>
 	<string>在 iPhone 上轻点 Mac 胶囊按钮 ▸ 扫描二维码。</string>
 	<key>On iPhone, tap the Mac pill ▸ Scan QR Code. The token is minted on %@ and demanded on every connection.</key>
 	<string>在 iPhone 上，点按 Mac 药丸 ▸ 扫描二维码。Token 在 %@ 上生成，每次连接都会验证。</string>
+	<key>On the other Mac, open Settings ▸ Server ▸ Pairing ▸ Show QR Code… and click Copy Link, then paste it here.</key>
+	<string>在另一台 Mac 上打开“设置 ▸ Termio server ▸ 配对 ▸ 显示二维码…”，点“拷贝链接”，然后粘贴到这里。</string>
 	<key>Only regular files can be previewed.</key>
 	<string>只能预览普通文件。</string>
 	<key>Only the first %lld items are shown — update termio on this device to list them all.</key>
@@ -1074,14 +1098,26 @@
 	<string>页面</string>
 	<key>Pair</key>
 	<string>配对</string>
-	<key>Pair iPhone</key>
-	<string>配对 iPhone</string>
-	<key>Pair iPhone…</key>
-	<string>配对 iPhone…</string>
+	<key>Pair a Device</key>
+	<string>配对设备</string>
+	<key>Pair a Device…</key>
+	<string>配对设备…</string>
+	<key>Pair with a Mac</key>
+	<string>与 Mac 配对</string>
+	<key>Pair with a Mac…</key>
+	<string>与 Mac 配对…</string>
+	<key>Paired Mac</key>
+	<string>已配对的 Mac</string>
 	<key>Paired iPhones must scan the code again after switching.</key>
 	<string>切换后，已配对的 iPhone 需要重新扫码。</string>
+	<key>Paired over the network. Its Termio must be open with Allow Paired Devices and Direct Attach on.</key>
+	<string>通过网络配对。那台 Mac 上的 Termio 必须打开，并开启“允许已配对设备”和“直接连接”。</string>
+	<key>Paired · %@</key>
+	<string>已配对 · %@</string>
 	<key>Pairing</key>
 	<string>配对</string>
+	<key>Pairing Link</key>
+	<string>配对链接</string>
 	<key>Pairing Token</key>
 	<string>配对 Token</string>
 	<key>Pairs your iPhone straight to this Mac's session host. Projects with nothing running don't appear yet.</key>
@@ -1290,6 +1326,8 @@
 	<string>正在保存到 %@…</string>
 	<key>Scan the QR code with WeChat to join the Chinese community group.</key>
 	<string>用微信扫描二维码加入中文社区群。</string>
+	<key>Scan the code with your iPhone, or copy its link to another Mac.</key>
+	<string>用 iPhone 扫描二维码，或把链接拷贝到另一台 Mac。</string>
 	<key>Scrollback</key>
 	<string>回滚</string>
 	<key>Search</key>
@@ -1478,12 +1516,16 @@
 	<string>无论上面的 Agent 在哪里运行，Termio 都会通知你。</string>
 	<key>Termio opens a terminal where %@ signs you in. Your other accounts stay signed in.</key>
 	<string>Termio 会打开一个终端，由 %@ 完成登录。其他账户保持登录。</string>
+	<key>Termio reaches a paired Mac without SSH, so it can’t clone there for you. Clone the repository on that Mac, then open the folder from here.</key>
+	<string>Termio 连接已配对的 Mac 时不经过 SSH，所以无法替你在那里克隆。请在那台 Mac 上克隆仓库，再从这里打开该文件夹。</string>
 	<key>Termio server</key>
 	<string>Termio server</string>
 	<key>Test</key>
 	<string>测试</string>
 	<key>Test Connection</key>
 	<string>测试连接</string>
+	<key>That isn’t a Termio pairing link. Copy it again from the other Mac.</key>
+	<string>这不是 Termio 配对链接。请从另一台 Mac 重新拷贝。</string>
 	<key>The agent New Chat (⌘N) starts. “Last used” follows whichever agent you most recently chatted with.</key>
 	<string>新建聊天（⌘N）启动的 Agent。“上次使用”跟随你最近一次聊天所用的 Agent。</string>
 	<key>The base branch has commits this branch doesn’t have, as of the last fetch.</key>
@@ -1548,6 +1590,8 @@
 	<string>本机</string>
 	<key>This Mac and the machines you reach from it</key>
 	<string>本机以及你能连接的设备</string>
+	<key>This Mac is no longer paired. Pair it again from Settings ▸ Remote Hosts.</key>
+	<string>这台 Mac 已不再配对。请在“设置 ▸ 远程主机”中重新配对。</string>
 	<key>This Mac…</key>
 	<string>本机…</string>
 	<key>This PDF carries no table of contents.</key>
@@ -1620,6 +1664,8 @@
 	<string>这个工作区已不在你的列表中。</string>
 	<key>Timed out</key>
 	<string>连接超时</string>
+	<key>To pair another Mac, turn on Direct Attach.</key>
+	<string>要配对另一台 Mac，请开启“直接连接”。</string>
 	<key>Today</key>
 	<string>今天</string>
 	<key>Toggle Full Screen</key>
@@ -1656,6 +1702,12 @@
 	<string>取消编组</string>
 	<key>Unlock “%@” (git worktree unlock) before removing it.</key>
 	<string>请先解锁“%@”（git worktree unlock）再移除。</string>
+	<key>Unpair</key>
+	<string>取消配对</string>
+	<key>Unpair %@?</key>
+	<string>要取消与 %@ 的配对吗？</string>
+	<key>Unpair…</key>
+	<string>取消配对…</string>
 	<key>Unpin</key>
 	<string>取消固定</string>
 	<key>Unsaved changes — press ⌘S to save to %@</key>

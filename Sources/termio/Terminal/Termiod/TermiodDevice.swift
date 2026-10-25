@@ -7,7 +7,7 @@ import Foundation
 /// moves between home and office.
 ///
 /// Spelled on disk as the endpoint form the protocol doc uses (`unix`,
-/// `ssh:<alias>`) so `devices.json` reads like configuration rather than an
+/// `ssh:<alias>`, `paired:<host_id>`) so `devices.json` reads like configuration rather than an
 /// encoder's idea of an enum.
 enum TermiodRoute: Hashable, Codable, CustomStringConvertible {
     /// This Mac's own daemon, over its Unix socket. There is exactly one — the
@@ -15,24 +15,61 @@ enum TermiodRoute: Hashable, Codable, CustomStringConvertible {
     case local
     /// A `~/.ssh/config` alias, reached with `ssh <alias> termiod stdio`.
     case ssh(String)
+    /// Another Mac paired from its Pairing section, by its daemon's `host_id`,
+    /// reached over the WebSocket that Mac's app splices onto its daemon. The
+    /// address and token live in the keychain (`PairedDeviceStore`), not here:
+    /// this value is written into the session tree on disk.
+    case paired(String)
 
     var description: String {
         switch self {
         case .local: return "unix"
         case .ssh(let alias): return "ssh:\(alias)"
+        case .paired(let hostID): return "paired:\(hostID)"
         }
     }
 
-    /// The SSH alias, or `nil` for the local route. Lets callers that still think
-    /// in aliases (the `~/.ssh/config` picker, `Termiod.Transport`) round-trip
-    /// through a route without a switch at every site.
+    /// The string the app's state keys a machine by, `nil` for this Mac: a
+    /// `~/.ssh/config` alias, or `paired:<host_id>` for a paired Mac. The session
+    /// tree, the workspaces and the closed-session journal all store this one
+    /// string, so a paired Mac rides every path an SSH host does, and is never
+    /// taken for this Mac the way a `nil` would be.
+    var hostKey: String? {
+        switch self {
+        case .local: return nil
+        case .ssh(let alias): return alias
+        case .paired(let hostID): return Self.pairedPrefix + hostID
+        }
+    }
+
+    init(hostKey: String?) {
+        guard let hostKey else { self = .local; return }
+        if hostKey.hasPrefix(Self.pairedPrefix) {
+            self = .paired(String(hostKey.dropFirst(Self.pairedPrefix.count)))
+        } else {
+            self = .ssh(hostKey)
+        }
+    }
+
+    /// The SSH alias, when this route is one. Every caller that runs `ssh`
+    /// itself asks this, so a paired Mac never reaches `ssh paired:…`.
     var sshAlias: String? {
         if case .ssh(let alias) = self { return alias }
         return nil
     }
 
-    init(sshAlias: String?) {
-        self = sshAlias.map(TermiodRoute.ssh) ?? .local
+    var isPaired: Bool {
+        if case .paired = self { return true }
+        return false
+    }
+
+    /// A colon cannot appear in a `Host` alias anyone types, so the prefix
+    /// cannot collide with one.
+    static let pairedPrefix = "paired:"
+
+    /// Whether a host key names a paired Mac rather than an SSH alias.
+    static func isPaired(hostKey: String?) -> Bool {
+        hostKey?.hasPrefix(pairedPrefix) == true
     }
 
     init(from decoder: Decoder) throws {
@@ -41,6 +78,8 @@ enum TermiodRoute: Hashable, Codable, CustomStringConvertible {
             self = .local
         } else if text.hasPrefix("ssh:") {
             self = .ssh(String(text.dropFirst(4)))
+        } else if text.hasPrefix("paired:") {
+            self = .paired(String(text.dropFirst(7)))
         } else {
             throw DecodingError.dataCorruptedError(
                 in: try decoder.singleValueContainer(),
@@ -212,6 +251,7 @@ final class TermiodDeviceRegistry: @unchecked Sendable {
     }
 
     func deviceID(for route: TermiodRoute) -> String? {
+        if case .paired(let hostID) = route { return hostID }
         lock.lock()
         defer { lock.unlock() }
         return deviceIDByRoute[route]
@@ -251,7 +291,15 @@ final class TermiodDeviceRegistry: @unchecked Sendable {
             // ISO 8601, not the Foundation reference-date float: `devices.json`
             // reads like configuration, and `termio version` parses it in shell.
             encoder.dateEncodingStrategy = .iso8601
-            let devices = devicesByID.values.sorted { $0.id < $1.id }
+            // A paired route stays in memory only. Builds before it decode this
+            // file with `try?` over the whole array, so one route they cannot
+            // read would empty their registry and the next save would keep it
+            // empty. The route carries the `host_id`, so nothing is lost.
+            let devices = devicesByID.values.sorted { $0.id < $1.id }.map { device in
+                var saved = device
+                saved.routes.removeAll(where: \.isPaired)
+                return saved
+            }
             try encoder.encode(devices).write(to: fileURL, options: .atomic)
         } catch {
             Log.termiod.error("""

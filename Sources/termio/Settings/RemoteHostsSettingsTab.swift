@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TermioShared
 
 /// Settings ▸ Remote Hosts: one row per machine this Mac reaches, each pushing
 /// that machine's pane.
@@ -35,6 +36,9 @@ struct RemoteHostsSettingsTab: View {
     @State private var hosts: [SSHConfigHost] = []
     @State private var publicKeys: [SSHPublicKey] = []
     @State private var addingHost = false
+    @State private var pairingMac = false
+    /// Read here so pairing or unpairing redraws the roster.
+    @State private var paired: [PairedDevice] = PairedDeviceStore.all()
     @State private var configEditor: SSHConfigEditorTarget?
     /// The key whose Copy button is briefly confirming, so the click visibly took.
     @State private var copiedKeyID: String?
@@ -48,15 +52,22 @@ struct RemoteHostsSettingsTab: View {
             // sections in between — and so read as adding a public key.
             Section {
                 ForEach(machines) { machine in
-                    NavigationLink(value: DeviceRoute(key: machine.settingsKey)) {
+                    NavigationLink(value: DeviceRoute(key: machine.navigationKey)) {
                         RemoteHostListRow(machine: machine, host: host(for: machine))
                     }
                 }
                 SettingsListGutter {
-                    Button { addingHost = true } label: {
+                    // Two ways in, because there are two roads: a host block in
+                    // ~/.ssh/config, or another Mac's pairing link with no SSH.
+                    Menu {
+                        Button(localized("Add SSH Host…")) { addingHost = true }
+                        Button(localized("Pair with a Mac…")) { pairingMac = true }
+                    } label: {
                         SettingsGutterGlyph(symbol: "plus")
                     }
-                    .buttonStyle(.plain)
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
                     .help(localized("Add Remote Host"))
                     .accessibilityLabel(localized("Add Remote Host"))
                 }
@@ -109,7 +120,8 @@ struct RemoteHostsSettingsTab: View {
         }
         .formStyle(.grouped)
         .navigationDestination(for: DeviceRoute.self) { route in
-            if let machine = machines.first(where: { $0.settingsKey == route.key }) {
+            if let machine = machines.first(where: { $0.navigationKey == route.key })
+                ?? machines.first(where: { $0.settingsKey == route.key }) {
                 DevicePane(
                     machine: machine,
                     host: host(for: machine),
@@ -120,7 +132,10 @@ struct RemoteHostsSettingsTab: View {
                     onConnect: onConnect,
                     onSetUpKey: onSetUpKey,
                     onEditConfig: { presentEditor(for: host(for: machine)) },
-                    pairsPhones: DeviceRoster.known(in: store).contains { $0.alias == machine.alias }
+                    // Publishing a box for a phone runs `termiod pair` over ssh;
+                    // a paired Mac pairs its own phones from its own Settings.
+                    pairsPhones: !TermiodRoute.isPaired(hostKey: machine.alias)
+                        && DeviceRoster.known(in: store).contains { $0.alias == machine.alias }
                 )
                 .id(route.key)
                 .navigationTitle(machine.name)
@@ -137,6 +152,10 @@ struct RemoteHostsSettingsTab: View {
         .sheet(isPresented: $addingHost, onDismiss: reload) {
             AddSSHHostSheet(existingAliases: Set(hosts.map(\.alias)))
         }
+        .sheet(isPresented: $pairingMac) { PairMacSheet() }
+        .onReceive(NotificationCenter.default.publisher(for: PairedDeviceStore.didChange)) { _ in
+            paired = PairedDeviceStore.all()
+        }
         .sheet(item: $configEditor, onDismiss: reload) { target in
             SSHConfigEditorSheet(target: target, settings: settings) { configEditor = nil }
         }
@@ -149,7 +168,7 @@ struct RemoteHostsSettingsTab: View {
     /// This Mac is filtered out rather than led with: it has its own tab, and a
     /// roster that also carried it would be two doors to one pane.
     private var machines: [KnownDevice] {
-        let known = DeviceRoster.known(in: store)
+        let known = DeviceRoster.known(in: store, paired: paired)
         return known.filter { !$0.isLocal }
             + DeviceRoster.unusedAliases(known: known)
                 .map { KnownDevice(alias: $0, deviceID: nil) }
@@ -214,6 +233,10 @@ private struct RemoteHostListRow: View {
     /// than one line and a gap. Apple's rows put the *fact* in the subtitle ("65
     /// apps", "Off"); here the fact is where this host is and what signs in.
     private var detail: String {
+        if case .paired(let hostID) = machine.route {
+            return PairedDeviceStore.device(hostID: hostID).map { localized("Paired · \($0.url)") }
+                ?? localized("No longer paired")
+        }
         guard let host else { return localized("From your session history") }
         guard let identityFile = host.identityFile else { return host.destinationLabel }
         return "\(host.destinationLabel) · \((identityFile as NSString).lastPathComponent)"
@@ -245,3 +268,94 @@ private struct RemoteHostListRow: View {
 }
 
 
+/// Pairs this Mac with another one from the link its Pairing sheet copies. The
+/// link is checked by dialing it before anything is kept, so a typo or a Mac that
+/// is not serving fails here, in words, rather than on the first session.
+struct PairMacSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var link = ""
+    @State private var checking = false
+    @State private var failure: String?
+    /// Set by Cancel, so a dial still running when the sheet closes keeps
+    /// nothing. The task outlives the sheet; this box is what it can still read.
+    @State private var attempt = PairingCancellation()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextField(localized("Pairing Link"), text: $link,
+                              prompt: Text(verbatim: "termio://device?…"), axis: .vertical)
+                        .lineLimit(3 ... 5)
+                        .font(.system(.body, design: .monospaced))
+                        .disabled(checking)
+                } header: {
+                    SectionHeaderLabel(title: localized("Pair with a Mac"))
+                } footer: {
+                    Text(localized("On the other Mac, open Settings ▸ Server ▸ Pairing ▸ Show QR Code… and click Copy Link, then paste it here."))
+                        .font(.settingsDetail)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped)
+            Divider()
+            HStack {
+                if let failure {
+                    Text(failure)
+                        .font(.settingsDetail)
+                        .foregroundStyle(.red)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if checking {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer()
+                Button(localized("Cancel")) {
+                    attempt.cancel()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button(localized("Pair"), action: pair)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(checking || link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(12)
+        }
+        .frame(width: 460, height: 300)
+    }
+
+    private func pair() {
+        guard let device = PairedDevice(link: link) else {
+            failure = localized("That isn’t a Termio pairing link. Copy it again from the other Mac.")
+            return
+        }
+        failure = nil
+        checking = true
+        let attempt = attempt
+        Task {
+            // Dialled before anything is kept, so a link that does not work never
+            // replaces one that does.
+            let dialFailure: String? = await Task.detached(priority: .userInitiated) {
+                do {
+                    _ = try Termiod.probePairedDevice(device, cancellation: attempt)
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            }.value
+            guard !attempt.isCancelled else { return }
+            checking = false
+            if let dialFailure {
+                failure = dialFailure
+                return
+            }
+            do {
+                try PairedDeviceStore.save(device)
+                NotificationCenter.default.post(name: PairedDeviceStore.didChange, object: nil)
+                dismiss()
+            } catch {
+                failure = error.localizedDescription
+            }
+        }
+    }
+}

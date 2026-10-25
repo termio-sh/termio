@@ -505,15 +505,19 @@ extension Termiod {
         /// without explanation. `nil` on the local socket, which has no child
         /// and no stderr to keep.
         private let stderrTail: StderrTail?
+        /// The WebSocket behind a paired Mac's descriptor, held so it lives as
+        /// long as the transport does.
+        private let bridge: WebSocketBridge?
 
         private init(readDescriptor: Int32, writeDescriptor: Int32,
                      route: TermiodRoute, sshPid: pid_t?,
-                     stderrTail: StderrTail? = nil) {
+                     stderrTail: StderrTail? = nil, bridge: WebSocketBridge? = nil) {
             self.readDescriptor = readDescriptor
             self.writeDescriptor = writeDescriptor
             self.route = route
             self.sshPid = sshPid
             self.stderrTail = stderrTail
+            self.bridge = bridge
             Transport.suppressSignalOnBrokenPipe(writeDescriptor)
         }
 
@@ -590,7 +594,27 @@ extension Termiod {
             switch route {
             case .local: return try local()
             case .ssh(let alias): return try ssh(host: alias)
+            case .paired(let hostID): return try paired(hostID: hostID)
             }
+        }
+
+        /// A paired Mac over its WebSocket, bridged to a descriptor so nothing
+        /// above this line learns a third kind of pipe. The bridge lives as long
+        /// as its descriptor: closing it ends the WebSocket.
+        static func paired(hostID: String) throws -> Transport {
+            guard let device = PairedDeviceStore.device(hostID: hostID) else {
+                throw TermiodClientError.remoteFailed(localized(
+                    "This Mac is no longer paired. Pair it again from Settings ▸ Remote Hosts."))
+            }
+            return try paired(device)
+        }
+
+        /// A paired Mac from its record directly, for the pairing sheet's dial
+        /// before anything is saved.
+        static func paired(_ device: PairedDevice, requiresPairing: Bool = true) throws -> Transport {
+            let bridge = try WebSocketBridge.open(device, requiresPairing: requiresPairing)
+            return Transport(readDescriptor: bridge.descriptor, writeDescriptor: bridge.descriptor,
+                             route: .paired(device.hostID), sshPid: nil, bridge: bridge)
         }
 
         /// `ssh <host> termiod stdio`: the framed protocol rides the SSH pipe,
@@ -871,6 +895,12 @@ extension Termiod {
                              caps: [String] = []) throws -> Handshake {
         let hello = try helloPayload(role: role, caps: caps, client: clientBanner)
         try writeFrame(transport.writeDescriptor, kind: .control, payload: hello)
+        // On a paired Mac the far app's splice answers pings for a daemon that
+        // may not be answering at all, so the reply gets a deadline there. It is
+        // lifted once the reply lands: the reads after it wait on a quiet shell.
+        let deadline = transport.route.isPaired
+        if deadline { setReceiveTimeout(transport.readDescriptor, seconds: WebSocketBridge.openTimeout) }
+        defer { if deadline { setReceiveTimeout(transport.readDescriptor, seconds: 0) } }
         let reply = try readFrame(transport.readDescriptor)
         guard reply.kind == .control else { throw TermiodClientError.malformedFrame }
         switch try decodeControl(reply.payload) {
@@ -923,6 +953,35 @@ extension Termiod {
         } catch let error as TermiodClientError {
             throw transport.explained(error)
         }
+    }
+
+    /// The pairing sheet's check: dial a link that is not saved yet, and confirm
+    /// the daemon behind it is the machine the link names. A link copied from
+    /// one Mac and edited to point at another would otherwise pair the second
+    /// under the first one's identity.
+    static func probePairedDevice(
+        _ paired: PairedDevice, cancellation: PairingCancellation? = nil
+    ) throws -> TermiodDevice {
+        let transport = try Transport.paired(paired, requiresPairing: false)
+        cancellation?.watch(transport.readDescriptor)
+        defer {
+            cancellation?.unwatch()
+            transport.close()
+        }
+        guard cancellation?.isCancelled != true else { throw TermiodClientError.connectionClosed }
+        let device = try performHello(transport, role: "control").device
+        guard device.id == paired.hostID else {
+            throw TermiodClientError.handshakeRejected(localized(
+                "The Mac at that address isn’t the one the link was copied from. Copy the link again."))
+        }
+        return device
+    }
+
+    /// `0` clears it. A socket option, so a no-op on the ssh road's pipes.
+    static func setReceiveTimeout(_ descriptor: Int32, seconds: TimeInterval) {
+        var value = timeval(tv_sec: Int(seconds), tv_usec: 0)
+        _ = setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &value,
+                       socklen_t(MemoryLayout<timeval>.size))
     }
 
     /// Connect, shake hands, hang up: the cheapest question you can ask a route,
@@ -1624,7 +1683,12 @@ final class TermiodSessionLink: @unchecked Sendable {
                 rendering: declaredRendering
             )
             try Termiod.writeFrame(channel.writeDescriptor, kind: .control, payload: payload)
+            // Bounded on a paired Mac for the reason the hello is: its app's
+            // splice keeps the link alive for a daemon that may have stopped.
+            let paired = channel.route.isPaired
+            if paired { Termiod.setReceiveTimeout(channel.readDescriptor, seconds: WebSocketBridge.openTimeout) }
             let reply = try Termiod.readFrame(channel.readDescriptor)
+            if paired { Termiod.setReceiveTimeout(channel.readDescriptor, seconds: 0) }
             guard reply.kind == .control else {
                 throw TermiodClientError.handshakeRejected("attach was not acknowledged")
             }

@@ -292,7 +292,7 @@ final class TermiodPasteInterceptor: NSObject {
         guard !inFlight.contains(sessionID) else { return true }
         inFlight.insert(sessionID)
 
-        let route = TermiodRoute(sshAlias: host)
+        let route = TermiodRoute(hostKey: host)
         let name = image.scratchFileName
         // The name the *daemon* knows this session by, which is the app's own uuid
         // only for a session the app created. One adopted off the machine's roster
