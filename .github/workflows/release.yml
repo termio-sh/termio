@@ -90,7 +90,7 @@ jobs:
       # Built-in Tailscale (termiod/tailnet) is a Go helper; build-app.sh fails a
       # release without it. go.mod pins the toolchain Tailscale's module needs.
       - name: Install Go (for built-in Tailscale)
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: termiod/tailnet/go.mod
           cache-dependency-path: termiod/tailnet/go.sum
