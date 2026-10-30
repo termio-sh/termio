@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A graphical light/dark/system switcher, styled like macOS System Settings:
 /// three tiles, each a small window rendered in that appearance, with a radio and
-/// label beneath and an accent ring on the selection.
+/// label beneath and an ink ring on the selection: state is marked with ink, never hue.
 struct AppearanceModePicker: View {
     @Binding var selection: AppearanceMode
 
@@ -32,8 +32,8 @@ struct AppearanceModePicker: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .strokeBorder(
-                                    isSelected ? Color.accentColor : Color.primary.opacity(0.15),
-                                    lineWidth: isSelected ? 3 : 1
+                                    isSelected ? Color.primary : Color.primary.opacity(0.15),
+                                    lineWidth: isSelected ? 2 : 1
                                 )
                         )
                 }
@@ -42,7 +42,7 @@ struct AppearanceModePicker: View {
                     Text(mode.displayName).font(.system(size: 12))
                 } icon: {
                     Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                 }
                 .labelStyle(.titleAndIcon)
             }
@@ -65,8 +65,8 @@ struct TabLayoutPicker: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     .strokeBorder(
-                                        layout == selection ? Color.accentColor : Color.primary.opacity(0.15),
-                                        lineWidth: layout == selection ? 3 : 1
+                                        layout == selection ? Color.primary : Color.primary.opacity(0.15),
+                                        lineWidth: layout == selection ? 2 : 1
                                     )
                             )
                     }
@@ -75,7 +75,7 @@ struct TabLayoutPicker: View {
                         Text(layout.displayName).font(.system(size: 12))
                     } icon: {
                         Image(systemName: layout == selection ? "largecircle.fill.circle" : "circle")
-                            .foregroundStyle(layout == selection ? Color.accentColor : Color.secondary)
+                            .foregroundStyle(layout == selection ? Color.primary : Color.secondary)
                     }
                     .labelStyle(.titleAndIcon)
                 }

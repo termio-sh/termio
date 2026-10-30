@@ -3,8 +3,8 @@ title: 问题排查
 description: 真正会出问题的那些事——状态点不动、Agent 起不来、重启之后会话不见了、一台机器不应答了、手机连不上——每一条都给一个去看而不是去猜的办法。
 x-i18n:
   source_path: troubleshooting.mdx
-  source_hash: 9b7977d2714a1a0209fe8158bb1ee4aa2f5c1c7d2ac8c851065773606e7fc4bc
-  generated_at: 2026-10-26
+  source_hash: ace371d0cb3b4bbf095ad4367959e0cb88d399011050f68b1e9ede5e7cb92c99
+  generated_at: 2026-10-28
 ---
 
 几乎所有看起来像 Termio bug 的东西，都是下面这些情况之一，而每一条都有一个去查而不是去猜的
@@ -114,9 +114,9 @@ termio -H mybox server deploy     # 重装并校验一遍
 1. **机器醒着吗？** 睡着的 Mac 什么也不应答，而且应用里没有任何东西能从外面把它叫醒。如果
    你想让这件事一直成立，就配对到一台一直开着的机器上——参见
    [什么会留下来](/zh-CN/docs/persistence#sleep)。
-2. **发布了吗？** 本机要在**设置 ▸ Termio server ▸ 配对**里打开**允许已配对设备**；别的机器要在
+2. **发布了吗？** 本机要在**设置 ▸ Termio server ▸ iPhone**里打开**允许已配对设备**；别的机器要在
    **设置 ▸ 远程主机**里发布。在同一个 Wi-Fi 下，这就够了。
-3. **在外面时，有隧道吗？** 离开你自己的网络，机器需要一个地址——**设置 ▸ Termio server ▸ 配对 ▸ 网络**里的
+3. **在外面时，有隧道吗？** 离开你自己的网络，机器需要一个地址——**设置 ▸ Termio server ▸ 网络**里的
    Tailscale 或隧道，
    或者你自己的。
 4. **Token 换过吗？** **更换 Token…**按设计会让每一台已配对的手机登出。重新扫一次二维码。

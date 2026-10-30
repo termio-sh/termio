@@ -10,7 +10,7 @@ or a tunnel you configure. There’s no relay of ours in between.
 ## Pairing
 
 1. On your Mac, open the machine your iPhone should connect to. Each one serves
-   its own sessions. For this Mac, that’s **Settings ▸ Server ▸ Pairing**: turn
+   its own sessions. For this Mac, that’s **Settings ▸ Server ▸ iPhone**: turn
    on **Allow Paired Devices** and press **Show QR Code…**. For another machine,
    open it under **Settings ▸ Remote Hosts** and press **Publish** if it isn’t
    reachable yet.
@@ -72,8 +72,8 @@ the middle.
 ## Reaching a machine remotely
 
 On the same Wi-Fi, pairing is all you need. To reach a machine from anywhere,
-give it an address. **Settings ▸ Server ▸ Pairing ▸ Network** offers
-**Tailscale** — with **Built-In Tailscale**, which needs **Direct Attach** on,
+give it an address. **Settings ▸ Server ▸ Network ▸ Connect Over** offers
+**Tailscale** — with **Built-In Tailscale**, which needs **Direct Attach** under **Pairing**,
 this Mac joins your tailnet without the Tailscale app — and tunnels: a bundled one starts for you, or **Custom** runs the tunnel command you choose — a named `cloudflared` tunnel, or
 your own relay — and matches the URL it prints. Termio never routes your traffic
 through servers of ours; a hosted tunnel provider terminates on theirs, which is
