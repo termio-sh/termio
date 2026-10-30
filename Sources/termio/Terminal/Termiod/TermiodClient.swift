@@ -2524,6 +2524,14 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// repainted too.
     func noteSurfaceGrid(rows: Int, cols: Int) {
         let size = TerminalGrid(rows: UInt16(clamping: rows), cols: UInt16(clamping: cols))
+        // Ghostty can call this while holding its parser lock. Output takes
+        // outputLock before entering that parser, so acquiring outputLock here
+        // would invert the locks and strand both the IO and main threads.
+        workQueue.async { [self] in noteSurfaceGridLocked(size) }
+    }
+
+    private func noteSurfaceGridLocked(_ size: TerminalGrid) {
+        guard !closed else { return }
         let readyAfter = DispatchTime.now() + .milliseconds(30)
         outputLock.lock()
         hold.surfaceReadyAfter = readyAfter
@@ -2608,7 +2616,7 @@ final class TermiodSessionLink: @unchecked Sendable {
     /// path to the surface does: a release running on `workQueue` that dropped
     /// the lock before emitting could be overtaken by the next `D` frame, and
     /// that order is the whole point of the hold.
-    private func deliverOutput(_ data: Data) {
+    func deliverOutput(_ data: Data) {
         outputLock.lock()
         let outcome = hold.receive(output: data, limit: Self.keyframeHoldByteLimit)
         for chunk in outcome.emit { onOutput?(chunk) }
