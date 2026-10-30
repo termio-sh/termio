@@ -165,6 +165,7 @@ Companion:
   re-pull from upstream instead.
 - Skills that encode this repo's workflows, by area:
   - Build & run: `macos-rebuild-dev`, `ios-rebuild-dev`, `app-screenshot-debug`
+  - Browser: `chrome-record` (drive Chrome, record an interaction as a GIF)
   - Release: `bump-version`, `check-ghostty-update`, `testflight-release`
     (iOS beta builds), `asc` (App Store Connect)
   - Repo hygiene: `conventional-commit`, `doc`, `issue-creator`
