@@ -448,14 +448,13 @@ struct DeviceServingSection: View {
             // A product name, the same in every language.
             SectionHeaderLabel(title: "iPhone")
         }
-        .onDisappear { builtIn.stopWatching() }
+        // This card shows a failure to take Tailscale off the tailnet, so it
+        // watches too; the count lets both cards hold one poll.
         .onAppear {
             pairing.refresh()
             builtIn.startWatching()
-            let custom = CustomTunnel.current
-            customCommand = custom.command
-            customURLPattern = custom.urlPattern
         }
+        .onDisappear { builtIn.stopWatching() }
 
         if mobile.isEnabled {
             Section {
@@ -495,6 +494,16 @@ struct DeviceServingSection: View {
                 // one the user runs themselves.
                 footnote(networkFootnote)
             }
+            // Polling follows the section that shows Tailscale's state: in a
+            // lazy Form each section appears and disappears on its own, and
+            // the iPhone card can scroll away while this one is on screen.
+            .onAppear {
+                builtIn.startWatching()
+                let custom = CustomTunnel.current
+                customCommand = custom.command
+                customURLPattern = custom.urlPattern
+            }
+            .onDisappear { builtIn.stopWatching() }
 
             Section {
                 Toggle(isOn: $mobile.attachesDirectly) {
