@@ -38,36 +38,27 @@ struct ThemePickerField: View {
     var isActive = false
 
     var body: some View {
-        Button { isPresented = true } label: {
-            VStack(alignment: .leading, spacing: 8) {
+        // The same tile as the mode and tab choices, so the page reads as one
+        // family; the ring marks the slot painting the window now. The theme
+        // itself is chosen in the pop-up button beneath, which keeps the search
+        // a plain menu could not give fifty themes.
+        VStack(spacing: 8) {
+            ChoiceTile(title: title, isSelected: isActive, action: { isPresented = true }) {
                 ThemePreview(definition: ThemeLibrary.theme(named: selection), prefersDark: prefersDark)
-                    .frame(height: 96)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(
-                                isActive ? Color.primary : Color.primary.opacity(0.15),
-                                lineWidth: isActive ? 2 : 1
-                            )
-                    )
+            }
+            Button { isPresented = true } label: {
                 HStack(spacing: 4) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title)
-                            .font(.settingsDetail)
-                            .foregroundStyle(.secondary)
-                        Text(selection.isEmpty ? localized("Terminal default") : selection)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    Spacer(minLength: 4)
+                    Text(selection.isEmpty ? localized("Terminal default") : selection)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 2)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
                 }
+                .frame(width: ChoiceTileMetrics.size.width - 18)
             }
-            .contentShape(Rectangle())
+            .controlSize(.small)
         }
-        .buttonStyle(.plain)
         .help(appearanceMismatchHint ?? "")
         .popover(isPresented: $isPresented, arrowEdge: .bottom) { popover }
     }
@@ -305,25 +296,26 @@ struct ThemePreview: View {
         let background = definition.flatMap { Color(hex: $0.background) } ?? (prefersDark ? .black : .white)
         let foreground = definition.flatMap { Color(hex: $0.foreground) } ?? (prefersDark ? .white : .black)
         let cursor = definition?.cursorColor.flatMap { Color(hex: $0) } ?? foreground
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             line([("~/termio", ansi(4, foreground)), (" git:(", foreground), ("main", ansi(1, foreground)), (")", foreground)])
             line([("$ ", ansi(2, foreground)), ("swift test", foreground)])
-            line([("✓ ", ansi(2, foreground)), ("42 passed", foreground), ("  ", foreground), ("1 skipped", ansi(3, foreground))])
+            line([("✓ ", ansi(2, foreground)), ("42 passed", foreground), (" ", foreground), ("1 skipped", ansi(3, foreground))])
             HStack(spacing: 0) {
                 Text(verbatim: "$ ").foregroundStyle(ansi(2, foreground))
-                cursor.frame(width: 6, height: 11)
+                cursor.frame(width: 5, height: 10)
             }
             Spacer(minLength: 0)
             HStack(spacing: 3) {
                 ForEach(1...6, id: \.self) { slot in
                     RoundedRectangle(cornerRadius: 1.5)
                         .fill(ansi(slot, foreground))
-                        .frame(width: 10, height: 4)
+                        .frame(width: 8, height: 3)
                 }
             }
         }
-        .font(.system(size: 10, design: .monospaced))
-        .padding(10)
+        // Sized for the Appearance page's tile: the longest line just fits.
+        .font(.system(size: 9, design: .monospaced))
+        .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(background)
         // A theme preview is not text anyone reads; the name below it is.

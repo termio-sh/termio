@@ -33,7 +33,7 @@ struct AppearanceSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
             Section {
-                HStack(alignment: .top, spacing: 16) {
+                HStack(alignment: .top, spacing: ChoiceTileMetrics.spacing) {
                     ThemePickerField(
                         title: localized("Light"), prefersDark: false, selection: $settings.lightThemeName,
                         userThemeNames: userThemeNames, onDuplicate: duplicate, isActive: !showsDark)
@@ -41,17 +41,19 @@ struct AppearanceSettingsTab: View {
                         title: localized("Dark"), prefersDark: true, selection: $settings.darkThemeName,
                         userThemeNames: userThemeNames, onDuplicate: duplicate, isActive: showsDark)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
                 HStack {
                     Button(localized("Open Themes Folder…"), action: openThemesFolder)
+                    Button(localized("Reload"), action: reloadUserThemes)
                     Spacer()
                     if !userThemeNames.isEmpty {
                         Text(localized("\(userThemeNames.count) in your Themes folder"))
                             .font(.settingsDetail)
                             .foregroundStyle(.secondary)
                     }
-                    Button(localized("Reload"), action: reloadUserThemes)
                 }
+                .controlSize(.small)
             } header: {
                 SectionHeaderLabel(title: localized("Theme"))
             } footer: {

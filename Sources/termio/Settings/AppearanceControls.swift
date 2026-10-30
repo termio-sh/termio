@@ -1,52 +1,62 @@
 import SwiftUI
 
+/// The size every picture on the Appearance page is drawn at. One size for the
+/// mode, theme and tab choices, so their rows line up and read as one family.
+enum ChoiceTileMetrics {
+    static let size = CGSize(width: 136, height: 86)
+    static let spacing: CGFloat = 20
+}
+
+/// A picture to click, with its name beneath and an ink ring when it is the
+/// current choice: state is marked with ink, never hue. The ring is the only
+/// mark; a radio beside the name said the same thing twice.
+struct ChoiceTile<Picture: View>: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+    @ViewBuilder let picture: () -> Picture
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                picture()
+                    .frame(width: ChoiceTileMetrics.size.width, height: ChoiceTileMetrics.size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(
+                                isSelected ? Color.primary : Color.primary.opacity(0.15),
+                                lineWidth: isSelected ? 2 : 1
+                            )
+                    )
+                Text(title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
 /// A graphical light/dark/system switcher, styled like macOS System Settings:
-/// three tiles, each a small window rendered in that appearance, with a radio and
-/// label beneath and an ink ring on the selection: state is marked with ink, never hue.
+/// three small windows, each rendered in that appearance.
 struct AppearanceModePicker: View {
     @Binding var selection: AppearanceMode
 
     var body: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: ChoiceTileMetrics.spacing) {
             ForEach(AppearanceMode.allCases) { mode in
-                Tile(mode: mode, isSelected: mode == selection) {
+                ChoiceTile(title: mode.displayName, isSelected: mode == selection) {
                     selection = mode
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
-    }
-
-    private struct Tile: View {
-        let mode: AppearanceMode
-        let isSelected: Bool
-        let action: () -> Void
-
-        var body: some View {
-            VStack(spacing: 8) {
-                Button(action: action) {
+                } picture: {
                     WindowMock(mode: mode)
-                        .frame(width: 116, height: 74)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(
-                                    isSelected ? Color.primary : Color.primary.opacity(0.15),
-                                    lineWidth: isSelected ? 2 : 1
-                                )
-                        )
                 }
-                .buttonStyle(.plain)
-                Label {
-                    Text(mode.displayName).font(.system(size: 12))
-                } icon: {
-                    Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                }
-                .labelStyle(.titleAndIcon)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
     }
 }
 
@@ -55,33 +65,16 @@ struct TabLayoutPicker: View {
     @Binding var selection: TabLayout
 
     var body: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: ChoiceTileMetrics.spacing) {
             ForEach(TabLayout.allCases) { layout in
-                VStack(spacing: 8) {
-                    Button { selection = layout } label: {
-                        TabLayoutMock(layout: layout)
-                            .frame(width: 116, height: 74)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(
-                                        layout == selection ? Color.primary : Color.primary.opacity(0.15),
-                                        lineWidth: layout == selection ? 2 : 1
-                                    )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    Label {
-                        Text(layout.displayName).font(.system(size: 12))
-                    } icon: {
-                        Image(systemName: layout == selection ? "largecircle.fill.circle" : "circle")
-                            .foregroundStyle(layout == selection ? Color.primary : Color.secondary)
-                    }
-                    .labelStyle(.titleAndIcon)
+                ChoiceTile(title: layout.displayName, isSelected: layout == selection) {
+                    selection = layout
+                } picture: {
+                    TabLayoutMock(layout: layout)
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
     }
 }
