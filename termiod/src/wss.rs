@@ -20,7 +20,7 @@ use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, UnixStream};
@@ -699,10 +699,21 @@ where
 
 /// Live splices close when the token changes. `pair --rotate` is the only
 /// revocation there is, so it has to reach connections that are already up.
+///
+/// One watch for the process. The accept loop and the tailnet helper both
+/// follow it. A watch of this directory feeds itself: notify 8.2.0's inotify
+/// mask includes `IN_OPEN`, and reading `pair.token` is that open. A second
+/// watch receives every one of those opens.
 pub(crate) struct Rotation {
     sender: watch::Sender<u64>,
-    _watcher: Option<RecommendedWatcher>,
 }
+
+struct RotationHub {
+    sender: watch::Sender<u64>,
+    watcher: Mutex<Option<RecommendedWatcher>>,
+}
+
+static ROTATION: OnceLock<RotationHub> = OnceLock::new();
 
 impl Rotation {
     pub(crate) fn subscribe(&self) -> watch::Receiver<u64> {
@@ -711,20 +722,40 @@ impl Rotation {
 }
 
 pub(crate) fn start_rotation_watch() -> Rotation {
-    let (sender, _) = watch::channel(0u64);
-    let watcher = match install_watch(sender.clone()) {
-        Ok(watcher) => Some(watcher),
-        Err(error) => {
-            // Degraded, not broken: new Upgrades still read the token from
-            // disk. Only the "kick the live ones" half is lost.
-            eprintln!("termiod: wss: not watching pair.token for rotation: {error:#}");
-            None
+    let hub = ROTATION.get_or_init(|| {
+        let (sender, _) = watch::channel(0u64);
+        RotationHub {
+            sender,
+            watcher: Mutex::new(None),
         }
-    };
-    Rotation {
-        sender,
-        _watcher: watcher,
+    });
+    {
+        // The accept loop and the tailnet supervisor call this concurrently.
+        // Two installs would be two watches of the same directory.
+        let mut watcher = hub.watcher.lock().unwrap();
+        if watcher.is_none() {
+            match install_watch(hub.sender.clone()) {
+                Ok(installed) => *watcher = Some(installed),
+                Err(error) => {
+                    // Degraded, not broken: new Upgrades still read the token
+                    // from disk. Leave the slot empty so the next caller retries.
+                    eprintln!("termiod: wss: not watching pair.token for rotation: {error:#}");
+                }
+            }
+        }
     }
+    Rotation {
+        sender: hub.sender.clone(),
+    }
+}
+
+fn rotation_signal(event: &notify::Event, token_name: &std::ffi::OsStr) -> bool {
+    // File name, not full path: `/tmp` is a symlink to `/private/tmp` on macOS.
+    !crate::resource::is_read_only_access(&event.kind)
+        && event
+            .paths
+            .iter()
+            .any(|path| path.file_name() == Some(token_name))
 }
 
 fn install_watch(sender: watch::Sender<u64>) -> Result<RecommendedWatcher> {
@@ -739,9 +770,20 @@ fn install_watch(sender: watch::Sender<u64>) -> Result<RecommendedWatcher> {
         .file_name()
         .map(std::ffi::OsString::from)
         .ok_or_else(|| anyhow::anyhow!("the pairing token has no file name"))?;
-    let (raw_tx, mut raw_rx) = mpsc::unbounded_channel::<notify::Result<notify::Event>>();
-    let mut watcher = notify::recommended_watcher(move |event| {
-        let _ = raw_tx.send(event);
+    // Capacity 1. The queued consumer reads `pair.token` from disk, so a
+    // newer signal would only repeat that read.
+    let (raw_tx, mut raw_rx) = mpsc::channel::<()>(1);
+    let mut watcher = notify::recommended_watcher(move |result| {
+        let event = match result {
+            Ok(event) => event,
+            Err(error) => {
+                eprintln!("termiod: wss: pair.token watch: {error:#}");
+                return;
+            }
+        };
+        if rotation_signal(&event, token_name.as_os_str()) {
+            let _ = raw_tx.try_send(());
+        }
     })
     .context("creating the pair.token watcher")?;
     // The directory, not the file: rotation renames a staged file into place,
@@ -752,18 +794,7 @@ fn install_watch(sender: watch::Sender<u64>) -> Result<RecommendedWatcher> {
 
     tokio::spawn(async move {
         let mut current = paths::read_pair_token().ok().flatten();
-        while let Some(event) = raw_rx.recv().await {
-            let Ok(event) = event else { continue };
-            // By file name, not by full path: the backend reports resolved
-            // paths (`/tmp` is a symlink to `/private/tmp` on macOS), so an
-            // equality check against the configured path never matches.
-            if !event
-                .paths
-                .iter()
-                .any(|path| path.file_name() == Some(token_name.as_os_str()))
-            {
-                continue;
-            }
+        while raw_rx.recv().await.is_some() {
             let latest = paths::read_pair_token().ok().flatten();
             if latest != current {
                 current = latest;
@@ -1033,5 +1064,42 @@ mod tests {
             parse_origin("http://127.0.0.1:8790").unwrap().base_url(),
             "http://127.0.0.1:8790/"
         );
+    }
+
+    #[test]
+    fn only_a_change_to_the_token_file_wakes_rotation() {
+        use notify::event::{AccessKind, AccessMode, ModifyKind, RemoveKind, RenameMode};
+        let name = std::ffi::OsStr::new("pair.token");
+        let wakes = |kind: notify::EventKind, path: &str| {
+            rotation_signal(&notify::Event::new(kind).add_path(path.into()), name)
+        };
+
+        assert!(!wakes(
+            notify::EventKind::Access(AccessKind::Open(AccessMode::Any)),
+            "/private/tmp/pair.token"
+        ));
+        assert!(!wakes(
+            notify::EventKind::Modify(ModifyKind::Any),
+            "/private/tmp/termiod.log"
+        ));
+        assert!(!wakes(
+            notify::EventKind::Access(AccessKind::Close(AccessMode::Write)),
+            "/private/tmp/.adopt.lock"
+        ));
+        assert!(wakes(
+            notify::EventKind::Access(AccessKind::Close(AccessMode::Write)),
+            "/private/tmp/pair.token"
+        ));
+        assert!(wakes(
+            notify::EventKind::Remove(RemoveKind::File),
+            "/private/tmp/pair.token"
+        ));
+
+        let renamed = notify::Event::new(notify::EventKind::Modify(ModifyKind::Name(
+            RenameMode::Both,
+        )))
+        .add_path("/private/tmp/pair.staged".into())
+        .add_path("/private/tmp/pair.token".into());
+        assert!(rotation_signal(&renamed, name));
     }
 }
