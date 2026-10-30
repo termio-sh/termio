@@ -108,7 +108,10 @@ def read_until(master, needle, timeout=5.0):
 def cleanup():
     for s in sessions():
         run("kill", s["id"])
-    # The temp-socket daemon idles harmlessly; its socket dir is removed below.
+    # Stop the temp-socket daemon too: removing its socket dir leaves it running
+    # with no way to reach it. `stop` signals only the process serving
+    # TERMIOD_SOCK, which is this test's own.
+    run("stop", "--force")
 
 
 def main():
