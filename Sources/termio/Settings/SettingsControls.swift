@@ -208,7 +208,7 @@ struct SettingsStepper<Value: Strideable>: View {
                     .foregroundStyle(.secondary)
                 Stepper(title, value: $value, in: range, step: step)
                     .labelsHidden()
-                    .controlSize(.small)
+                    .fixedSize()
             }
         }
     }

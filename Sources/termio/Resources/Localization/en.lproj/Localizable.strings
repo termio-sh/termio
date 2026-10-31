@@ -74,6 +74,8 @@
 %@</string>
 	<key>%@ stays published only until you log out of it. Termio couldn’t set it to keep services running after that.</key>
 	<string>%@ stays published only until you log out of it. Termio couldn’t set it to keep services running after that.</string>
+	<key>%@ theme</key>
+	<string>%@ theme</string>
 	<key>%@ tokens</key>
 	<string>%@ tokens</string>
 	<key>%@ · %@ tokens</key>
@@ -92,8 +94,6 @@
 	<string>%lld file</string>
 	<key>%lld files</key>
 	<string>%lld files</string>
-	<key>%lld in your Themes folder</key>
-	<string>%lld in your Themes folder</string>
 	<key>%lld installed</key>
 	<string>%lld installed</string>
 	<key>%lld not installed</key>
@@ -542,6 +542,8 @@
 	<string>Create</string>
 	<key>Credentials</key>
 	<string>Credentials</string>
+	<key>Current</key>
+	<string>Current</string>
 	<key>Current workspace</key>
 	<string>Current workspace</string>
 	<key>Cursor</key>
@@ -846,6 +848,8 @@
 	<string>Later</string>
 	<key>Launch</key>
 	<string>Launch</string>
+	<key>Layout</key>
+	<string>Layout</string>
 	<key>Leave a path empty to launch the agent the way %@’s login shell would. Which agents appear at all is Settings ▸ Agents.</key>
 	<string>Leave a path empty to launch the agent the way %@’s login shell would. Which agents appear at all is Settings ▸ Agents.</string>
 	<key>Let your agents coordinate?</key>
@@ -890,6 +894,8 @@
 	<string>Machines</string>
 	<key>Machines signed in to Tailscale. Choose one to fill in its address.</key>
 	<string>Machines signed in to Tailscale. Choose one to fill in its address.</string>
+	<key>Manage</key>
+	<string>Manage</string>
 	<key>Match Case</key>
 	<string>Match Case</string>
 	<key>Match Whole Word</key>
@@ -1406,8 +1412,6 @@
 	<string>Rotate Token…</string>
 	<key>Rotate the pairing token?</key>
 	<string>Rotate the pairing token?</string>
-	<key>Row padding</key>
-	<string>Row padding</string>
 	<key>Run Termio from the built app to install its command-line tool.</key>
 	<string>Run Termio from the built app to install its command-line tool.</string>
 	<key>Run a command…</key>
@@ -1542,6 +1546,12 @@
 	<string>Side Button</string>
 	<key>Sidebar</key>
 	<string>Sidebar</string>
+	<key>Sidebar font</key>
+	<string>Sidebar font</string>
+	<key>Sidebar row spacing</key>
+	<string>Sidebar row spacing</string>
+	<key>Sidebar text size</key>
+	<string>Sidebar text size</string>
 	<key>Sign In…</key>
 	<string>Sign In…</string>
 	<key>Sign Out</key>
@@ -1702,8 +1712,6 @@
 	<string>The ignore rule couldn’t be added.</string>
 	<key>The install page — the same one whichever machine you are installing on.</key>
 	<string>The install page — the same one whichever machine you are installing on.</string>
-	<key>The light and dark themes below follow this choice.</key>
-	<string>The light and dark themes below follow this choice.</string>
 	<key>The listing failed.</key>
 	<string>The listing failed.</string>
 	<key>The machine answered with no listing for that folder.</key>
@@ -1714,8 +1722,6 @@
 	<string>The machine couldn’t read this comparison.</string>
 	<key>The machine everything filed under this workspace lives on.</key>
 	<string>The machine everything filed under this workspace lives on.</string>
-	<key>The project and session list.</key>
-	<string>The project and session list.</string>
 	<key>The public keys in ~/.ssh. Copy one to paste into a server’s authorized_keys — private keys are never read.</key>
 	<string>The public keys in ~/.ssh. Copy one to paste into a server’s authorized_keys — private keys are never read.</string>
 	<key>The read failed.</key>

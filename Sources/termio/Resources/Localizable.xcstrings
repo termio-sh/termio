@@ -910,16 +910,6 @@
         }
       }
     },
-    "%lld in your Themes folder": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "主题文件夹里有 %lld 个"
-          }
-        }
-      }
-    },
     "%lld installed": {
       "localizations": {
         "zh-Hans": {
@@ -5634,16 +5624,6 @@
         }
       }
     },
-    "The light and dark themes below follow this choice.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "下方的浅色与深色主题随此选择切换。"
-          }
-        }
-      }
-    },
     "Pin to Top": {
       "localizations": {
         "zh-Hans": {
@@ -6390,16 +6370,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "要更换配对 Token 吗？"
-          }
-        }
-      }
-    },
-    "Row padding": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "行边距"
           }
         }
       }
@@ -7541,16 +7511,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "归入这个工作区的一切所在的机器。"
-          }
-        }
-      }
-    },
-    "The project and session list.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "项目与会话列表。"
           }
         }
       }
@@ -10370,6 +10330,83 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法从 %2$@ 移除“%1$@”"
+          }
+        }
+      }
+    },
+    "Current": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前"
+          }
+        }
+      }
+    },
+    "Layout": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "布局"
+          }
+        }
+      }
+    },
+    "Manage": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理"
+          }
+        }
+      }
+    },
+    "Sidebar font": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "侧栏字体"
+          }
+        }
+      }
+    },
+    "Sidebar text size": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "侧栏字号"
+          }
+        }
+      }
+    },
+    "Sidebar row spacing": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "侧栏行距"
+          }
+        }
+      }
+    },
+    "%@ theme": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@主题"
           }
         }
       }
