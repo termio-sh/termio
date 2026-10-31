@@ -141,7 +141,7 @@ struct SectionHeaderLabel: View {
 
     var body: some View {
         Text(title)
-            .font(.headline)
+            .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(.primary)
             .textCase(nil)
             .padding(.bottom, 2)

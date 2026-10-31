@@ -60,6 +60,10 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
+                // Clears the traffic lights, now that the list runs behind them.
+                Color.clear
+                    .frame(height: settingsSidebarTopMargin)
+                    .selectionDisabled()
                 ForEach(Array(SettingsTab.groups.enumerated()), id: \.offset) { index, group in
                     ForEach(Array(group.enumerated()), id: \.element) { position, tab in
                         row(for: tab)
@@ -87,6 +91,11 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
+            // One tone from the traffic lights to the bottom edge: the window is
+            // two surfaces, this list and the page. The list has to run up behind
+            // the title bar itself, because its split view is not the window's
+            // and the bar's own material otherwise shows as a band above the rows.
+            .ignoresSafeArea(.container, edges: .top)
             .navigationSplitViewColumnWidth(min: 184, ideal: 204, max: 240)
         } detail: {
             NavigationStack(path: $path) {
@@ -98,13 +107,7 @@ struct SettingsView: View {
                     .navigationTitle(selection.title)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            // The page sits on a ground a shade off the window white, so the
-            // sidebar reads as the lighter panel floating above it and each grouped
-            // card as a well sunk into it. On white all three were one sheet, told
-            // apart only by the sidebar's shadow. Set on the stack, not the root
-            // page, so a pushed pane (an agent, a remote host) stands on it too.
-            .scrollContentBackground(.hidden)
-            .background(Color.primary.opacity(settingsCanvasInk).ignoresSafeArea())
+            .toolbarBackground(.hidden, for: .windowToolbar)
         }
         .navigationSplitViewStyle(.balanced)
         .labeledContentStyle(.settingsCentered)
@@ -151,8 +154,8 @@ struct SettingsView: View {
     /// fill covers the whole row — including the group gap the first row of a
     /// group carries.
     ///
-    /// The pill is the main sidebar's selection glass, not the accent: Termio marks
-    /// state with ink, and the same "this one" in both sidebars reads as one app.
+    /// The pill is plain ink, not the accent: Termio marks state with ink. Glass
+    /// is white, so on this light sidebar it had nothing to stand against.
     /// The selected row keeps the full-strength label and takes a medium weight.
     private func row(for tab: SettingsTab) -> some View {
         let isSelected = selection == tab
@@ -174,13 +177,14 @@ struct SettingsView: View {
             Text(tab.title)
                 .fontWeight(isSelected ? .medium : .regular)
         }
-        .padding(.vertical, isServer ? 4 : 0)
+        .padding(.vertical, isServer ? 2 : 0)
         .foregroundStyle(Color.primary)
         .padding(.horizontal, settingsSidebarPillPadding)
-        .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
         .background {
             if isSelected {
-                SelectionGlass(shape: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(settingsSelectionInk))
             }
         }
         // Applied *after* the pill so the pill widens with the row rather than
@@ -232,6 +236,6 @@ private let settingsSidebarBaseIndent: CGFloat = 18.7
 private let settingsSidebarPillInset: CGFloat = 10
 private let settingsSidebarPillPadding: CGFloat = 6
 
-/// How much ink the detail page's ground carries over the window background:
-/// #F4F4F4 on light, and the matching lift on dark.
-private let settingsCanvasInk: Double = 0.045
+/// Clears the traffic lights and the sidebar button.
+private let settingsSidebarTopMargin: CGFloat = 40
+private let settingsSelectionInk: Double = 0.1
