@@ -326,6 +326,7 @@ private final class WorkspaceMenuHost: NSView {
         if ProcessInfo.processInfo.systemUptime - lastClose < 0.2 { return }
         let anchor = window.convertToScreen(convert(bounds, to: nil))
         let bottom = window.screen?.visibleFrame.minY ?? window.frame.minY
+        let right = window.screen?.visibleFrame.maxX ?? window.frame.maxX
         let hosting = NSHostingView(rootView: MachineSwitcherPanel(
             store: store,
             maxHeight: anchor.minY - 6 - bottom - 8,
@@ -345,7 +346,7 @@ private final class WorkspaceMenuHost: NSView {
         panel.contentView = AppDelegate.paletteBackdrop(around: hosting)
         panel.onCancel = { [weak self] in self?.closePanel() }
         panel.setFrameOrigin(NSPoint(
-            x: max(anchor.minX, window.frame.minX + 8),
+            x: min(max(anchor.minX, window.frame.minX + 8), right - size.width - 8),
             // A window low on the screen: over the control, rather than off the bottom.
             y: max(bottom + 8, anchor.minY - 6 - size.height)))
         window.addChildWindow(panel, ordered: .above)
@@ -387,7 +388,8 @@ private final class SwitcherPanel: NSPanel {
     /// Any shortcut closes the panel and goes on to the menu bar, so a command that
     /// leaves the scope as it was still hands the keyboard back to the terminal.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        onCancel?()
+        // AppKit routes plain arrow keys through here too, and those stay with the panel.
+        if event.modifierFlags.contains(.command) { onCancel?() }
         return false
     }
 }
