@@ -402,11 +402,12 @@ struct DeviceServingSection: View {
         )
     }
 
-    /// Configuration first, the code last. The QR is something you do once per
-    /// phone, not a setting, so it sits behind Pair iPhone in a sheet, the way
-    /// Rex puts "Pair Device with QR Code" behind a button. The pane then reads
-    /// top to bottom as: is this Mac paired at all, which network carries it,
-    /// pair a phone, and the rare maintenance.
+    /// Three cards, one job each: the phone, the network that carries it, and
+    /// how pairing works. They were one card of up to ten rows, which put the
+    /// action people come for fifth and a switch's prerequisite three rows
+    /// below the switch. The QR is something you do once per phone, not a
+    /// setting, so it sits behind Pair iPhone in a sheet, the way Rex puts
+    /// "Pair Device with QR Code" behind a button.
     var body: some View {
         Section {
             Toggle(isOn: $mobile.isEnabled) {
@@ -428,9 +429,38 @@ struct DeviceServingSection: View {
             // master switch reveals it — a dimmed, unscannable QR (and an
             // address nothing is listening on) is more misleading than absent.
             if mobile.isEnabled {
+                LabeledContent {
+                    Button(localized("Show QR Code…")) { pairing.showsSheet = true }
+                } label: {
+                    SettingsLabel(
+                        title: localized("Pair iPhone"),
+                        subtext: localized("On iPhone, tap the Mac pill ▸ Scan QR Code.")
+                    )
+                }
+
+                // The QR is unscannable without the companion installed, so the
+                // one step that happens off this Mac stays beside it. The
+                // TestFlight icon does the explaining a sentence would: this
+                // link leaves for Apple's beta installer.
+                betaRow
+            }
+        } header: {
+            // A product name, the same in every language.
+            SectionHeaderLabel(title: "iPhone")
+        }
+        // This card shows a failure to take Tailscale off the tailnet, so it
+        // watches too; the count lets both cards hold one poll.
+        .onAppear {
+            pairing.refresh()
+            builtIn.startWatching()
+        }
+        .onDisappear { builtIn.stopWatching() }
+
+        if mobile.isEnabled {
+            Section {
                 // One precise control: where the phone reaches this Mac — the
                 // LAN, the user's tailnet, or a named tunnel.
-                Picker(localized("Network"), selection: reach) {
+                Picker(localized("Connect Over"), selection: reach) {
                     ForEach(TunnelManager.Provider.allCases) { provider in
                         Text(Self.pickerLabel(provider)).tag(Reach.tunnel(provider))
                         // Offered without a Tailscale app too: built-in Tailscale
@@ -455,16 +485,27 @@ struct DeviceServingSection: View {
                     builtInRows
                     if !pairing.usesBuiltInTailscale { tailnetRow }
                 }
+            } header: {
+                SectionHeaderLabel(title: localized("Network"))
+            } footer: {
+                // Say plainly whose server the phone's traffic crosses, so the
+                // "can I self-host the relay?" question is answered in the app:
+                // the bundled providers all terminate on a third party, Custom is
+                // one the user runs themselves.
+                footnote(networkFootnote)
+            }
+            // Polling follows the section that shows Tailscale's state: in a
+            // lazy Form each section appears and disappears on its own, and
+            // the iPhone card can scroll away while this one is on screen.
+            .onAppear {
+                builtIn.startWatching()
+                let custom = CustomTunnel.current
+                customCommand = custom.command
+                customURLPattern = custom.urlPattern
+            }
+            .onDisappear { builtIn.stopWatching() }
 
-                LabeledContent {
-                    Button(localized("Show QR Code…")) { pairing.showsSheet = true }
-                } label: {
-                    SettingsLabel(
-                        title: localized("Pair iPhone"),
-                        subtext: localized("On iPhone, tap the Mac pill ▸ Scan QR Code.")
-                    )
-                }
-
+            Section {
                 Toggle(isOn: $mobile.attachesDirectly) {
                     SettingsLabel(
                         title: localized("Direct Attach"),
@@ -472,11 +513,6 @@ struct DeviceServingSection: View {
                     )
                 }
                 .toggleStyle(.switch)
-                // The switch changes what the QR means, so every phone paired
-                // the other way is signed out by flipping it. Said here rather
-                // than in a dialog: it is a fact about the switch, not a
-                // consequence of one particular flip.
-                footnote(localized("Paired iPhones must scan the code again after switching."))
 
                 LabeledContent {
                     // A rare, destructive maintenance action: it rests as a plain
@@ -505,29 +541,15 @@ struct DeviceServingSection: View {
                         .font(.settingsDetail)
                         .foregroundStyle(.red)
                 }
-
-                // The QR is unscannable without the companion installed, so the
-                // one step that happens off this Mac stays on the pane. The
-                // TestFlight icon does the explaining a sentence would: this
-                // link leaves for Apple's beta installer.
-                betaRow
+            } header: {
+                SectionHeaderLabel(title: localized("Pairing"))
+            } footer: {
+                // Direct Attach changes what the QR means, so every phone paired
+                // the other way is signed out by flipping it. Said once, under
+                // the section, rather than in a dialog: it is a fact about the
+                // switch, not a consequence of one particular flip.
+                footnote(localized("Paired iPhones must scan the code again after Direct Attach is switched."))
             }
-        } header: {
-            SectionHeaderLabel(title: localized("Pairing"))
-        } footer: {
-            // Say plainly whose server the phone's traffic crosses, so the
-            // "can I self-host the relay?" question is answered in the app: the
-            // bundled providers all terminate on a third party, Custom is one
-            // the user runs themselves.
-            if mobile.isEnabled { footnote(networkFootnote) }
-        }
-        .onDisappear { builtIn.stopWatching() }
-        .onAppear {
-            pairing.refresh()
-            builtIn.startWatching()
-            let custom = CustomTunnel.current
-            customCommand = custom.command
-            customURLPattern = custom.urlPattern
         }
     }
 
@@ -602,7 +624,7 @@ struct DeviceServingSection: View {
             return localized("This build of Termio doesn’t include built-in Tailscale.")
         }
         if !mobile.attachesDirectly {
-            return localized("Needs Direct Attach.")
+            return localized("Needs Direct Attach, under Pairing below.")
         }
         return localized("This Mac joins your tailnet as a device of its own. It doesn’t need the Tailscale app.")
     }
@@ -868,7 +890,7 @@ struct PairingSheet: View {
                 } else if pairing.usesBuiltInTailscale, builtIn.url == nil {
                     // The node has no address until it is signed in and up,
                     // and the step it waits on is in Settings, not here.
-                    footnote(localized("Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Pairing."))
+                    footnote(localized("Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network."))
                 } else if pairing.servesTailnet, !pairing.onTunnel, !pairing.usesBuiltInTailscale, pairing.tailnetAddress == nil {
                     if pairing.tailnetRead {
                         footnote(localized("Tailscale isn’t connected on this Mac. Connect it, then reopen this pane."))

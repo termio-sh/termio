@@ -9,26 +9,39 @@ struct AppearanceSettingsTab: View {
     /// reopening this tab — refreshes the pickers without a relaunch.
     @State private var userThemeNames: [String] = ThemeLibrary.userThemeNames
     @State private var themesFolderError: String?
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Which theme is painting the window now. System follows the Settings
+    /// window's own scheme, which follows the Mac's.
+    private var showsDark: Bool {
+        switch settings.appearanceMode {
+        case .light: false
+        case .dark: true
+        case .system: colorScheme == .dark
+        }
+    }
 
     var body: some View {
         Form {
+            // No header: the page is already called Appearance, and the
+            // three windows say what they choose.
             Section {
                 AppearanceModePicker(selection: $settings.appearanceMode)
-            } header: {
-                SectionHeaderLabel(title: localized("Appearance"))
             } footer: {
                 Text(localized("The light and dark themes below follow this choice."))
                     .font(.settingsDetail)
                     .foregroundStyle(.secondary)
             }
             Section {
-                TabLayoutPicker(selection: $settings.tabLayout)
-            } header: {
-                SectionHeaderLabel(title: localized("Tabs"))
-            }
-            Section {
-                ThemePickerField(title: localized("Light"), prefersDark: false, selection: $settings.lightThemeName, userThemeNames: userThemeNames, onDuplicate: duplicate)
-                ThemePickerField(title: localized("Dark"), prefersDark: true, selection: $settings.darkThemeName, userThemeNames: userThemeNames, onDuplicate: duplicate)
+                HStack(alignment: .top, spacing: 16) {
+                    ThemePickerField(
+                        title: localized("Light"), prefersDark: false, selection: $settings.lightThemeName,
+                        userThemeNames: userThemeNames, onDuplicate: duplicate, isActive: !showsDark)
+                    ThemePickerField(
+                        title: localized("Dark"), prefersDark: true, selection: $settings.darkThemeName,
+                        userThemeNames: userThemeNames, onDuplicate: duplicate, isActive: showsDark)
+                }
+                .padding(.vertical, 4)
                 HStack {
                     Button(localized("Open Themes Folder…"), action: openThemesFolder)
                     Spacer()
@@ -45,6 +58,11 @@ struct AppearanceSettingsTab: View {
                 Text(localized("Drop a Ghostty theme file into the Themes folder to add your own."))
                     .font(.settingsDetail)
                     .foregroundStyle(.secondary)
+            }
+            Section {
+                TabLayoutPicker(selection: $settings.tabLayout)
+            } header: {
+                SectionHeaderLabel(title: localized("Tabs"))
             }
             Section {
                 FontFamilyField(
