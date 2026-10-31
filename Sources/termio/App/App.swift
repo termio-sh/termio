@@ -1410,7 +1410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Pre-26 fallback: `NSVisualEffectView`, where `maskImage` (not layer
     /// corner rounding) is the one mechanism that clips the backdrop region
     /// and the window shadow to the rounded shape.
-    private static func paletteBackdrop(around hosting: NSView) -> NSView {
+    static func paletteBackdrop(around hosting: NSView) -> NSView {
         if #available(macOS 26.0, *) {
             let glass = NSGlassEffectView()
             glass.cornerRadius = 18

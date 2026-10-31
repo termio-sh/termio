@@ -24,11 +24,17 @@ enum WindowChrome {
     /// The close button's leading edge: the same left margin the sidebar's rows use.
     static let trafficLightsLeading: CGFloat = 19
 
-    /// Where the traffic lights end, in window coordinates. Read from the live window rather than
-    /// assumed, since the spacing between the buttons is the system's to change.
+    /// Where the traffic lights end, in window coordinates. The span comes from the live window,
+    /// since the spacing between the buttons is the system's to change. The start does not:
+    /// AppKit puts the buttons back at its own x on a titlebar layout until `TrafficLights` moves
+    /// them again, and a row reading that x jumps 12pt on every workspace switch.
     @MainActor
     static var trafficLightsEnd: CGFloat {
-        AppDelegate.mainWindow?.standardWindowButton(.zoomButton)?.frame.maxX ?? 79
+        guard let window = AppDelegate.mainWindow,
+              let close = window.standardWindowButton(.closeButton),
+              let zoom = window.standardWindowButton(.zoomButton)
+        else { return 79 }
+        return trafficLightsLeading + zoom.frame.maxX - close.frame.minX
     }
 
     /// The gap between the last traffic light and the first control after it. Wider than the
@@ -171,7 +177,7 @@ enum ChromeGlyph {
         case .close: base * 0.8
         case .filter, .add: base * 0.85
         case .expand, .collapse: base * 0.87
-        case .edit, .view, .bookOpen: base * 0.9
+        case .edit, .view, .bookOpen, .network: base * 0.9
         default: base
         }
     }

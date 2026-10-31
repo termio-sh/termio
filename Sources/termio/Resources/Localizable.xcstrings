@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Offline": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "离线"
+          }
+        }
+      }
+    },
     "The token wasn’t rotated: %@": {
       "comment": "Settings ▸ Server ▸ Pairing, under Rotate Token; %@ is termiod's error message.",
       "localizations": {
