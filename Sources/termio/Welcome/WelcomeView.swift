@@ -4,11 +4,11 @@ import SwiftUI
 /// The center-pane welcome, shown by `TerminalPane` whenever no session is mounted
 /// — the state a returning user lands in after closing everything (the seeded
 /// first-run `home` project means this is never the very first launch). It replaces
-/// the old dead-end `ContentUnavailableView("No session selected")` with an
-/// Xcode-welcome-style **centered** start page: a large app icon stacked *over* the
-/// wordmark and tagline (a hero), then a single centered column of full-rounded
-/// action buttons (open a project, a new terminal, then one per enabled agent), with
-/// a one-click **Recent** projects list beneath.
+/// the old dead-end `ContentUnavailableView("No session selected")` with a start
+/// page: one left-aligned column, centred in the pane, holding a small header, the
+/// two general actions, a compact grid of agents, and a one-click **Recent** list.
+/// Only the two general actions wear a fill, so they read first and a long roster
+/// of agents cannot push Recent off the screen.
 ///
 /// Everything here reuses existing store entry points — `presentOpenProjectPanel`,
 /// `addScratchTerminal`/`addScratchSession`, `addProject` — so the welcome adds no
@@ -17,36 +17,35 @@ struct WelcomeView: View {
     @EnvironmentObject var store: TermioStore
     @EnvironmentObject var settings: AppSettings
 
-    /// The whole page is one narrow, centered column — hero, actions, recents — so it
-    /// reads like Xcode's welcome window rather than a document spread across a wide
-    /// pane. 400pt keeps the full-rounded buttons a comfortable, tappable width.
-    private let columnWidth: CGFloat = 400
+    private let columnWidth: CGFloat = 520
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 28) {
-                hero
-                startColumn
-                recentColumn
+        GeometryReader { pane in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    header
+                    primaryActions
+                    agentSection
+                    recentSection
+                }
+                .frame(maxWidth: columnWidth, alignment: .leading)
+                .padding(.horizontal, 32)
+                .padding(.vertical, 40)
+                // Centred when it fits, scrolling from the top when it does not.
+                .frame(maxWidth: .infinity, minHeight: pane.size.height)
             }
-            .frame(width: columnWidth)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 48)
         }
     }
 
-    /// The hero: the real app icon, big and centered, with the wordmark and tagline
-    /// stacked directly beneath — the app introducing itself face-first, the way
-    /// Xcode's welcome leads with its hammer icon over "Xcode".
-    private var hero: some View {
-        VStack(spacing: 10) {
+    private var header: some View {
+        HStack(spacing: 14) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 96, height: 96)
-            VStack(spacing: 4) {
+                .frame(width: 48, height: 48)
+            VStack(alignment: .leading, spacing: 2) {
                 Text("Termio")
-                    .font(.system(size: 32, weight: .bold))
+                    .font(.system(size: 22, weight: .semibold))
                 Text(localized("Start an agent in a project."))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
@@ -54,30 +53,41 @@ struct WelcomeView: View {
         }
     }
 
-    // MARK: Start
+    private var primaryActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { primaryButtons }
+            VStack(spacing: 8) { primaryButtons }
+        }
+    }
 
-    private var startColumn: some View {
-        VStack(spacing: 8) {
-            WelcomeActionRow(
-                icon: HugeIconView(icon: .folder, size: 16, color: .secondary),
-                title: localized("Open Project…"),
-                shortcut: "⌘O"
-            ) { store.presentOpenProjectPanel() }
-            WelcomeActionRow(
-                icon: HugeIconView(icon: .terminal, size: 16, color: .secondary),
-                title: localized("New Terminal"),
-                shortcut: "⌘T"
-            ) { store.addScratchTerminal() }
+    @ViewBuilder
+    private var primaryButtons: some View {
+        WelcomePrimaryButton(icon: .folder, title: localized("Open Project…"), shortcut: "⌘O") {
+            store.presentOpenProjectPanel()
+        }
+        WelcomePrimaryButton(icon: .terminal, title: localized("New Terminal"), shortcut: "⌘T") {
+            store.addScratchTerminal()
+        }
+    }
 
-            // Agents only — a plain terminal already has its own "New Terminal" button
-            // above (⌘T). Each agent is the same full-rounded button, just with its
-            // brand icon, so a new session reads as one more thing you can start here.
-            let agents = enabledAgentPresets(settings).filter { $0 != .terminal }
-            ForEach(agents) { preset in
-                WelcomeActionRow(
-                    icon: AgentIconView(agent: preset, size: 17),
-                    title: preset.displayName
-                ) { store.addScratchSession(agent: preset) }
+    // MARK: Agents
+
+    /// A plain terminal is left out: it already has New Terminal above.
+    @ViewBuilder
+    private var agentSection: some View {
+        let agents = enabledAgentPresets(settings).filter { $0 != .terminal }
+        if !agents.isEmpty {
+            WelcomeSection(title: localized("Agents")) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 2)], spacing: 2) {
+                    ForEach(agents) { preset in
+                        WelcomeRow(action: { store.addScratchSession(agent: preset) }) {
+                            AgentIconView(agent: preset, size: 16)
+                            Text(preset.displayName)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
             }
         }
     }
@@ -85,13 +95,23 @@ struct WelcomeView: View {
     // MARK: Recent
 
     @ViewBuilder
-    private var recentColumn: some View {
+    private var recentSection: some View {
         if !recentEntries.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                sectionLabel(localized("Recent"))
-                ForEach(recentEntries) { entry in
-                    WelcomeRecentRow(entry: entry) {
-                        store.addProject(at: URL(fileURLWithPath: entry.path))
+            WelcomeSection(title: localized("Recent")) {
+                VStack(spacing: 2) {
+                    ForEach(recentEntries) { entry in
+                        WelcomeRow(action: { store.addProject(at: URL(fileURLWithPath: entry.path)) }) {
+                            HugeIconView(icon: .folder, size: 16, color: .secondary)
+                            Text(entry.name)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                            Spacer(minLength: 16)
+                            Text((entry.path as NSString).abbreviatingWithTildeInPath)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                     }
                 }
             }
@@ -117,113 +137,81 @@ struct WelcomeView: View {
         for recent in settings.recentProjects where seen.insert(recent.path).inserted {
             out.append(recent)
         }
-        return Array(out.prefix(8))
-    }
-
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.system(size: 10, weight: .semibold))
-            .tracking(0.6)
-            .foregroundStyle(.tertiary)
-            // Match the rows' inner inset (8pt) so the header lines up with the
-            // action/recent labels below it rather than hanging off to the left.
-            .padding(.horizontal, 8)
-            .padding(.bottom, 4)
+        return Array(out.prefix(5))
     }
 }
 
-/// A full-width welcome row: a leading glyph (a `HugeIcon` for Start actions, an
-/// agent brand icon for a new session), a title, and an optional keyboard shortcut,
-/// lifting a faint rounded fill under the cursor — the same hover affordance the
-/// sidebar's controls use. Taking the icon as an arbitrary view is what lets the
-/// Start actions and the agent sessions share one row type instead of splitting into
-/// rows-and-chips.
-private struct WelcomeActionRow: View {
-    private let icon: AnyView
+private struct WelcomeSection<Content: View>: View {
     let title: String
-    var shortcut: String?
-    let action: () -> Void
-    @State private var isHovering = false
-
-    init(icon: some View, title: String, shortcut: String? = nil, action: @escaping () -> Void) {
-        self.icon = AnyView(icon)
-        self.title = title
-        self.shortcut = shortcut
-        self.action = action
-    }
+    @ViewBuilder let content: Content
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                icon
-                    .frame(width: 20)
-                Text(title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.primary)
-                Spacer(minLength: 12)
-                if let shortcut {
-                    Text(shortcut)
-                        .font(.system(size: 12, design: .rounded))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 13)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // A full-rounded filled pill (Xcode's welcome buttons): a subtle fill at
-            // rest so it reads as a button even without a cursor, brightening on hover.
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(isHovering ? 0.12 : 0.06))
-            )
-            .contentShape(Capsule(style: .continuous))
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            // The rows' hover fill overhangs the column, so their glyphs stay on its edge.
+            content.padding(.horizontal, -8)
         }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .animation(.easeInOut(duration: 0.1), value: isHovering)
     }
 }
 
-/// A Recent-projects row: folder glyph, project name, and its home-relative path.
-private struct WelcomeRecentRow: View {
-    let entry: RecentProject
+/// One of the two actions that wear a fill at rest.
+private struct WelcomePrimaryButton: View {
+    let icon: HugeIcon
+    let title: String
+    let shortcut: String
     let action: () -> Void
     @State private var isHovering = false
-
-    /// The path with the user's home directory folded to `~`, the way the shell and
-    /// Finder title bars show it — a full absolute path would dominate the row.
-    private var displayPath: String {
-        (entry.path as NSString).abbreviatingWithTildeInPath
-    }
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                HugeIconView(icon: .folder, size: 15, color: .secondary)
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(entry.name)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.primary)
-                    Text(displayPath)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer(minLength: 0)
+                HugeIconView(icon: icon, size: 16, color: .primary)
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .fixedSize()
+                Spacer(minLength: 12)
+                Text(shortcut)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity)
+            .frame(height: 40)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.primary.opacity(isHovering ? 0.08 : 0))
-            )
-            .contentShape(Rectangle())
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.primary.opacity(isHovering ? 0.12 : 0.06)))
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .animation(.easeInOut(duration: 0.1), value: isHovering)
+    }
+}
+
+/// A quiet row for agents and recent projects: no fill until the pointer is on it.
+private struct WelcomeRow<Content: View>: View {
+    let action: () -> Void
+    @ViewBuilder let content: Content
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) { content }
+                .font(.system(size: 13))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 8)
+                .frame(height: 30)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(isHovering ? 0.08 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
     }
 }

@@ -13,7 +13,8 @@ belongs to one machine, and everything filed under the workspace inherits it.
 ## Switching
 
 Switch with `⌘1` through `⌘9`, or from the switcher in the sidebar’s toolbar.
-`File ▸ Workspace` carries the same rows.
+The digits reach the workspaces on the machine you’re on. `File ▸ Workspace`
+carries the same rows, with the other machines’ workspaces after them.
 
 The digits are positional: they follow the order of the list, so what `⌘2`
 reaches changes when the list does. That’s also why they aren’t rebindable — a
@@ -24,9 +25,8 @@ A workspace remembers the session you left it on, with its panes, its split
 group, and its inspector tab. Coming back to a scope puts your own work back on
 screen rather than whatever sorts first.
 
-Where a workspace’s name doesn’t already say which machine it’s on, the switcher
-names the machine beside it — so switching workspaces is also how you move
-between machines.
+The switcher lists every machine, with the current machine’s workspaces under
+it. Choosing a machine takes you to the workspace you last used there.
 
 ## Managing them
 
@@ -38,9 +38,8 @@ already in.
 
 Removing a workspace closes its sessions. The folders on disk are left alone.
 
-New workspaces come from `File ▸ Workspace ▸ New Workspace…` or the same row in
-the switcher. With more than one machine known, that row asks which machine the
-new workspace is on.
+New workspaces come from `File ▸ Workspace ▸ New Workspace…` or the button at the
+end of a machine’s row in the switcher, which creates it on that machine.
 
 <Callout type="note" title="One workspace, one machine">
   A workspace can’t span two machines. A checkout already lives on exactly one

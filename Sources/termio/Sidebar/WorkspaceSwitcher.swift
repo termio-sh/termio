@@ -2,26 +2,71 @@ import AppKit
 import SwiftUI
 import TermioShared
 
-/// The workspace rows, in the order every surface shows them: one item per
-/// workspace, the one on screen checked, the first nine carrying ⌘1…9.
+/// The workspace a machine reopens on, across launches.
+enum MachineMemory {
+    private static let key = "lastWorkspaceByMachine"
+
+    static func remember(_ id: Workspace.ID, on device: WorkspaceDevice) {
+        var known = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        known[device.alias ?? ""] = id.uuidString
+        UserDefaults.standard.set(known, forKey: key)
+    }
+
+    static func workspace(on device: WorkspaceDevice) -> Workspace.ID? {
+        let known = UserDefaults.standard.dictionary(forKey: key) as? [String: String]
+        return known?[device.alias ?? ""].flatMap(UUID.init(uuidString:))
+    }
+}
+
+extension TermioStore {
+    /// This Mac first, then every machine with a workspace or a recorded handshake.
+    /// The registry half keeps a machine listed after its empty workspace is pruned.
+    var switcherMachines: [WorkspaceDevice] {
+        var aliases = Set(DeviceRoster.known(in: self).compactMap(\.alias))
+        aliases.formUnion(workspaces.compactMap(\.deviceAlias))
+        return [.thisMac] + aliases.sorted().map { .ssh(alias: $0) }
+    }
+
+    func workspaces(on device: WorkspaceDevice) -> [Workspace] {
+        orderedWorkspaces.filter { $0.device == device }
+    }
+
+    func lastWorkspace(on device: WorkspaceDevice) -> Workspace? {
+        let own = workspaces(on: device)
+        guard let remembered = MachineMemory.workspace(on: device) else { return own.first }
+        return own.first { $0.id == remembered } ?? own.first
+    }
+
+    func enterMachine(_ device: WorkspaceDevice) {
+        if let workspace = lastWorkspace(on: device) {
+            switchToWorkspace(workspace.id)
+        } else if let alias = device.alias {
+            switchToWorkspace(deviceWorkspace(for: alias))
+        } else {
+            // This Mac can lose its last workspace. There is nothing to enter, so make one.
+            // After the panel has gone: the name panel is modal.
+            DispatchQueue.main.async { self.presentNewWorkspacePanel(on: device) }
+        }
+    }
+}
+
+/// The workspace rows for File ▸ Workspace: the current machine's first, carrying
+/// ⌘1…9, then the other machines' rows with no digit.
 ///
-/// One builder for both menus that draw them — the sidebar switcher and File ▸
-/// Workspace — because the digit is positional. Two menus numbering their own
-/// rows could disagree about which workspace ⌘2 reaches, and a number that lies
-/// is worse than no number at all.
+/// The digit is positional within the current machine, and `MachineSwitcherPanel`
+/// numbers its rows the same way, so both surfaces agree about what ⌘2 reaches.
 enum WorkspaceMenu {
     /// `representedObject` carries the workspace's uuid string, which is what
-    /// `action` reads back — the one thing both callers' handlers share.
-    ///
-    /// The key equivalents are live only in the menu bar's copy: AppKit matches a
-    /// keystroke against the main menu, so the same items in a pull-down draw the
-    /// glyphs without claiming ⌘1…9 a second time.
+    /// `action` reads back.
     @MainActor
     static func rows(in store: TermioStore, target: AnyObject, action: Selector) -> [NSMenuItem] {
         let shortcuts = KeybindingStore.workspaceShortcuts
-        return store.orderedWorkspaces.enumerated().map { index, workspace in
+        let device = store.currentWorkspace.device
+        let ordered = store.workspaces(on: device) + store.orderedWorkspaces.filter { $0.device != device }
+        let localCount = store.workspaces(on: device).count
+        return ordered.enumerated().map { index, workspace in
             let item = NSMenuItem(title: workspace.name, action: action, keyEquivalent: "")
-            if index < shortcuts.count {
+            if index < localCount, index < shortcuts.count {
                 item.keyEquivalent = shortcuts[index].keyEquivalent
                 item.keyEquivalentModifierMask = shortcuts[index].keyEquivalentModifierMask
             }
@@ -75,27 +120,6 @@ struct WorkspaceSwitcherToolbarView: View {
     /// AppKit overlay below, which is the view the pointer actually lands on.
     @State private var isHighlighted = false
 
-    /// One fixed box, wide enough for an ordinary name and narrow enough to leave the
-    /// sort and `+` buttons clear of NSToolbar's `»` overflow at the navigator's 240pt
-    /// minimum (the toggle, this box and those two buttons come to roughly 220).
-    ///
-    /// Fixed, not sized to the string. A label that measures its own text hands the
-    /// toolbar item a new intrinsic width on every switch, and NSToolbar answers by
-    /// re-laying out the region — which is what was seen as the name flicking and
-    /// shifting as the scope changed. That relayout belongs to AppKit, below SwiftUI,
-    /// so the deliberately un-animated transaction in `switchToWorkspace` cannot reach
-    /// it. Holding the width constant means there is nothing to re-lay out: no name,
-    /// of any length, can put the toolbar back into motion.
-    ///
-    /// A floor would have hidden this for short names and let it back for long ones.
-    /// Measuring the widest name and sizing to that keeps the box honest but needs
-    /// text metrics, a font bridge and a re-measure on every rename — machinery in
-    /// exchange for slack the flexible space beside it already absorbs.
-    ///
-    /// Sixteen points of it went to the glass capsule's inset (`chipInset` below), so the
-    /// item as a whole is exactly as wide as it was.
-    private static let nameWidth: CGFloat = 88
-
     /// What the hover chip puts around the name. Real padding, not a background
     /// drawn outside the label's bounds: the toolbar item is only as large as this
     /// view asks to be, so anything painted past that edge is at the mercy of the
@@ -104,20 +128,33 @@ struct WorkspaceSwitcherToolbarView: View {
     ///
     /// The leading half is given back as negative padding on the whole box (see
     /// `body`), so the name still starts at the x the toggle beside it was spaced
-    /// for. Only the trailing half is new width, and it comes out of `nameWidth`.
+    /// for.
     private static let chipInset: CGFloat = 8
 
     var body: some View {
-        // The single-workspace collapse. Not "hidden but present": with one scope
-        // there is no switch to make, and a control that always reads the same
-        // word is a label for a decision the user never took.
-        if store.hasMultipleWorkspaces {
-            let current = store.currentWorkspace
-            // The name and a down chevron. No device mark — the rows below already
-            // say which machine they are on. The chevron is the pop-up's own cue
-            // that the word opens a menu; it lives inside the fixed box, so the name
-            // truncates a few points earlier instead of the box growing.
+        let current = store.currentWorkspace
+        let machineIcon: HugeIcon = current.device.isThisMac ? .laptop : .network
+        // One machine and one workspace: the icon alone, still the way to add either.
+        if !store.hasMultipleWorkspaces && store.switcherMachines.count == 1 {
+            HugeIconView(icon: machineIcon,
+                             size: ChromeGlyph.size(for: machineIcon, base: ChromeGlyph.prominentSize),
+                             color: color,
+                             lineWidthOverride: ChromeGlyph.lineWidth(base: ChromeGlyph.prominentSize))
+                .padding(.horizontal, Self.chipInset)
+                .frame(height: ChromeGlyph.prominentFrame.height)
+                .modifier(ChromeGlass(isVisible: true))
+                .overlay(Capsule(style: .continuous).fill(Color.primary.opacity(isHighlighted ? 0.08 : 0)))
+                .padding(.leading, -Self.chipInset)
+                .overlay(WorkspaceMenuPopper(store: store, highlighted: $isHighlighted))
+                .accessibilityHidden(true)
+        } else {
+            // One button: the capsule hugs the icon and the name. The spacer beside it
+            // takes the slack, so a long name truncates before it can reach sort or `+`.
             HStack(spacing: 4) {
+                HugeIconView(icon: machineIcon,
+                             size: ChromeGlyph.size(for: machineIcon, base: ChromeGlyph.prominentSize),
+                             color: color,
+                             lineWidthOverride: ChromeGlyph.lineWidth(base: ChromeGlyph.prominentSize))
                 Text(current.name)
                     // The very font the sidebar's rows and section headers use — not a copy of its
                     // definition, which is what this was and what let the two drift on paper. The band
@@ -129,24 +166,13 @@ struct WorkspaceSwitcherToolbarView: View {
                     .fontWeight(.medium)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                // Hugeicons has no down chevron; the sidebar's disclosure chevron,
-                // turned, keeps it in the same stroke family.
-                HugeIconView(icon: .chevronRight, size: 7.5, color: color, lineWidthOverride: 1.75)
-                    .rotationEffect(.degrees(90))
             }
                 .foregroundStyle(color)
-                // Leading, so every name starts at the same x. Centred, a short one would
-                // sit in the middle of the box and the label's left edge would move on each
-                // switch — the same shift by a different route.
-                .frame(width: Self.nameWidth, alignment: .leading)
                 .padding(.horizontal, Self.chipInset)
-                .padding(.vertical, 4)
-                // The glass capsule under the name while the pointer is on it — the one thing
-                // that says this word is a control; without it people ran a whole session
-                // without finding out the workspace could be changed here. The same glass the
-                // sidebar's other core controls wear on hover, inside padding that is always
-                // there, so the pointer arriving never resizes or re-truncates the name.
-                .modifier(ChromeGlass(isVisible: isHighlighted))
+                .frame(height: ChromeGlyph.prominentFrame.height)
+                // Always on: this is the one thing that says the word is a control.
+                .modifier(ChromeGlass(isVisible: true))
+                .overlay(Capsule(style: .continuous).fill(Color.primary.opacity(isHighlighted ? 0.08 : 0)))
                 // The leading inset given back, so the capsule fills the gap beside the toggle
                 // rather than pushing the name away from it: the two read as one band.
                 .padding(.leading, -Self.chipInset)
@@ -186,8 +212,8 @@ private struct WorkspaceMenuPopper: NSViewRepresentable {
     /// hits, so the label underneath never learns the pointer arrived.
     @Binding var highlighted: Bool
 
-    /// The name as well as the sentence, because the label above draws in a fixed box and
-    /// a name too long for it is middle-truncated with nowhere else to be read in place.
+    /// The name as well as the sentence, because the label above has only the row's slack
+    /// and a name too long for it is middle-truncated with nowhere else to be read in place.
     private static func toolTip(for store: TermioStore) -> String {
         "\(store.currentWorkspace.name) — \(localized("The sidebar shows this workspace"))"
     }
@@ -215,6 +241,9 @@ private struct WorkspaceMenuPopper: NSViewRepresentable {
 /// view already holds, so there is no second place for its contents to live.
 private final class WorkspaceMenuHost: NSView {
     weak var store: TermioStore?
+    private var lastClose: TimeInterval = 0
+    private var panel: SwitcherPanel?
+    private var resignObserver: NSObjectProtocol?
 
     /// Reports the pointer cue back to the view drawing it. See `highlight`.
     var onHighlight: ((Bool) -> Void)?
@@ -251,7 +280,15 @@ private final class WorkspaceMenuHost: NSView {
 
     override func mouseEntered(with event: NSEvent) { onHighlight?(true) }
 
-    override func mouseExited(with event: NSEvent) { onHighlight?(false) }
+    override func mouseExited(with event: NSEvent) {
+        if panel == nil { onHighlight?(false) }
+    }
+
+    /// A panel outliving the control it hangs from would float with nothing under it.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil { closePanel() }
+        super.viewWillMove(toWindow: newWindow)
+    }
 
     /// Whether the pointer is over this view right now, asked rather than
     /// remembered — the tracking area is silent while a menu holds the event loop,
@@ -279,57 +316,296 @@ private final class WorkspaceMenuHost: NSView {
         return true
     }
 
+    /// A key child panel, the way the command palette floats, rather than an
+    /// `NSPopover`: dismissal is then only ever this view's own decision, and there
+    /// is no arrow under the toolbar control.
     private func showMenu() {
-        guard let store else { return }
-        let menu = NSMenu()
-        for row in WorkspaceMenu.rows(in: store, target: self, action: #selector(switchToWorkspace(_:))) {
-            menu.addItem(row)
-        }
-        // This Mac, without asking: the device submenu belongs to the menus that
-        // already carry one (File ▸ Workspace and the sidebar `+`), and growing a
-        // third here would put a machine list in the switcher, which is the "go to
-        // a computer" mode the workspace replaced.
-        addAction(localized("New Workspace…"), to: menu, #selector(newWorkspace))
-        menu.addItem(.separator())
-        // Renaming and removing are in Settings ▸ Workspaces. Creating stays here
-        // because it is the one verb that does not need the user to pick which
-        // workspace it acts on — the other two do, and this menu can only ever
-        // offer them for the row it already shows checked.
-        addAction(localized("Workspace Settings…"), to: menu, #selector(openWorkspaceSettings))
-        // No device verb here, deliberately. A machine you can *go to* is the
-        // mode this scope replaced: it made the sidebar answer "which computer"
-        // when the question is "which work". A device is a place a new thing is
-        // put — New Terminal on it, Clone to it, File ▸ Connect to… for a box
-        // never reached — never a place the window travels to.
-
-        // Held highlighted for as long as the menu is up, the way a pull-down stays
-        // pressed under its own menu. `popUp` runs a nested event loop and returns
-        // once the menu closes, so the cue is settled on the line after it — from
-        // where the pointer actually is, since no exit was delivered while the menu
-        // had the loop.
+        guard let store, let window, panel == nil else { return }
+        // Clicking the control resigns the panel on the mouse-down that lands here,
+        // so that click would otherwise reopen what it just dismissed.
+        if ProcessInfo.processInfo.systemUptime - lastClose < 0.2 { return }
+        let anchor = window.convertToScreen(convert(bounds, to: nil))
+        let bottom = window.screen?.visibleFrame.minY ?? window.frame.minY
+        let right = window.screen?.visibleFrame.maxX ?? window.frame.maxX
+        let hosting = NSHostingView(rootView: MachineSwitcherPanel(
+            store: store,
+            maxHeight: anchor.minY - 6 - bottom - 8,
+            unusedAliases: DeviceRoster.unusedAliases(known: DeviceRoster.known(in: store)),
+            dismiss: { [weak self] in self?.closePanel() }))
+        let size = hosting.fittingSize
+        let panel = SwitcherPanel(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isMovable = false
+        panel.isReleasedWhenClosed = false
+        panel.contentView = AppDelegate.paletteBackdrop(around: hosting)
+        panel.onCancel = { [weak self] in self?.closePanel() }
+        panel.setFrameOrigin(NSPoint(
+            x: min(max(anchor.minX, window.frame.minX + 8), right - size.width - 8),
+            // A window low on the screen: over the control, rather than off the bottom.
+            y: max(bottom + 8, anchor.minY - 6 - size.height)))
+        window.addChildWindow(panel, ordered: .above)
+        panel.makeKeyAndOrderFront(nil)
+        // The shadow shape is computed before the backdrop's first frame.
+        DispatchQueue.main.async { panel.invalidateShadow() }
+        self.panel = panel
         onHighlight?(true)
-        // Anchored under the label the way a pull-down opens, rather than at the
-        // pointer the way a context menu does.
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height + 4), in: self)
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.closePanel() }
+        }
+    }
+
+    private func closePanel() {
+        guard let panel else { return }
+        self.panel = nil
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
+        // Key goes back only if the panel still holds it. A click on another window
+        // has already made that window key, and taking it back would undo the click.
+        let hadKey = panel.isKeyWindow
+        window?.removeChildWindow(panel)
+        panel.orderOut(nil)
+        if hadKey { window?.makeKey() }
+        lastClose = ProcessInfo.processInfo.systemUptime
         onHighlight?(isUnderPointer)
     }
+}
 
-    private func addAction(_ title: String, to menu: NSMenu, _ action: Selector) {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
-        menu.addItem(item)
+private final class SwitcherPanel: NSPanel {
+    var onCancel: (() -> Void)?
+
+    override var canBecomeKey: Bool { true }
+
+    override func cancelOperation(_ sender: Any?) { onCancel?() }
+
+    /// Any shortcut closes the panel and goes on to the menu bar, so a command that
+    /// leaves the scope as it was still hands the keyboard back to the terminal.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // AppKit routes plain arrow keys through here too, and those stay with the panel.
+        if event.modifierFlags.contains(.command) { onCancel?() }
+        return false
+    }
+}
+
+/// The switcher's panel: every machine, the current one's workspaces under it, and
+/// the actions that are not about any one row. Every row shares one grid: a glyph
+/// column, a text column, and a trailing column that the new-workspace buttons, the
+/// shortcuts and the chevron all end on.
+private struct MachineSwitcherPanel: View {
+    @ObservedObject var store: TermioStore
+    /// The room below the control. A long list scrolls inside it, keeping the actions on screen.
+    let maxHeight: CGFloat
+    let unusedAliases: [String]
+    let dismiss: () -> Void
+
+    @State private var hovered: String?
+
+    private static let rowHeight: CGFloat = 28
+    private static let iconSize: CGFloat = 16
+    private static let iconColumn: CGFloat = 25
+    private static let leadingInset: CGFloat = 8
+    private static let trailingInset: CGFloat = 8
+    private static let addButtonSize: CGFloat = 23
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 1) {
+                    ForEach(store.switcherMachines, id: \.self, content: machineGroup)
+                }
+                .padding(6)
+            }
+            .frame(height: listHeight)
+            Divider().padding(.horizontal, 14)
+            VStack(spacing: 1) {
+                if !unusedAliases.isEmpty {
+                    actionRow(localized("Connect to…"), icon: .network, opensMenu: true, action: showConnectMenu)
+                }
+                actionRow(localized("Workspace Settings…"), icon: .settings) {
+                    dismiss()
+                    NSApp.sendAction(#selector(AppDelegate.openWorkspaceSettings(_:)), to: nil, from: nil)
+                }
+            }
+            .padding(6)
+        }
+        .frame(width: 264)
+        .font(.system(size: 13))
+        // ⌘1…9 reach the menu bar while this is open, and a panel left key would keep
+        // typing from the terminal the switch just brought up.
+        .onChange(of: store.currentWorkspaceID) { dismiss() }
     }
 
-    @objc private func switchToWorkspace(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let id = UUID(uuidString: raw) else { return }
-        store?.switchToWorkspace(id)
+    /// Worked out rather than measured: a `ScrollView` has no fitting height to report.
+    private var listHeight: CGFloat {
+        let current = store.workspaces(on: store.currentWorkspace.device).count
+        let rows = store.switcherMachines.count + (current > 1 ? current : 0)
+        let actions = CGFloat(unusedAliases.isEmpty ? 1 : 2) * (Self.rowHeight + 1) + 13
+        let full = CGFloat(rows) * (Self.rowHeight + 1) - 1 + 12
+        return min(full, max(Self.rowHeight * 3, maxHeight - actions))
     }
 
-    @objc private func newWorkspace() {
-        store?.presentNewWorkspacePanel(on: .thisMac)
+    @ViewBuilder
+    private func machineGroup(_ device: WorkspaceDevice) -> some View {
+        let isCurrent = store.currentWorkspace.device == device
+        let own = store.workspaces(on: device)
+        let expanded = isCurrent && own.count > 1
+        machineRow(device, isCurrent: isCurrent, own: own, expanded: expanded)
+        if expanded {
+            ForEach(Array(own.enumerated()), id: \.element.id) { index, workspace in
+                workspaceRow(workspace, index: index)
+            }
+        }
     }
 
-    @objc private func openWorkspaceSettings() {
-        NSApp.sendAction(#selector(AppDelegate.openWorkspaceSettings(_:)), to: nil, from: nil)
+    private func machineRow(
+        _ device: WorkspaceDevice, isCurrent: Bool, own: [Workspace], expanded: Bool
+    ) -> some View {
+        let key = "machine-" + device.displayName
+        let isOffline: Bool = {
+            guard isCurrent, case .failed = store.deviceSessions else { return false }
+            return true
+        }()
+        return HStack(spacing: 0) {
+            Button {
+                dismiss()
+                store.enterMachine(device)
+            } label: {
+                HStack(spacing: 0) {
+                    panelIcon(device.isThisMac ? .laptop : .network, color: isOffline ? .secondary : .primary)
+                        .frame(width: Self.iconColumn, alignment: .leading)
+                    Text(device.displayName)
+                        .fontWeight(.medium)
+                        .foregroundStyle(isOffline ? .secondary : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 10)
+                    Text(machineDetail(device, isCurrent: isCurrent, own: own, isOffline: isOffline))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.leading, Self.leadingInset)
+                .padding(.trailing, 6)
+                .frame(height: Self.rowHeight)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button {
+                dismiss()
+                // After the panel has gone: the name panel is modal.
+                DispatchQueue.main.async { store.presentNewWorkspacePanel(on: device) }
+            } label: {
+                panelIcon(.dashboardSquareAdd, color: hovered == key + "+" ? .primary : .secondary)
+                    .frame(width: Self.addButtonSize, height: Self.addButtonSize)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.primary.opacity(hovered == key + "+" ? 0.13 : 0)))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(device.alias.map { localized("New Workspace on \($0)") } ?? localized("New Workspace"))
+            .onHover { hovered = $0 ? key + "+" : key }
+            // The glyph, not its hit box, ends on the trailing column.
+            .padding(.trailing, Self.trailingInset - (Self.addButtonSize - Self.iconSize) / 2)
+        }
+        .background(rowFill(isSelected: isCurrent && !expanded, isHovered: hovered == key || hovered == key + "+"))
+        .onHover { inside in
+            if inside { hovered = key } else if hovered == key { hovered = nil }
+        }
+    }
+
+    private func machineDetail(
+        _ device: WorkspaceDevice, isCurrent: Bool, own: [Workspace], isOffline: Bool
+    ) -> String {
+        if isOffline { return localized("Offline") }
+        guard !isCurrent, own.count > 1 else { return "" }
+        return store.lastWorkspace(on: device)?.name ?? ""
+    }
+
+    private func workspaceRow(_ workspace: Workspace, index: Int) -> some View {
+        let key = "workspace-" + workspace.id.uuidString
+        return Button {
+            dismiss()
+            store.switchToWorkspace(workspace.id)
+        } label: {
+            HStack(spacing: 0) {
+                Text(workspace.name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 10)
+                if index < KeybindingStore.workspaceShortcuts.count {
+                    Text(verbatim: "⌘\(index + 1)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.leading, Self.leadingInset + Self.iconColumn)
+            .padding(.trailing, Self.trailingInset)
+            .frame(height: Self.rowHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(rowFill(isSelected: workspace.id == store.currentWorkspaceID, isHovered: hovered == key))
+        .onHover { hovered = $0 ? key : nil }
+    }
+
+    private func actionRow(
+        _ title: String, icon: HugeIcon, opensMenu: Bool = false, action: @escaping () -> Void
+    ) -> some View {
+        let key = "action-" + title
+        return Button(action: action) {
+            HStack(spacing: 0) {
+                panelIcon(icon, color: .primary)
+                    .frame(width: Self.iconColumn, alignment: .leading)
+                Text(title)
+                Spacer(minLength: 10)
+                if opensMenu {
+                    HugeIconView(icon: .chevronRight, size: 7.5, color: .secondary, lineWidthOverride: 1.75)
+                }
+            }
+            .padding(.leading, Self.leadingInset)
+            .padding(.trailing, Self.trailingInset)
+            .frame(height: Self.rowHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(rowFill(isSelected: false, isHovered: hovered == key))
+        .onHover { hovered = $0 ? key : nil }
+    }
+
+    /// Evened by `ChromeGlyph` rather than by point size: the globe fills its box where
+    /// the others keep a margin, so at one point size it reads larger than they do.
+    private func panelIcon(_ icon: HugeIcon, color: Color) -> some View {
+        HugeIconView(icon: icon,
+                     size: ChromeGlyph.size(for: icon, base: Self.iconSize),
+                     color: color,
+                     lineWidthOverride: ChromeGlyph.lineWidth(base: Self.iconSize))
+    }
+
+    private func rowFill(isSelected: Bool, isHovered: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 7, style: .continuous)
+            .fill(Color.primary.opacity(isSelected ? 0.13 : (isHovered ? 0.07 : 0)))
+    }
+
+    /// The same action the File menu's Connect to… rows send.
+    private func showConnectMenu() {
+        guard let delegate = NSApp.delegate as? AppDelegate else { return }
+        let menu = NSMenu()
+        for alias in unusedAliases {
+            let item = NSMenuItem(
+                title: alias, action: #selector(AppDelegate.connectToDevice(_:)), keyEquivalent: "")
+            item.target = delegate
+            item.representedObject = alias
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        dismiss()
     }
 }

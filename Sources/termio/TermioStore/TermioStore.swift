@@ -57,7 +57,14 @@ final class TermioStore: ObservableObject {
     /// `AppSettings` keeps a copy only so the next launch starts where this one
     /// ended. Written through `switchToWorkspace(_:)`, which moves the selection
     /// with it.
-    @Published var currentWorkspaceID: Workspace.ID
+    @Published var currentWorkspaceID: Workspace.ID {
+        // Here rather than in `switchToWorkspace`: creating a workspace and following a
+        // session into one change the scope too, and a machine reopens on all of them.
+        didSet {
+            guard let workspace = workspaces.first(where: { $0.id == currentWorkspaceID }) else { return }
+            MachineMemory.remember(workspace.id, on: workspace.device)
+        }
+    }
     @Published var selectedSessionID: Session.ID? {
         // Selecting a session means the user is now looking at it, so any pending
         // "needs attention" (or unseen "done") is, by definition, answered.
@@ -1412,6 +1419,8 @@ final class TermioStore: ObservableObject {
             self.openTerminalLink(url, surfaceWorkingDirectory: nil)
             return nil
         }
+        // `currentWorkspaceID`'s didSet does not run for the restored value.
+        MachineMemory.remember(currentWorkspaceID, on: currentWorkspace.device)
         syncWatchedFolders()
         // The designated init set the selection without firing its didSet, so
         // the selected checkout's device watch has to be armed by hand once.

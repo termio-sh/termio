@@ -17,6 +17,25 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.69.0",
+    date: "2026-10-30",
+    title: "Every machine in one switcher",
+    changes: {
+      new: [
+        "The sidebar switcher lists every machine with its workspaces. Choose a machine to go back to the workspace you last used there.",
+        "Each machine in the switcher has a button that creates a new workspace on it.",
+      ],
+      improved: [
+        "Cmd-1 through Cmd-9 now reach the workspaces on the machine you are on.",
+        "The welcome page fits your agents and recent projects on one screen.",
+        "Settings splits pairing into iPhone, Network and Pairing, and previews themes in their own colors.",
+      ],
+      fixed: [
+        "The sidebar's controls no longer jump sideways when you switch workspaces.",
+      ],
+    },
+  },
+  {
     version: "0.68.0",
     date: "2026-10-30",
     title: "The size stays with the screen you type on",
