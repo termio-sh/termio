@@ -1116,6 +1116,8 @@
 	<string>好</string>
 	<key>Off — SSH only</key>
 	<string>关闭 — 仅 SSH</string>
+	<key>Offline</key>
+	<string>离线</string>
 	<key>Offline · %@</key>
 	<string>离线 · %@</string>
 	<key>On Your Tailnet</key>

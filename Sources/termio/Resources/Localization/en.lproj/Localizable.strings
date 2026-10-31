@@ -1116,6 +1116,8 @@
 	<string>OK</string>
 	<key>Off — SSH only</key>
 	<string>Off — SSH only</string>
+	<key>Offline</key>
+	<string>Offline</string>
 	<key>Offline · %@</key>
 	<string>Offline · %@</string>
 	<key>On Your Tailnet</key>
