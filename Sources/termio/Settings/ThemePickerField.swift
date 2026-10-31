@@ -24,6 +24,10 @@ struct ThemePickerField: View {
     /// The parent owns the reload and the error alert, so the picker only names
     /// the theme.
     let onDuplicate: (String) -> Void
+    /// Theme files are a chore done rarely, so their actions live with the list
+    /// they change rather than on the page. The parent owns the alert and reload.
+    let onOpenFolder: () -> Void
+    let onReload: () -> Void
 
     @State private var isPresented = false
     @State private var query = ""
@@ -38,36 +42,42 @@ struct ThemePickerField: View {
     var isActive = false
 
     var body: some View {
-        Button { isPresented = true } label: {
-            VStack(alignment: .leading, spacing: 8) {
+        // The picture and the name open the same picker, so they read as one
+        // field. Current names the slot painting the window: every slot has a
+        // theme selected, so a selection mark here would say nothing.
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(title)
+                if isActive {
+                    Text(localized("Current"))
+                        .font(.settingsDetail)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Button { isPresented = true } label: {
                 ThemePreview(definition: ThemeLibrary.theme(named: selection), prefersDark: prefersDark)
                     .frame(height: 96)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(
-                                isActive ? Color.primary : Color.primary.opacity(0.15),
-                                lineWidth: isActive ? 2 : 1
-                            )
+                            .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
                     )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(localized("\(title) theme"))
+            Button { isPresented = true } label: {
                 HStack(spacing: 4) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title)
-                            .font(.settingsDetail)
-                            .foregroundStyle(.secondary)
-                        Text(selection.isEmpty ? localized("Terminal default") : selection)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    Spacer(minLength: 4)
+                    Text(selection.isEmpty ? localized("Terminal default") : selection)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 2)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity)
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .help(appearanceMismatchHint ?? "")
         .popover(isPresented: $isPresented, arrowEdge: .bottom) { popover }
     }
@@ -148,7 +158,7 @@ struct ThemePickerField: View {
         HStack(spacing: 6) {
             if let hint = appearanceMismatchHint {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(.secondary)
                 Text(hint)
                     .font(.settingsDetail)
                     .foregroundStyle(.secondary)
@@ -160,7 +170,19 @@ struct ThemePickerField: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
+            Menu(localized("Manage")) {
+                Button(localized("Open Themes Folder…")) {
+                    isPresented = false
+                    onOpenFolder()
+                }
+                Button(localized("Reload"), action: onReload)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help(localized("Drop a Ghostty theme file into the Themes folder to add your own."))
+            // Return still closes it, but the brand marks nothing with accent blue.
             Button(localized("Done")) { isPresented = false }
+                .buttonStyle(.bordered)
                 .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 10)
@@ -307,22 +329,21 @@ struct ThemePreview: View {
         let cursor = definition?.cursorColor.flatMap { Color(hex: $0) } ?? foreground
         VStack(alignment: .leading, spacing: 3) {
             line([("~/termio", ansi(4, foreground)), (" git:(", foreground), ("main", ansi(1, foreground)), (")", foreground)])
-            line([("$ ", ansi(2, foreground)), ("swift test", foreground)])
-            line([("✓ ", ansi(2, foreground)), ("42 passed", foreground), ("  ", foreground), ("1 skipped", ansi(3, foreground))])
+            line([("✓ ", ansi(2, foreground)), ("42 passed", foreground), (" ", foreground), ("1 skipped", ansi(3, foreground))])
             HStack(spacing: 0) {
                 Text(verbatim: "$ ").foregroundStyle(ansi(2, foreground))
-                cursor.frame(width: 6, height: 11)
+                cursor.frame(width: 6, height: 12)
             }
             Spacer(minLength: 0)
             HStack(spacing: 3) {
                 ForEach(1...6, id: \.self) { slot in
                     RoundedRectangle(cornerRadius: 1.5)
                         .fill(ansi(slot, foreground))
-                        .frame(width: 10, height: 4)
+                        .frame(width: 14, height: 4)
                 }
             }
         }
-        .font(.system(size: 10, design: .monospaced))
+        .font(.system(size: 11, design: .monospaced))
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(background)

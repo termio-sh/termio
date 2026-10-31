@@ -23,50 +23,40 @@ struct AppearanceSettingsTab: View {
 
     var body: some View {
         Form {
-            // No header: the page is already called Appearance, and the
-            // three windows say what they choose.
+            // One big picture on the page, the themes: they are the only choice
+            // here that has to be seen to be judged. Everything else is a word.
             Section {
-                AppearanceModePicker(selection: $settings.appearanceMode)
-            } footer: {
-                Text(localized("The light and dark themes below follow this choice."))
-                    .font(.settingsDetail)
-                    .foregroundStyle(.secondary)
+                LabeledContent(localized("Appearance")) {
+                    Picker(localized("Appearance"), selection: $settings.appearanceMode) {
+                        ForEach(AppearanceMode.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    .segmentedChoice()
+                }
             }
             Section {
                 HStack(alignment: .top, spacing: 16) {
                     ThemePickerField(
                         title: localized("Light"), prefersDark: false, selection: $settings.lightThemeName,
-                        userThemeNames: userThemeNames, onDuplicate: duplicate, isActive: !showsDark)
+                        userThemeNames: userThemeNames, onDuplicate: duplicate,
+                        onOpenFolder: openThemesFolder, onReload: reloadUserThemes, isActive: !showsDark)
                     ThemePickerField(
                         title: localized("Dark"), prefersDark: true, selection: $settings.darkThemeName,
-                        userThemeNames: userThemeNames, onDuplicate: duplicate, isActive: showsDark)
+                        userThemeNames: userThemeNames, onDuplicate: duplicate,
+                        onOpenFolder: openThemesFolder, onReload: reloadUserThemes, isActive: showsDark)
                 }
                 .padding(.vertical, 4)
-                HStack {
-                    Button(localized("Open Themes Folder…"), action: openThemesFolder)
-                    Spacer()
-                    if !userThemeNames.isEmpty {
-                        Text(localized("\(userThemeNames.count) in your Themes folder"))
-                            .font(.settingsDetail)
-                            .foregroundStyle(.secondary)
-                    }
-                    Button(localized("Reload"), action: reloadUserThemes)
-                }
             } header: {
                 SectionHeaderLabel(title: localized("Theme"))
-            } footer: {
-                Text(localized("Drop a Ghostty theme file into the Themes folder to add your own."))
-                    .font(.settingsDetail)
-                    .foregroundStyle(.secondary)
             }
             Section {
-                TabLayoutPicker(selection: $settings.tabLayout)
-            } header: {
-                SectionHeaderLabel(title: localized("Tabs"))
-            }
-            Section {
+                LabeledContent(localized("Tabs")) {
+                    Picker(localized("Tabs"), selection: $settings.tabLayout) {
+                        ForEach(TabLayout.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    .segmentedChoice()
+                }
                 FontFamilyField(
-                    title: localized("Family"),
+                    title: localized("Sidebar font"),
                     prompt: localized("System"),
                     families: InstalledFonts.all,
                     previewSize: settings.interfaceFontSize,
@@ -74,9 +64,9 @@ struct AppearanceSettingsTab: View {
                     family: $settings.interfaceFontFamily
                 )
                 SettingsStepper(
-                    title: localized("Size"), value: $settings.interfaceFontSize, range: 9...20, step: 1,
+                    title: localized("Sidebar text size"), value: $settings.interfaceFontSize, range: 9...20, step: 1,
                     display: localized("\(Int(settings.interfaceFontSize)) pt"))
-                LabeledContent(localized("Row padding")) {
+                LabeledContent(localized("Sidebar row spacing")) {
                     HStack(spacing: 8) {
                         Slider(value: $settings.interfaceRowPadding, in: 0...12, step: 1)
                             .frame(width: 160)
@@ -87,20 +77,19 @@ struct AppearanceSettingsTab: View {
                     }
                 }
             } header: {
-                SectionHeaderLabel(title: localized("Sidebar"))
-            } footer: {
-                Text(localized("The project and session list."))
-                    .font(.settingsDetail)
-                    .foregroundStyle(.secondary)
+                SectionHeaderLabel(title: localized("Layout"))
             }
             Section {
-                Toggle(localized("Dim ignored files"), isOn: $settings.dimIgnoredFiles)
+                Toggle(isOn: $settings.dimIgnoredFiles) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(localized("Dim ignored files"))
+                        Text(localized("Shows files and folders ignored by Git in a muted color."))
+                            .font(.settingsDetail)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             } header: {
                 SectionHeaderLabel(title: localized("File Tree"))
-            } footer: {
-                Text(localized("Shows files and folders ignored by Git in a muted color."))
-                    .font(.settingsDetail)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -143,5 +132,13 @@ struct AppearanceSettingsTab: View {
     private func reloadUserThemes() {
         userThemeNames = ThemeLibrary.reload().map(\.name).sorted { $0.lowercased() < $1.lowercased() }
         settings.objectWillChange.send()
+    }
+}
+
+private extension View {
+    /// One width for every segmented row, so their edges line up down the page
+    /// with the other controls instead of stretching to fill what the label leaves.
+    func segmentedChoice() -> some View {
+        labelsHidden().pickerStyle(.segmented).frame(width: 240)
     }
 }

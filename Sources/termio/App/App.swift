@@ -1006,6 +1006,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // separator and the detail pane's title/subtitle. The window is
             // resizable so short panes don't force a fixed slab of empty space.
             window.toolbarStyle = .unified
+            // No band or rule of its own: each surface runs up behind the title.
+            window.titlebarAppearsTransparent = true
+            window.titlebarSeparatorStyle = .none
             window.isReleasedWhenClosed = false
 
             let minSize = NSSize(width: 640, height: 480)

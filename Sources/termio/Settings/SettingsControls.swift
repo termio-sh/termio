@@ -141,7 +141,7 @@ struct SectionHeaderLabel: View {
 
     var body: some View {
         Text(title)
-            .font(.headline)
+            .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(.primary)
             .textCase(nil)
             .padding(.bottom, 2)
@@ -208,7 +208,7 @@ struct SettingsStepper<Value: Strideable>: View {
                     .foregroundStyle(.secondary)
                 Stepper(title, value: $value, in: range, step: step)
                     .labelsHidden()
-                    .controlSize(.small)
+                    .fixedSize()
             }
         }
     }
