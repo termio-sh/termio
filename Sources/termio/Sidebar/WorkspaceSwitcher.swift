@@ -42,6 +42,10 @@ extension TermioStore {
             switchToWorkspace(workspace.id)
         } else if let alias = device.alias {
             switchToWorkspace(deviceWorkspace(for: alias))
+        } else {
+            // This Mac can lose its last workspace. There is nothing to enter, so make one.
+            // After the panel has gone: the name panel is modal.
+            DispatchQueue.main.async { self.presentNewWorkspacePanel(on: device) }
         }
     }
 }
@@ -237,7 +241,7 @@ private struct WorkspaceMenuPopper: NSViewRepresentable {
 /// view already holds, so there is no second place for its contents to live.
 private final class WorkspaceMenuHost: NSView {
     weak var store: TermioStore?
-    private var lastClose = Date.distantPast
+    private var lastClose: TimeInterval = 0
     private var panel: SwitcherPanel?
     private var resignObserver: NSObjectProtocol?
 
@@ -319,9 +323,12 @@ private final class WorkspaceMenuHost: NSView {
         guard let store, let window, panel == nil else { return }
         // Clicking the control resigns the panel on the mouse-down that lands here,
         // so that click would otherwise reopen what it just dismissed.
-        if Date().timeIntervalSince(lastClose) < 0.2 { return }
+        if ProcessInfo.processInfo.systemUptime - lastClose < 0.2 { return }
+        let anchor = window.convertToScreen(convert(bounds, to: nil))
+        let bottom = window.screen?.visibleFrame.minY ?? window.frame.minY
         let hosting = NSHostingView(rootView: MachineSwitcherPanel(
             store: store,
+            maxHeight: anchor.minY - 6 - bottom - 8,
             unusedAliases: DeviceRoster.unusedAliases(known: DeviceRoster.known(in: store)),
             dismiss: { [weak self] in self?.closePanel() }))
         let size = hosting.fittingSize
@@ -337,7 +344,6 @@ private final class WorkspaceMenuHost: NSView {
         panel.isReleasedWhenClosed = false
         panel.contentView = AppDelegate.paletteBackdrop(around: hosting)
         panel.onCancel = { [weak self] in self?.closePanel() }
-        let anchor = window.convertToScreen(convert(bounds, to: nil))
         panel.setFrameOrigin(NSPoint(
             x: max(anchor.minX, window.frame.minX + 8),
             y: anchor.minY - 6 - size.height))
@@ -365,7 +371,7 @@ private final class WorkspaceMenuHost: NSView {
         window?.removeChildWindow(panel)
         panel.orderOut(nil)
         if hadKey { window?.makeKey() }
-        lastClose = Date()
+        lastClose = ProcessInfo.processInfo.systemUptime
         onHighlight?(isUnderPointer)
     }
 }
@@ -384,6 +390,8 @@ private final class SwitcherPanel: NSPanel {
 /// shortcuts and the chevron all end on.
 private struct MachineSwitcherPanel: View {
     @ObservedObject var store: TermioStore
+    /// The room below the control. A long list scrolls inside it, keeping the actions on screen.
+    let maxHeight: CGFloat
     let unusedAliases: [String]
     let dismiss: () -> Void
 
@@ -398,10 +406,13 @@ private struct MachineSwitcherPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 1) {
-                ForEach(store.switcherMachines, id: \.self, content: machineGroup)
+            ScrollView {
+                VStack(spacing: 1) {
+                    ForEach(store.switcherMachines, id: \.self, content: machineGroup)
+                }
+                .padding(6)
             }
-            .padding(6)
+            .frame(height: listHeight)
             Divider().padding(.horizontal, 14)
             VStack(spacing: 1) {
                 if !unusedAliases.isEmpty {
@@ -416,6 +427,18 @@ private struct MachineSwitcherPanel: View {
         }
         .frame(width: 264)
         .font(.system(size: 13))
+        // ⌘1…9 reach the menu bar while this is open, and a panel left key would keep
+        // typing from the terminal the switch just brought up.
+        .onChange(of: store.currentWorkspaceID) { dismiss() }
+    }
+
+    /// Worked out rather than measured: a `ScrollView` has no fitting height to report.
+    private var listHeight: CGFloat {
+        let current = store.workspaces(on: store.currentWorkspace.device).count
+        let rows = store.switcherMachines.count + (current > 1 ? current : 0)
+        let actions = CGFloat(unusedAliases.isEmpty ? 1 : 2) * (Self.rowHeight + 1) + 13
+        let full = CGFloat(rows) * (Self.rowHeight + 1) - 1 + 12
+        return min(full, max(Self.rowHeight * 3, maxHeight - actions))
     }
 
     @ViewBuilder

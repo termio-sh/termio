@@ -336,7 +336,6 @@ extension TermioStore {
         guard let target = workspaces.first(where: { $0.id == id }),
               currentWorkspaceID != id
         else { return }
-        MachineMemory.remember(id, on: target.device)
         // The switch itself, and nothing else: the column is the answer to
         // "which workspace", and it can be drawn knowing only this. Timed
         // separately from the settle below, because the two are what the user
