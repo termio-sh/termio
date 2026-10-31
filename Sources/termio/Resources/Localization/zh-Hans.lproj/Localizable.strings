@@ -286,8 +286,8 @@
 	<string>内置 Tailscale</string>
 	<key>Built-in</key>
 	<string>内置</string>
-	<key>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Pairing.</key>
-	<string>内置 Tailscale 尚未连接。请在“设置 ▸ Termio server ▸ 配对”中完成登录。</string>
+	<key>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.</key>
+	<string>内置 Tailscale 尚未连接。请在“设置 ▸ Termio server ▸ 网络”中完成登录。</string>
 	<key>Cancel</key>
 	<string>取消</string>
 	<key>Can’t Compare</key>
@@ -436,6 +436,8 @@
 	<string>连接</string>
 	<key>Connect GitHub</key>
 	<string>连接 GitHub</string>
+	<key>Connect Over</key>
+	<string>连接方式</string>
 	<key>Connect to…</key>
 	<string>连接到…</string>
 	<key>Connect your GitHub account to read this project’s issues and pull requests here.</key>
@@ -926,8 +928,8 @@
 	<string>导航</string>
 	<key>Navigator</key>
 	<string>导航器</string>
-	<key>Needs Direct Attach.</key>
-	<string>需要开启直接连接。</string>
+	<key>Needs Direct Attach, under Pairing below.</key>
+	<string>需要开启下方“配对”中的直接连接。</string>
 	<key>Needs Live agent status above: without it, nothing tells Termio an agent finished.</key>
 	<string>需要上面的“实时 Agent 状态”：没有它，就没有东西告诉 Termio 一个 Agent 完成了。</string>
 	<key>Needs `ngrok config add-authtoken` on that machine first. The free address changes on every restart.</key>
@@ -1200,8 +1202,8 @@
 	<string>配对 iPhone</string>
 	<key>Pair iPhone…</key>
 	<string>配对 iPhone…</string>
-	<key>Paired iPhones must scan the code again after switching.</key>
-	<string>切换后，已配对的 iPhone 需要重新扫码。</string>
+	<key>Paired iPhones must scan the code again after Direct Attach is switched.</key>
+	<string>切换直接连接后，已配对的 iPhone 需要重新扫码。</string>
 	<key>Pairing</key>
 	<string>配对</string>
 	<key>Pairing Token</key>

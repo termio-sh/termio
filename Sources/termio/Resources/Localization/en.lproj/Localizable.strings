@@ -286,8 +286,8 @@
 	<string>Built-In Tailscale</string>
 	<key>Built-in</key>
 	<string>Built-in</string>
-	<key>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Pairing.</key>
-	<string>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Pairing.</string>
+	<key>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.</key>
+	<string>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.</string>
 	<key>Cancel</key>
 	<string>Cancel</string>
 	<key>Can’t Compare</key>
@@ -436,6 +436,8 @@
 	<string>Connect</string>
 	<key>Connect GitHub</key>
 	<string>Connect GitHub</string>
+	<key>Connect Over</key>
+	<string>Connect Over</string>
 	<key>Connect to…</key>
 	<string>Connect to…</string>
 	<key>Connect your GitHub account to read this project’s issues and pull requests here.</key>
@@ -926,8 +928,8 @@
 	<string>Navigation</string>
 	<key>Navigator</key>
 	<string>Navigator</string>
-	<key>Needs Direct Attach.</key>
-	<string>Needs Direct Attach.</string>
+	<key>Needs Direct Attach, under Pairing below.</key>
+	<string>Needs Direct Attach, under Pairing below.</string>
 	<key>Needs Live agent status above: without it, nothing tells Termio an agent finished.</key>
 	<string>Needs Live agent status above: without it, nothing tells Termio an agent finished.</string>
 	<key>Needs `ngrok config add-authtoken` on that machine first. The free address changes on every restart.</key>
@@ -1200,8 +1202,8 @@
 	<string>Pair iPhone</string>
 	<key>Pair iPhone…</key>
 	<string>Pair iPhone…</string>
-	<key>Paired iPhones must scan the code again after switching.</key>
-	<string>Paired iPhones must scan the code again after switching.</string>
+	<key>Paired iPhones must scan the code again after Direct Attach is switched.</key>
+	<string>Paired iPhones must scan the code again after Direct Attach is switched.</string>
 	<key>Pairing</key>
 	<string>Pairing</string>
 	<key>Pairing Token</key>

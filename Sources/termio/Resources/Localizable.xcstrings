@@ -44,13 +44,35 @@
         }
       }
     },
-    "Needs Direct Attach.": {
-      "comment": "Settings ▸ Server ▸ Pairing, built-in Tailscale: why the switch is disabled.",
+    "Connect Over": {
+      "comment": "Settings ▸ Server ▸ Network: the picker for how an iPhone reaches this Mac (Local Network, Tailscale, a tunnel).",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "需要开启直接连接。"
+            "value": "连接方式"
+          }
+        }
+      }
+    },
+    "Paired iPhones must scan the code again after Direct Attach is switched.": {
+      "comment": "Settings ▸ Server ▸ Pairing footer: flipping the Direct Attach switch signs out every paired iPhone.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换直接连接后，已配对的 iPhone 需要重新扫码。"
+          }
+        }
+      }
+    },
+    "Needs Direct Attach, under Pairing below.": {
+      "comment": "Settings ▸ Server ▸ Network, built-in Tailscale: why the switch is disabled. Direct Attach is a switch in the Pairing section below.",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要开启下方“配对”中的直接连接。"
           }
         }
       }
@@ -231,13 +253,13 @@
         }
       }
     },
-    "Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Pairing.": {
+    "Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.": {
       "comment": "Pair iPhone sheet, when built-in Tailscale is not connected.",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "内置 Tailscale 尚未连接。请在“设置 ▸ Termio server ▸ 配对”中完成登录。"
+            "value": "内置 Tailscale 尚未连接。请在“设置 ▸ Termio server ▸ 网络”中完成登录。"
           }
         }
       }
@@ -5498,16 +5520,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "配对"
-          }
-        }
-      }
-    },
-    "Paired iPhones must scan the code again after switching.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "切换后，已配对的 iPhone 需要重新扫码。"
           }
         }
       }

@@ -32,26 +32,44 @@ struct ThemePickerField: View {
     @State private var highlighted: String?
     @FocusState private var searchFocused: Bool
 
+    /// Whether this slot is the one painting the window now, given the
+    /// appearance mode. Marked with ink, so the card the user is looking at
+    /// in the terminal is the card they can tell apart here.
+    var isActive = false
+
     var body: some View {
-        LabeledContent(title) {
-            Button { isPresented = true } label: {
-                HStack(spacing: 8) {
-                    if let definition = ThemeLibrary.theme(named: selection) {
-                        ThemeSwatch(definition: definition, compact: true)
+        Button { isPresented = true } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                ThemePreview(definition: ThemeLibrary.theme(named: selection), prefersDark: prefersDark)
+                    .frame(height: 96)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                isActive ? Color.primary : Color.primary.opacity(0.15),
+                                lineWidth: isActive ? 2 : 1
+                            )
+                    )
+                HStack(spacing: 4) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(title)
+                            .font(.settingsDetail)
+                            .foregroundStyle(.secondary)
+                        Text(selection.isEmpty ? localized("Terminal default") : selection)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
-                    Text(selection.isEmpty ? localized("Terminal default") : selection)
-                        .lineLimit(1)
-                    Spacer(minLength: 6)
+                    Spacer(minLength: 4)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-                .frame(minWidth: 200)
             }
-            .help(appearanceMismatchHint ?? "")
-            .buttonStyle(.bordered)
-            .popover(isPresented: $isPresented, arrowEdge: .bottom) { popover }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help(appearanceMismatchHint ?? "")
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) { popover }
     }
 
     private var popover: some View {
@@ -273,5 +291,53 @@ struct ThemeSwatch: View {
             RoundedRectangle(cornerRadius: 3)
                 .strokeBorder(.separator, lineWidth: 0.5)
         )
+    }
+}
+
+/// A few lines of a shell session drawn in a theme's own colors: the theme as it
+/// will look in a pane, rather than a strip of chips to decode. Without a theme
+/// ("Terminal default") it falls back to plain black on white, or white on black.
+struct ThemePreview: View {
+    let definition: GhosttyThemeDefinition?
+    let prefersDark: Bool
+
+    var body: some View {
+        let background = definition.flatMap { Color(hex: $0.background) } ?? (prefersDark ? .black : .white)
+        let foreground = definition.flatMap { Color(hex: $0.foreground) } ?? (prefersDark ? .white : .black)
+        let cursor = definition?.cursorColor.flatMap { Color(hex: $0) } ?? foreground
+        VStack(alignment: .leading, spacing: 3) {
+            line([("~/termio", ansi(4, foreground)), (" git:(", foreground), ("main", ansi(1, foreground)), (")", foreground)])
+            line([("$ ", ansi(2, foreground)), ("swift test", foreground)])
+            line([("✓ ", ansi(2, foreground)), ("42 passed", foreground), ("  ", foreground), ("1 skipped", ansi(3, foreground))])
+            HStack(spacing: 0) {
+                Text(verbatim: "$ ").foregroundStyle(ansi(2, foreground))
+                cursor.frame(width: 6, height: 11)
+            }
+            Spacer(minLength: 0)
+            HStack(spacing: 3) {
+                ForEach(1...6, id: \.self) { slot in
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(ansi(slot, foreground))
+                        .frame(width: 10, height: 4)
+                }
+            }
+        }
+        .font(.system(size: 10, design: .monospaced))
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(background)
+        // A theme preview is not text anyone reads; the name below it is.
+        .accessibilityHidden(true)
+    }
+
+    private func ansi(_ slot: Int, _ fallback: Color) -> Color {
+        definition?.palette[slot].flatMap { Color(hex: $0) } ?? fallback
+    }
+
+    private func line(_ runs: [(String, Color)]) -> some View {
+        runs.reduce(Text(verbatim: "")) { text, run in
+            text + Text(verbatim: run.0).foregroundColor(run.1)
+        }
+        .lineLimit(1)
     }
 }
