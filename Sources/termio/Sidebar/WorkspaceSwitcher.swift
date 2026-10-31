@@ -346,7 +346,8 @@ private final class WorkspaceMenuHost: NSView {
         panel.onCancel = { [weak self] in self?.closePanel() }
         panel.setFrameOrigin(NSPoint(
             x: max(anchor.minX, window.frame.minX + 8),
-            y: anchor.minY - 6 - size.height))
+            // A window low on the screen: over the control, rather than off the bottom.
+            y: max(bottom + 8, anchor.minY - 6 - size.height)))
         window.addChildWindow(panel, ordered: .above)
         panel.makeKeyAndOrderFront(nil)
         // The shadow shape is computed before the backdrop's first frame.
@@ -382,6 +383,13 @@ private final class SwitcherPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 
     override func cancelOperation(_ sender: Any?) { onCancel?() }
+
+    /// Any shortcut closes the panel and goes on to the menu bar, so a command that
+    /// leaves the scope as it was still hands the keyboard back to the terminal.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        onCancel?()
+        return false
+    }
 }
 
 /// The switcher's panel: every machine, the current one's workspaces under it, and

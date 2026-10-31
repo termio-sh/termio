@@ -1419,6 +1419,8 @@ final class TermioStore: ObservableObject {
             self.openTerminalLink(url, surfaceWorkingDirectory: nil)
             return nil
         }
+        // `currentWorkspaceID`'s didSet does not run for the restored value.
+        MachineMemory.remember(currentWorkspaceID, on: currentWorkspace.device)
         syncWatchedFolders()
         // The designated init set the selection without firing its didSet, so
         // the selected checkout's device watch has to be armed by hand once.
