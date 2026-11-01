@@ -260,9 +260,7 @@ final class RootContainerViewController: UIViewController {
 
         let settle = { screen.view.frame = self.view.bounds }
         if animated {
-            UIView.animate(withDuration: 0.35, delay: 0,
-                           usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
-                           options: .curveEaseOut, animations: settle)
+            Motion.animate(settle)
         } else {
             settle()
         }
@@ -287,10 +285,7 @@ final class RootContainerViewController: UIViewController {
             }
         }
         if animated {
-            UIView.animate(withDuration: 0.3, delay: 0,
-                           options: .curveEaseOut,
-                           animations: { screen.view.frame = offscreen },
-                           completion: { _ in finish() })
+            Motion.animate({ screen.view.frame = offscreen }, completion: finish)
         } else {
             screen.view.frame = offscreen
             finish()
@@ -457,19 +452,13 @@ final class RootContainerViewController: UIViewController {
         let remaining = width * (open ? 1 - railProgress : railProgress)
         let towardTarget = open ? velocityX : -velocityX
         let initial = remaining > 1 ? min(max(towardTarget / remaining, 0), 30) : 0
-        let timing = UISpringTimingParameters(
-            dampingRatio: 0.9, initialVelocity: CGVector(dx: initial, dy: 0)
-        )
-        let animator = UIViewPropertyAnimator(duration: 0.35, timingParameters: timing)
-        animator.isInterruptible = true
-        animator.addAnimations { self.layoutRail(progress: open ? 1 : 0) }
-        animator.addCompletion { [weak self] position in
-            guard let self, position == .end else { return }
+        railAnimator = Motion.animate(velocity: initial) {
+            self.layoutRail(progress: open ? 1 : 0)
+        } completion: { [weak self] in
+            guard let self else { return }
             railAnimator = nil
             if !open { railContainer.isHidden = true }
         }
-        railAnimator = animator
-        animator.startAnimation()
     }
 
     /// The reveal: drag right from the left edge of a home screen. Tracks the
@@ -561,26 +550,21 @@ final class RootContainerViewController: UIViewController {
             let offscreen = view.bounds.offsetBy(dx: width, dy: 0)
             let remaining = max(1, width - currentX)
             let v = min(max(velocityX / remaining, 0), 30)
-            UIView.animate(withDuration: 0.3, delay: 0,
-                           usingSpringWithDamping: 0.9, initialSpringVelocity: v,
-                           options: .curveEaseOut,
-                           animations: { screen.view.frame = offscreen },
-                           completion: { _ in
+            Motion.animate(velocity: v) {
+                screen.view.frame = offscreen
+            } completion: {
                 if parked {
                     screen.view.isHidden = true // stays in the window: surface alive
                 } else {
                     self.evict(screen)
                 }
-            })
+            }
         } else {
             // Cancel: settle back to x = 0. A leftward flick (negative vx) is
             // toward the target, so negate; away-from-target starts from rest.
             let remaining = max(1, currentX)
             let v = min(max(-velocityX / remaining, 0), 30)
-            UIView.animate(withDuration: 0.3, delay: 0,
-                           usingSpringWithDamping: 0.9, initialSpringVelocity: v,
-                           options: .curveEaseOut,
-                           animations: { screen.view.frame = self.view.bounds })
+            Motion.animate(velocity: v) { screen.view.frame = self.view.bounds }
         }
     }
 
