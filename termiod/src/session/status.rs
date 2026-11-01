@@ -521,8 +521,9 @@ impl SupportQuery {
     /// Takes another terminal's answer to the query out of bytes bound for the
     /// PTY. The sidecar VT and the writer's terminal both answer too, and a second
     /// answer lands in a program that has stopped listening for one: Grok typed it
-    /// into its prompt (#831). Returns where an answer that has no terminator yet
-    /// starts; those bytes stay.
+    /// into its prompt (#831). An answer is the query, a printable body of at most
+    /// `MAX_HELD` bytes, and a terminator; anything else stays. Returns where an
+    /// answer that has no terminator yet starts; those bytes stay too.
     pub fn strip_other_reply(data: &mut Vec<u8>) -> Option<usize> {
         let mut start = 0;
         while let Some(offset) = data[start..]
@@ -531,16 +532,21 @@ impl SupportQuery {
         {
             let at = start + offset;
             let body = at + Self::QUERY.len();
-            let end = data[body..]
-                .iter()
-                .position(|byte| matches!(byte, 0x07 | 0x1b))
-                .map(|length| body + length)
-                .and_then(|end| match data[end] {
-                    0x07 => Some(end + 1),
-                    _ if data.get(end + 1) == Some(&b'\\') => Some(end + 2),
-                    _ => None,
-                });
-            let Some(end) = end else { return Some(at) };
+            let printable = data[body..].iter().take_while(|byte| matches!(byte, b' '..=b'~')).count();
+            let stop = body + printable;
+            if printable > Self::MAX_HELD {
+                start = at + 1;
+                continue;
+            }
+            let end = match (data.get(stop), data.get(stop + 1)) {
+                (Some(0x07), _) => stop + 1,
+                (Some(0x1b), Some(b'\\')) => stop + 2,
+                (None, _) | (Some(0x1b), None) => return Some(at),
+                _ => {
+                    start = at + 1;
+                    continue;
+                }
+            };
             data.drain(at..end);
             start = at;
         }
@@ -549,10 +555,10 @@ impl SupportQuery {
 
     /// `strip_other_reply` for the writer's input, whose answer reads can split
     /// across frames. A frame that ends inside an answer keeps that tail back
-    /// while it still looks like one: printable bytes, at most `MAX_HELD`. A
-    /// byte that breaks the shape sends the tail on to the PTY untouched. Only a
-    /// whole `QUERY` prefix is held, never a lone ESC, so a key press is never
-    /// delayed; a split inside the prefix itself still gets through.
+    /// until a byte finishes it or shows it is not one, which sends it on to the
+    /// PTY untouched. Only a whole `QUERY` prefix is held, never a lone ESC, so a
+    /// key press is never delayed; a split inside the prefix itself still gets
+    /// through.
     pub fn strip_writer_reply(&mut self, data: &mut Vec<u8>) {
         if !self.held.is_empty() {
             let mut joined = std::mem::take(&mut self.held);
@@ -560,16 +566,7 @@ impl SupportQuery {
             *data = joined;
         }
         if let Some(at) = Self::strip_other_reply(data) {
-            let body = &data[at + Self::QUERY.len()..];
-            let last = body.len().saturating_sub(1);
-            let shaped = body.len() <= Self::MAX_HELD
-                && body
-                    .iter()
-                    .enumerate()
-                    .all(|(index, &byte)| matches!(byte, b' '..=b'~') || (byte == 0x1b && index == last));
-            if shaped {
-                self.held = data.split_off(at);
-            }
+            self.held = data.split_off(at);
         }
     }
 
@@ -2078,6 +2075,13 @@ mod tests {
         assert_eq!(feed(b"q"), b"q");
         let long = [b"\x1b]7501;?".as_slice(), &[b'x'; 300]].concat();
         assert_eq!(feed(&long), long);
+        // Bytes that are not an answer are never taken, however the frames fall.
+        assert_eq!(feed(b"\x1b]7501;?:x"), b"");
+        assert_eq!(feed(b"\rtyped\x1b\\"), b"\x1b]7501;?:x\rtyped\x1b\\");
+        assert_eq!(feed(b"\x1b]7501;?:x\rtyped\x1b\\"), b"\x1b]7501;?:x\rtyped\x1b\\");
+        assert_eq!(feed(b"\x1b]7501;?"), b"");
+        let rest = [[b'x'; 300].as_slice(), b"\x1b\\"].concat();
+        assert_eq!(feed(&rest), [b"\x1b]7501;?".as_slice(), &rest].concat());
         // A lone ESC is a key press, and goes at once.
         assert_eq!(feed(b"\x1b"), b"\x1b");
     }
