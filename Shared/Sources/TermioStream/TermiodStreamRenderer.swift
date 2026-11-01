@@ -740,6 +740,31 @@ public final class TermiodStreamImages {
     }
 }
 
+/// A glyph's bitmap and where its origin falls in it. The origin is a whole pixel,
+/// so every glyph of a line shares the cell's baseline: drawing from the glyph's
+/// own fractional bounds moved each one by a different part of a pixel (#820).
+public struct GlyphPlacement: Equatable {
+    public init(bounds: CGRect, padding: Int) {
+        let minX = Int(bounds.minX.rounded(.down))
+        let minY = Int(bounds.minY.rounded(.down))
+        let maxY = Int(bounds.maxY.rounded(.up))
+        width = Int(bounds.maxX.rounded(.up)) - minX + 2 * padding
+        height = maxY - minY + 2 * padding
+        origin = CGPoint(x: padding - minX, y: padding - minY)
+        ascent = maxY + padding
+        left = minX - padding
+    }
+
+    public var width: Int
+    public var height: Int
+    /// Where to draw the glyph in the bitmap, counted up from its bottom edge.
+    public var origin: CGPoint
+    /// How far the bitmap's top edge sits above the baseline.
+    public var ascent: Int
+    /// How far the bitmap's left edge sits from the cell's.
+    public var left: Int
+}
+
 /// The pixel size of one cell and where the baseline and decorations sit in it.
 public struct TermiodCellMetrics: Equatable {
     public init(width: Int, height: Int, baseline: Int, underlinePosition: Int, underlineThickness: Int, strikethroughPosition: Int) {
@@ -1069,8 +1094,9 @@ public final class TermiodGlyphAtlas {
         // most fonts. Its bitmap is its cells exactly, with the emoji scaled
         // and centred inside, so no pixel can reach the rows around it.
         let span = metrics.width * max(1, cells)
-        let width = colored ? span : Int(bounds.width.rounded(.up)) + 2 * padding
-        let height = colored ? metrics.height : Int(bounds.height.rounded(.up)) + 2 * padding
+        let placement = GlyphPlacement(bounds: bounds, padding: padding)
+        let width = colored ? span : placement.width
+        let height = colored ? metrics.height : placement.height
         let fit = colored
             ? min(1, CGFloat(span - 2) / bounds.width, CGFloat(metrics.height - 2) / bounds.height)
             : 1
@@ -1090,7 +1116,7 @@ public final class TermiodGlyphAtlas {
                 context.scaleBy(x: fit, y: fit)
                 context.textPosition = CGPoint(x: -bounds.minX, y: -bounds.minY)
             } else {
-                context.textPosition = CGPoint(x: CGFloat(padding) - bounds.minX, y: CGFloat(padding) - bounds.minY)
+                context.textPosition = placement.origin
             }
             CTLineDraw(line, context)
             return true
@@ -1100,10 +1126,9 @@ public final class TermiodGlyphAtlas {
             region: MTLRegionMake2D(origin.x, origin.y, width, height),
             mipmapLevel: 0, withBytes: pixels, bytesPerRow: width * 4
         )
-        // CoreGraphics counts up from the bottom: the bitmap's top edge sits
-        // maxY + padding above the baseline. An emoji's bitmap is its cells.
-        let top = colored ? 0 : metrics.baseline - Int(bounds.maxY.rounded(.up)) - padding
-        let left = colored ? 0 : Int(bounds.minX.rounded(.down)) - padding
+        // An emoji's bitmap is its cells.
+        let top = colored ? 0 : metrics.baseline - placement.ascent
+        let left = colored ? 0 : placement.left
         return Slot(
             origin: SIMD2(UInt16(origin.x), UInt16(origin.y)),
             size: SIMD2(UInt16(width), UInt16(height)),
@@ -1119,9 +1144,9 @@ public final class TermiodGlyphAtlas {
         guard bounds.width > 0, bounds.height > 0 else {
             return Slot(origin: SIMD2(0, 0), size: SIMD2(0, 0), offset: SIMD2(0, 0), colored: false)
         }
-        let padding = 1
-        let width = Int(bounds.width.rounded(.up)) + 2 * padding
-        let height = Int(bounds.height.rounded(.up)) + 2 * padding
+        let placement = GlyphPlacement(bounds: bounds, padding: 1)
+        let width = placement.width
+        let height = placement.height
         guard let origin = allocate(width: width, height: height) else { return nil }
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
@@ -1133,7 +1158,7 @@ public final class TermiodGlyphAtlas {
             context.setShouldAntialias(true)
             context.setShouldSmoothFonts(false)
             context.setFillColor(CGColor(gray: 1, alpha: 1))
-            var position = CGPoint(x: CGFloat(padding) - bounds.minX, y: CGFloat(padding) - bounds.minY)
+            var position = placement.origin
             CTFontDrawGlyphs(font, &glyph, &position, 1, context)
             return true
         }
@@ -1142,8 +1167,8 @@ public final class TermiodGlyphAtlas {
             region: MTLRegionMake2D(origin.x, origin.y, width, height),
             mipmapLevel: 0, withBytes: pixels, bytesPerRow: width * 4
         )
-        let top = metrics.baseline - Int(bounds.maxY.rounded(.up)) - padding
-        let left = Int(bounds.minX.rounded(.down)) - padding + key.shift
+        let top = metrics.baseline - placement.ascent
+        let left = placement.left + key.shift
         return Slot(
             origin: SIMD2(UInt16(origin.x), UInt16(origin.y)),
             size: SIMD2(UInt16(width), UInt16(height)),

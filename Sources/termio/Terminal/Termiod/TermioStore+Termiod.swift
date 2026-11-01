@@ -2901,10 +2901,27 @@ extension TermioStore {
             && TermiodStreamRenderer.isAvailable
     }
 
+    /// Prompt themes draw icons from Nerd Fonts' private-use codepoints, which most
+    /// fonts lack; without this face CoreText answers them with `?` boxes (#825).
+    static let symbolsFontFamily: String = {
+        let url = Bundle.termioResources.url(forResource: "SymbolsNerdFont-Regular", withExtension: "ttf")
+        var error: Unmanaged<CFError>?
+        if let url {
+            if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
+                let reason = error.map { CFErrorCopyDescription($0.takeRetainedValue()) as String } ?? "unknown"
+                Log.termiod.error("symbols font not registered: \(reason, privacy: .public)")
+            }
+        } else {
+            Log.termiod.error("symbols font is missing from the resource bundle")
+        }
+        return "Symbols Nerd Font"
+    }()
+
     /// The settings the embedded surface is configured with, in the form the
     /// stream renderer takes (`applyAppearance` is the embedded side).
     func streamAppearance() -> TermiodStreamRenderer.Appearance {
         var fallbacks = settings.ghosttyFontFallbacks.filter { $0 != settings.fontFamily }
+        fallbacks.append(Self.symbolsFontFamily)
         let chain = [settings.fontFamily] + settings.ghosttyFontFallbacks
         if let cjk = InstalledFonts.cjkMonospaceFallback(existingChain: chain) { fallbacks.append(cjk) }
         return TermiodStreamRenderer.Appearance(
