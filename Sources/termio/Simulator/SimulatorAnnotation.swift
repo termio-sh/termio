@@ -60,6 +60,7 @@ struct SimulatorMark: Equatable {
 
 /// The marks drawn on top of the screenshot, as one PNG at the screenshot's
 /// own pixel size. Nil when the screenshot can't be read or the PNG written.
+@MainActor
 enum SimulatorAnnotationRenderer {
     static func render(_ source: NSImage, marks: [SimulatorMark]) -> Data? {
         guard let cgImage = source.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
