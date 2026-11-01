@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Couldn’t add the dropped item": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法添加拖入的项目"
+          }
+        }
+      }
+    },
     "Offline": {
       "localizations": {
         "zh-Hans": {
@@ -161,6 +171,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "退出登录"
+          }
+        }
+      }
+    },
+    "This session has no running terminal.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话没有正在运行的终端。"
           }
         }
       }

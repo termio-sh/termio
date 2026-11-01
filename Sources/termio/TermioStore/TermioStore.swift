@@ -584,7 +584,19 @@ final class TermioStore: ObservableObject {
     @discardableResult
     func addPathToSelectedSessionPrompt(_ url: URL) -> Bool {
         guard let id = selectedSessionID, let session = session(id) else { return false }
-        return surface(for: session).send(Self.promptToken(for: url) + " ")
+        return typeAtPrompt(Self.promptToken(for: url) + " ", in: session)
+    }
+
+    /// Types text into a session's terminal. A stream pane has no embedded surface
+    /// to type through, so its text goes to the session link, which holds it until
+    /// the link is attached.
+    @discardableResult
+    func typeAtPrompt(_ text: String, in session: Session) -> Bool {
+        if let link = runtimes[session.id]?.streamLink, link.isStreaming {
+            link.send(Data(text.utf8))
+            return true
+        }
+        return surface(for: session).send(text)
     }
 
     /// Pastes selected text into the selected session's prompt, wrapped in bracketed
