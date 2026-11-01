@@ -622,14 +622,19 @@ struct TerminalPane: View {
         store.selectedSessionID = id
         requestTerminalFocus(for: id, reason: .fileDrop)
         let text = urls.map { TermioStore.promptToken(for: $0) }.joined(separator: " ") + " "
-        if store.surface(for: session).send(text) { return true }
+        if store.typeAtPrompt(text, in: session) { return true }
 
         // The shell may not be attached yet (a freshly opened session whose surface
         // hasn't mounted). Selecting it above mounts the surface; retry a moment later, once.
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(300))
-            if !store.surface(for: session).send(text) {
+            if !store.typeAtPrompt(text, in: session) {
                 Log.pty.error("dropped path could not be sent — \(session.title, privacy: .public) has no live terminal")
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = localized("Couldn’t add the dropped item")
+                alert.informativeText = localized("This session has no running terminal.")
+                alert.runModal()
             }
         }
         return true

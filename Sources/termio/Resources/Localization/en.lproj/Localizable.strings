@@ -490,6 +490,8 @@
 	<string>Could not run termio: %@</string>
 	<key>Couldn't read plan limits.</key>
 	<string>Couldn't read plan limits.</string>
+	<key>Couldn’t add the dropped item</key>
+	<string>Couldn’t add the dropped item</string>
 	<key>Couldn’t change the Themes folder</key>
 	<string>Couldn’t change the Themes folder</string>
 	<key>Couldn’t copy the capture.</key>
@@ -1844,6 +1846,8 @@
 	<string>This relay has no valid URL pattern, so its address could never be read back.</string>
 	<key>This session couldn’t be started.</key>
 	<string>This session couldn’t be started.</string>
+	<key>This session has no running terminal.</key>
+	<string>This session has no running terminal.</string>
 	<key>This workspace is no longer on your list.</key>
 	<string>This workspace is no longer on your list.</string>
 	<key>Timed out</key>

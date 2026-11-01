@@ -203,6 +203,16 @@ final class StreamLinkIntegrationTests: XCTestCase {
         XCTAssertFalse(clipboard.contains("EPERM"), clipboard.debugDescription)
     }
 
+    /// termiod answers the program status query on its read path, so its VT's or a
+    /// pane's own answer would be a second one: Grok typed it into its prompt (#831).
+    func testTheProgramStatusQueryIsAnsweredOnceWhoeverElseAnswers() throws {
+        for offersAnswers in [true, false] {
+            let read = try answers(offersAnswers: offersAnswers, query: "\\033]7501;?\\033\\\\")
+            XCTAssertEqual(read.components(separatedBy: "]7501;?").count - 1, 1, read.debugDescription)
+            XCTAssertTrue(read.contains("]7501;?:states="), read.debugDescription)
+        }
+    }
+
     /// What a program that asks `query` and then DA1 after its first key
     /// reads, collected until two quiet seconds pass.
     private func answers(offersAnswers: Bool, query: String = "\\033[>q") throws -> String {

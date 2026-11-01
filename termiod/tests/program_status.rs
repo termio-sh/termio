@@ -85,8 +85,17 @@ fn the_host_answers_the_query_and_carries_a_report() {
     // reply that arrives first as "not supported", so the host's answer has to
     // be in the PTY before anything a client can send.
     let marker = format!("{}/reply", daemon.dir);
+    let extra = format!("{}/extra", daemon.dir);
+    //
+    // It also sends the writer's own answer. The program must read one answer,
+    // then the DA1 reply: a second answer would land in its input (#831). The
+    // second `head` waits a second for anything after those.
+    const ANSWER: &[u8] =
+        b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\";
+    const DA1: &[u8] = b"\x1b[?62;22c";
+    let length = ANSWER.len() + DA1.len();
     let script = format!(
-        r"stty raw -echo; printf '\033]7501;?\033\\'; head -c 10 > {marker}; printf '\033]7501;state=blocked:kind=permission\033\\'; sleep 5"
+        r"stty raw -echo; printf '\033]7501;?\033\\'; head -c {length} > {marker}; stty min 0 time 10; head -c 64 > {extra}; printf '\033]7501;state=blocked:kind=permission\033\\'; sleep 5"
     );
     let attach = serde_json::json!({
         "op": "attach",
@@ -104,8 +113,8 @@ fn the_host_answers_the_query_and_carries_a_report() {
         let Some((kind, payload)) = read_frame(&mut stream) else {
             break;
         };
-        if kind == b'D' && payload.windows(9).any(|window| window == b"\x1b]7501;?") {
-            write_frame(&mut stream, b'D', b"\x1b[?62;22c");
+        if kind == b'D' && payload.windows(8).any(|window| window == b"\x1b]7501;?") {
+            write_frame(&mut stream, b'D', &[ANSWER, DA1].concat());
         }
         let text = String::from_utf8_lossy(&payload);
         if text.contains("\"ev\":\"status\"") && text.contains("\"status\":\"needs_you\"") {
@@ -119,5 +128,7 @@ fn the_host_answers_the_query_and_carries_a_report() {
     );
 
     let reply = std::fs::read(&marker).expect("the program never read a reply");
-    assert_eq!(reply, b"\x1b]7501;?\x1b\\");
+    assert_eq!(reply, [ANSWER, DA1].concat());
+    let extra = std::fs::read(&extra).expect("the program never looked for more input");
+    assert!(extra.is_empty(), "the program read more than one answer: {extra:?}");
 }

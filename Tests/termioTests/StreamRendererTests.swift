@@ -14,6 +14,38 @@ final class StreamRendererTests: XCTestCase {
         paddingX: 8, paddingY: 2, backgroundOpacity: 1
     )
 
+    /// Glyphs with different fractional bounds keep one baseline and one left edge:
+    /// the origin in the bitmap is whole, and the bitmap holds the whole glyph.
+    func testGlyphOriginIsAWholePixel() {
+        let boxes = [
+            CGRect(x: 0.4, y: -2.63, width: 23.2, height: 23.79),
+            CGRect(x: -1.7, y: -2.0, width: 23.2, height: 23.32),
+            CGRect(x: 2, y: 3, width: 5, height: 7),
+        ]
+        for box in boxes {
+            let placement = GlyphPlacement(bounds: box, padding: 1)
+            XCTAssertEqual(placement.origin.x, placement.origin.x.rounded())
+            XCTAssertEqual(placement.origin.y, placement.origin.y.rounded())
+            // The baseline, measured from the bitmap's top edge, is where `ascent` says.
+            XCTAssertEqual(placement.height - Int(placement.origin.y), placement.ascent)
+            XCTAssertEqual(placement.left + Int(placement.origin.x), 0)
+            XCTAssertGreaterThanOrEqual(placement.origin.y + box.minY, 1)
+            XCTAssertLessThanOrEqual(placement.origin.y + box.maxY, CGFloat(placement.height - 1))
+            XCTAssertLessThanOrEqual(placement.origin.x + box.maxX, CGFloat(placement.width - 1))
+        }
+    }
+
+    /// A Nerd Fonts icon resolves to the bundled face through the cascade.
+    func testSymbolsFontAnswersANerdFontIcon() {
+        let cascade = [CTFontDescriptorCreateWithAttributes(
+            [kCTFontFamilyNameAttribute: TermioStore.symbolsFontFamily] as CFDictionary)]
+        let font = CTFontCreateCopyWithAttributes(
+            CTFontCreateWithName("Menlo" as CFString, 13, nil), 13, nil,
+            CTFontDescriptorCreateWithAttributes([kCTFontCascadeListAttribute: cascade] as CFDictionary))
+        let used = CTFontCreateForString(font, "\u{F015}" as CFString, CFRange(location: 0, length: 1))
+        XCTAssertEqual(CTFontCopyFamilyName(used) as String, "Symbols Nerd Font")
+    }
+
     private func terminal() throws -> TermiodStreamTerminal {
         let url = try XCTUnwrap(
             Bundle.module.url(forResource: "vt-stream-resize", withExtension: "txt", subdirectory: "Fixtures"))

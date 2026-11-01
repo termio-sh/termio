@@ -490,6 +490,8 @@
 	<string>无法运行 termio：%@</string>
 	<key>Couldn't read plan limits.</key>
 	<string>无法读取套餐限额。</string>
+	<key>Couldn’t add the dropped item</key>
+	<string>无法添加拖入的项目</string>
 	<key>Couldn’t change the Themes folder</key>
 	<string>无法修改主题文件夹</string>
 	<key>Couldn’t copy the capture.</key>
@@ -1844,6 +1846,8 @@
 	<string>这个中转没有有效的 URL 正则，它的地址永远读不回来。</string>
 	<key>This session couldn’t be started.</key>
 	<string>这个会话没能启动。</string>
+	<key>This session has no running terminal.</key>
+	<string>此会话没有正在运行的终端。</string>
 	<key>This workspace is no longer on your list.</key>
 	<string>这个工作区已不在你的列表中。</string>
 	<key>Timed out</key>
