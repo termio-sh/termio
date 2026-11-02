@@ -347,10 +347,12 @@
     const row = rowAt(event);
     if (!row) return;
     draggingRow = true;
-    // The library drags the whole selection when the pressed row is in it.
+    // The library drags the whole selection when the pressed row is in it,
+    // less any row inside a selected folder: the folder carries it.
     const pressed = row.dataset.itemPath;
     const selected = tree?.getSelectedPaths() ?? [];
-    const dragged = selected.includes(pressed) ? selected : [pressed];
+    const dragged = (selected.includes(pressed) ? selected : [pressed]).filter((path) =>
+      !selected.some((other) => other !== path && isFolder(other) && path.startsWith(other)));
     if (writable) post({ type: 'dragStart', paths: dragged.map(plain) });
   }, true);
   host.addEventListener('dragend', () => { draggingRow = false; }, true);
