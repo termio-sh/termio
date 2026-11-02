@@ -29,10 +29,12 @@
   let openedByThisClick = null;
   let revealing = false;
   let dropRow = null;
-  // Folders to keep open across a move inside the tree, each under its old and
-  // new name: the disk move may still fail. A folder inside a moved one is
-  // listed only later, so a pair waits here until one of its names lands.
+  // Folders to keep open across a move inside the tree, under their old and new
+  // names: the disk move may still fail.
   let openAcrossMove = [];
+  // Set from the pointer press: a click with shift, cmd or ctrl edits the
+  // selection and opens nothing.
+  let modifiedClick = false;
   // Set while an arrow key is handled. The library moves focus, not selection,
   // and the old tree opened the file the keyboard walked onto.
   let walking = false;
@@ -97,9 +99,10 @@
       renderRowDecoration: decoration,
       unsafeCSS: '[data-termio-drop-target] { background: var(--trees-selected-bg-override); border-radius: var(--trees-border-radius-override); }',
       onSelectionChange: (selected) => {
-        if (revealing || selected.length > 1) return;
-        tellSelection(selected[0] ?? null);
-        const path = selected[0];
+        if (revealing) return;
+        const kept = keptSelection(selected);
+        if (kept !== toldSelection) tellSelection(kept);
+        const path = selected.length === 1 && !modifiedClick ? selected[0] : null;
         if (path != null && !isFolder(path)) {
           openedByThisClick = path;
           setTimeout(() => { if (openedByThisClick === path) openedByThisClick = null; }, 0);
@@ -112,27 +115,18 @@
     tree.render({ fileTreeContainer: host });
   }
 
+  // Swift holds one path. Of several selected rows it keeps the one it has, if
+  // still selected, else the focused one, else the last.
+  function keptSelection(selected) {
+    if (selected.length === 0) return null;
+    if (toldSelection != null && selected.includes(toldSelection)) return toldSelection;
+    const focused = tree.getFocusedPath();
+    return selected.includes(focused) ? focused : selected[selected.length - 1];
+  }
+
   function tellSelection(path) {
     toldSelection = path;
     post({ type: 'select', path: path == null ? null : plain(path), directory: path != null && isFolder(path) });
-  }
-
-  // The library has already moved the rows, so a folder that was open is found
-  // under its new name; `entries` still holds the old ones.
-  function openFoldersAcross(draggedPaths, directory) {
-    const open = [];
-    for (const [path, entry] of entries) {
-      if (!entry.d) continue;
-      const moved = draggedPaths.find((dragged) => path === dragged || (isFolder(dragged) && path.startsWith(dragged)));
-      if (moved == null) {
-        if (itemAt(path)?.isExpanded?.()) open.push([path]);
-        continue;
-      }
-      const name = plain(moved).split('/').pop() + (isFolder(moved) ? '/' : '');
-      const renamed = directory + name + path.slice(moved.length);
-      if (itemAt(renamed)?.isExpanded?.()) open.push([path, renamed]);
-    }
-    return open;
   }
 
   const parentOf = (path) => {
@@ -140,26 +134,33 @@
     return cut < 0 ? '' : path.slice(0, cut + 1);
   };
 
-  // The waiting folders `next` lists, to open now. A pair is dropped once one
-  // of its names is listed, or once every parent has been listed without it:
-  // the folder is gone, and a new one by that name later is not it. A folder
-  // whose parent is closed by then stays closed, since opening it would open
-  // its parents too, against what was done since the move.
-  function settleOpenAcrossMove(next, isOpen) {
-    const opened = [];
-    openAcrossMove = openAcrossMove.filter((names) => {
-      const name = names.find((candidate) => next.has(candidate));
-      if (name != null) {
-        const parent = parentOf(name);
-        if (parent === '' || isOpen(parent)) opened.push(name);
-        return false;
+  // Open with every folder above it open too. The library keeps a hidden
+  // folder's flag, and opening it again would open its parents with it.
+  function visiblyOpen(path) {
+    for (let folder = path; folder !== ''; folder = parentOf(folder)) {
+      if (!itemAt(folder)?.isExpanded?.()) return false;
+    }
+    return true;
+  }
+
+  // The library has already moved the rows, so a folder that was open is found
+  // under its new name; `entries` still holds the old ones. A folder inside a
+  // moved one that the device has not listed yet stays closed: its rows only
+  // arrive after the move, and opening it then would undo what was done since.
+  function openFoldersAcross(draggedPaths, directory) {
+    const open = [];
+    for (const [path, entry] of entries) {
+      if (!entry.d) continue;
+      const moved = draggedPaths.find((dragged) => path === dragged || (isFolder(dragged) && path.startsWith(dragged)));
+      if (moved == null) {
+        if (visiblyOpen(path)) open.push(path);
+        continue;
       }
-      return names.some((candidate) => {
-        const parent = parentOf(candidate);
-        return parent !== '' && !next.get(parent)?.o;
-      });
-    });
-    return opened;
+      const name = plain(moved).split('/').pop() + (isFolder(moved) ? '/' : '');
+      const renamed = directory + name + path.slice(moved.length);
+      if (visiblyOpen(renamed)) open.push(path, renamed);
+    }
+    return open;
   }
 
   function followKeyboardFocus() {
@@ -225,19 +226,12 @@
       const moved = diverged;
       if (diverged) {
         entries = next;
-        // Nothing is open yet in the new path set: a parent opens here if it
-        // was open before the move.
-        const waiting = openAcrossMove.flat();
-        tree.resetPaths([...next.keys()], {
-          initialExpandedPaths: settleOpenAcrossMove(next, (parent) => waiting.includes(parent)),
-        });
+        tree.resetPaths([...next.keys()], { initialExpandedPaths: openAcrossMove.filter((path) => next.has(path)) });
+        openAcrossMove = [];
         diverged = false;
       } else {
         patch(next);
         entries = next;
-        for (const path of settleOpenAcrossMove(next, (parent) => itemAt(parent)?.isExpanded?.())) {
-          itemAt(path)?.expand();
-        }
       }
       tree.setGitStatus(gitStatus());
       // A change to a row's decoration alone (loading, a note) touches no path
@@ -245,11 +239,8 @@
       tree.render({ fileTreeContainer: host });
       // Swift dropped the selection the library reported mid-move, for a path it
       // had not listed yet; a row removed from under the selection reports none.
-      // Swift holds one path; of several selected rows it keeps one still there.
-      const selected = tree.getSelectedPaths();
-      if (moved ? selected.length > 0 : !(toldSelection == null ? selected.length === 0 : selected.includes(toldSelection))) {
-        tellSelection(selected[0] ?? null);
-      }
+      const kept = keptSelection(tree.getSelectedPaths());
+      if (moved ? kept != null : kept !== toldSelection) tellSelection(kept);
       requestUnlistedFolders();
     },
 
@@ -292,7 +283,6 @@
     },
 
     collapseAll() {
-      openAcrossMove = [];
       for (const path of expandedFolders()) itemAt(path)?.collapse();
     },
 
@@ -306,9 +296,12 @@
     return null;
   }
 
+  host.addEventListener('pointerdown', (event) => {
+    modifiedClick = event.shiftKey || event.metaKey || event.ctrlKey;
+  }, true);
+
   host.addEventListener('click', (event) => {
-    // A modified click edits the selection; it opens nothing.
-    if (event.shiftKey || event.metaKey || event.ctrlKey) return;
+    if (modifiedClick) return;
     const row = rowAt(event);
     if (!row || row.dataset.itemType !== 'file') return;
     const path = row.dataset.itemPath;
@@ -330,6 +323,7 @@
 
   const walkingKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']);
   host.addEventListener('keydown', (event) => {
+    modifiedClick = false;
     if (!walkingKeys.has(event.key) || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     walking = true;
     setTimeout(() => { walking = false; }, 0);
