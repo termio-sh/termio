@@ -45,23 +45,6 @@ struct UsageWindow: Identifiable, Hashable, Sendable {
 /// never interrupt a session.
 struct AgentUsage: Hashable, Sendable {
     var windows: [UsageWindow]
-    /// The plan the sign-in is on ("Max", "Plus"), when the credential says.
-    var plan: String?
-}
-
-/// One sign-in of one agent, which is one config folder: the CLIs keep a login,
-/// its refresh chain, and its session logs per folder (`CLAUDE_CONFIG_DIR`,
-/// `CODEX_HOME`, …), so a second account is a second folder. The default
-/// folder is the one the CLI uses when its variable is unset.
-struct UsageAccount: Hashable, Sendable, Identifiable {
-    let agent: AgentPreset
-    let home: URL
-    let isDefault: Bool
-
-    var id: String { "\(agent.rawValue):\(home.path)" }
-
-    /// The folder as the user would type it, `~/.claude-work`.
-    var displayPath: String { (home.path as NSString).abbreviatingWithTildeInPath }
 }
 
 /// One plan-limit fetch's result: the reading (if any) plus whether the user
@@ -76,8 +59,8 @@ struct PlanLimitReading {
 
     /// The lanes a provider managed to read, collapsing "fetched, nothing
     /// measurable" back to no reading at all.
-    init(_ windows: [UsageWindow], plan: String? = nil) {
-        usage = windows.isEmpty ? nil : AgentUsage(windows: windows, plan: plan)
+    init(_ windows: [UsageWindow]) {
+        usage = windows.isEmpty ? nil : AgentUsage(windows: windows)
     }
 
     init(usage: AgentUsage? = nil, keychainDeclined: Bool = false) {
@@ -86,36 +69,18 @@ struct PlanLimitReading {
     }
 }
 
-/// One agent's usage source for one config folder: where its plan limits come
-/// from and how its own session logs are totalled.
+/// One agent's usage source: where its plan limits come from and how its own
+/// session logs are totalled.
 ///
 /// Everything provider-specific — the credential file and its refresh dance, the
 /// endpoint, the log layout — lives behind this, so `UsageMonitor` only knows the
-/// list and adding an agent is one new file plus one line in that list. A
-/// provider is built per account (`init(home:)`), so every path it reads hangs
-/// off `home` and a second account needs no provider code at all. The extension
-/// below is what a provider gets for free: the HTTP shapes, the credential-file
-/// plumbing, and the CLI-home lookup, all of which every provider needs and none
-/// of which is worth restating four times.
+/// list and adding an agent is one new file plus one line in that list. The
+/// extension below is what a provider gets for free: the HTTP shapes, the
+/// credential-file plumbing, and the CLI-home lookup, all of which every
+/// provider needs and none of which is worth restating four times.
 protocol UsageProvider: Sendable {
-    /// The agent this reads for.
-    static var agent: AgentPreset { get }
-
-    /// The variable that moves the CLI's config folder, e.g. `CLAUDE_CONFIG_DIR`.
-    /// Signing in to a second account means running the CLI with it set.
-    static var homeEnvironment: String { get }
-
-    /// The folder the CLI uses when `homeEnvironment` is unset.
-    static var defaultDirectory: String { get }
-
-    /// The CLI's own sign-in subcommand (`auth login`), or `nil` when the agent
-    /// has none termio can run — such an agent can't have accounts added.
-    static var loginArguments: String? { get }
-
-    /// The config folder this instance reads.
-    var home: URL { get }
-
-    init(home: URL)
+    /// The agent this reads for, and its key in the monitor's published maps.
+    var agent: AgentPreset { get }
 
     /// The plan's quota lanes, fetched from the provider's usage endpoint with
     /// the credential its CLI already left on disk. `allowKeychain` is false once
@@ -125,58 +90,23 @@ protocol UsageProvider: Sendable {
 
     /// Token totals scanned out of the agent's own local session logs.
     func tokenUsage(in windows: DateWindows) -> AgentTokenUsage
-
-    /// The signed-in email, read from a plain file so it never raises a
-    /// Keychain prompt. `nil` when the CLI doesn't record one.
-    func accountEmail() -> String?
-
-    /// Whether the folder holds a login at all. Never reads a secret, so it is
-    /// safe to poll while a sign-in is under way and never prompts.
-    func hasCredential() -> Bool
 }
 
 extension UsageProvider {
-    var agent: AgentPreset { Self.agent }
-
-    static var loginArguments: String? { nil }
-
-    func accountEmail() -> String? { nil }
-
     // MARK: - CLI data
 
-    /// The CLI's default data root: its own `$…_HOME` override when termio's
-    /// environment carries one, else the named dot-directory under the user's
-    /// home. Honouring the override matters — a user who moved the CLI's home
-    /// expects termio to read what the CLI wrote.
-    static var defaultHome: URL {
-        ProcessInfo.processInfo.environment[homeEnvironment].map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(defaultDirectory)
-    }
-
-    /// The manifest's own folder, `~/.claude`, whatever the environment says.
-    /// Extra accounts are named and checked beside this one: termiod accepts
-    /// its siblings however either process was started, while a folder named
-    /// after an environment override only works when both saw the same one.
-    static var manifestHome: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(defaultDirectory)
+    /// The CLI's data root: its own `$…_HOME` override when set, else the named
+    /// dot-directory under the user's home. Honouring the override matters —
+    /// a user who moved the CLI's home expects termio to read what the CLI wrote.
+    func cliHome(environment: String, directory: String) -> URL {
+        ProcessInfo.processInfo.environment[environment].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(directory)
     }
 
     /// The JSON object at `file`, or `nil` when it is missing, unreadable, or not
     /// an object — all of which mean the same thing here: no credential.
     func jsonObject(at file: URL) -> [String: Any]? {
         guard let data = try? Data(contentsOf: file) else { return nil }
-        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    }
-
-    /// The claims of a JWT, unverified — only ever used to label an account the
-    /// CLI already trusts, never to authorize anything.
-    func jwtClaims(_ token: String) -> [String: Any]? {
-        let parts = token.split(separator: ".")
-        guard parts.count >= 2 else { return nil }
-        var payload = parts[1].replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
-        guard let data = Data(base64Encoded: payload) else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 

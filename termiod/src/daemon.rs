@@ -2721,8 +2721,6 @@ async fn process_control(
             skills,
             reporter,
             commands,
-            homes,
-            retired_homes,
             seq,
         } => {
             if !connection.capabilities.contains("agents") {
@@ -2740,9 +2738,7 @@ async fn process_control(
                     skills,
                     reporter,
                     commands,
-                )
-                .with_homes(homes)
-                .with_retired_homes(retired_homes);
+                );
                 // A dozen agents is a few dozen small reads, merges and renames.
                 // That is blocking work, and it must not sit on the runtime that
                 // is also carrying somebody's keystrokes.
@@ -2755,7 +2751,6 @@ async fn process_control(
                         Ok(report) => Control::AgentsInstalled {
                             results: report.results,
                             present: report.present,
-                            retired: report.retired,
                             re: seq,
                         },
                         Err(e) => error(seq, ErrorCode::Internal, e.to_string(), true),

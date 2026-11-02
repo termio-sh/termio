@@ -10,8 +10,6 @@
 	<string> Cost is estimated at API rates.</string>
 	<key>%1$@ changed on %2$@</key>
 	<string>%1$@ changed on %2$@</string>
-	<key>%@ Sign-In</key>
-	<string>%@ Sign-In</string>
 	<key>%@ and %@</key>
 	<string>%@ and %@</string>
 	<key>%@ answered as a different machine than %@. Its address is being served by something else.</key>
@@ -32,8 +30,6 @@
 	<string>%@ is a dark theme in the %@ slot.</string>
 	<key>%@ is a light theme in the %@ slot.</key>
 	<string>%@ is a light theme in the %@ slot.</string>
-	<key>%@ is already added</key>
-	<string>%@ is already added</string>
 	<key>%@ is not an address the iPhone could dial.</key>
 	<string>%@ is not an address the iPhone could dial.</string>
 	<key>%@ is published, but the connection an iPhone would make was refused.
@@ -144,16 +140,12 @@
 	<string>Accept the Xcode License</string>
 	<key>Access</key>
 	<string>Access</string>
-	<key>Accounts</key>
-	<string>Accounts</string>
+	<key>Activity</key>
+	<string>Activity</string>
 	<key>Add</key>
 	<string>Add</string>
 	<key>Add &amp; Connect</key>
 	<string>Add &amp; Connect</string>
-	<key>Add Account</key>
-	<string>Add Account</string>
-	<key>Add Account…</key>
-	<string>Add Account…</string>
 	<key>Add Agent</key>
 	<string>Add Agent</string>
 	<key>Add Device</key>
@@ -166,8 +158,6 @@
 	<string>Add Remote Host</string>
 	<key>Add SSH Host</key>
 	<string>Add SSH Host</string>
-	<key>Add a %@ Account</key>
-	<string>Add a %@ Account</string>
 	<key>Add a host you reach over SSH and Termio can run sessions on it, with agents that keep working after you disconnect.</key>
 	<string>Add a host you reach over SSH and Termio can run sessions on it, with agents that keep working after you disconnect.</string>
 	<key>Add to Chat</key>
@@ -212,14 +202,14 @@
 	<string>All changes to “%@” will be lost. This cannot be undone.</string>
 	<key>Allow</key>
 	<string>Allow</string>
+	<key>Allow Keychain Access…</key>
+	<string>Allow Keychain Access…</string>
 	<key>Allow Paired Devices</key>
 	<string>Allow Paired Devices</string>
 	<key>Allow Usage Access</key>
 	<string>Allow Usage Access</string>
 	<key>Allow agents to use %@?</key>
 	<string>Allow agents to use %@?</string>
-	<key>Allow…</key>
-	<string>Allow…</string>
 	<key>An older install points at %@. Update it to this version of Termio.</key>
 	<string>An older install points at %@. Update it to this version of Termio.</string>
 	<key>Annotate</key>
@@ -346,8 +336,6 @@
 	<string>Choose a device above to boot it.</string>
 	<key>Choose a different name.</key>
 	<string>Choose a different name.</string>
-	<key>Choose a folder named like “%@-work”</key>
-	<string>Choose a folder named like “%@-work”</string>
 	<key>Choose a name for this workspace.</key>
 	<string>Choose a name for this workspace.</string>
 	<key>Choose a project folder on %@.</key>
@@ -360,8 +348,6 @@
 	<string>Choose another branch to compare with.</string>
 	<key>Choose how projects are ordered</key>
 	<string>Choose how projects are ordered</string>
-	<key>Choose the folder %@ signed in to.</key>
-	<string>Choose the folder %@ signed in to.</string>
 	<key>Choose which repository’s issues to show</key>
 	<string>Choose which repository’s issues to show</string>
 	<key>Choose…</key>
@@ -488,8 +474,6 @@
 	<string>Could not run ssh: %@</string>
 	<key>Could not run termio: %@</key>
 	<string>Could not run termio: %@</string>
-	<key>Couldn't read plan limits.</key>
-	<string>Couldn't read plan limits.</string>
 	<key>Couldn’t add the dropped item</key>
 	<string>Couldn’t add the dropped item</string>
 	<key>Couldn’t change the Themes folder</key>
@@ -658,8 +642,6 @@
 	<string>Erase All Content and Settings…</string>
 	<key>Erase all content and settings on %@?</key>
 	<string>Erase all content and settings on %@?</string>
-	<key>Every %@ session on this Mac, from all accounts.%@</key>
-	<string>Every %@ session on this Mac, from all accounts.%@</string>
 	<key>Every iPhone paired with %@ is signed out and must re-scan the new QR to reconnect.</key>
 	<string>Every iPhone paired with %@ is signed out and must re-scan the new QR to reconnect.</string>
 	<key>Every paired iPhone is signed out and must re-scan the new QR to reconnect.</key>
@@ -694,8 +676,6 @@
 	<string>Find…</string>
 	<key>Finish Setting Up Xcode</key>
 	<string>Finish Setting Up Xcode</string>
-	<key>Finish signing in in the terminal</key>
-	<string>Finish signing in in the terminal</string>
 	<key>Finish updating Termio’s session host?</key>
 	<string>Finish updating Termio’s session host?</string>
 	<key>Fit to Pane</key>
@@ -832,6 +812,8 @@
 	<string>Key file</string>
 	<key>Keyboard</key>
 	<string>Keyboard</string>
+	<key>Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.</key>
+	<string>Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.</string>
 	<key>Labels</key>
 	<string>Labels</string>
 	<key>Language</key>
@@ -858,8 +840,6 @@
 	<string>Lets an agent see and drive its sibling sessions in this project via the `termio session` command. Installs the termio skill into each agent's skills folder.</string>
 	<key>Light</key>
 	<string>Light</string>
-	<key>Limits need Keychain access.</key>
-	<string>Limits need Keychain access.</string>
 	<key>Line height</key>
 	<string>Line height</string>
 	<key>Line height applies to the file editor and diffs; the terminal keeps the font’s own.</key>
@@ -980,8 +960,6 @@
 	<string>New Worktree…</string>
 	<key>New chat</key>
 	<string>New chat</string>
-	<key>New sessions use this account.</key>
-	<string>New sessions use this account.</string>
 	<key>New terminal or project</key>
 	<string>New terminal or project</string>
 	<key>Next Match</key>
@@ -1046,6 +1024,8 @@
 	<string>No iOS simulator is downloaded. Get one in Xcode ▸ Settings ▸ Components, or in Terminal.</string>
 	<key>No issues found.</key>
 	<string>No issues found.</string>
+	<key>No local usage yet — run `%@` once, then Refresh.</key>
+	<string>No local usage yet — run `%@` once, then Refresh.</string>
 	<key>No matches</key>
 	<string>No matches</string>
 	<key>No network address found. Join a network, then reopen this pane.</key>
@@ -1060,8 +1040,6 @@
 	<string>No results</string>
 	<key>No route to host</key>
 	<string>No route to host</string>
-	<key>No sessions on this Mac yet.</key>
-	<string>No sessions on this Mac yet.</string>
 	<key>No simulator is booted. Boot one with `xcrun simctl boot &lt;device&gt;`, or pick one in the Simulator pane.</key>
 	<string>No simulator is booted. Boot one with `xcrun simctl boot &lt;device&gt;`, or pick one in the Simulator pane.</string>
 	<key>No textual changes to show.</key>
@@ -1246,6 +1224,10 @@
 	<string>Pinned</string>
 	<key>Placeholder: %@</key>
 	<string>Placeholder: %@</string>
+	<key>Plan limits</key>
+	<string>Plan limits</string>
+	<key>Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.</key>
+	<string>Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.</string>
 	<key>Play sound</key>
 	<string>Play sound</string>
 	<key>Pointing termiod at %@…</key>
@@ -1288,6 +1270,8 @@
 	<string>Push the current branch to the repository’s remote first, then try again. (The remote also needs to be a forge Termio recognizes: GitHub, GitLab, Bitbucket, or Gitea.)</string>
 	<key>Quit Termio</key>
 	<string>Quit Termio</string>
+	<key>Range</key>
+	<string>Range</string>
 	<key>Reachable</key>
 	<string>Reachable</string>
 	<key>Reached by</key>
@@ -1344,8 +1328,6 @@
 	<string>Remote Hosts</string>
 	<key>Remove</key>
 	<string>Remove</string>
-	<key>Remove Account</key>
-	<string>Remove Account</string>
 	<key>Remove Highlight</key>
 	<string>Remove Highlight</string>
 	<key>Remove Project</key>
@@ -1388,10 +1370,6 @@
 	<string>Request Permission</string>
 	<key>Reset Font Size</key>
 	<string>Reset Font Size</string>
-	<key>Resets in %@</key>
-	<string>Resets in %@</string>
-	<key>Resetting</key>
-	<string>Resetting</string>
 	<key>Restart</key>
 	<string>Restart</string>
 	<key>Restarting the tunnel changes the address, and every paired iPhone has to scan again.</key>
@@ -1400,6 +1378,8 @@
 	<string>Restore Defaults</string>
 	<key>Reveal in Finder</key>
 	<string>Reveal in Finder</string>
+	<key>Revoke Access</key>
+	<string>Revoke Access</string>
 	<key>Rotate Left</key>
 	<string>Rotate Left</string>
 	<key>Rotate Right</key>
@@ -1552,16 +1532,10 @@
 	<string>Sign Out</string>
 	<key>Sign Out…</key>
 	<string>Sign Out…</string>
-	<key>Sign in again to see this account's limits.</key>
-	<string>Sign in again to see this account's limits.</string>
-	<key>Sign in with a different account in the terminal, or cancel.</key>
-	<string>Sign in with a different account in the terminal, or cancel.</string>
 	<key>Sign in with the Tailscale account your iPhone uses.</key>
 	<string>Sign in with the Tailscale account your iPhone uses.</string>
 	<key>Sign this Mac out of Tailscale?</key>
 	<string>Sign this Mac out of Tailscale?</string>
-	<key>Signed out</key>
-	<string>Signed out</string>
 	<key>Signs in with %@</key>
 	<string>Signs in with %@</string>
 	<key>Signs in with the keys ssh offers by default.</key>
@@ -1618,8 +1592,6 @@
 	<string>Status</string>
 	<key>Status Bar</key>
 	<string>Status Bar</string>
-	<key>Stop Reading %@ Data</key>
-	<string>Stop Reading %@ Data</string>
 	<key>Stop Recording</key>
 	<string>Stop Recording</string>
 	<key>Stop Selecting</key>
@@ -1646,6 +1618,8 @@
 	<string>Takes %@ out of the new-session menu. Its settings are kept.</string>
 	<key>Takes effect after Termio relaunches.</key>
 	<string>Takes effect after Termio relaunches.</string>
+	<key>Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@</key>
+	<string>Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@</string>
 	<key>Task completion</key>
 	<string>Task completion</string>
 	<key>Teaches agents the termio session commands.</key>
@@ -1670,12 +1644,8 @@
 	<string>Termio for iPhone is in beta</string>
 	<key>Termio is open source — star the repo, report bugs, and request features.</key>
 	<string>Termio is open source — star the repo, report bugs, and request features.</string>
-	<key>Termio keeps each account in a folder beside %@ so its sessions can report their status.</key>
-	<string>Termio keeps each account in a folder beside %@ so its sessions can report their status.</string>
 	<key>Termio notifies you about the agents above, wherever they run.</key>
 	<string>Termio notifies you about the agents above, wherever they run.</string>
-	<key>Termio opens a terminal where %@ signs you in. Your other accounts stay signed in.</key>
-	<string>Termio opens a terminal where %@ signs you in. Your other accounts stay signed in.</string>
 	<key>Termio server</key>
 	<string>Termio server</string>
 	<key>Test</key>
@@ -1794,8 +1764,6 @@
 	<string>This build of Termio doesn’t include the simulator helper.</string>
 	<key>This checkout has no other branch to compare with.</key>
 	<string>This checkout has no other branch to compare with.</string>
-	<key>This closes by itself once %@ is signed in.</key>
-	<string>This closes by itself once %@ is signed in.</string>
 	<key>This device didn’t answer. Its termiod may be too old to search.</key>
 	<string>This device didn’t answer. Its termiod may be too old to search.</string>
 	<key>This device is no longer in your configuration.</key>
@@ -1840,6 +1808,8 @@
 	<string>This machine’s termiod is too old to read git.</string>
 	<key>This machine’s termiod is too old to report its agents.</key>
 	<string>This machine’s termiod is too old to report its agents.</string>
+	<key>This month</key>
+	<string>This month</string>
 	<key>This pull request changes no files.</key>
 	<string>This pull request changes no files.</string>
 	<key>This relay has no valid URL pattern, so its address could never be read back.</key>
@@ -1848,6 +1818,8 @@
 	<string>This session couldn’t be started.</string>
 	<key>This session has no running terminal.</key>
 	<string>This session has no running terminal.</string>
+	<key>This week</key>
+	<string>This week</string>
 	<key>This workspace is no longer on your list.</key>
 	<string>This workspace is no longer on your list.</string>
 	<key>Timed out</key>
@@ -1862,6 +1834,8 @@
 	<string>Toggle Project Files</string>
 	<key>Toggle Sidebar</key>
 	<string>Toggle Sidebar</string>
+	<key>Token usage</key>
+	<string>Token usage</string>
 	<key>Traffic crosses the relay you run yourself — no third party in the path.</key>
 	<string>Traffic crosses the relay you run yourself — no third party in the path.</string>
 	<key>Try Again</key>
@@ -1914,10 +1888,6 @@
 	<string>Use Regular Expression</string>
 	<key>Use Selection for Find</key>
 	<string>Use Selection for Find</string>
-	<key>Use a Signed-In Folder…</key>
-	<string>Use a Signed-In Folder…</string>
-	<key>Use for New Sessions</key>
-	<string>Use for New Sessions</string>
 	<key>Used for this invite only. To make it stick, start the daemon there with --wss-origin.</key>
 	<string>Used for this invite only. To make it stick, start the daemon there with --wss-origin.</string>
 	<key>User</key>
@@ -1992,6 +1962,8 @@
 	<string>Xcode needs its license accepted before the simulator runs. Open Xcode, or accept it in Terminal.</string>
 	<key>Yellow</key>
 	<string>Yellow</string>
+	<key>Yesterday</key>
+	<string>Yesterday</string>
 	<key>You can restore it from the Trash.</key>
 	<string>You can restore it from the Trash.</string>
 	<key>Your Host entries from ~/.ssh/config — the same aliases `ssh` resolves. Right-click a host to connect.</key>
@@ -2082,8 +2054,8 @@ Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks
 	<string>termiod on this Mac is too old to search.</string>
 	<key>this Mac</key>
 	<string>this Mac</string>
-	<key>tokens</key>
-	<string>tokens</string>
+	<key>· resets %@</key>
+	<string>· resets %@</string>
 	<key>“%@” already exists.</key>
 	<string>“%@” already exists.</string>
 	<key>“%@” is already in your config.</key>

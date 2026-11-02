@@ -62,9 +62,7 @@ enum AgentIntegrationInstaller {
         hooks: Termiod.AgentHalfAction,
         skills: Termiod.AgentHalfAction,
         target: Target = .thisMac,
-        commands: [String: String] = [:],
-        homes: [String: [String]] = [:],
-        retiredHomes: [String: [String]] = [:]
+        commands: [String: String] = [:]
     ) async -> InstallOutcome {
         // Every local hook invokes the channel-stable CLI copy, so make sure it
         // carries this build's content before the daemon stamps its path
@@ -81,9 +79,7 @@ enum AgentIntegrationInstaller {
                     hooks: hooks,
                     skills: skills,
                     reporter: target.reporter,
-                    commands: commands,
-                    homes: homes,
-                    retiredHomes: retiredHomes)
+                    commands: commands)
             }.value
             return InstallOutcome(reply)
         } catch {
@@ -122,7 +118,6 @@ extension InstallOutcome {
         self.init()
         let results = reply.results
         coveredIDs = reply.present.isEmpty ? nil : reply.present.sorted()
-        retiredCleaned = Set(reply.retired)
         var seen: [String: Bool] = [:]
         var order: [String] = []
         for result in results {

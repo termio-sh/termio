@@ -9104,126 +9104,6 @@
         }
       }
     },
-    "Accounts": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "账户"
-          }
-        }
-      }
-    },
-    "Add Account…": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "添加账户…"
-          }
-        }
-      }
-    },
-    "Add Account": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "添加账户"
-          }
-        }
-      }
-    },
-    "Remove Account": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "移除账户"
-          }
-        }
-      }
-    },
-    "Choose the folder %@ signed in to.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择 %@ 登录时使用的文件夹。"
-          }
-        }
-      }
-    },
-    "%@ Sign-In": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 登录"
-          }
-        }
-      }
-    },
-    "%@ is already added": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 已经添加过了"
-          }
-        }
-      }
-    },
-    "Add a %@ Account": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "添加 %@ 账户"
-          }
-        }
-      }
-    },
-    "Allow…": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "允许…"
-          }
-        }
-      }
-    },
-    "Couldn't read plan limits.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法读取套餐限额。"
-          }
-        }
-      }
-    },
-    "Finish signing in in the terminal": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请在终端里完成登录"
-          }
-        }
-      }
-    },
-    "Limits need Keychain access.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "读取限额需要钥匙串访问权限。"
-          }
-        }
-      }
-    },
     "More": {
       "localizations": {
         "zh-Hans": {
@@ -9234,172 +9114,12 @@
         }
       }
     },
-    "No sessions on this Mac yet.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本机上还没有会话。"
-          }
-        }
-      }
-    },
-    "Resets in %@": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@后重置"
-          }
-        }
-      }
-    },
-    "Resetting": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在重置"
-          }
-        }
-      }
-    },
     "Sign In…": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "登录…"
-          }
-        }
-      }
-    },
-    "Sign in again to see this account's limits.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重新登录即可查看此账户的限额。"
-          }
-        }
-      }
-    },
-    "Sign in with a different account in the terminal, or cancel.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请在终端里换一个账户登录，或者取消。"
-          }
-        }
-      }
-    },
-    "Signed out": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已退出登录"
-          }
-        }
-      }
-    },
-    "Stop Reading %@ Data": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "停止读取 %@ 数据"
-          }
-        }
-      }
-    },
-    "Termio opens a terminal where %@ signs you in. Your other accounts stay signed in.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Termio 会打开一个终端，由 %@ 完成登录。其他账户保持登录。"
-          }
-        }
-      }
-    },
-    "This closes by itself once %@ is signed in.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 登录完成后，此窗口会自动关闭。"
-          }
-        }
-      }
-    },
-    "Use a Signed-In Folder…": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "使用已登录的文件夹…"
-          }
-        }
-      }
-    },
-    "tokens": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "token"
-          }
-        }
-      }
-    },
-    "Every %@ session on this Mac, from all accounts.%@": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本机上所有账户的 %1$@ 会话。%2$@"
-          }
-        }
-      }
-    },
-    "Use for New Sessions": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "用于新会话"
-          }
-        }
-      }
-    },
-    "New sessions use this account.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新会话使用此账户。"
-          }
-        }
-      }
-    },
-    "Choose a folder named like “%@-work”": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请选择名称类似“%@-work”的文件夹"
-          }
-        }
-      }
-    },
-    "Termio keeps each account in a folder beside %@ so its sessions can report their status.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Termio 把每个账户放在 %@ 旁边的文件夹里，这样它的会话才能报告状态。"
           }
         }
       }
@@ -10400,6 +10120,146 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法从 %2$@ 移除“%1$@”"
+          }
+        }
+      }
+    },
+    "Activity": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活动"
+          }
+        }
+      }
+    },
+    "Allow Keychain Access…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许访问钥匙串…"
+          }
+        }
+      }
+    },
+    "Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "钥匙串访问已被拒绝，套餐限额保持隐藏。再次允许会重新显示 macOS 提示。"
+          }
+        }
+      }
+    },
+    "No local usage yet — run `%@` once, then Refresh.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无本地用量——运行一次 `%@`，然后点按“刷新”。"
+          }
+        }
+      }
+    },
+    "Plan limits": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "套餐限额"
+          }
+        }
+      }
+    },
+    "Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "套餐限额来自 %@ 的 OAuth 登录；不会存储任何密码。撤销后将停止读取 %@ 的所有数据。"
+          }
+        }
+      }
+    },
+    "Range": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "范围"
+          }
+        }
+      }
+    },
+    "Revoke Access": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "撤销访问"
+          }
+        }
+      }
+    },
+    "Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "根据 %@ 在这台 Mac 上所有终端和编辑器的本地会话日志统计——即你的实际用量，与套餐计费方式无关。%@"
+          }
+        }
+      }
+    },
+    "This month": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本月"
+          }
+        }
+      }
+    },
+    "This week": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本周"
+          }
+        }
+      }
+    },
+    "Token usage": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token 用量"
+          }
+        }
+      }
+    },
+    "Yesterday": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "昨天"
+          }
+        }
+      }
+    },
+    "· resets %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "· 重置于 %@"
           }
         }
       }

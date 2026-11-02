@@ -1059,19 +1059,6 @@ pub enum Control {
         /// own command, which is what every older client sends.
         #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
         commands: std::collections::HashMap<String, String>,
-        /// Extra config folders per agent id — one per signed-in account the
-        /// user keeps beside the default (`~/.claude-2`). The one place a client
-        /// names a path, so the box still decides what it accepts: only an
-        /// existing sibling of the agent's own config home named
-        /// `<home>-<suffix>`; anything else is ignored. Absent from older
-        /// clients, which install into the default home only.
-        #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-        homes: std::collections::HashMap<String, Vec<String>>,
-        /// Account folders the user removed, by agent id, to take termio's hooks
-        /// and skill out of — only those folders, whatever the two halves say.
-        /// Held to the same shape as `homes`.
-        #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-        retired_homes: std::collections::HashMap<String, Vec<String>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         seq: Option<u64>,
     },
@@ -1418,10 +1405,6 @@ pub enum Control {
         /// than as "none".
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         present: Vec<String>,
-        /// The `retired_homes` folders now clean of termio's wiring. Absent from
-        /// an older daemon, which cleaned none — so the client keeps them queued.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        retired: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         re: Option<u64>,
     },

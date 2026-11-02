@@ -55,17 +55,6 @@ extension TermioStore {
         syncSessionControlInstallation()
     }
 
-    /// Re-installs when an account folder is added or removed, so a sign-in in
-    /// a fresh folder gets termio's hooks before its first session starts.
-    /// Only once a first sync has run (the app's launch does one): a store that
-    /// never started its integration — a test's — must not open a daemon
-    /// connection on an unrelated settings change.
-    func syncAccountFoldersIfNeeded() {
-        guard let installed = installedAccountFolders,
-              installed != settings.usageAccountFolders else { return }
-        syncAgentIntegration()
-    }
-
     func syncSessionControlInstallationIfNeeded() {
         guard installedSessionControlEnabled != settings.sessionControlEnabled else { return }
         installedSessionControlEnabled = settings.sessionControlEnabled
@@ -98,37 +87,9 @@ extension TermioStore {
         // observable object from inside the task is the kind of re-entrancy that
         // only shows up later, somewhere else.
         let commands = settings.authoredCommands()
-        // Every extra account folder gets the same hooks and skill as the
-        // default one; a session signed in there would otherwise report no
-        // status at all.
-        installedAccountFolders = settings.usageAccountFolders
-        // A removed account's folder is cleaned once no session still runs on
-        // it: those sessions keep the account on purpose, and need its hooks
-        // to keep reporting status. Until then it stays among the installed
-        // folders, so the Integration switches still reach it.
-        let inUse = Set(allSessions.compactMap(\.accountHome))
-        let retired = settings.usageRetiredAccountFolders
-            .mapValues { $0.filter { !inUse.contains($0) } }
-            .filter { !$0.value.isEmpty }
-        let homes = settings.usageAccountFolders.merging(
-            settings.usageRetiredAccountFolders.mapValues { $0.filter(inUse.contains) }
-        ) { current, held in current + held.filter { !current.contains($0) } }
-            .filter { !$0.value.isEmpty }
-        // The settings, not the store: a task that held `self` would keep the
-        // whole store — its daemon links included — alive past its owner.
-        let settings = self.settings
         Task {
             let outcome = await AgentIntegrationInstaller.sync(
-                hooks: hooks, skills: skills, commands: commands, homes: homes,
-                retiredHomes: retired)
-            // Only what the daemon says it cleaned: an older one ignores the
-            // request, and a failed removal must be retried next time.
-            let cleaned = retired
-                .mapValues { $0.filter(outcome.retiredCleaned.contains) }
-                .filter { !$0.value.isEmpty }
-            if !cleaned.isEmpty {
-                settings.forgetRetiredAccountFolders(cleaned)
-            }
+                hooks: hooks, skills: skills, commands: commands)
             // Stamped for the same reason a machine's pane stamps after its own
             // install: the stamp is what "Not installed on This Mac" reads, and
             // this is the only thing that ever puts the files here. Unstamped, the
@@ -218,9 +179,7 @@ extension TermioStore {
     func noteForegroundAgent(_ detected: AgentDefinition?, for id: Session.ID) {
         guard let home = locate(id) else { return }
         var session = self[home]
-        // A sign-in terminal runs an agent CLI's login, not the agent: promoting it
-        // would persist an agent identity that relaunches as a full session.
-        guard !session.isSSH, !session.isAccountSignIn else { return }
+        guard !session.isSSH else { return }
         if let detected {
             // Promote a plain terminal only: an already-promoted row seeing its own
             // agent is the idempotent no-op, and a *different* foreground under a
@@ -232,9 +191,6 @@ extension TermioStore {
             // here to protect it from.
             session.title = detected.displayName
             session.agent = detected
-            // Typed into a shell, the agent runs on whatever account that shell
-            // gives it, not one this row once started on.
-            session.accountHome = nil
             self[home] = session
         } else if session.agent != .terminal {
             demoteSessionToTerminal(id)
@@ -259,7 +215,6 @@ extension TermioStore {
         let terminalCount = roster(at: home).filter { $0.agent == .terminal }.count
         session.title = "Terminal \(terminalCount + 1)"
         session.agent = .terminal
-        session.accountHome = nil
         session.liveTitle = nil
         session.promptTitle = nil
         self[home] = session
@@ -284,19 +239,12 @@ extension TermioStore {
     /// `nil` until a matching transcript exists on disk.
     func resolveTranscriptPath(for id: Session.ID) -> String? {
         guard let session = session(id), session.launched else { return nil }
-        // A session on an extra account keeps its conversations in that folder.
-        let account = session.accountHome
-        let store = session.agent.resumeSpec.store.map { store -> AgentDefinition.ResumeSpec.Store in
-            var moved = store
-            moved.root = session.agent.path(store.root, inAccount: account)
-            return moved
-        }
-        if let store, !store.isDirectory,
+        if let store = session.agent.resumeSpec.store, !store.isDirectory,
            let resumeID = session.resumeID,
            let path = SessionStore.locate(store, id: resumeID) {
             return path
         }
-        if let store, store.isDirectory,
+        if let store = session.agent.resumeSpec.store, store.isDirectory,
            let resumeID = session.resumeID,
            let dirPath = SessionStore.locate(store, id: resumeID) {
             // Directory-based store: the session is a directory of files. Prefer the
@@ -311,11 +259,11 @@ extension TermioStore {
             return soleJSONLFile(in: dirPath)
         }
         if session.agent.resumeSpec.discover != nil, let resumeID = session.resumeID {
-            return AgentSessionStore.transcript(agent: session.agent, id: resumeID, account: account)
+            return AgentSessionStore.transcript(agent: session.agent, id: resumeID)
         }
         guard let directory = session.worktreePath ?? project(for: id)?.path else { return nil }
         return AgentSessionStore.discoverTranscript(
-            agent: session.agent, directory: directory, after: session.launchedAt, account: account)
+            agent: session.agent, directory: directory, after: session.launchedAt)
     }
 
     /// Returns the path to a named file inside a directory, or `nil` if it doesn't exist.

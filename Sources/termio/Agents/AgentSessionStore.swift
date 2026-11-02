@@ -17,10 +17,8 @@ import Foundation
 /// *private* on-disk format, undocumented and free to change between agent versions,
 /// so every read is best-effort: any miss returns `nil` and the session launches fresh.
 enum AgentSessionStore {
-    static func discover(
-        agent: AgentPreset, directory: String, after launchedAt: Date?, account: String? = nil
-    ) -> String? {
-        match(agent: agent, directory: directory, after: launchedAt, account: account)?.id
+    static func discover(agent: AgentPreset, directory: String, after launchedAt: Date?) -> String? {
+        match(agent: agent, directory: directory, after: launchedAt)?.id
     }
 
     /// The on-disk conversation transcript for an agent that doesn't hand termio a
@@ -28,11 +26,9 @@ enum AgentSessionStore {
     /// the agent's session log itself (Codex's rollout file), so the Info pane can
     /// render a trace from it; a `json` record is metadata only (OpenCode). Returns the
     /// file path, or `nil` when none matches (yet) or the record isn't a transcript.
-    static func discoverTranscript(
-        agent: AgentPreset, directory: String, after launchedAt: Date?, account: String? = nil
-    ) -> String? {
+    static func discoverTranscript(agent: AgentPreset, directory: String, after launchedAt: Date?) -> String? {
         guard agent.resumeSpec.discover?.format == .jsonl else { return nil }
-        return match(agent: agent, directory: directory, after: launchedAt, account: account)?.url.path
+        return match(agent: agent, directory: directory, after: launchedAt)?.url.path
     }
 
     /// The transcript for a *known* conversation id: the record whose id field matches,
@@ -40,9 +36,9 @@ enum AgentSessionStore {
     /// the trace must follow that exact conversation, not whichever record a time-based
     /// match happens to find. Returns the first hit (ids are unique in every agent's
     /// store), and only for `jsonl` records, which double as the transcript.
-    static func transcript(agent: AgentPreset, id: String, account: String? = nil) -> String? {
+    static func transcript(agent: AgentPreset, id: String) -> String? {
         guard let spec = agent.resumeSpec.discover, spec.format == .jsonl else { return nil }
-        let root = URL(fileURLWithPath: XDGBaseDirectories.expand(agent.path(spec.root, inAccount: account)))
+        let root = URL(fileURLWithPath: XDGBaseDirectories.expand(spec.root))
         let keys: [URLResourceKey] = [.isRegularFileKey]
         guard let enumerator = FileManager.default.enumerator(
             at: root, includingPropertiesForKeys: keys) else { return nil }
@@ -63,11 +59,9 @@ enum AgentSessionStore {
     /// follows the agent through an in-process rotation (`/new`) that minted a newer
     /// one. Returns the id plus the record path when the record doubles as the
     /// transcript (`jsonl`).
-    static func rediscover(
-        agent: AgentPreset, directory: String, after launchedAt: Date?, account: String? = nil
-    ) -> (id: String, transcriptPath: String?)? {
-        guard let hit = match(agent: agent, directory: directory, after: launchedAt, newest: true,
-                              account: account)
+    static func rediscover(agent: AgentPreset, directory: String, after launchedAt: Date?)
+        -> (id: String, transcriptPath: String?)? {
+        guard let hit = match(agent: agent, directory: directory, after: launchedAt, newest: true)
         else { return nil }
         let isTranscript = agent.resumeSpec.discover?.format == .jsonl
         return (hit.id, isTranscript ? hit.url.path : nil)
@@ -77,9 +71,9 @@ enum AgentSessionStore {
     /// Both `discover` (id, for resume) and `discoverTranscript` (path, for the trace
     /// viewer) read from the same scan.
     private static func match(agent: AgentPreset, directory: String, after launchedAt: Date?,
-                              newest: Bool = false, account: String? = nil) -> (url: URL, id: String)? {
+                              newest: Bool = false) -> (url: URL, id: String)? {
         guard let launchedAt, let spec = agent.resumeSpec.discover else { return nil }
-        let root = URL(fileURLWithPath: XDGBaseDirectories.expand(agent.path(spec.root, inAccount: account)))
+        let root = URL(fileURLWithPath: XDGBaseDirectories.expand(spec.root))
         let target = canonical(directory)
         return bestMatch(in: root, ext: spec.format.fileExtension, after: launchedAt,
                          newest: newest) { url in
