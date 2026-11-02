@@ -351,8 +351,9 @@
     // less any row inside a selected folder: the folder carries it.
     const pressed = row.dataset.itemPath;
     const selected = tree?.getSelectedPaths() ?? [];
-    const dragged = (selected.includes(pressed) ? selected : [pressed]).filter((path) =>
-      !selected.some((other) => other !== path && isFolder(other) && path.startsWith(other)));
+    const dragged = selected.includes(pressed)
+      ? selected.filter((path) => !selected.some((other) => other !== path && isFolder(other) && path.startsWith(other)))
+      : [pressed];
     if (writable) post({ type: 'dragStart', paths: dragged.map(plain) });
   }, true);
   host.addEventListener('dragend', () => { draggingRow = false; }, true);
