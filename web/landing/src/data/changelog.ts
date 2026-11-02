@@ -17,6 +17,22 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.70.0",
+    date: "2026-11-02",
+    title: "Terminal fixes for icons, drops and Grok",
+    changes: {
+      improved: [
+        "Settings ▸ Usage reads each agent's default account again. Multiple accounts per agent are removed.",
+      ],
+      fixed: [
+        "Dropping a file from Finder into a terminal types its path again.",
+        "Grok no longer finds stray text in its prompt when it starts.",
+        "Text in a terminal stays on one baseline instead of drifting up and down.",
+        "Nerd Font icons draw in the terminal instead of question-mark boxes.",
+      ],
+    },
+  },
+  {
     version: "0.69.0",
     date: "2026-10-30",
     title: "Every machine in one switcher",
