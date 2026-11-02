@@ -7,7 +7,7 @@ import TermioShared
 /// bookkeeping.
 ///
 /// The tree used to drop every node it held and re-list the root alone, leaving
-/// each still-expanded folder to fetch itself from the `children` getter — one
+/// each still-expanded folder to fetch itself on its next expand — one
 /// SSH round trip per open folder, on every app focus. It now names them all in
 /// one `fs.list` and grafts the replies onto the nodes already on screen.
 ///
