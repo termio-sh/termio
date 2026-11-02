@@ -452,7 +452,7 @@ final class RootContainerViewController: UIViewController {
         let remaining = width * (open ? 1 - railProgress : railProgress)
         let towardTarget = open ? velocityX : -velocityX
         let initial = remaining > 1 ? min(max(towardTarget / remaining, 0), 30) : 0
-        railAnimator = Motion.animate(velocity: initial) {
+        railAnimator = Motion.animate(velocity: initial, interactive: true) {
             self.layoutRail(progress: open ? 1 : 0)
         } completion: { [weak self] in
             guard let self else { return }

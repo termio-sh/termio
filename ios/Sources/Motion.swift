@@ -15,9 +15,15 @@ enum Motion {
     /// `velocity` is in fractions of the remaining travel per second, the unit
     /// `UISpringTimingParameters` takes: a flick keeps its speed, a release at
     /// rest starts from zero.
+    ///
+    /// Moving views ignore touches unless `interactive` says otherwise, as
+    /// `UIView.animate` did: a terminal still sliding out must not take a pan
+    /// meant for the one sliding in. The rail opts in so a drag can catch it
+    /// mid-flight.
     @discardableResult
     static func animate(
         velocity: CGFloat = 0,
+        interactive: Bool = false,
         _ animations: @escaping () -> Void,
         completion: (() -> Void)? = nil
     ) -> UIViewPropertyAnimator? {
@@ -32,7 +38,7 @@ enum Motion {
         // The spring's own settle time governs; the duration is ignored.
         let animator = UIViewPropertyAnimator(duration: 0, timingParameters: timing)
         animator.isInterruptible = true
-        animator.isUserInteractionEnabled = true
+        animator.isUserInteractionEnabled = interactive
         animator.addAnimations(animations)
         if let completion {
             animator.addCompletion { position in
