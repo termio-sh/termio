@@ -375,6 +375,10 @@ private struct FileDiffCard: View {
     @State private var expansion = DiffExpansion()
     @State private var contentHeight: CGFloat = 0
     @State private var loaded = false
+    /// The scheme the document and its syntax colors were built for. A lazy stack re-runs `.task`
+    /// every time the card scrolls back into view; rebuilding then re-highlighted the file and
+    /// re-laid out all of its text on every pass of a scroller drag.
+    @State private var builtScheme: ColorScheme?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -395,7 +399,8 @@ private struct FileDiffCard: View {
             if !collapsed, !loaded { await load() }
         }
         .task(id: colorScheme) {
-            guard !rows.isEmpty else { return }
+            guard !rows.isEmpty, builtScheme != colorScheme else { return }
+            builtScheme = colorScheme
             rebuildDocument()
             await buildStyled(rows)
         }
@@ -471,6 +476,7 @@ private struct FileDiffCard: View {
 
     private func load() async {
         loaded = true
+        builtScheme = colorScheme
         guard let patch, !patch.isEmpty else { rows = []; document = nil; return }
         let parsed = await GitService.parseDiffText(patch)
         rows = parsed
