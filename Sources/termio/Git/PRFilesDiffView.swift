@@ -375,10 +375,44 @@ private struct FileDiffCard: View {
     @State private var expansion = DiffExpansion()
     @State private var contentHeight: CGFloat = 0
     @State private var loaded = false
-    /// The scheme the document and its syntax colors were built for. A lazy stack re-runs `.task`
-    /// every time the card scrolls back into view; rebuilding then re-highlighted the file and
-    /// re-laid out all of its text on every pass of a scroller drag.
-    @State private var builtScheme: ColorScheme?
+    /// What the document and the syntax colors were last built from. A lazy stack re-runs `.task`
+    /// every time the card scrolls back into view; rebuilding on each of those re-highlighted the
+    /// file and re-laid out all of its text on every pass of a scroller drag.
+    @State private var builtDocument: DocumentInputs?
+    @State private var builtStyle: Look?
+    @State private var stylingLook: Look?
+
+    /// Everything the document's and the highlighter's colors and metrics come from.
+    private struct Look: Equatable {
+        let scheme: ColorScheme
+        let themeName: String
+        let fontFamily: String
+        let fontSize: Double
+        let lineHeight: Double
+    }
+
+    private struct StyleInputs: Equatable {
+        let look: Look
+        let rowCount: Int
+    }
+
+    private struct DocumentInputs: Equatable {
+        let style: StyleInputs
+        let hasGapText: Bool
+    }
+
+    private var look: Look {
+        Look(scheme: colorScheme,
+             themeName: colorScheme == .dark ? settings.darkThemeName : settings.lightThemeName,
+             fontFamily: settings.fontFamily, fontSize: settings.fontSize,
+             lineHeight: settings.codeLineHeight)
+    }
+
+    private var styleInputs: StyleInputs { StyleInputs(look: look, rowCount: rows.count) }
+
+    private var documentInputs: DocumentInputs {
+        DocumentInputs(style: styleInputs, hasGapText: !gapText.isEmpty)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -398,11 +432,19 @@ private struct FileDiffCard: View {
         .task(id: collapsed) {
             if !collapsed, !loaded { await load() }
         }
-        .task(id: colorScheme) {
-            guard !rows.isEmpty, builtScheme != colorScheme else { return }
-            builtScheme = colorScheme
+        // Both build from this pass's settings and scheme, so a load that started under an older
+        // scheme can never leave its colors behind.
+        .task(id: documentInputs) {
+            let inputs = documentInputs
+            guard !rows.isEmpty, builtDocument != inputs else { return }
+            builtDocument = inputs
             rebuildDocument()
-            await buildStyled(rows)
+        }
+        .task(id: styleInputs) {
+            let look = look
+            guard !rows.isEmpty, builtStyle != look, stylingLook != look else { return }
+            stylingLook = look
+            await buildStyled(rows, look: look)
         }
     }
 
@@ -459,7 +501,7 @@ private struct FileDiffCard: View {
                 onContentHeight: { contentHeight = $0 }
             )
             .frame(height: max(contentHeight, 24))
-        } else if !loaded {
+        } else if !loaded || !rows.isEmpty {
             ProgressView().controlSize(.small)
                 .frame(maxWidth: .infinity).frame(height: 44)
         } else {
@@ -476,19 +518,9 @@ private struct FileDiffCard: View {
 
     private func load() async {
         loaded = true
-        builtScheme = colorScheme
         guard let patch, !patch.isEmpty else { rows = []; document = nil; return }
-        let parsed = await GitService.parseDiffText(patch)
-        rows = parsed
-        document = parsed.isEmpty
-            ? nil
-            : DiffDocument.build(rows: parsed, expansion: expansion,
-                                 palette: settings.diffPalette(for: colorScheme),
-                                 codeFont: settings.resolvedTerminalFont(),
-                                 lineSpacing: settings.codeLineSpacing(for: settings.resolvedTerminalFont()),
-                                 gapText: gapText)
+        rows = await GitService.parseDiffText(patch)
         await loadGapText()
-        await buildStyled(parsed)
     }
 
     private func rebuildDocument() {
@@ -502,10 +534,9 @@ private struct FileDiffCard: View {
     private func loadGapText() async {
         guard gapText.isEmpty, let text = await fileText(change.path) else { return }
         gapText = DiffGapText(fileLines: text.components(separatedBy: "\n"))
-        rebuildDocument()
     }
 
-    private func buildStyled(_ parsed: [DiffRow]) async {
+    private func buildStyled(_ parsed: [DiffRow], look: Look) async {
         let url = URL(fileURLWithPath: repoRoot).appendingPathComponent(change.path)
         guard let language = FileEditorView.highlightLanguage(for: url) else { return }
         let code = parsed.filter { $0.kind != .hunk }
@@ -517,8 +548,12 @@ private struct FileDiffCard: View {
             theme: colorScheme == .dark ? "xcode-dark" : "xcode",
             font: settings.resolvedTerminalFont()
         )
-        guard !Task.isCancelled else { return }
+        // Kept even when scrolling the card away cancelled this task: the highlighter finishes
+        // regardless, and running it again on every return is the cost this card avoids. Only a
+        // newer look supersedes it.
+        guard stylingLook == look else { return }
         styledLines = styled.byRow
+        builtStyle = look
     }
 }
 
