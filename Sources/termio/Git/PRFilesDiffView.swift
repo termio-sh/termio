@@ -379,13 +379,15 @@ private struct FileDiffCard: View {
     /// every time the card scrolls back into view; rebuilding on each of those re-highlighted the
     /// file and re-laid out all of its text on every pass of a scroller drag.
     @State private var builtDocument: DocumentInputs?
+    /// The look `styledLines` was highlighted for, and the look last asked of the highlighter.
     @State private var builtStyle: Look?
     @State private var stylingLook: Look?
 
     /// Everything the document's and the highlighter's colors and metrics come from.
     private struct Look: Equatable {
         let scheme: ColorScheme
-        let themeName: String
+        /// The theme's color, not its name: reloading an edited theme keeps the name.
+        let themeBackground: Color?
         let fontFamily: String
         let fontSize: Double
         let lineHeight: Double
@@ -403,7 +405,7 @@ private struct FileDiffCard: View {
 
     private var look: Look {
         Look(scheme: colorScheme,
-             themeName: colorScheme == .dark ? settings.darkThemeName : settings.lightThemeName,
+             themeBackground: settings.chromeTheme(for: colorScheme)?.background,
              fontFamily: settings.fontFamily, fontSize: settings.fontSize,
              lineHeight: settings.codeLineHeight)
     }
@@ -438,11 +440,20 @@ private struct FileDiffCard: View {
             let inputs = documentInputs
             guard !rows.isEmpty, builtDocument != inputs else { return }
             builtDocument = inputs
+            // Highlights carry their look's fonts and colors, and the text pane re-applies them
+            // only when their count changes, so a document for a new look starts plain.
+            if builtStyle != inputs.style.look {
+                styledLines = [:]
+                builtStyle = nil
+            }
             rebuildDocument()
         }
         .task(id: styleInputs) {
             let look = look
-            guard !rows.isEmpty, builtStyle != look, stylingLook != look else { return }
+            guard !rows.isEmpty else { return }
+            // Already highlighted for this look: any pass still running for another look is stale.
+            if builtStyle == look { stylingLook = look; return }
+            guard stylingLook != look else { return }
             stylingLook = look
             await buildStyled(rows, look: look)
         }
