@@ -1,0 +1,15 @@
+plugins {
+    id 'com.android.application' version '9.3.2' apply false
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.4.10' apply false
+}
+
+subprojects {
+    // The published Ghostty bindings use Kotlin 2.4 metadata.
+    configurations.matching {
+        it.name in ['kotlinCompilerClasspath', 'kotlinBuildToolsApiClasspath']
+    }.configureEach {
+        resolutionStrategy.eachDependency {
+            if (requested.group == 'org.jetbrains.kotlin') useVersion '2.4.10'
+        }
+    }
+}
