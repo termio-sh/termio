@@ -5,13 +5,9 @@ import Foundation
 /// legacy `~/.kimi` home predates the rename and is not read). No dollar
 /// estimate anywhere: termio doesn't carry Kimi pricing.
 struct KimiUsageProvider: UsageProvider {
-    static let agent = AgentPreset.kimi
-    static let homeEnvironment = "KIMI_CODE_HOME"
-    static let defaultDirectory = ".kimi-code"
+    var agent: AgentPreset { .kimi }
 
-    let home: URL
-
-    func hasCredential() -> Bool { credential() != nil }
+    private var home: URL { cliHome(environment: "KIMI_CODE_HOME", directory: ".kimi-code") }
     private var credentialFile: URL {
         home.appendingPathComponent("credentials/kimi-code.json")
     }

@@ -1046,13 +1046,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 // Same reason as above, and more so: this session opens on a
                 // password prompt waiting to be answered.
                 self.window.makeKeyAndOrderFront(nil)
-            },
-            onSignIn: { [weak self] title, command in
-                guard let self else { return }
-                self.store.addOneShotSession(title: title, command: command)
-                // The login waits on the user in that terminal; Settings keeps
-                // its sheet open and notices the new sign-in on its own.
-                self.window.makeKeyAndOrderFront(nil)
             }
         ).frame(minWidth: 640, minHeight: 480))
         settingsWindow?.makeKeyAndOrderFront(nil)

@@ -886,20 +886,6 @@ extension TermioStore {
         selectedSessionID = session.id
     }
 
-    /// Opens a terminal running `command` once — an agent CLI's own login, asked
-    /// for by Settings ▸ Usage. The session exists so the CLI's browser hand-off
-    /// and any prompt have somewhere to live; termio itself never sees the login.
-    /// Filed with the current workspace's terminals, like the key install above.
-    func addOneShotSession(title: String, command: String) {
-        var session = Session(title: title, agent: .terminal)
-        session.givenTitle = title
-        session.oneShotCommand = command
-        session.isAccountSignIn = true
-        guard let index = workspaces.firstIndex(where: { $0.id == currentWorkspace.id }) else { return }
-        workspaces[index].terminals.append(session)
-        selectedSessionID = session.id
-    }
-
     /// Prompts for an SSH destination, then opens a terminal to it. The combo box is
     /// pre-populated with the connectable `Host` aliases from `~/.ssh/config` (the
     /// same list the phone imports), but stays editable so a one-off `user@host` that

@@ -4,12 +4,9 @@ import Foundation
 /// (default `~/.codex`). No dollar estimate anywhere: termio doesn't carry
 /// OpenAI model pricing.
 struct CodexUsageProvider: UsageProvider {
-    static let agent = AgentPreset.codex
-    static let homeEnvironment = "CODEX_HOME"
-    static let defaultDirectory = ".codex"
-    static let loginArguments: String? = "login"
+    var agent: AgentPreset { .codex }
 
-    let home: URL
+    private var home: URL { cliHome(environment: "CODEX_HOME", directory: ".codex") }
 
     // MARK: - Plan limits
 
@@ -17,42 +14,15 @@ struct CodexUsageProvider: UsageProvider {
     /// lane's `limit_window_seconds` names the period so a free-plan monthly
     /// window isn't mislabelled "session".
     func planLimits(allowKeychain: Bool) async -> PlanLimitReading {
-        guard let tokens = self.tokens,
+        guard let tokens = jsonObject(at: home.appendingPathComponent("auth.json"))?["tokens"]
+                as? [String: Any],
               let token = tokens["access_token"] as? String,
               let request = request("https://chatgpt.com/backend-api/wham/usage", bearer: token),
               let payload: CodexUsageResponse = await getJSON(request),
               let limit = payload.rate_limit else { return .none }
 
         return PlanLimitReading(
-            [limit.primary_window, limit.secondary_window].compactMap { $0?.window() },
-            plan: (payload.plan_type ?? plan).map(\.capitalized))
-    }
-
-    // MARK: - Account
-
-    private var tokens: [String: Any]? {
-        jsonObject(at: home.appendingPathComponent("auth.json"))?["tokens"] as? [String: Any]
-    }
-
-    /// The ChatGPT login's id token: `email` at the top, the plan under
-    /// OpenAI's namespaced auth claim.
-    private var identityClaims: [String: Any]? {
-        (tokens?["id_token"] as? String).flatMap(jwtClaims)
-    }
-
-    /// The plan the id token was minted for, the fallback when the usage
-    /// payload leaves `plan_type` out.
-    private var plan: String? {
-        (identityClaims?["https://api.openai.com/auth"] as? [String: Any])?["chatgpt_plan_type"]
-            as? String
-    }
-
-    func hasCredential() -> Bool {
-        (tokens?["access_token"] as? String).map { !$0.isEmpty } ?? false
-    }
-
-    func accountEmail() -> String? {
-        identityClaims?["email"] as? String
+            [limit.primary_window, limit.secondary_window].compactMap { $0?.window() })
     }
 
     // MARK: - Token usage
@@ -122,7 +92,6 @@ struct CodexUsageProvider: UsageProvider {
 // MARK: - Wire format
 
 private struct CodexUsageResponse: Decodable {
-    let plan_type: String?
     let rate_limit: CodexRateLimit?
 }
 

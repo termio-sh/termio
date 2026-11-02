@@ -23,10 +23,6 @@ struct InstallOutcome {
     /// a daemon too old to report it, which means *unknown* and never "none".
     var coveredIDs: [String]?
 
-    /// The removed account folders the machine reports clean of termio's
-    /// wiring — the only ones it is safe to stop asking about.
-    var retiredCleaned: Set<String> = []
-
     var isEmpty: Bool { succeeded.isEmpty && failed.isEmpty }
 
     mutating func record(_ name: String, installed: Bool) {

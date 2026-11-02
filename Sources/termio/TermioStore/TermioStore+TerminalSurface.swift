@@ -228,12 +228,10 @@ extension TermioStore {
         // the remote host allocates its own pty over the connection. It never
         // resumes (a local-agent concept), so it short-circuits the agent launch
         // resolution below.
-        let launch = session.oneShotCommand.map { (command: $0, resumeID: String?.none) }
-            ?? session.sshHost.map {
-                (command: Self.sshLaunchCommand(host: $0, keyToInstall: session.sshKeyToInstall),
-                 resumeID: String?.none)
-            }
-            ?? resolveLaunch(for: session, spawnPath: spawnPath)
+        let launch = session.sshHost.map {
+            (command: Self.sshLaunchCommand(host: $0, keyToInstall: session.sshKeyToInstall),
+             resumeID: String?.none)
+        } ?? resolveLaunch(for: session, spawnPath: spawnPath)
         let agentCommand = launch.command
 
         // Pi checks the pinned `--session-id` against its session store at startup
@@ -372,12 +370,7 @@ extension TermioStore {
         // (no second shell), and `recordLaunch` is idempotent — running it a turn later
         // is harmless. (`surfaces`/`monitors` are plain, non-`@Published` caches, so
         // writing them here is fine; only the `projects` write must be deferred.)
-        // The account is read once, here, with the command it shaped: reading the
-        // setting again a turn later could record a different one than launched.
-        let launchedAccount = accountHome(for: session)
-        DispatchQueue.main.async { [self] in
-            recordLaunch(session.id, resumeID: launch.resumeID, account: launchedAccount)
-        }
+        DispatchQueue.main.async { [self] in recordLaunch(session.id, resumeID: launch.resumeID) }
         return state
     }
 
@@ -514,13 +507,6 @@ extension TermioStore {
             return (base, nil)
         }
         let agent = session.agent
-        // A session on an extra account runs with that folder exported, and its
-        // conversations are looked for there — the store below and the discovery
-        // both read the folder the agent actually writes.
-        let account = accountHome(for: session)
-        let command = account.flatMap { home in
-            agent.configHome.map { Self.exporting($0.env, home, before: base) }
-        } ?? base
         let resumeID: String?
         if agent.usesPinnedResumeID {
             // We mint and pin the id up front; reuse the persisted one across launches.
@@ -531,7 +517,7 @@ extension TermioStore {
             // so the scan happens at most once per session.
             resumeID = session.resumeID
                 ?? AgentSessionStore.discover(agent: agent, directory: spawnPath,
-                                              after: session.launchedAt, account: account)
+                                              after: session.launchedAt)
         } else {
             resumeID = nil
         }
@@ -540,8 +526,7 @@ extension TermioStore {
         // resume flag once the agent has persisted it. Fully manifest-driven: no agent is
         // named here.
         let pinnedConversationExists: Bool
-        if var store = agent.resumeSpec.store, let id = resumeID {
-            store.root = agent.path(store.root, inAccount: account)
+        if let store = agent.resumeSpec.store, let id = resumeID {
             pinnedConversationExists = SessionStore.exists(store, id: id)
         } else {
             pinnedConversationExists = false
@@ -551,45 +536,27 @@ extension TermioStore {
             pinnedConversationExists: pinnedConversationExists
         )
         guard let arguments = agent.resumeArguments(context) else {
-            return (command, resumeID)
+            return (base, resumeID)
         }
-        return ("\(command) \(arguments)", resumeID)
+        return ("\(base) \(arguments)", resumeID)
     }
 
     /// Persists that a session has launched and, for the id-pinning agents, the id it
     /// was pinned to. Writes only when something actually changed, so re-opening an
     /// already-launched session doesn't churn the state file or re-sync watched folders.
-    private func recordLaunch(_ id: Session.ID, resumeID: String?, account: String?) {
+    private func recordLaunch(_ id: Session.ID, resumeID: String?) {
         guard var session = session(id) else { return }
         let firstLaunch = !session.launched
         let needsResumeID = resumeID != nil && session.resumeID == nil
         guard firstLaunch || needsResumeID else { return }
         if needsResumeID { session.resumeID = resumeID }
         if firstLaunch {
-            session.accountHome = account
             session.launched = true
             // Stamp the launch moment so a later run can correlate Codex/OpenCode's own
             // session record back to this session by creation time (see `resolveLaunch`).
             session.launchedAt = Date()
         }
         updateSession(id) { $0 = session }
-    }
-
-    /// `command` with `variable` exported for the whole line. A bare `VAR=x`
-    /// prefix binds to the first simple command only, so an authored
-    /// `prepare && claude` would run the agent on the default account.
-    static func exporting(_ variable: String, _ value: String, before command: String) -> String {
-        "export \(variable)=\(shellQuoted(value)); \(command)"
-    }
-
-    /// The account folder `session` runs on: the one it was started on, or —
-    /// before its first launch — the one chosen for new sessions. `nil` is the
-    /// default folder, and always for a session on another machine, whose
-    /// config lives over there.
-    func accountHome(for session: Session) -> String? {
-        guard session.termiodRemoteHost == nil, !session.isAccountSignIn else { return nil }
-        if session.launched { return session.accountHome }
-        return settings.activeAccountFolder(for: session.agent)
     }
 
     /// Advances a session's pinned `resumeID` to the conversation it is *currently*
@@ -666,8 +633,7 @@ extension TermioStore {
         guard let spawnedAt = processSpawnedAt[id] else { return }
         guard soleAgentSession(session.agent, in: directory, is: id) else { return }
         guard let found = AgentSessionStore.rediscover(
-            agent: session.agent, directory: directory, after: spawnedAt,
-            account: session.accountHome)
+            agent: session.agent, directory: directory, after: spawnedAt)
         else { return }
         if adoptConversationID(found.id, for: id) {
             transcriptPaths[id] = found.transcriptPath

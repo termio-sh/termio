@@ -531,17 +531,6 @@ struct Session: Identifiable, Hashable, Codable {
     /// opens the plain `ssh` shell its `sshHost` describes.
     var sshKeyToInstall: String?
 
-    /// A command line this session runs once in place of its shell — today an
-    /// agent CLI's own login, opened by Settings ▸ Usage ▸ Add Account. Outside
-    /// `CodingKeys` for the same reason as `sshKeyToInstall`: a relaunch must not
-    /// start a finished sign-in over again.
-    var oneShotCommand: String?
-
-    /// Marks a terminal opened to sign an agent CLI in, and outlives the
-    /// one-shot command: persisted, so a row restored while the login is still
-    /// waiting is never promoted to the agent it is logging in to.
-    var isAccountSignIn = false
-
     var isSSH: Bool { sshHost != nil }
 
     /// When set, this session runs **inside a `termiod` daemon on an SSH host**
@@ -649,12 +638,6 @@ struct Session: Identifiable, Hashable, Codable {
     /// first launch, and unused by the pinned-id agents (Claude Code, Pi).
     var launchedAt: Date?
 
-    /// The agent's config folder this session runs on, when that is an extra
-    /// account rather than the default (`~/.claude-2`). Fixed at first launch
-    /// from the account the user chose for new sessions, and persisted: the
-    /// conversation lives in that folder, so a relaunch must resume it there.
-    var accountHome: String?
-
     init(title: String, agent: AgentPreset = .terminal, createdAt: Date = Date()) {
         self.title = title
         self.agent = agent
@@ -665,7 +648,7 @@ struct Session: Identifiable, Hashable, Codable {
         case id, title, agent, createdAt, worktreePath, resumeID, launched, launchedAt,
              liveTitle, promptTitle, lastWorkingDirectory, spawnDirectory, sshHost, pinned,
              termiodRemoteHost, termiodRemoteCwd, deviceID, termiodSessionName,
-             termiodDaemonID, givenTitle, accountHome, isAccountSignIn
+             termiodDaemonID, givenTitle
     }
 
     /// The name to recover from a state file written before `givenTitle` existed,
@@ -716,8 +699,6 @@ struct Session: Identifiable, Hashable, Codable {
         termiodSessionName = try container.decodeIfPresent(
             String.self, forKey: .termiodSessionName)
         termiodDaemonID = try container.decodeIfPresent(String.self, forKey: .termiodDaemonID)
-        accountHome = try container.decodeIfPresent(String.self, forKey: .accountHome)
-        isAccountSignIn = try container.decodeIfPresent(Bool.self, forKey: .isAccountSignIn) ?? false
         givenTitle = try container.decodeIfPresent(String.self, forKey: .givenTitle)
             ?? Self.recoveredGivenTitle(title, agent: agent, remoteHost: termiodRemoteHost)
     }

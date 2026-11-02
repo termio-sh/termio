@@ -4,13 +4,9 @@ import Foundation
 /// (default `~/.grok`). No dollar estimate anywhere: termio doesn't carry xAI
 /// pricing.
 struct GrokUsageProvider: UsageProvider {
-    static let agent = AgentPreset.grok
-    static let homeEnvironment = "GROK_HOME"
-    static let defaultDirectory = ".grok"
+    var agent: AgentPreset { .grok }
 
-    let home: URL
-
-    func hasCredential() -> Bool { credential() != nil }
+    private var home: URL { cliHome(environment: "GROK_HOME", directory: ".grok") }
     private var credentialFile: URL { home.appendingPathComponent("auth.json") }
 
     // MARK: - Plan limits

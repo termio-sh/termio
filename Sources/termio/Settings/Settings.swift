@@ -163,9 +163,6 @@ final class AppSettings: ObservableObject {
         static let sessionControlPrompted = "agents.sessionControlPrompted"
         static let usageAuthorizedAgents = "usage.authorizedAgents"
         static let claudeKeychainDeclined = "usage.claudeKeychainDeclined"
-        static let usageAccountFolders = "usage.accountFolders"
-        static let usageActiveAccounts = "usage.activeAccounts"
-        static let usageRetiredAccountFolders = "usage.retiredAccountFolders"
         static let githubIntegrationEnabled = "github.integrationEnabled"
         static let notifyTaskCompletion = "notifications.taskCompletion"
         static let notificationSound = "notifications.sound"
@@ -504,28 +501,6 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(claudeKeychainDeclined, forKey: Key.claudeKeychainDeclined) }
     }
 
-    /// The extra config folders the user added in the Usage tab, by agent
-    /// `rawValue`, as absolute paths. Each is one more signed-in account; the
-    /// CLI's default folder is always read and never stored here.
-    @Published var usageAccountFolders: [String: [String]] {
-        didSet { defaults.set(usageAccountFolders, forKey: Key.usageAccountFolders) }
-    }
-
-    /// The added folder each agent's new sessions run on, by agent `rawValue`.
-    /// Absent means the default folder. Running sessions keep the account they
-    /// started on (`Session.accountHome`).
-    /// Account folders the user removed whose termio hooks and skill have not
-    /// been cleaned out yet, by agent `rawValue`. Kept until a sync confirms
-    /// the sweep, so a removal made while the daemon was unreachable still
-    /// cleans up later.
-    @Published var usageRetiredAccountFolders: [String: [String]] {
-        didSet { defaults.set(usageRetiredAccountFolders, forKey: Key.usageRetiredAccountFolders) }
-    }
-
-    @Published var usageActiveAccounts: [String: String] {
-        didSet { defaults.set(usageActiveAccounts, forKey: Key.usageActiveAccounts) }
-    }
-
 
     // MARK: Notifications
 
@@ -709,12 +684,6 @@ final class AppSettings: ObservableObject {
         githubIntegrationEnabled = store.bool(Key.githubIntegrationEnabled)
         usageAuthorizedAgents = Set(defaults.stringArray(forKey: Key.usageAuthorizedAgents) ?? [])
         claudeKeychainDeclined = defaults.bool(forKey: Key.claudeKeychainDeclined)
-        usageAccountFolders = defaults.dictionary(forKey: Key.usageAccountFolders)
-            as? [String: [String]] ?? [:]
-        usageActiveAccounts = defaults.dictionary(forKey: Key.usageActiveAccounts)
-            as? [String: String] ?? [:]
-        usageRetiredAccountFolders = defaults.dictionary(forKey: Key.usageRetiredAccountFolders)
-            as? [String: [String]] ?? [:]
         notifyOnTaskCompletion = store.bool(Key.notifyTaskCompletion)
         notificationSoundEnabled = store.bool(Key.notificationSound)
         analyticsEnabled = store.bool(Key.analyticsEnabled)
@@ -851,48 +820,6 @@ final class AppSettings: ObservableObject {
 
     func isUsageAuthorized(_ agent: AgentPreset) -> Bool {
         usageAuthorizedAgents.contains(agent.rawValue)
-    }
-
-    func usageAccountFolders(for agent: AgentPreset) -> [String] {
-        usageAccountFolders[agent.rawValue] ?? []
-    }
-
-    func addUsageAccountFolder(_ path: String, for agent: AgentPreset) {
-        guard !usageAccountFolders(for: agent).contains(path) else { return }
-        usageRetiredAccountFolders[agent.rawValue]?.removeAll { $0 == path }
-        usageAccountFolders[agent.rawValue, default: []].append(path)
-    }
-
-    func removeUsageAccountFolder(_ path: String, for agent: AgentPreset) {
-        usageAccountFolders[agent.rawValue]?.removeAll { $0 == path }
-        if usageActiveAccounts[agent.rawValue] == path { usageActiveAccounts[agent.rawValue] = nil }
-        if usageRetiredAccountFolders[agent.rawValue]?.contains(path) != true {
-            usageRetiredAccountFolders[agent.rawValue, default: []].append(path)
-        }
-    }
-
-    /// Forgets retired folders a sync has swept.
-    func forgetRetiredAccountFolders(_ swept: [String: [String]]) {
-        for (agent, folders) in swept {
-            usageRetiredAccountFolders[agent]?.removeAll { folders.contains($0) }
-            if usageRetiredAccountFolders[agent]?.isEmpty == true {
-                usageRetiredAccountFolders[agent] = nil
-            }
-        }
-    }
-
-    /// The folder new sessions of `agent` start on, or `nil` for the default
-    /// one. A folder that was removed or deleted since falls back to the default
-    /// rather than launching the agent into nothing.
-    func activeAccountFolder(for agent: AgentPreset) -> String? {
-        guard let path = usageActiveAccounts[agent.rawValue],
-              usageAccountFolders(for: agent).contains(path),
-              FileManager.default.fileExists(atPath: path) else { return nil }
-        return path
-    }
-
-    func setActiveAccountFolder(_ path: String?, for agent: AgentPreset) {
-        usageActiveAccounts[agent.rawValue] = path
     }
 
     func setUsageAuthorized(_ agent: AgentPreset, enabled: Bool) {

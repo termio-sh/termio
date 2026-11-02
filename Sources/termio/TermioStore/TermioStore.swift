@@ -1284,9 +1284,6 @@ final class TermioStore: ObservableObject {
     /// rewrites the hooks file when this specific setting flips — not on every
     /// unrelated appearance change that also fires `objectWillChange`.
     var installedHooksEnabled: Bool?
-    /// The account folders the last integration sync was sent, for the same
-    /// change-only guard.
-    var installedAccountFolders: [String: [String]]?
 
     /// The socket the `termio` CLI drives the app through. Runs for the app's
     /// lifetime (harmless when the feature is off — the handler refuses with
@@ -1394,7 +1391,6 @@ final class TermioStore: ObservableObject {
                 self?.applyAppearanceToOpenSurfaces()
                 self?.syncHooksInstallationIfNeeded()
                 self?.syncSessionControlInstallationIfNeeded()
-                self?.syncAccountFoldersIfNeeded()
             }
 
         // A branch label changing is not a change to the persisted tree, so the

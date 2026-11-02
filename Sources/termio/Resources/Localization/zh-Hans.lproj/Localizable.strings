@@ -10,8 +10,6 @@
 	<string>费用按 API 价格估算。</string>
 	<key>%1$@ changed on %2$@</key>
 	<string>%1$@ 在 %2$@ 上已被修改</string>
-	<key>%@ Sign-In</key>
-	<string>%@ 登录</string>
 	<key>%@ and %@</key>
 	<string>%1$@ 和 %2$@</string>
 	<key>%@ answered as a different machine than %@. Its address is being served by something else.</key>
@@ -32,8 +30,6 @@
 	<string>“%@”是深色主题，与“%@”插槽不匹配。</string>
 	<key>%@ is a light theme in the %@ slot.</key>
 	<string>“%@”是浅色主题，与“%@”插槽不匹配。</string>
-	<key>%@ is already added</key>
-	<string>%@ 已经添加过了</string>
 	<key>%@ is not an address the iPhone could dial.</key>
 	<string>%@ 不是 iPhone 能拨通的地址。</string>
 	<key>%@ is published, but the connection an iPhone would make was refused.
@@ -144,16 +140,12 @@
 	<string>接受 Xcode 许可协议</string>
 	<key>Access</key>
 	<string>访问</string>
-	<key>Accounts</key>
-	<string>账户</string>
+	<key>Activity</key>
+	<string>活动</string>
 	<key>Add</key>
 	<string>添加</string>
 	<key>Add &amp; Connect</key>
 	<string>添加并连接</string>
-	<key>Add Account</key>
-	<string>添加账户</string>
-	<key>Add Account…</key>
-	<string>添加账户…</string>
 	<key>Add Agent</key>
 	<string>添加 Agent</string>
 	<key>Add Device</key>
@@ -166,8 +158,6 @@
 	<string>添加远程主机</string>
 	<key>Add SSH Host</key>
 	<string>添加 SSH 主机</string>
-	<key>Add a %@ Account</key>
-	<string>添加 %@ 账户</string>
 	<key>Add a host you reach over SSH and Termio can run sessions on it, with agents that keep working after you disconnect.</key>
 	<string>添加一台你用 SSH 连接的主机，Termio 就能在上面运行会话；断开连接后 Agent 仍会继续工作。</string>
 	<key>Add to Chat</key>
@@ -212,14 +202,14 @@
 	<string>对“%@”的所有更改都将丢失。此操作无法撤销。</string>
 	<key>Allow</key>
 	<string>允许</string>
+	<key>Allow Keychain Access…</key>
+	<string>允许访问钥匙串…</string>
 	<key>Allow Paired Devices</key>
 	<string>允许已配对设备</string>
 	<key>Allow Usage Access</key>
 	<string>允许访问用量</string>
 	<key>Allow agents to use %@?</key>
 	<string>允许 Agent 使用“%@”吗？</string>
-	<key>Allow…</key>
-	<string>允许…</string>
 	<key>An older install points at %@. Update it to this version of Termio.</key>
 	<string>旧的安装指向 %@。请将其更新到此版本的 Termio。</string>
 	<key>Annotate</key>
@@ -346,8 +336,6 @@
 	<string>在上方选取一台设备以启动它。</string>
 	<key>Choose a different name.</key>
 	<string>请选取其他名称。</string>
-	<key>Choose a folder named like “%@-work”</key>
-	<string>请选择名称类似“%@-work”的文件夹</string>
 	<key>Choose a name for this workspace.</key>
 	<string>为这个工作区取个名字。</string>
 	<key>Choose a project folder on %@.</key>
@@ -360,8 +348,6 @@
 	<string>请另选一个用于对比的分支。</string>
 	<key>Choose how projects are ordered</key>
 	<string>选取项目的排序方式</string>
-	<key>Choose the folder %@ signed in to.</key>
-	<string>选择 %@ 登录时使用的文件夹。</string>
 	<key>Choose which repository’s issues to show</key>
 	<string>选择显示哪个仓库的 issue</string>
 	<key>Choose…</key>
@@ -488,8 +474,6 @@
 	<string>无法运行 ssh：%@</string>
 	<key>Could not run termio: %@</key>
 	<string>无法运行 termio：%@</string>
-	<key>Couldn't read plan limits.</key>
-	<string>无法读取套餐限额。</string>
 	<key>Couldn’t add the dropped item</key>
 	<string>无法添加拖入的项目</string>
 	<key>Couldn’t change the Themes folder</key>
@@ -658,8 +642,6 @@
 	<string>抹掉所有内容和设置…</string>
 	<key>Erase all content and settings on %@?</key>
 	<string>要抹掉“%@”上的所有内容和设置吗？</string>
-	<key>Every %@ session on this Mac, from all accounts.%@</key>
-	<string>本机上所有账户的 %1$@ 会话。%2$@</string>
 	<key>Every iPhone paired with %@ is signed out and must re-scan the new QR to reconnect.</key>
 	<string>所有与 %@ 配对的 iPhone 都会退出登录，需重新扫描新的二维码才能重新连接。</string>
 	<key>Every paired iPhone is signed out and must re-scan the new QR to reconnect.</key>
@@ -694,8 +676,6 @@
 	<string>查找…</string>
 	<key>Finish Setting Up Xcode</key>
 	<string>完成 Xcode 设置</string>
-	<key>Finish signing in in the terminal</key>
-	<string>请在终端里完成登录</string>
 	<key>Finish updating Termio’s session host?</key>
 	<string>要完成 Termio server 的更新吗？</string>
 	<key>Fit to Pane</key>
@@ -832,6 +812,8 @@
 	<string>密钥文件</string>
 	<key>Keyboard</key>
 	<string>键盘</string>
+	<key>Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.</key>
+	<string>钥匙串访问已被拒绝，套餐限额保持隐藏。再次允许会重新显示 macOS 提示。</string>
 	<key>Labels</key>
 	<string>标签</string>
 	<key>Language</key>
@@ -858,8 +840,6 @@
 	<string>允许 Agent 通过 `termio session` 命令查看并驱动本项目中的其他会话。会将 termio 技能安装到各 Agent 的技能文件夹中。</string>
 	<key>Light</key>
 	<string>浅色</string>
-	<key>Limits need Keychain access.</key>
-	<string>读取限额需要钥匙串访问权限。</string>
 	<key>Line height</key>
 	<string>行高</string>
 	<key>Line height applies to the file editor and diffs; the terminal keeps the font’s own.</key>
@@ -980,8 +960,6 @@
 	<string>新建 Worktree…</string>
 	<key>New chat</key>
 	<string>新建聊天</string>
-	<key>New sessions use this account.</key>
-	<string>新会话使用此账户。</string>
 	<key>New terminal or project</key>
 	<string>新建终端或项目</string>
 	<key>Next Match</key>
@@ -1046,6 +1024,8 @@
 	<string>尚未下载 iOS 模拟器。请在 Xcode ▸ Settings ▸ Components 中获取，或在终端中下载。</string>
 	<key>No issues found.</key>
 	<string>未找到 issues。</string>
+	<key>No local usage yet — run `%@` once, then Refresh.</key>
+	<string>暂无本地用量——运行一次 `%@`，然后点按“刷新”。</string>
 	<key>No matches</key>
 	<string>无匹配结果</string>
 	<key>No network address found. Join a network, then reopen this pane.</key>
@@ -1060,8 +1040,6 @@
 	<string>没有结果</string>
 	<key>No route to host</key>
 	<string>无法到达主机</string>
-	<key>No sessions on this Mac yet.</key>
-	<string>本机上还没有会话。</string>
 	<key>No simulator is booted. Boot one with `xcrun simctl boot &lt;device&gt;`, or pick one in the Simulator pane.</key>
 	<string>没有已启动的模拟器。请用 `xcrun simctl boot &lt;device&gt;` 启动一台，或在模拟器窗格中选取一台。</string>
 	<key>No textual changes to show.</key>
@@ -1246,6 +1224,10 @@
 	<string>已固定</string>
 	<key>Placeholder: %@</key>
 	<string>占位符：%@</string>
+	<key>Plan limits</key>
+	<string>套餐限额</string>
+	<key>Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.</key>
+	<string>套餐限额来自 %@ 的 OAuth 登录；不会存储任何密码。撤销后将停止读取 %@ 的所有数据。</string>
 	<key>Play sound</key>
 	<string>播放声音</string>
 	<key>Pointing termiod at %@…</key>
@@ -1288,6 +1270,8 @@
 	<string>请先将当前分支推送到仓库的远程，然后重试。（远程还需是 Termio 能识别的代码托管平台：GitHub、GitLab、Bitbucket 或 Gitea。）</string>
 	<key>Quit Termio</key>
 	<string>退出 Termio</string>
+	<key>Range</key>
+	<string>范围</string>
 	<key>Reachable</key>
 	<string>可连接</string>
 	<key>Reached by</key>
@@ -1344,8 +1328,6 @@
 	<string>远程主机</string>
 	<key>Remove</key>
 	<string>移除</string>
-	<key>Remove Account</key>
-	<string>移除账户</string>
 	<key>Remove Highlight</key>
 	<string>移除标注</string>
 	<key>Remove Project</key>
@@ -1388,10 +1370,6 @@
 	<string>请求权限</string>
 	<key>Reset Font Size</key>
 	<string>重设字体大小</string>
-	<key>Resets in %@</key>
-	<string>%@后重置</string>
-	<key>Resetting</key>
-	<string>正在重置</string>
 	<key>Restart</key>
 	<string>重新启动</string>
 	<key>Restarting the tunnel changes the address, and every paired iPhone has to scan again.</key>
@@ -1400,6 +1378,8 @@
 	<string>恢复默认</string>
 	<key>Reveal in Finder</key>
 	<string>在“访达”中显示</string>
+	<key>Revoke Access</key>
+	<string>撤销访问</string>
 	<key>Rotate Left</key>
 	<string>向左旋转</string>
 	<key>Rotate Right</key>
@@ -1552,16 +1532,10 @@
 	<string>退出登录</string>
 	<key>Sign Out…</key>
 	<string>退出登录…</string>
-	<key>Sign in again to see this account's limits.</key>
-	<string>重新登录即可查看此账户的限额。</string>
-	<key>Sign in with a different account in the terminal, or cancel.</key>
-	<string>请在终端里换一个账户登录，或者取消。</string>
 	<key>Sign in with the Tailscale account your iPhone uses.</key>
 	<string>用你的 iPhone 所用的 Tailscale 账号登录。</string>
 	<key>Sign this Mac out of Tailscale?</key>
 	<string>让这台 Mac 退出 Tailscale 登录？</string>
-	<key>Signed out</key>
-	<string>已退出登录</string>
 	<key>Signs in with %@</key>
 	<string>使用 %@ 登录</string>
 	<key>Signs in with the keys ssh offers by default.</key>
@@ -1618,8 +1592,6 @@
 	<string>状态</string>
 	<key>Status Bar</key>
 	<string>状态栏</string>
-	<key>Stop Reading %@ Data</key>
-	<string>停止读取 %@ 数据</string>
 	<key>Stop Recording</key>
 	<string>停止录制</string>
 	<key>Stop Selecting</key>
@@ -1646,6 +1618,8 @@
 	<string>将 %@ 从新建会话菜单中移除，其设置会保留。</string>
 	<key>Takes effect after Termio relaunches.</key>
 	<string>重新启动 Termio 后生效。</string>
+	<key>Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@</key>
+	<string>根据 %@ 在这台 Mac 上所有终端和编辑器的本地会话日志统计——即你的实际用量，与套餐计费方式无关。%@</string>
 	<key>Task completion</key>
 	<string>任务完成</string>
 	<key>Teaches agents the termio session commands.</key>
@@ -1670,12 +1644,8 @@
 	<string>Termio for iPhone 正在测试中</string>
 	<key>Termio is open source — star the repo, report bugs, and request features.</key>
 	<string>Termio 是开源软件：欢迎给仓库加星标、报告 bug 和提出功能请求。</string>
-	<key>Termio keeps each account in a folder beside %@ so its sessions can report their status.</key>
-	<string>Termio 把每个账户放在 %@ 旁边的文件夹里，这样它的会话才能报告状态。</string>
 	<key>Termio notifies you about the agents above, wherever they run.</key>
 	<string>无论上面的 Agent 在哪里运行，Termio 都会通知你。</string>
-	<key>Termio opens a terminal where %@ signs you in. Your other accounts stay signed in.</key>
-	<string>Termio 会打开一个终端，由 %@ 完成登录。其他账户保持登录。</string>
 	<key>Termio server</key>
 	<string>Termio server</string>
 	<key>Test</key>
@@ -1794,8 +1764,6 @@
 	<string>此版本的 Termio 不包含模拟器辅助程序。</string>
 	<key>This checkout has no other branch to compare with.</key>
 	<string>这个检出没有其他分支可以对比。</string>
-	<key>This closes by itself once %@ is signed in.</key>
-	<string>%@ 登录完成后，此窗口会自动关闭。</string>
 	<key>This device didn’t answer. Its termiod may be too old to search.</key>
 	<string>该设备没有响应，其 termiod 版本可能过旧，不支持搜索。</string>
 	<key>This device is no longer in your configuration.</key>
@@ -1840,6 +1808,8 @@
 	<string>该设备上的 termiod 版本过旧，无法读取 git。</string>
 	<key>This machine’s termiod is too old to report its agents.</key>
 	<string>该设备上的 termiod 版本过旧，无法查询其 Agent。</string>
+	<key>This month</key>
+	<string>本月</string>
 	<key>This pull request changes no files.</key>
 	<string>此 PR 未更改任何文件。</string>
 	<key>This relay has no valid URL pattern, so its address could never be read back.</key>
@@ -1848,6 +1818,8 @@
 	<string>这个会话没能启动。</string>
 	<key>This session has no running terminal.</key>
 	<string>此会话没有正在运行的终端。</string>
+	<key>This week</key>
+	<string>本周</string>
 	<key>This workspace is no longer on your list.</key>
 	<string>这个工作区已不在你的列表中。</string>
 	<key>Timed out</key>
@@ -1862,6 +1834,8 @@
 	<string>切换项目文件</string>
 	<key>Toggle Sidebar</key>
 	<string>切换侧栏</string>
+	<key>Token usage</key>
+	<string>Token 用量</string>
 	<key>Traffic crosses the relay you run yourself — no third party in the path.</key>
 	<string>流量经由你自己运行的中继，路径中没有第三方。</string>
 	<key>Try Again</key>
@@ -1914,10 +1888,6 @@
 	<string>使用正则表达式</string>
 	<key>Use Selection for Find</key>
 	<string>用所选内容查找</string>
-	<key>Use a Signed-In Folder…</key>
-	<string>使用已登录的文件夹…</string>
-	<key>Use for New Sessions</key>
-	<string>用于新会话</string>
 	<key>Used for this invite only. To make it stick, start the daemon there with --wss-origin.</key>
 	<string>仅用于本次邀请。要长期生效，请在那台机器上用 --wss-origin 启动守护进程。</string>
 	<key>User</key>
@@ -1992,6 +1962,8 @@
 	<string>需要先接受 Xcode 许可协议，模拟器才能运行。请打开 Xcode，或在终端中接受。</string>
 	<key>Yellow</key>
 	<string>黄色</string>
+	<key>Yesterday</key>
+	<string>昨天</string>
 	<key>You can restore it from the Trash.</key>
 	<string>可以从废纸篓恢复它。</string>
 	<key>Your Host entries from ~/.ssh/config — the same aliases `ssh` resolves. Right-click a host to connect.</key>
@@ -2082,8 +2054,8 @@ Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks
 	<string>这台 Mac 上的 termiod 版本过旧，不支持搜索。</string>
 	<key>this Mac</key>
 	<string>本机</string>
-	<key>tokens</key>
-	<string>token</string>
+	<key>· resets %@</key>
+	<string>· 重置于 %@</string>
 	<key>“%@” already exists.</key>
 	<string>“%@”已存在。</string>
 	<key>“%@” is already in your config.</key>

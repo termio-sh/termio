@@ -23,20 +23,17 @@ struct TokenWindowStats: Sendable, Hashable {
         costUSD += other.costUSD
     }
 
-    /// Compact token count for the UI: `1.18B`, `1.2M`, `980K`, `420`.
+    /// Compact token count for the UI: `1.2M`, `980K`, `420`.
     var tokenSummary: String {
         let value = total
-        if value >= 1_000_000_000 { return String(format: "%.2fB", Double(value) / 1_000_000_000) }
         if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000) }
         if value >= 1_000 { return String(format: "%.0fK", Double(value) / 1_000) }
         return "\(value)"
     }
 
-    /// Dollar estimate as `$4,043.29`, or empty when this window carries no
-    /// priced cost.
+    /// Dollar estimate as `$3.40`, or empty when this window carries no priced cost.
     var costSummary: String {
-        costUSD > 0
-            ? costUSD.formatted(.currency(code: "USD").locale(Locale(identifier: "en_US"))) : ""
+        costUSD > 0 ? String(format: "$%.2f", costUSD) : ""
     }
 }
 
@@ -54,20 +51,6 @@ struct AgentTokenUsage: Sendable, Hashable {
     /// True when there is nothing to show at all — no in-month totals and no
     /// historical days — so the agent's pane can fall back to its hint.
     var isEmpty: Bool { month.isEmpty && daily.values.allSatisfy(\.isEmpty) }
-
-    /// Folds another account's totals in, for the "All Accounts" view. The
-    /// folders keep separate logs, so nothing is counted twice.
-    mutating func add(_ other: AgentTokenUsage) {
-        today.add(other.today)
-        week.add(other.week)
-        month.add(other.month)
-        daily.merge(other.daily) { mine, theirs in
-            var sum = mine
-            sum.add(theirs)
-            return sum
-        }
-        hasCost = hasCost || other.hasCost
-    }
 }
 
 /// The local-calendar boundaries the scan buckets into. Today is since local

@@ -152,12 +152,6 @@ pub struct InstallRequest {
     /// than the manifest — the path the user authored in Settings. Empty from a
     /// client that does not send it.
     pub commands: HashMap<String, String>,
-    /// Extra config folders by agent id, one per extra account. Each is checked
-    /// by `accepted_home` before anything is written there.
-    pub homes: HashMap<String, Vec<String>>,
-    /// Removed account folders by agent id, swept on every request. See
-    /// `sweep_retired`.
-    pub retired_homes: HashMap<String, Vec<String>>,
 }
 
 impl InstallRequest {
@@ -176,19 +170,7 @@ impl InstallRequest {
             reporter,
             binary,
             commands,
-            homes: HashMap::new(),
-            retired_homes: HashMap::new(),
         }
-    }
-
-    pub fn with_retired_homes(mut self, homes: HashMap<String, Vec<String>>) -> InstallRequest {
-        self.retired_homes = homes;
-        self
-    }
-
-    pub fn with_homes(mut self, homes: HashMap<String, Vec<String>>) -> InstallRequest {
-        self.homes = homes;
-        self
     }
 
     pub(super) fn binary(&self) -> &str {
@@ -330,8 +312,6 @@ pub struct InstallReport {
     /// while the install that follows gets a real answer and skips half of them,
     /// and the coverage recorded then claims agents that were never wired.
     pub present: Vec<String>,
-    /// The removed account folders now clean of termio's wiring.
-    pub retired: Vec<String>,
 }
 
 /// Apply `request` against this box's filesystem.
@@ -358,10 +338,9 @@ fn run_against_shell(request: &InstallRequest) -> InstallReport {
     if request.skills != HalfAction::Leave {
         results.extend(sync_skills(&catalog, request, &present));
     }
-    let retired = sweep_retired(&catalog, request);
     let mut reported: Vec<String> = present.into_iter().collect();
     reported.sort();
-    InstallReport { results, present: reported, retired }
+    InstallReport { results, present: reported }
 }
 
 /// Which catalog agents this box has, by id, for one install.
@@ -397,9 +376,8 @@ fn sync_hooks(
         // Sweep everything termio has ever installed, bundled declarations
         // included, so a shipped hook a user override removed or redirected is
         // cleaned too.
-        let copies = rehomed_all(catalog.all.iter(), request);
         let mut seen: Vec<&HookSpec> = Vec::new();
-        for agent in catalog.bundled.iter().chain(catalog.all.iter()).chain(copies.iter()) {
+        for agent in catalog.bundled.iter().chain(catalog.all.iter()) {
             let Some(spec) = agent.hooks.as_ref() else {
                 continue;
             };
@@ -417,10 +395,8 @@ fn sync_hooks(
         uninstall_hooks(&agent, &spec);
     }
 
-    let copies = rehomed_all(selected(catalog, request).into_iter(), request);
     selected(catalog, request)
         .into_iter()
-        .chain(copies.iter())
         .filter_map(|agent| {
             let spec = agent.hooks.as_ref()?;
             // The same rule the skill half has always followed: a hook is a
@@ -441,216 +417,6 @@ fn sync_hooks(
             Some(install_hooks(agent, spec, request))
         })
         .collect()
-}
-
-/// A copy of each agent for every extra account folder the request names for
-/// it, with every manifest path moved under that folder — so the install and
-/// sweep loops treat an account folder exactly like another agent, and no
-/// installer has to know accounts exist.
-fn rehomed_all<'a>(
-    agents: impl Iterator<Item = &'a AgentDefinition>,
-    request: &InstallRequest,
-) -> Vec<AgentDefinition> {
-    agents.flat_map(|agent| rehomed(agent, request)).collect()
-}
-
-fn rehomed(agent: &AgentDefinition, request: &InstallRequest) -> Vec<AgentDefinition> {
-    rehomed_into(agent, request.homes.get(&agent.id))
-}
-
-fn rehomed_into(agent: &AgentDefinition, folders: Option<&Vec<String>>) -> Vec<AgentDefinition> {
-    let (Some(home), Some(folders)) = (agent.config_home.as_ref(), folders) else {
-        return Vec::new();
-    };
-    folders
-        .iter()
-        .filter_map(|folder| {
-            let folder = accepted_home(home, folder)?;
-            let moved = |path: &str| -> Option<String> {
-                if !crate::agent::manifest::is_under(path, &home.path) {
-                    return None;
-                }
-                let tail = path[home.path.len()..].trim_start_matches('/');
-                Some(if tail.is_empty() { folder.clone() } else { format!("{folder}/{tail}") })
-            };
-            let mut copy = agent.clone();
-            if let Some(spec) = copy.hooks.as_mut() {
-                if let Some(file) = spec.file.as_deref() {
-                    spec.file = Some(moved(file)?);
-                }
-                if let Some(directory) = spec.directory.as_deref() {
-                    spec.directory = Some(moved(directory)?);
-                }
-            }
-            if let Some(directory) = copy.skill_dir.as_deref() {
-                copy.skill_dir = Some(moved(directory)?);
-            }
-            // The paths are absolute now; the variable must not move them again.
-            copy.config_home = None;
-            Some(copy)
-        })
-        .collect()
-}
-
-/// Takes termio's hooks and skill out of the account folders the user removed —
-/// and nothing else. The two halves' own sweep removes everything termio ever
-/// installed, which is right for "turn integration off" but wrong here: other
-/// accounts still in use must keep theirs. Returns the folders now settled
-/// (cleaned, or with nothing of termio's to clean), so the client forgets only
-/// those and retries the rest; a daemon that predates this returns none.
-fn sweep_retired(catalog: &AgentCatalog, request: &InstallRequest) -> Vec<String> {
-    let mut settled = Vec::new();
-    for agent in &catalog.all {
-        let Some(folders) = request.retired_homes.get(&agent.id) else {
-            continue;
-        };
-        let Some(home) = agent.config_home.as_ref() else {
-            settled.extend(folders.iter().cloned());
-            continue;
-        };
-        // The folders this agent really uses as its default here, either
-        // spelling. One of them can be listed as an extra account (a shell
-        // profile exporting the variable); its hooks are the default's and stay.
-        let defaults: Vec<PathBuf> = [
-            machine::resolve(&home.path, None).ok(),
-            machine::resolve(&home.path, Some(home)).ok(),
-        ]
-        .into_iter()
-        .flatten()
-        .filter_map(|path| std::fs::canonicalize(path).ok())
-        .collect();
-        for folder in folders {
-            let one = vec![folder.clone()];
-            let copies = rehomed_into(agent, Some(&one));
-            // Gone, or never an account folder: nothing of termio's to clean.
-            let (Some(copy), Ok(root)) = (copies.first(), std::fs::canonicalize(folder)) else {
-                settled.push(folder.clone());
-                continue;
-            };
-            if defaults.contains(&root) {
-                settled.push(folder.clone());
-                continue;
-            }
-            let mut clean = true;
-            if let Some(spec) = copy.hooks.as_ref() {
-                let targets = [spec.file.as_deref(), spec.directory.as_deref()];
-                if targets.iter().flatten().all(|path| stays_inside(Path::new(path), &root)) {
-                    // The uninstallers log a failure and carry on, so the
-                    // result is read back from the file: anything of termio's
-                    // still there (a locked file, a settings.json that no
-                    // longer parses) keeps the folder queued for a later sync.
-                    uninstall_hooks(copy, spec);
-                    if still_wired(spec) {
-                        clean = false;
-                    }
-                }
-            }
-            if let Some(directory) = copy.skill_dir.as_deref() {
-                if let Ok(skill) = resolved(copy, &format!("{directory}/termio")) {
-                    let skill = PathBuf::from(skill);
-                    if skill.exists() && stays_inside(&skill, &root) {
-                        if let Err(error) = std::fs::remove_dir_all(&skill) {
-                            log(&format!("could not remove {}: {error}", skill.display()));
-                            clean = false;
-                        }
-                    }
-                }
-            }
-            if clean {
-                settled.push(folder.clone());
-            }
-        }
-    }
-    settled
-}
-
-/// Whether termio's hooks may still be in a spec's file after an uninstall.
-/// An unreadable or unparseable file counts as wired: nothing proves it clean.
-/// Directory dialects (script and plugin hooks) belong to agents that cannot
-/// have extra accounts, so they are not checked here.
-fn still_wired(spec: &HookSpec) -> bool {
-    let Some(file) = spec.file.as_deref() else {
-        return false;
-    };
-    match spec.hook_type {
-        HookType::Json => match read_state(file) {
-            FileState::Missing(_) => false,
-            FileState::Unreadable => true,
-            FileState::Ok(settings, _) => {
-                let Some(serde_json::Value::Object(hooks)) = settings.get("hooks") else {
-                    return false;
-                };
-                let mut stripped = hooks.clone();
-                strip_groups(&mut stripped, &is_ours);
-                stripped != *hooks
-            }
-        },
-        HookType::Toml => match std::fs::read_to_string(machine::expand(file)) {
-            Ok(text) => text.contains(TOML_BLOCK_BEGIN),
-            Err(error) => error.kind() != std::io::ErrorKind::NotFound,
-        },
-        _ => false,
-    }
-}
-
-/// Whether `path`, symlinks followed, still lies inside `root`. An account
-/// folder whose `skills` or `settings.json` links into the default account's
-/// would otherwise have the default's copy removed in its name.
-fn stays_inside(path: &Path, root: &Path) -> bool {
-    let target = match std::fs::canonicalize(path) {
-        Ok(target) => target,
-        Err(_) => match (path.parent(), path.file_name()) {
-            (Some(parent), Some(name)) => match std::fs::canonicalize(parent) {
-                Ok(parent) => parent.join(name),
-                Err(_) => return false,
-            },
-            _ => return false,
-        },
-    };
-    target.starts_with(root)
-}
-
-/// The one shape of client-named folder this box writes into: an existing
-/// directory beside the agent's own config home, named `<home>-<suffix>`
-/// (`~/.claude-2`, `~/.codex-work`). It keeps the write surface the box's to
-/// fix — a client can choose among the account folders, never name `/etc` or
-/// a project checkout.
-fn accepted_home(home: &crate::agent::manifest::ConfigHome, folder: &str) -> Option<String> {
-    // Beside either the manifest's folder or the one the agent's variable moves
-    // it to here: the app and this daemon may have been started with different
-    // environments, and the app names accounts after whichever it saw.
-    let plain = machine::resolve(&home.path, None).ok();
-    let moved = machine::resolve(&home.path, Some(home)).ok();
-    [plain, moved]
-        .into_iter()
-        .flatten()
-        .find_map(|default| accepted_home_beside(&default, folder))
-}
-
-fn accepted_home_beside(default: &Path, folder: &str) -> Option<String> {
-    let name = default.file_name()?.to_str()?;
-    let candidate = PathBuf::from(folder);
-    // Only a path that is already in normal form: a trailing `/` would make the
-    // `lstat` below follow a symlink to a directory anywhere, and `.`/`..`
-    // components would make the sibling check below describe a different
-    // folder from the one written into.
-    let normal: PathBuf = candidate.components().collect();
-    let plain = candidate.components().all(|part| {
-        matches!(part, std::path::Component::RootDir | std::path::Component::Normal(_))
-    });
-    if !plain || normal.as_os_str() != candidate.as_os_str() {
-        return None;
-    }
-    if !candidate.is_absolute() || candidate.parent() != default.parent() {
-        return None;
-    }
-    let suffix = candidate.file_name()?.to_str()?.strip_prefix(name)?.strip_prefix('-')?;
-    let well_formed = !suffix.is_empty()
-        && suffix.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    let is_directory = std::fs::symlink_metadata(&candidate)
-        .map(|meta| meta.is_dir())
-        .unwrap_or(false);
-    (well_formed && is_directory).then(|| candidate.display().to_string())
 }
 
 /// Where a manifest path lands on this box, honouring the agent's own
@@ -1553,13 +1319,12 @@ fn sync_skills(
         // Every skills directory termio has ever installed into — bundled
         // declarations plus the live catalog — so a shipped dir a user override
         // removed or redirected is swept too.
-        let copies = rehomed_all(catalog.all.iter(), request);
         let mut seen = HashSet::new();
         // A sweep that worked has nothing per-agent to say. One that could not
         // delete a folder says so, or the skill stays while the reply claims
         // it is gone.
         let mut failures = Vec::new();
-        for agent in catalog.bundled.iter().chain(catalog.all.iter()).chain(copies.iter()) {
+        for agent in catalog.bundled.iter().chain(catalog.all.iter()) {
             let Some(directory) = agent.skill_dir.as_deref() else {
                 continue;
             };
@@ -1590,10 +1355,8 @@ fn sync_skills(
 
     let skill = request.reporter.skill();
     let mut seen = HashSet::new();
-    let copies = rehomed_all(selected(catalog, request).into_iter(), request);
     selected(catalog, request)
         .into_iter()
-        .chain(copies.iter())
         .filter_map(|agent| {
             let directory = agent.skill_dir.as_deref()?;
             // Install only for agents whose CLI is actually here, so a box
@@ -1739,56 +1502,6 @@ pub(super) mod tests {
     /// A request whose binary is stated rather than resolved, so a test can
     /// assert generated output byte for byte without depending on where the
     /// test binary happens to sit.
-    /// Cleanup follows symlinks only as far as the account folder: a `skills`
-    /// link into another folder must not count as inside it.
-    #[cfg(unix)]
-    #[test]
-    fn retired_cleanup_stays_inside_the_account_folder() {
-        let root = std::env::temp_dir().join(format!("termiod-inside-{}", std::process::id()));
-        let account = root.join(".claude-2");
-        let shared = root.join(".claude").join("skills");
-        std::fs::create_dir_all(account.join("own")).unwrap();
-        std::fs::create_dir_all(&shared).unwrap();
-        std::os::unix::fs::symlink(&shared, account.join("skills")).unwrap();
-        let account = std::fs::canonicalize(&account).unwrap();
-
-        assert!(stays_inside(&account.join("own"), &account));
-        assert!(stays_inside(&account.join("settings.json"), &account));
-        assert!(!stays_inside(&account.join("skills").join("termio"), &account));
-        assert!(!stays_inside(&account.join("skills"), &account));
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// The one place a client names a path: only an existing `<home>-<suffix>`
-    /// sibling of the agent's own folder may be written into.
-    #[test]
-    fn an_account_folder_must_be_a_named_sibling_of_the_config_home() {
-        let root = std::env::temp_dir().join(format!("termiod-homes-{}", std::process::id()));
-        let default = root.join(".claude");
-        for name in [".claude-2", ".claudex-2", "nested/.claude-3"] {
-            std::fs::create_dir_all(root.join(name)).unwrap();
-        }
-        let at = |name: &str| root.join(name).display().to_string();
-
-        assert_eq!(accepted_home_beside(&default, &at(".claude-2")), Some(at(".claude-2")));
-        assert_eq!(accepted_home_beside(&default, &at(".claude")), None);
-        assert_eq!(accepted_home_beside(&default, &at(".claudex-2")), None);
-        assert_eq!(accepted_home_beside(&default, &at("nested/.claude-3")), None);
-        assert_eq!(accepted_home_beside(&default, &at(".claude-missing")), None);
-        assert_eq!(accepted_home_beside(&default, ".claude-2"), None);
-        assert_eq!(accepted_home_beside(&default, &format!("{}/", at(".claude-2"))), None);
-        assert_eq!(accepted_home_beside(&default, &at("nested/../.claude-2")), None);
-        assert_eq!(accepted_home_beside(&default, &at("./.claude-2")), None);
-        #[cfg(unix)]
-        {
-            std::fs::create_dir_all(root.join("elsewhere")).unwrap();
-            std::os::unix::fs::symlink(root.join("elsewhere"), root.join(".claude-link")).unwrap();
-            assert_eq!(accepted_home_beside(&default, &at(".claude-link")), None);
-            assert_eq!(accepted_home_beside(&default, &format!("{}/", at(".claude-link"))), None);
-        }
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
     fn request(reporter: Reporter, binary: &str) -> InstallRequest {
         let mut request = InstallRequest::new(
             None,
@@ -2142,27 +1855,6 @@ pub(super) mod tests {
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("scratch dir");
         directory
-    }
-
-    /// A removed account is reported clean only when its file really is: after
-    /// an install the hooks are there, after an uninstall they are gone, and a
-    /// file that no longer parses proves nothing either way.
-    #[test]
-    fn retired_cleanup_reads_back_whether_the_hooks_are_gone() {
-        let directory = scratch("still-wired");
-        let path = directory.join("settings.json").display().to_string();
-        let mut spec = claude_spec();
-        spec.file = Some(path.clone());
-        let request = local_request("/opt/termiod");
-
-        assert!(!still_wired(&spec));
-        JsonHookFile::new(&path, &spec, &request).install().expect("installs");
-        assert!(still_wired(&spec));
-        JsonHookFile::bare(&path, spec.dialect).uninstall();
-        assert!(!still_wired(&spec));
-        std::fs::write(&path, "{ not json").expect("fixture");
-        assert!(still_wired(&spec));
-        let _ = std::fs::remove_dir_all(&directory);
     }
 
     fn kimi_spec() -> HookSpec {

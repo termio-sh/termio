@@ -94,15 +94,6 @@ struct AgentDefinition: Identifiable {
     /// `agent::machine::resolve` is what reads it.
     let configHome: ConfigHome?
 
-    /// `path` as it reads for a session on the account folder `home`: a manifest
-    /// path under the default config home moved under `home`, anything else —
-    /// or a session on the default account (`home == nil`) — unchanged.
-    func path(_ path: String, inAccount home: String?) -> String {
-        guard let home, let prefix = configHome?.path,
-              path == prefix || path.hasPrefix(prefix + "/") else { return path }
-        return home + path.dropFirst(prefix.count)
-    }
-
     /// A documented per-agent config-home override. See `ConfigHomeSpec`.
     struct ConfigHome: Hashable, Sendable {
         /// The variable the agent documents, e.g. `CLAUDE_CONFIG_DIR`.
