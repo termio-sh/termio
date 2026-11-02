@@ -17,6 +17,19 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.71.0",
+    date: "2026-11-02",
+    title: "A new file tree",
+    changes: {
+      improved: [
+        "Files: the tree in the Files tab is rebuilt. Folders, the row menu, Quick Look and Collapse All work as before.",
+        "Arrow keys in the file tree open the file they land on.",
+        "Dragging several selected files out of the tree carries all of them to the terminal or the Finder.",
+        "A file moved onto a name that already exists gets a numbered name instead of being refused.",
+      ],
+    },
+  },
+  {
     version: "0.70.1",
     date: "2026-11-02",
     title: "Smooth scrolling through large pull requests",
