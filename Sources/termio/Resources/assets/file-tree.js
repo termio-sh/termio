@@ -29,6 +29,13 @@
   let openedByThisClick = null;
   let revealing = false;
   let dropRow = null;
+  // Folders to keep open across the `resetPaths` that follows a move inside the
+  // tree, under both their old and new names: the disk move may still fail.
+  let openAcrossMove = [];
+  // Set while an arrow key is handled. The library moves focus, not selection,
+  // and the old tree opened the file the keyboard walked onto.
+  let walking = false;
+  let lastFocused = null;
 
   const treePath = (entry) => (entry.d ? entry.p + '/' : entry.p);
   const plain = (path) => (path.endsWith('/') ? path.slice(0, -1) : path);
@@ -72,8 +79,15 @@
       initialExpansion: 'closed',
       dragAndDrop: writable ? {
         onDropComplete: ({ draggedPaths, target }) => {
+          openAcrossMove = openFoldersAcross(draggedPaths, target.directoryPath ?? '');
           diverged = true;
           post({ type: 'move', paths: draggedPaths.map(plain), directory: target.directoryPath ? plain(target.directoryPath) : '' });
+        },
+        // The library refuses a move onto a name that exists. The disk move
+        // gives the file a numbered name instead, so Swift still gets it; the
+        // rows were not moved, and the next listing adds the new one.
+        onDropError: (_message, { draggedPaths, target }) => {
+          post({ type: 'move', paths: draggedPaths.map(plain), directory: target?.directoryPath ? plain(target.directoryPath) : '' });
         },
       } : false,
       gitStatus: gitStatus(),
@@ -91,7 +105,37 @@
       },
     });
     tree.subscribe(requestUnlistedFolders);
+    tree.subscribe(followKeyboardFocus);
     tree.render({ fileTreeContainer: host });
+  }
+
+  // The library has already moved the rows, so a folder that was open is found
+  // under its new name; `entries` still holds the old ones.
+  function openFoldersAcross(draggedPaths, directory) {
+    const open = [];
+    for (const [path, entry] of entries) {
+      if (!entry.d) continue;
+      const moved = draggedPaths.find((dragged) => path === dragged || (isFolder(dragged) && path.startsWith(dragged)));
+      if (moved == null) {
+        if (itemAt(path)?.isExpanded?.()) open.push(path);
+        continue;
+      }
+      const name = plain(moved).split('/').pop() + (isFolder(moved) ? '/' : '');
+      const renamed = directory + name + path.slice(moved.length);
+      if (itemAt(renamed)?.isExpanded?.()) open.push(path, renamed);
+    }
+    return open;
+  }
+
+  function followKeyboardFocus() {
+    const focused = tree.getFocusedPath();
+    if (focused === lastFocused) return;
+    lastFocused = focused;
+    if (!walking || focused == null) return;
+    const selected = tree.getSelectedPaths();
+    if (selected.length === 1 && selected[0] === focused) return;
+    for (const path of selected) itemAt(path)?.deselect();
+    itemAt(focused)?.select();
   }
 
   function requestUnlistedFolders() {
@@ -143,15 +187,18 @@
         return;
       }
       if (diverged) {
-        const open = expandedFolders();
         entries = next;
-        tree.resetPaths([...next.keys()], { initialExpandedPaths: open });
+        tree.resetPaths([...next.keys()], { initialExpandedPaths: openAcrossMove.filter((path) => next.has(path)) });
+        openAcrossMove = [];
         diverged = false;
       } else {
         patch(next);
         entries = next;
       }
       tree.setGitStatus(gitStatus());
+      // A change to a row's decoration alone (loading, a note) touches no path
+      // the library tracks, so it would not redraw on its own.
+      tree.render({ fileTreeContainer: host });
       requestUnlistedFolders();
     },
 
@@ -224,6 +271,13 @@
       y: event.clientY,
     });
   });
+
+  const walkingKeys = new Set(['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
+  host.addEventListener('keydown', (event) => {
+    if (!walkingKeys.has(event.key) || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    walking = true;
+    setTimeout(() => { walking = false; }, 0);
+  }, true);
 
   host.addEventListener('keydown', (event) => {
     if (event.key !== ' ' || event.metaKey || event.ctrlKey || event.altKey) return;

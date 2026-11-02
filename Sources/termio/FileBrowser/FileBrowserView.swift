@@ -209,7 +209,10 @@ struct FileBrowserView: View {
         }
         guard let tree = browserState.tree else { return }
         if await tree.reveal(path) {
+            // The page reports no selection for a reveal, so Quick Look is moved here.
             browserState.selection = path
+            browserState.selectedLocalURL = self.tree?.node(at: path)?.localURL
+            followSelectionInQuickLook()
         } else {
             Log.files.error("reveal stopped: no row for \(path, privacy: .public)")
         }
@@ -507,6 +510,7 @@ struct FileBrowserView: View {
         }
         tree?.refresh()
         browserState.selection = target.path
+        browserState.selectedLocalURL = target
         store.pendingFileReveal = target.path
         onActivate(target)
     }
@@ -519,6 +523,7 @@ struct FileBrowserView: View {
             try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
             tree?.refresh()
             browserState.selection = target.path
+            browserState.selectedLocalURL = target
             store.pendingFileReveal = target.path
         } catch {
             Log.files.error("failed to create folder at \(target.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -548,6 +553,7 @@ struct FileBrowserView: View {
             tree?.refresh()
             if wasSelected {
                 browserState.selection = target.path
+                browserState.selectedLocalURL = target
                 store.pendingFileReveal = target.path
                 if !wasDirectory { onActivate(target) }
             }
@@ -567,7 +573,10 @@ struct FileBrowserView: View {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-            if browserState.selection == url.path { browserState.selection = nil }
+            if browserState.selection == url.path {
+                browserState.selection = nil
+                browserState.selectedLocalURL = nil
+            }
             tree?.refresh()
         } catch {
             Log.files.error("failed to trash \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -633,16 +642,29 @@ private struct FileTreeContent: View {
                 message: message
             )
         case .ready:
-            FileTreeWebView(
-                model: model,
-                writes: writes,
-                dimIgnored: settings.dimIgnoredFiles,
-                style: style,
-                browserState: browserState,
-                onSelect: onSelect,
-                onOpen: onOpen,
-                onQuickLook: onQuickLook
-            )
+            VStack(spacing: 0) {
+                FileTreeWebView(
+                    model: model,
+                    writes: writes,
+                    dimIgnored: settings.dimIgnoredFiles,
+                    style: style,
+                    browserState: browserState,
+                    onSelect: onSelect,
+                    onOpen: onOpen,
+                    onQuickLook: onQuickLook
+                )
+                // A root listing that stopped short has no folder row to carry its
+                // note, and the rows above it look complete.
+                if let notice = model.rootNodes.lazy.compactMap(\.notice).first {
+                    Text(notice)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
     }
 
