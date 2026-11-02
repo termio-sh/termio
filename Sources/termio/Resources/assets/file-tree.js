@@ -32,9 +32,9 @@
   // Folders to keep open across a move inside the tree, under their old and new
   // names: the disk move may still fail.
   let openAcrossMove = [];
-  // Set from the pointer press: a click with shift, cmd or ctrl edits the
-  // selection and opens nothing.
-  let modifiedClick = false;
+  // Set from the last press, pointer or key: with shift, cmd or ctrl held it
+  // edits the selection and opens nothing.
+  let modifiedInput = false;
   // Set while an arrow key is handled. The library moves focus, not selection,
   // and the old tree opened the file the keyboard walked onto.
   let walking = false;
@@ -102,7 +102,7 @@
         if (revealing) return;
         const kept = keptSelection(selected);
         if (kept !== toldSelection) tellSelection(kept);
-        const path = selected.length === 1 && !modifiedClick ? selected[0] : null;
+        const path = selected.length === 1 && !modifiedInput ? selected[0] : null;
         if (path != null && !isFolder(path)) {
           openedByThisClick = path;
           setTimeout(() => { if (openedByThisClick === path) openedByThisClick = null; }, 0);
@@ -283,6 +283,8 @@
     },
 
     collapseAll() {
+      // A move's refresh still to come must not reopen what this closes.
+      openAcrossMove = [];
       for (const path of expandedFolders()) itemAt(path)?.collapse();
     },
 
@@ -297,11 +299,11 @@
   }
 
   host.addEventListener('pointerdown', (event) => {
-    modifiedClick = event.shiftKey || event.metaKey || event.ctrlKey;
+    modifiedInput = event.shiftKey || event.metaKey || event.ctrlKey;
   }, true);
 
   host.addEventListener('click', (event) => {
-    if (modifiedClick) return;
+    if (modifiedInput) return;
     const row = rowAt(event);
     if (!row || row.dataset.itemType !== 'file') return;
     const path = row.dataset.itemPath;
@@ -323,7 +325,7 @@
 
   const walkingKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']);
   host.addEventListener('keydown', (event) => {
-    modifiedClick = false;
+    modifiedInput = event.shiftKey || event.metaKey || event.ctrlKey;
     if (!walkingKeys.has(event.key) || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     walking = true;
     setTimeout(() => { walking = false; }, 0);
