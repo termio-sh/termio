@@ -29,9 +29,10 @@
   let openedByThisClick = null;
   let revealing = false;
   let dropRow = null;
-  // Folders to keep open across a move inside the tree, under their old and new
-  // names: the disk move may still fail.
-  let openAcrossMove = [];
+  // Every folder's names across a move inside the tree, as [old] or [old, new]:
+  // the disk move may still fail. Which ones are open is read when the
+  // listing lands, so a folder closed meanwhile stays closed.
+  let namesAcrossMove = [];
   // Set from the last press, pointer or key: with shift, cmd or ctrl held it
   // edits the selection and opens nothing.
   let modifiedInput = false;
@@ -84,7 +85,7 @@
       initialExpansion: 'closed',
       dragAndDrop: writable ? {
         onDropComplete: ({ draggedPaths, target }) => {
-          openAcrossMove = openFoldersAcross(draggedPaths, target.directoryPath ?? '');
+          namesAcrossMove = foldersAcross(draggedPaths, target.directoryPath ?? '');
           diverged = true;
           post({ type: 'move', paths: draggedPaths.map(plain), directory: target.directoryPath ? plain(target.directoryPath) : '' });
         },
@@ -143,24 +144,23 @@
     return true;
   }
 
-  // The library has already moved the rows, so a folder that was open is found
-  // under its new name; `entries` still holds the old ones. A folder inside a
-  // moved one that the device has not listed yet stays closed: its rows only
-  // arrive after the move, and opening it then would undo what was done since.
-  function openFoldersAcross(draggedPaths, directory) {
-    const open = [];
+  // The library has already moved the rows, so a folder is found under its new
+  // name; `entries` still holds the old ones. A folder inside a moved one that
+  // the device has not listed yet stays closed: its rows only arrive after the
+  // move, and opening it then would undo what was done since.
+  function foldersAcross(draggedPaths, directory) {
+    const names = [];
     for (const [path, entry] of entries) {
       if (!entry.d) continue;
       const moved = draggedPaths.find((dragged) => path === dragged || (isFolder(dragged) && path.startsWith(dragged)));
       if (moved == null) {
-        if (visiblyOpen(path)) open.push(path);
+        names.push([path]);
         continue;
       }
       const name = plain(moved).split('/').pop() + (isFolder(moved) ? '/' : '');
-      const renamed = directory + name + path.slice(moved.length);
-      if (visiblyOpen(renamed)) open.push(path, renamed);
+      names.push([path, directory + name + path.slice(moved.length)]);
     }
-    return open;
+    return names;
   }
 
   function followKeyboardFocus() {
@@ -226,8 +226,10 @@
       const moved = diverged;
       if (diverged) {
         entries = next;
-        tree.resetPaths([...next.keys()], { initialExpandedPaths: openAcrossMove.filter((path) => next.has(path)) });
-        openAcrossMove = [];
+        // Read before the reset, while the library still holds the moved rows.
+        const open = namesAcrossMove.filter((names) => visiblyOpen(names[names.length - 1])).flat();
+        tree.resetPaths([...next.keys()], { initialExpandedPaths: open.filter((path) => next.has(path)) });
+        namesAcrossMove = [];
         diverged = false;
       } else {
         patch(next);
@@ -283,8 +285,6 @@
     },
 
     collapseAll() {
-      // A move's refresh still to come must not reopen what this closes.
-      openAcrossMove = [];
       for (const path of expandedFolders()) itemAt(path)?.collapse();
     },
 
@@ -347,7 +347,11 @@
     const row = rowAt(event);
     if (!row) return;
     draggingRow = true;
-    if (writable) post({ type: 'dragStart', path: plain(row.dataset.itemPath) });
+    // The library drags the whole selection when the pressed row is in it.
+    const pressed = row.dataset.itemPath;
+    const selected = tree?.getSelectedPaths() ?? [];
+    const dragged = selected.includes(pressed) ? selected : [pressed];
+    if (writable) post({ type: 'dragStart', paths: dragged.map(plain) });
   }, true);
   host.addEventListener('dragend', () => { draggingRow = false; }, true);
 

@@ -295,7 +295,7 @@ final class FileTreeBridge: NSObject, WKScriptMessageHandler, WKNavigationDelega
         case "dropTarget":
             dropDirectory = absolutePath(body["directory"] as? String ?? "")
         case "dragStart":
-            draggedPath = (body["path"] as? String).map(absolutePath)
+            draggedPaths = (body["paths"] as? [String] ?? []).map(absolutePath)
         default:
             Log.files.error("file tree: unknown message \(type, privacy: .public)")
         }
@@ -312,19 +312,33 @@ final class FileTreeBridge: NSObject, WKScriptMessageHandler, WKNavigationDelega
 
     // MARK: Drags out of the page
 
-    /// The row the page said a drag started on, until its URL is on the pasteboard.
-    private var draggedPath: String?
+    /// The rows the page said a drag started with, until their URLs are on the
+    /// pasteboard.
+    private var draggedPaths: [String] = []
 
-    /// Adds the dragged row's file URL to the drag. WebKit writes only what the
-    /// page set, and a page may not write a file URL; the terminal and the Finder
-    /// take nothing else.
+    /// Adds the dragged rows' file URLs to the drag, one pasteboard item each.
+    /// WebKit writes only what the page set, and a page may not write a file
+    /// URL; the terminal and the Finder take nothing else. WebKit's own item is
+    /// kept as the first, so a drop inside the page still reads it.
     func stampDrag(on pasteboard: NSPasteboard) {
-        guard let path = draggedPath else { return }
-        draggedPath = nil
-        let url = URL(fileURLWithPath: path).absoluteString
-        pasteboard.addTypes([.fileURL, .URL], owner: nil)
-        pasteboard.setString(url, forType: .fileURL)
-        pasteboard.setString(url, forType: .URL)
+        guard !draggedPaths.isEmpty else { return }
+        let urls = draggedPaths.map { URL(fileURLWithPath: $0).absoluteString }
+        draggedPaths = []
+        let items = urls.map { url in
+            let item = NSPasteboardItem()
+            item.setString(url, forType: .fileURL)
+            item.setString(url, forType: .URL)
+            return item
+        }
+        if let webKitItem = pasteboard.pasteboardItems?.first {
+            for type in webKitItem.types where type != .fileURL && type != .URL {
+                if let data = webKitItem.data(forType: type) { items[0].setData(data, forType: type) }
+            }
+        }
+        pasteboard.clearContents()
+        if !pasteboard.writeObjects(items) {
+            Log.files.error("file tree: the drag's file URLs could not be written")
+        }
     }
 
     // MARK: Drops from outside the page
