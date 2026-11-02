@@ -2,8 +2,8 @@ import AppKit
 import Quartz
 import SwiftUI
 
-/// The trailing inspector's content: a native disclosure tree of the selected
-/// session's project, rooted at the project (or worktree) directory. Selecting a
+/// The trailing inspector's content: a disclosure tree of the selected session's
+/// project (`FileTreeWebView`), rooted at the project (or worktree) directory. Selecting a
 /// file and pressing space opens it in Quick Look (Finder's gesture); dragging
 /// files from the Finder onto the panel copies them into the project root.
 ///
@@ -28,10 +28,6 @@ struct FileBrowserView: View {
     /// Double-clicking a file activates it: the hosting controller routes a previewable
     /// file (image, PDF, HTML) to Quick Look and everything else to the code editor.
     let onActivate: (URL) -> Void
-
-    /// Bumped to collapse the whole tree: it is the file list's `.id`, so changing it
-    /// rebuilds the list fresh — and a fresh `List(children:)` starts fully collapsed.
-    @State private var treeGeneration = 0
 
     /// Where the selected session's files live, and on which machine — see
     /// `TermioStore.inspectorCheckout`. Nothing in this pane may ask the session
@@ -63,10 +59,8 @@ struct FileBrowserView: View {
     var body: some View {
         ZStack {
             // The Files pane is ALWAYS mounted; a tab switch merely covers it. A
-            // fresh `List(children:)` re-realizes every row of the outline, which
-            // on a huge root (a home directory) costs whole seconds per switch —
-            // and loses the tree's disclosure state besides (#207). Same
-            // always-mounted-under-an-opaque-overlay shape as `InspectorRoot`.
+            // fresh tree reloads its page and loses its disclosure state (#207).
+            // Same always-mounted-under-an-opaque-overlay shape as `InspectorRoot`.
             filesPane
                 .allowsHitTesting(store.inspectorTab == .files)
                 .accessibilityHidden(store.inspectorTab != .files)
@@ -82,12 +76,10 @@ struct FileBrowserView: View {
         // the whole column behind the transparent list, ignoring the safe area so it runs
         // full-height. Tracks the terminal theme live via `settings`.
         .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
-        // A drop on empty space targets the project root: a file already in the tree
-        // is *moved* there, a file dragged in from the Finder is *copied* in. Folder
-        // rows install their own, more specific drop targets (see `FileTreeList`), so
-        // this only catches drops that miss every row. No panel-wide target ring —
-        // dragging a row out is itself a `URL` drag, so a whole-panel highlight would
-        // be a false positive; the folder rows light up individually instead.
+        // A drop on the header or an empty state targets the project root: a file
+        // already in the tree is *moved* there, a file dragged in from the Finder is
+        // *copied* in. The tree takes its own drops, into the folder under the
+        // pointer (see `FileTreeWKWebView`).
         // A checkout on another device has no local root, so the drop is refused:
         // the alternative is landing a file on this Mac under a session that runs
         // somewhere else, which is the whole defect this pane's checkout fixes.
@@ -136,33 +128,10 @@ struct FileBrowserView: View {
             if tree?.isLive != true { tree?.refresh() }
             if store.inspectorTab != .changes { seedChangeCount() }
         }
-        // Covering or uncovering the always-mounted tree resets its scroll view's
-        // wheel increment (SwiftUI re-configures the scroll view on the overlay
-        // flip, and no row update follows to heal it — see `OutlineViewFixups`);
-        // reassert once the switch's update pass has settled.
-        .onChange(of: store.inspectorTab) {
-            let outline = browserState.outlineView
-            DispatchQueue.main.async { OutlineViewFixups.assertWheelIncrement(on: outline) }
-        }
         .onChange(of: store.pendingFileReveal, initial: true) { _, path in
             guard let path else { return }
             Task { await reveal(path) }
         }
-        .onChange(of: browserState.selection) {
-            guard !browserState.isRevealing else { return }
-            // The table fires native selection on a clean click — reliably, unlike a
-            // click recognizer, which `NSOutlineView`'s own primary-button tracking
-            // swallows. So a selection *change* opens: a file opens, a folder opens
-            // (expands). Collapse stays on the disclosure triangle. This is also what
-            // carries an arrow-key walk through the tree, which sends no click at all.
-            InspectorPanelHost.shared.quickLookFollowsTreeSelection()
-            activateSelection()
-            // Keep an open Quick Look panel in step as the selection moves.
-            if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
-                QLPreviewPanel.shared().reloadData()
-            }
-        }
-        .onReceive(browserState.rowClicked) { activateClickedRow() }
     }
 
     /// Arms the tree for the selected checkout: the device's channel stays warm
@@ -188,151 +157,62 @@ struct FileBrowserView: View {
         model?.stopWarming()
     }
 
-    /// Opens the file under a click the selection binding cannot report: re-clicking the
-    /// already-selected row changes no selection, so nothing publishes. That is how you
-    /// re-open a file you just closed — closing the detail leaves the row selected, as it
-    /// does in VS Code and Zed, the highlight marking where you are rather than what is
-    /// open — and without this the row stays dead until some other row is clicked first.
-    private func activateClickedRow() {
-        // `clickedRow` is only meaningful during the action send `rowClicked` is delivering.
-        // -1 is the empty area below the rows, which must not re-open what is still selected.
-        guard let outline = browserState.outlineView, outline.clickedRow >= 0 else { return }
-        // A click on the row already selected sends no selection change, so it hands Quick Look
-        // back to the tree here.
-        InspectorPanelHost.shared.quickLookFollowsTreeSelection()
-        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
-            QLPreviewPanel.shared().reloadData()
-        }
-        // Folders belong to the selection handler, which toggles and then clears. Skipping a
-        // file that is already open is both the Zed/VS Code no-op and what stops a click that
-        // *did* move the selection from being opened twice, once down each path.
-        guard let node = selectedNode, !node.isDirectory else { return }
+    /// A row became the selection, by click or by keyboard. Quick Look follows it,
+    /// and an open panel moves with it.
+    private func select(_ node: DeviceFileNode) {
+        browserState.selection = node.path
+        browserState.selectedLocalURL = node.localURL
+        followSelectionInQuickLook()
+    }
+
+    /// A file row was clicked or walked onto. A click on the row already selected
+    /// re-opens its file: closing the detail leaves the row selected, as it does in
+    /// VS Code and Zed, the highlight marking where you are rather than what is
+    /// open. A click on the file that is still open does nothing.
+    private func activate(_ node: DeviceFileNode) {
+        followSelectionInQuickLook()
         if let url = node.localURL, store.openFileURL == url { return }
         open(node)
     }
 
-    private var selectedNode: DeviceFileNode? {
-        browserState.selection.flatMap { tree?.node(at: $0) }
-    }
-
-    /// What a selection change does: a folder toggles open, a file opens.
-    private func activateSelection() {
-        browserState.selectedLocalURL = selectedNode?.localURL
-        guard let node = selectedNode else { return }
-        if node.isDirectory {
-            toggleSelectedFolder()
-        } else {
-            open(node)
+    private func followSelectionInQuickLook() {
+        InspectorPanelHost.shared.quickLookFollowsTreeSelection()
+        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
+            QLPreviewPanel.shared().reloadData()
         }
     }
 
     /// Opens one row. A file on this Mac goes to the inspector's editor or
     /// preview; a file on another device is staged and shown read-only, which is
     /// the only honest thing to offer for bytes this app cannot save back
-    /// through the same path. A row that is neither just clears, so the next
-    /// click on it registers.
+    /// through the same path. A row that is neither does nothing.
     private func open(_ node: DeviceFileNode) {
         if let url = node.localURL {
             onActivate(url)
             return
         }
-        guard node.canPreview, let tree else {
-            browserState.selection = nil
-            return
-        }
+        guard node.canPreview, let tree else { return }
         store.openRemoteFile(
             path: node.path, name: node.name, provider: tree.files, host: tree.host)
-        // Every click should be observable, including reopening the same file
-        // after the overlay was dismissed.
-        browserState.selection = nil
     }
 
-    /// Expands the tree down to `path` and selects its row, leaving the file as the caller
-    /// opened it. The outline exposes no row for a path, so each folder is found by selecting
-    /// it and reading the row back. Each level is listed only once its parent expands, so
-    /// every step waits for its row to appear and gives up after `revealStepTimeout`.
+    /// Expands the tree down to `path` and selects its row, leaving the file as the
+    /// caller opened it. The tree may not exist yet — the pane can still be
+    /// connecting — so this waits for it as long as one reveal step would.
     private func reveal(_ path: String) async {
-        guard !browserState.isRevealing else { return }
-        defer {
-            browserState.isRevealing = false
-            if store.pendingFileReveal == path { store.pendingFileReveal = nil }
+        defer { if store.pendingFileReveal == path { store.pendingFileReveal = nil } }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while browserState.tree == nil {
+            guard ContinuousClock.now < deadline,
+                  (try? await Task.sleep(for: .milliseconds(30))) != nil
+            else { return }
         }
-        guard let tree else { return }
-        let root = tree.root.hasSuffix("/") ? String(tree.root.dropLast()) : tree.root
-        guard path.hasPrefix(root + "/") else { return }
-        let components = path.dropFirst(root.count + 1).split(separator: "/")
-        var ancestors: [String] = []
-        var current = root
-        for component in components {
-            current += "/" + component
-            ancestors.append(current)
-        }
-        browserState.isRevealing = true
-        for (index, step) in ancestors.enumerated() {
-            guard let row = await selectRow(step, in: tree) else {
-                Log.files.error("reveal stopped: no row for \(step, privacy: .public)")
-                return
-            }
-            guard index < ancestors.count - 1 else {
-                browserState.outlineView?.scrollRowToVisible(row)
-                return
-            }
-            guard let outline = browserState.outlineView, let item = outline.item(atRow: row) else { return }
-            if !outline.isItemExpanded(item) { outline.expandItem(item) }
-        }
-    }
-
-    private static let revealStepTimeout: Duration = .seconds(3)
-
-    /// Selects `path` once the tree has a row for it, and returns that row. The selection is
-    /// cleared before each try, so a row still selected from the previous step never answers.
-    private func selectRow(_ path: String, in tree: DeviceFileTreeModel) async -> Int? {
-        let clock = ContinuousClock()
-        let deadline = clock.now + Self.revealStepTimeout
-        while clock.now < deadline {
-            if tree.node(at: path) != nil {
-                browserState.selection = nil
-                guard await settle() else { return nil }
-                browserState.selection = path
-                guard await settle() else { return nil }
-                if let row = browserState.outlineView?.selectedRow, row >= 0 { return row }
-            } else {
-                guard await settle() else { return nil }
-            }
-        }
-        return nil
-    }
-
-    /// Lets SwiftUI push the selection into the outline, and a listing land.
-    private func settle() async -> Bool {
-        (try? await Task.sleep(for: .milliseconds(30))) != nil
-    }
-
-    /// Toggle (expand/collapse) the folder whose row was just selected, on the native
-    /// outline view — the click that selected it is the only signal we get (the outline
-    /// view swallows primary-click recognizers), so clicking a folder row IS "open/close
-    /// it". Afterward we clear the selection: an unchanged selection wouldn't re-fire
-    /// this handler, so a second click on the *same* folder (to collapse it) would go
-    /// unseen — resetting to nil makes every click on a folder register. Folders thus
-    /// don't hold a persistent highlight; files (which stay selected/open) are untouched.
-    private func toggleSelectedFolder(attempt: Int = 0) {
-        guard let outline = browserState.outlineView else { return }
-        let row = outline.selectedRow
-        // The AppKit selection normally already reflects the click that drove this
-        // change; if it hasn't caught up yet, retry a couple of runloop turns.
-        guard row >= 0, let item = outline.item(atRow: row) else {
-            if attempt < 3 {
-                DispatchQueue.main.async { toggleSelectedFolder(attempt: attempt + 1) }
-            }
-            return
-        }
-        guard outline.isExpandable(item) else { return }
-        if outline.isItemExpanded(item) {
-            outline.animator().collapseItem(item)
+        guard let tree = browserState.tree else { return }
+        if await tree.reveal(path) {
+            browserState.selection = path
         } else {
-            outline.animator().expandItem(item)
+            Log.files.error("reveal stopped: no row for \(path, privacy: .public)")
         }
-        browserState.selection = nil
     }
 
     /// The Files pane itself: one tree for every machine, and the two honest
@@ -345,15 +225,17 @@ struct FileBrowserView: View {
                 header(tree)
                 FileTreeContent(
                     model: tree,
-                    selection: $browserState.selection,
-                    generation: treeGeneration,
-                    font: settings.interfaceFont,
                     host: tree.host,
                     writes: writes,
-                    onQuickLook: onQuickLook,
-                    captureOutline: { outline in
-                        browserState.outlineView = outline
-                        if let outline { browserState.observeClicks(on: outline) }
+                    browserState: browserState,
+                    onSelect: { select($0) },
+                    onOpen: { activate($0) },
+                    // Quick Look previews a file on this Mac. A row on another
+                    // device has nothing local to hand the panel, so the key
+                    // does nothing rather than opening an empty preview.
+                    onQuickLook: {
+                        guard writes != nil, browserState.selection != nil else { return }
+                        onQuickLook()
                     }
                 )
             }
@@ -513,7 +395,7 @@ struct FileBrowserView: View {
                 tree.refresh()
             }
             TreeHeaderButton(codicon: .collapseAll, help: localized("Collapse All")) {
-                treeGeneration += 1
+                browserState.tree?.collapseAll()
             }
         }
         .padding(.leading, 14)
@@ -625,6 +507,7 @@ struct FileBrowserView: View {
         }
         tree?.refresh()
         browserState.selection = target.path
+        store.pendingFileReveal = target.path
         onActivate(target)
     }
 
@@ -636,6 +519,7 @@ struct FileBrowserView: View {
             try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
             tree?.refresh()
             browserState.selection = target.path
+            store.pendingFileReveal = target.path
         } catch {
             Log.files.error("failed to create folder at \(target.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
@@ -664,6 +548,7 @@ struct FileBrowserView: View {
             tree?.refresh()
             if wasSelected {
                 browserState.selection = target.path
+                store.pendingFileReveal = target.path
                 if !wasDirectory { onActivate(target) }
             }
         } catch {
@@ -719,21 +604,21 @@ struct FileTreeWrites {
 
 /// The tree's three states, observing the model that fills them.
 ///
-/// Split out of `FileBrowserView` so the outline re-renders on a graft without
+/// Split out of `FileBrowserView` so the tree re-renders on a graft without
 /// re-evaluating the whole pane — the header, the drop target and the other
 /// inspector tabs have no stake in a folder that just landed.
 private struct FileTreeContent: View {
     @ObservedObject var model: DeviceFileTreeModel
-    @Binding var selection: String?
-    /// Collapse All, as an identity: a fresh `List(children:)` starts collapsed.
-    let generation: Int
-    let font: Font
+    @EnvironmentObject var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
     /// The machine, for the failure state — which is the one place a tree has
     /// to name where it was reading.
     let host: String
     let writes: FileTreeWrites?
+    let browserState: FileBrowserState
+    let onSelect: (DeviceFileNode) -> Void
+    let onOpen: (DeviceFileNode) -> Void
     let onQuickLook: () -> Void
-    let captureOutline: (NSOutlineView?) -> Void
 
     var body: some View {
         switch model.phase {
@@ -748,26 +633,44 @@ private struct FileTreeContent: View {
                 message: message
             )
         case .ready:
-            FileTreeList(
-                nodes: model.rootNodes,
-                revision: model.revision,
-                selection: $selection,
-                font: font,
-                onDrop: writes?.onDrop ?? { _, _ in false },
-                rootURL: writes?.rootURL,
-                actions: writes?.actions,
-                captureOutline: captureOutline
+            FileTreeWebView(
+                model: model,
+                writes: writes,
+                dimIgnored: settings.dimIgnoredFiles,
+                style: style,
+                browserState: browserState,
+                onSelect: onSelect,
+                onOpen: onOpen,
+                onQuickLook: onQuickLook
             )
-            .onKeyPress(.space) {
-                // Quick Look previews a file on this Mac. A row on another
-                // device has nothing local to hand the panel, so the key does
-                // nothing rather than opening an empty preview.
-                guard writes != nil, selection != nil else { return .ignored }
-                onQuickLook()
-                return .handled
-            }
-            // Collapse All rebuilds the list by changing its identity.
-            .id(generation)
         }
+    }
+
+    /// The tree in the window's own terms: the interface font, the theme's ink,
+    /// and the same grey lift the sidebar rows wear — selection a clear step
+    /// above hover, never a hue.
+    private var style: [String: String] {
+        let dark = colorScheme == .dark
+        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        let foreground = settings.chromeTheme(for: colorScheme).map { NSColor($0.foreground) } ?? .labelColor
+        func css(_ color: NSColor) -> String { FileTreeWebView.css(color, in: appearance) }
+        func ink(_ alpha: CGFloat) -> String { css(ChromeTheme.overlayInk(onDark: dark, alpha: alpha)) }
+        let family = settings.interfaceFontFamily
+        return [
+            "color-scheme": dark ? "dark" : "light",
+            "--trees-font-family-override": family.isEmpty
+                ? "-apple-system, sans-serif" : "\"\(family)\", -apple-system, sans-serif",
+            "--trees-font-size-override": "\(settings.interfaceFontSize)px",
+            "--trees-fg-override": css(foreground),
+            "--trees-fg-muted-override": css(foreground.withAlphaComponent(0.6)),
+            "--trees-bg-override": "transparent",
+            "--trees-selected-bg-override": ink(0.10),
+            "--trees-selected-fg-override": css(foreground),
+            "--trees-theme-list-hover-bg": ink(0.045),
+            "--trees-focus-ring-color-override": ink(0.22),
+            "--trees-selected-focused-border-color-override": "transparent",
+            "--trees-git-ignored-color-override": dark ? "rgb(140, 140, 140)" : "rgb(142, 142, 144)",
+            "--trees-border-radius-override": "7px",
+        ]
     }
 }
