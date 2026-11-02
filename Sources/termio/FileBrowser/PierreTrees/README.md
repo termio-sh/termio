@@ -23,8 +23,18 @@ npx esbuild entry.js --bundle --minify --format=iife --global-name=PierreTrees \
   --target=safari17 --legal-comments=none --outfile=pierre-trees.min.js
 ```
 
-The bundle in the repo is that output, unmodified
-(sha256 `77dae7aaf2696b5ac7342968e96d58062d08a98a46e94a2f354902af2a3316bb`).
+That output has sha256
+`77dae7aaf2696b5ac7342968e96d58062d08a98a46e94a2f354902af2a3316bb`. The bundle
+in the repo differs from it in one place, so a rebuild must apply it again:
+
+- `FileTree` gains `selectOnlyPath(e){this.#t.selectOnlyPath(e)}`, inserted
+  right after `focusPath(e){this.#t.focusPath(e)}`. The controller has it, but
+  `FileTree` does not pass it on, and an item's `select()` keeps the old range
+  anchor. Without it, a row the keyboard walked onto can't become the row a
+  shift-click extends from.
+
+With that line the sha256 is
+`64c60ad0fcb82345c23ef761183ef54c6f26533d74e78aba05589fd300782a7c`.
 
 ## Licenses
 

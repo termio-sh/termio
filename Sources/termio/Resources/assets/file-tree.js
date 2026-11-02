@@ -135,15 +135,29 @@
     return open;
   }
 
-  // Opens each waiting folder whose name `next` lists, and returns the paths
-  // opened; the pairs still waiting stay.
-  function settleOpenAcrossMove(next) {
+  const parentOf = (path) => {
+    const cut = plain(path).lastIndexOf('/');
+    return cut < 0 ? '' : path.slice(0, cut + 1);
+  };
+
+  // The waiting folders `next` lists, to open now. A pair is dropped once one
+  // of its names is listed, or once every parent has been listed without it:
+  // the folder is gone, and a new one by that name later is not it. A folder
+  // whose parent is closed by then stays closed, since opening it would open
+  // its parents too, against what was done since the move.
+  function settleOpenAcrossMove(next, isOpen) {
     const opened = [];
     openAcrossMove = openAcrossMove.filter((names) => {
       const name = names.find((candidate) => next.has(candidate));
-      if (name == null) return true;
-      opened.push(name);
-      return false;
+      if (name != null) {
+        const parent = parentOf(name);
+        if (parent === '' || isOpen(parent)) opened.push(name);
+        return false;
+      }
+      return names.some((candidate) => {
+        const parent = parentOf(candidate);
+        return parent !== '' && !next.get(parent)?.o;
+      });
     });
     return opened;
   }
@@ -155,23 +169,9 @@
     if (!walking || focused == null) return;
     const selected = tree.getSelectedPaths();
     if (selected.length === 1 && selected[0] === focused) return;
-    // A click is the library's only public way to select one row and make it
-    // the anchor a later shift-click extends from. A folder can't take one,
-    // since a click also toggles it.
-    // Clicked after the library finishes the key, not from inside its update.
-    if (!isFolder(focused) && rowElement(focused)) {
-      queueMicrotask(() => rowElement(focused)?.click());
-      return;
-    }
-    for (const path of selected) itemAt(path)?.deselect();
-    itemAt(focused)?.select();
-  }
-
-  function rowElement(path) {
-    for (const row of host.shadowRoot?.querySelectorAll('[data-item-path]') ?? []) {
-      if (row.dataset.itemPath === path) return row;
-    }
-    return null;
+    // Also makes it the anchor a later shift-click extends from; see the
+    // vendor README for why this one call is patched in.
+    tree.selectOnlyPath(focused);
   }
 
   function requestUnlistedFolders() {
@@ -225,12 +225,19 @@
       const moved = diverged;
       if (diverged) {
         entries = next;
-        tree.resetPaths([...next.keys()], { initialExpandedPaths: settleOpenAcrossMove(next) });
+        // Nothing is open yet in the new path set: a parent opens here if it
+        // was open before the move.
+        const waiting = openAcrossMove.flat();
+        tree.resetPaths([...next.keys()], {
+          initialExpandedPaths: settleOpenAcrossMove(next, (parent) => waiting.includes(parent)),
+        });
         diverged = false;
       } else {
         patch(next);
         entries = next;
-        for (const path of settleOpenAcrossMove(next)) itemAt(path)?.expand();
+        for (const path of settleOpenAcrossMove(next, (parent) => itemAt(parent)?.isExpanded?.())) {
+          itemAt(path)?.expand();
+        }
       }
       tree.setGitStatus(gitStatus());
       // A change to a row's decoration alone (loading, a note) touches no path
@@ -238,10 +245,10 @@
       tree.render({ fileTreeContainer: host });
       // Swift dropped the selection the library reported mid-move, for a path it
       // had not listed yet; a row removed from under the selection reports none.
+      // Swift holds one path; of several selected rows it keeps one still there.
       const selected = tree.getSelectedPaths();
-      if (selected.length <= 1) {
-        const path = selected[0] ?? null;
-        if (moved ? path != null : path !== toldSelection) tellSelection(path);
+      if (moved ? selected.length > 0 : !(toldSelection == null ? selected.length === 0 : selected.includes(toldSelection))) {
+        tellSelection(selected[0] ?? null);
       }
       requestUnlistedFolders();
     },
@@ -263,12 +270,13 @@
       if (!item) return false;
       revealing = true;
       try {
-        for (const selected of tree.getSelectedPaths()) itemAt(selected)?.deselect();
-        item.select();
+        tree.selectOnlyPath(target);
         tree.scrollToPath(target, { offset: 'center' });
       } finally {
         revealing = false;
       }
+      // Swift records the revealed row itself.
+      toldSelection = target;
       return true;
     },
 
@@ -280,9 +288,11 @@
       } finally {
         revealing = false;
       }
+      toldSelection = null;
     },
 
     collapseAll() {
+      openAcrossMove = [];
       for (const path of expandedFolders()) itemAt(path)?.collapse();
     },
 
@@ -297,6 +307,8 @@
   }
 
   host.addEventListener('click', (event) => {
+    // A modified click edits the selection; it opens nothing.
+    if (event.shiftKey || event.metaKey || event.ctrlKey) return;
     const row = rowAt(event);
     if (!row || row.dataset.itemType !== 'file') return;
     const path = row.dataset.itemPath;
