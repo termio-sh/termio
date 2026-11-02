@@ -398,6 +398,9 @@ extension Termiod {
     /// to a host give up on the same clock.
     static let connectTimeoutSeconds = 10
 
+    /// Forks the master into a process of its own, so no session's ssh is it.
+    static let controlPersist = "ControlPersist=10m"
+
     /// The argument list itself, taking what the probe found rather than
     /// running it, so the decisions above are checkable without an ssh on the
     /// machine. `options` is `nil` when `ssh -G` could not be read: only
@@ -412,7 +415,7 @@ extension Termiod {
         if options.leavesMultiplexingToUs, let controlPath {
             arguments += ["-o", "ControlMaster=auto",
                           "-o", "ControlPath=\(controlPath)",
-                          "-o", "ControlPersist=10m"]
+                          "-o", controlPersist]
         }
         return arguments
     }
@@ -2114,7 +2117,9 @@ final class TermiodSessionLink: @unchecked Sendable {
         clientID = nil
         sentViewport = nil
         do {
-            let channel = try Termiod.Transport.open(route)
+            let channel = try resuming
+                ? Termiod.Transport.openAfterLostConnection(route)
+                : Termiod.Transport.openForAttach(route)
             transport = channel
             noteTransport(up: true)
             let offering = offersStream && !streamRefused
@@ -2197,6 +2202,7 @@ final class TermiodSessionLink: @unchecked Sendable {
                 throw TermiodClientError.handshakeRejected("attach was not acknowledged")
             }
             attached = true
+            Termiod.Transport.prepareNextAttach(route)
             setStreaming(streamGranted)
             isWriter = attachedPayload.writer
             // Sent with the attach, so termiod had them before it granted the
