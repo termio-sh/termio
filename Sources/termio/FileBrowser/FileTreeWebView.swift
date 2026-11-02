@@ -22,8 +22,9 @@ struct FileTreeWebView: NSViewRepresentable {
     /// CSS custom properties for the tree's host element: font, ink, highlight.
     let style: [String: String]
     let browserState: FileBrowserState
-    /// A row became the selection, by click or by keyboard.
-    let onSelect: (DeviceFileNode) -> Void
+    /// A row became the selection, by click or by keyboard, or nil when the
+    /// selection went away with its row.
+    let onSelect: (DeviceFileNode?) -> Void
     /// A file row was clicked or walked onto.
     let onOpen: (DeviceFileNode) -> Void
     let onQuickLook: () -> Void
@@ -67,7 +68,7 @@ final class FileTreeBridge: NSObject, WKScriptMessageHandler, WKNavigationDelega
     private var writes: FileTreeWrites?
     private var dimIgnored = false
     private var style: [String: String] = [:]
-    private var onSelect: (DeviceFileNode) -> Void = { _ in }
+    private var onSelect: (DeviceFileNode?) -> Void = { _ in }
     private var onOpen: (DeviceFileNode) -> Void = { _ in }
     private var onQuickLook: () -> Void = {}
 
@@ -279,7 +280,7 @@ final class FileTreeBridge: NSObject, WKScriptMessageHandler, WKNavigationDelega
         let node = (body["path"] as? String).flatMap { model.node(at: absolutePath($0)) }
         switch type {
         case "select":
-            if let node { onSelect(node) }
+            if let node { onSelect(node) } else if body["path"] is NSNull { onSelect(nil) }
         case "open":
             if let node, !node.isDirectory { onOpen(node) }
         case "expand":

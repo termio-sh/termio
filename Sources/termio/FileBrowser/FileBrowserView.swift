@@ -157,11 +157,11 @@ struct FileBrowserView: View {
         model?.stopWarming()
     }
 
-    /// A row became the selection, by click or by keyboard. Quick Look follows it,
-    /// and an open panel moves with it.
-    private func select(_ node: DeviceFileNode) {
-        browserState.selection = node.path
-        browserState.selectedLocalURL = node.localURL
+    /// A row became the selection, by click or by keyboard, or the selected row
+    /// went away. Quick Look follows it, and an open panel moves with it.
+    private func select(_ node: DeviceFileNode?) {
+        browserState.selection = node?.path
+        browserState.selectedLocalURL = node?.localURL
         followSelectionInQuickLook()
     }
 
@@ -576,6 +576,7 @@ struct FileBrowserView: View {
             if browserState.selection == url.path {
                 browserState.selection = nil
                 browserState.selectedLocalURL = nil
+                followSelectionInQuickLook()
             }
             tree?.refresh()
         } catch {
@@ -625,7 +626,7 @@ private struct FileTreeContent: View {
     let host: String
     let writes: FileTreeWrites?
     let browserState: FileBrowserState
-    let onSelect: (DeviceFileNode) -> Void
+    let onSelect: (DeviceFileNode?) -> Void
     let onOpen: (DeviceFileNode) -> Void
     let onQuickLook: () -> Void
 

@@ -291,7 +291,7 @@ final class RemoteFileOpenIntegrationTests: XCTestCase {
         tree.refresh()
         try await settle("the root listing") { !tree.rootNodes.isEmpty }
         try await settle("the first level") { tree.prefetchedPaths().contains(subPath) }
-        _ = tree.node(at: subPath)?.children
+        tree.expand(subPath)
 
         try await settle("the level below it") {
             tree.prefetchedPaths().contains(root.appendingPathComponent("sub/deep").path)

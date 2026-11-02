@@ -29,13 +29,16 @@
   let openedByThisClick = null;
   let revealing = false;
   let dropRow = null;
-  // Folders to keep open across the `resetPaths` that follows a move inside the
-  // tree, under both their old and new names: the disk move may still fail.
+  // Folders to keep open across a move inside the tree, each under its old and
+  // new name: the disk move may still fail. A folder inside a moved one is
+  // listed only later, so a pair waits here until one of its names lands.
   let openAcrossMove = [];
   // Set while an arrow key is handled. The library moves focus, not selection,
   // and the old tree opened the file the keyboard walked onto.
   let walking = false;
   let lastFocused = null;
+  // The selection Swift was last told, as a tree path, or null for none.
+  let toldSelection = null;
 
   const treePath = (entry) => (entry.d ? entry.p + '/' : entry.p);
   const plain = (path) => (path.endsWith('/') ? path.slice(0, -1) : path);
@@ -94,10 +97,10 @@
       renderRowDecoration: decoration,
       unsafeCSS: '[data-termio-drop-target] { background: var(--trees-selected-bg-override); border-radius: var(--trees-border-radius-override); }',
       onSelectionChange: (selected) => {
-        if (revealing || selected.length !== 1) return;
+        if (revealing || selected.length > 1) return;
+        tellSelection(selected[0] ?? null);
         const path = selected[0];
-        post({ type: 'select', path: plain(path), directory: isFolder(path) });
-        if (!isFolder(path)) {
+        if (path != null && !isFolder(path)) {
           openedByThisClick = path;
           setTimeout(() => { if (openedByThisClick === path) openedByThisClick = null; }, 0);
           post({ type: 'open', path: plain(path) });
@@ -109,6 +112,11 @@
     tree.render({ fileTreeContainer: host });
   }
 
+  function tellSelection(path) {
+    toldSelection = path;
+    post({ type: 'select', path: path == null ? null : plain(path), directory: path != null && isFolder(path) });
+  }
+
   // The library has already moved the rows, so a folder that was open is found
   // under its new name; `entries` still holds the old ones.
   function openFoldersAcross(draggedPaths, directory) {
@@ -117,14 +125,27 @@
       if (!entry.d) continue;
       const moved = draggedPaths.find((dragged) => path === dragged || (isFolder(dragged) && path.startsWith(dragged)));
       if (moved == null) {
-        if (itemAt(path)?.isExpanded?.()) open.push(path);
+        if (itemAt(path)?.isExpanded?.()) open.push([path]);
         continue;
       }
       const name = plain(moved).split('/').pop() + (isFolder(moved) ? '/' : '');
       const renamed = directory + name + path.slice(moved.length);
-      if (itemAt(renamed)?.isExpanded?.()) open.push(path, renamed);
+      if (itemAt(renamed)?.isExpanded?.()) open.push([path, renamed]);
     }
     return open;
+  }
+
+  // Opens each waiting folder whose name `next` lists, and returns the paths
+  // opened; the pairs still waiting stay.
+  function settleOpenAcrossMove(next) {
+    const opened = [];
+    openAcrossMove = openAcrossMove.filter((names) => {
+      const name = names.find((candidate) => next.has(candidate));
+      if (name == null) return true;
+      opened.push(name);
+      return false;
+    });
+    return opened;
   }
 
   function followKeyboardFocus() {
@@ -134,8 +155,23 @@
     if (!walking || focused == null) return;
     const selected = tree.getSelectedPaths();
     if (selected.length === 1 && selected[0] === focused) return;
+    // A click is the library's only public way to select one row and make it
+    // the anchor a later shift-click extends from. A folder can't take one,
+    // since a click also toggles it.
+    // Clicked after the library finishes the key, not from inside its update.
+    if (!isFolder(focused) && rowElement(focused)) {
+      queueMicrotask(() => rowElement(focused)?.click());
+      return;
+    }
     for (const path of selected) itemAt(path)?.deselect();
     itemAt(focused)?.select();
+  }
+
+  function rowElement(path) {
+    for (const row of host.shadowRoot?.querySelectorAll('[data-item-path]') ?? []) {
+      if (row.dataset.itemPath === path) return row;
+    }
+    return null;
   }
 
   function requestUnlistedFolders() {
@@ -186,19 +222,27 @@
         create([...next.keys()]);
         return;
       }
+      const moved = diverged;
       if (diverged) {
         entries = next;
-        tree.resetPaths([...next.keys()], { initialExpandedPaths: openAcrossMove.filter((path) => next.has(path)) });
-        openAcrossMove = [];
+        tree.resetPaths([...next.keys()], { initialExpandedPaths: settleOpenAcrossMove(next) });
         diverged = false;
       } else {
         patch(next);
         entries = next;
+        for (const path of settleOpenAcrossMove(next)) itemAt(path)?.expand();
       }
       tree.setGitStatus(gitStatus());
       // A change to a row's decoration alone (loading, a note) touches no path
       // the library tracks, so it would not redraw on its own.
       tree.render({ fileTreeContainer: host });
+      // Swift dropped the selection the library reported mid-move, for a path it
+      // had not listed yet; a row removed from under the selection reports none.
+      const selected = tree.getSelectedPaths();
+      if (selected.length <= 1) {
+        const path = selected[0] ?? null;
+        if (moved ? path != null : path !== toldSelection) tellSelection(path);
+      }
       requestUnlistedFolders();
     },
 
@@ -272,7 +316,7 @@
     });
   });
 
-  const walkingKeys = new Set(['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
+  const walkingKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']);
   host.addEventListener('keydown', (event) => {
     if (!walkingKeys.has(event.key) || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     walking = true;
