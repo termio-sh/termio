@@ -375,6 +375,40 @@ private struct FileDiffCard: View {
     @State private var expansion = DiffExpansion()
     @State private var contentHeight: CGFloat = 0
     @State private var loaded = false
+    /// What the document and the syntax colors were last built from. A lazy stack re-runs `.task`
+    /// every time the card scrolls back into view; rebuilding on each of those re-highlighted the
+    /// file and re-laid out all of its text on every pass of a scroller drag.
+    @State private var builtDocument: DocumentInputs?
+    /// The look `styledLines` was highlighted for, and the look of the highlight pass in flight.
+    @State private var builtStyle: Look?
+    @State private var stylingLook: Look?
+
+    /// Everything the document's and the highlighter's colors and metrics come from.
+    private struct Look: Equatable {
+        let scheme: ColorScheme
+        /// The theme's color, not its name: reloading an edited theme keeps the name.
+        let themeBackground: Color?
+        let fontFamily: String
+        let fontSize: Double
+        let lineHeight: Double
+    }
+
+    private struct DocumentInputs: Equatable {
+        let look: Look
+        let rowCount: Int
+        let hasGapText: Bool
+    }
+
+    private var look: Look {
+        Look(scheme: colorScheme,
+             themeBackground: settings.chromeTheme(for: colorScheme)?.background,
+             fontFamily: settings.fontFamily, fontSize: settings.fontSize,
+             lineHeight: settings.codeLineHeight)
+    }
+
+    private var documentInputs: DocumentInputs {
+        DocumentInputs(look: look, rowCount: rows.count, hasGapText: !gapText.isEmpty)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -394,10 +428,24 @@ private struct FileDiffCard: View {
         .task(id: collapsed) {
             if !collapsed, !loaded { await load() }
         }
-        .task(id: colorScheme) {
+        // One task builds the document and starts its highlighting from this pass's settings and
+        // scheme, so a load that started under an older scheme can never leave its colors behind.
+        .task(id: documentInputs) {
+            let inputs = documentInputs
             guard !rows.isEmpty else { return }
-            rebuildDocument()
-            await buildStyled(rows)
+            if builtDocument != inputs {
+                builtDocument = inputs
+                // Highlights carry their look's fonts and colors, and the text pane re-applies
+                // them only when their count changes, so a document for a new look starts plain.
+                if builtStyle != inputs.look {
+                    styledLines = [:]
+                    builtStyle = nil
+                }
+                rebuildDocument()
+            }
+            guard builtStyle != inputs.look, stylingLook != inputs.look else { return }
+            stylingLook = inputs.look
+            await buildStyled(rows, look: inputs.look)
         }
     }
 
@@ -454,7 +502,7 @@ private struct FileDiffCard: View {
                 onContentHeight: { contentHeight = $0 }
             )
             .frame(height: max(contentHeight, 24))
-        } else if !loaded {
+        } else if !loaded || !rows.isEmpty {
             ProgressView().controlSize(.small)
                 .frame(maxWidth: .infinity).frame(height: 44)
         } else {
@@ -472,17 +520,8 @@ private struct FileDiffCard: View {
     private func load() async {
         loaded = true
         guard let patch, !patch.isEmpty else { rows = []; document = nil; return }
-        let parsed = await GitService.parseDiffText(patch)
-        rows = parsed
-        document = parsed.isEmpty
-            ? nil
-            : DiffDocument.build(rows: parsed, expansion: expansion,
-                                 palette: settings.diffPalette(for: colorScheme),
-                                 codeFont: settings.resolvedTerminalFont(),
-                                 lineSpacing: settings.codeLineSpacing(for: settings.resolvedTerminalFont()),
-                                 gapText: gapText)
+        rows = await GitService.parseDiffText(patch)
         await loadGapText()
-        await buildStyled(parsed)
     }
 
     private func rebuildDocument() {
@@ -496,14 +535,19 @@ private struct FileDiffCard: View {
     private func loadGapText() async {
         guard gapText.isEmpty, let text = await fileText(change.path) else { return }
         gapText = DiffGapText(fileLines: text.components(separatedBy: "\n"))
-        rebuildDocument()
     }
 
-    private func buildStyled(_ parsed: [DiffRow]) async {
+    private func buildStyled(_ parsed: [DiffRow], look: Look) async {
         let url = URL(fileURLWithPath: repoRoot).appendingPathComponent(change.path)
-        guard let language = FileEditorView.highlightLanguage(for: url) else { return }
         let code = parsed.filter { $0.kind != .hunk }
-        guard code.count <= 8000, code.reduce(0, { $0 + $1.text.count }) <= 600_000 else { return }
+        guard let language = FileEditorView.highlightLanguage(for: url),
+              code.count <= 8000, code.reduce(0, { $0 + $1.text.count }) <= 600_000
+        else {
+            // Nothing to highlight is a finished pass, not one to retry on every return.
+            builtStyle = look
+            stylingLook = nil
+            return
+        }
         let styled = await DiffHighlighter.shared.styledLines(
             newSide: code.filter { $0.kind == .context || $0.kind == .addition },
             oldSide: code.filter { $0.kind == .context || $0.kind == .deletion },
@@ -511,8 +555,13 @@ private struct FileDiffCard: View {
             theme: colorScheme == .dark ? "xcode-dark" : "xcode",
             font: settings.resolvedTerminalFont()
         )
-        guard !Task.isCancelled else { return }
+        // Kept even when scrolling the card away cancelled this task: the highlighter finishes
+        // regardless, and running it again on every return is the cost this card avoids. Only a
+        // pass started for a newer look supersedes it.
+        guard stylingLook == look else { return }
         styledLines = styled.byRow
+        builtStyle = look
+        stylingLook = nil
     }
 }
 
