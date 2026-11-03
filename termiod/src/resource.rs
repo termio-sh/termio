@@ -1088,7 +1088,10 @@ fn absorb(
 /// Closing a file after *writing* it (`IN_CLOSE_WRITE`) is a change and stays.
 /// macOS never saw this: FSEvents does not report reads at all, which is why
 /// the loop is invisible on the platform the daemon is developed on.
-fn is_read_only_access(kind: &notify::EventKind) -> bool {
+///
+/// The pairing-token watch (`wss`) drops the same events before they reach
+/// its queue. Re-reading `pair.token` is an `IN_OPEN` on that directory.
+pub(crate) fn is_read_only_access(kind: &notify::EventKind) -> bool {
     use notify::event::{AccessKind, AccessMode};
     match kind {
         notify::EventKind::Access(AccessKind::Close(AccessMode::Write)) => false,
