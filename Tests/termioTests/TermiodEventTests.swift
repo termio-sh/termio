@@ -174,6 +174,48 @@ final class TermiodEventTests: XCTestCase {
             rows: 40, cols: 120)
     }
 
+    func testSurfaceGridCallbackDoesNotWaitForOutputDelivery() {
+        let link = self.link()
+        let outputEntered = DispatchSemaphore(value: 0)
+        let releaseOutput = DispatchSemaphore(value: 0)
+        let resizeReturned = DispatchSemaphore(value: 0)
+        let outputFinished = DispatchSemaphore(value: 0)
+        let resizeFinished = DispatchSemaphore(value: 0)
+        let bytes = Data("output before resize".utf8)
+
+        // Model the reader holding outputLock while Ghostty waits for its IO
+        // thread. That thread must be able to report a resize without waiting
+        // for the reader to finish writing.
+        link.onOutput = { data in
+            XCTAssertEqual(data, bytes)
+            outputEntered.signal()
+            XCTAssertEqual(releaseOutput.wait(timeout: .now() + 5), .success)
+        }
+        Thread.detachNewThread {
+            link.deliverOutput(bytes)
+            outputFinished.signal()
+        }
+        guard outputEntered.wait(timeout: .now() + 2) == .success else {
+            releaseOutput.signal()
+            _ = outputFinished.wait(timeout: .now() + 3)
+            return XCTFail("output callback never started")
+        }
+        Thread.detachNewThread {
+            link.noteSurfaceGrid(rows: 30, cols: 100)
+            link.noteSurfaceGrid(rows: 40, cols: 120)
+            resizeReturned.signal()
+            resizeFinished.signal()
+        }
+        let returnedWhileOutputBlocked = resizeReturned.wait(timeout: .now() + 1)
+        // Always unblock the reader, including when testing the broken code,
+        // so a regression fails rather than hanging the test process.
+        releaseOutput.signal()
+        XCTAssertEqual(returnedWhileOutputBlocked, .success,
+                       "resize callbacks must not acquire the output delivery lock")
+        XCTAssertEqual(outputFinished.wait(timeout: .now() + 3), .success)
+        XCTAssertEqual(resizeFinished.wait(timeout: .now() + 3), .success)
+    }
+
     private static let liveRoster = """
     {"ev":"roster","session":"s_1","action":"updated","info":
       {"id":"s_1","name":"demo","cwd":"/code","command":"/bin/zsh -il","pid":4242,
