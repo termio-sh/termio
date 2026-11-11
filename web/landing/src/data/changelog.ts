@@ -17,6 +17,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.71.1",
+    date: "2026-11-10",
+    title: "Drag panes again",
+    changes: {
+      fixed: [
+        "Dragging a pane by the handle in its header rearranges the split again, instead of selecting text.",
+      ],
+    },
+  },
+  {
     version: "0.71.0",
     date: "2026-11-02",
     title: "A new file tree",
