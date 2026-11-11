@@ -249,8 +249,15 @@ extension TermioStore {
     /// Whether this pane is on screen. A hidden pane keeps its viewport and
     /// stops counting, so a window left open on another workspace never sizes a
     /// session nobody is looking at there — zellij's rule for unviewed tabs.
-    func reportRendering(_ showing: Bool, for id: Session.ID) {
-        termiodLinks[id]?.setRendering(showing)
+    ///
+    /// Each window's pane area reports as its own `viewer`, and the session counts
+    /// as on screen while any of them shows it: a second window must not hide a
+    /// session the first is still showing.
+    func reportRendering(_ showing: Bool, for id: Session.ID, viewer: AnyHashable) {
+        var viewers = renderingViewers[id] ?? []
+        if showing { viewers.insert(viewer) } else { viewers.remove(viewer) }
+        renderingViewers[id] = viewers.isEmpty ? nil : viewers
+        termiodLinks[id]?.setRendering(!viewers.isEmpty)
     }
 
     // MARK: - Host-reported workstream status

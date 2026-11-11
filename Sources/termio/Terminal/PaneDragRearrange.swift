@@ -266,7 +266,7 @@ final class PaneDragRearrange {
         guard let store, store.splitRoot != nil, !store.isPaneZoomed,
               !(store.isDetailPresented && store.inspectorMaximized),
               let window = event.window, window.isKeyWindow,
-              window.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName,
+              MainWindowController.isMain(window),
               let contentView = window.contentView
         else { return nil }
         return paneGeometry(at: event.locationInWindow, in: contentView, window: window)

@@ -1006,6 +1006,9 @@ struct TermiodStreamPane: NSViewRepresentable {
     /// detail, no palette.
     let takesKeyboard: Bool
     let copyOnSelect: Bool
+    /// A window the user left draws the session but sends it nothing: no keys, no
+    /// paste, no mouse or wheel events for a program that captures them.
+    var readOnly = false
     let onViewport: (TerminalGrid) -> Void
     let onFocused: () -> Void
     let onBackgroundColor: (NSColor) -> Void
@@ -1021,8 +1024,13 @@ struct TermiodStreamPane: NSViewRepresentable {
     func updateNSView(_ view: TermiodStreamView, context: Context) {
         let link = link
         view.terminal = { link.streamTerminal }
-        view.send = { link.send($0) }
-        view.sendInput = { link.sendInput($0) }
+        if readOnly {
+            view.send = { _ in }
+            view.sendInput = { _ in }
+        } else {
+            view.send = { link.send($0) }
+            view.sendInput = { link.sendInput($0) }
+        }
         view.copyOnSelect = copyOnSelect
         view.sessionID = sessionID
         view.onViewport = onViewport

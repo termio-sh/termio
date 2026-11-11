@@ -19,11 +19,12 @@ struct SidebarColumn: View {
 /// way Safari lists its tab groups. Clicking a group opens it on the session last left in it.
 struct SidebarGroupList: View {
     @EnvironmentObject var store: TermioStore
+    @EnvironmentObject var window: WindowContext
     @EnvironmentObject var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        let selected = store.selectedSessionID.flatMap(store.group(of:))
+        let selected = window.selectedSessionID.flatMap(store.group(of:))
         let chrome = settings.chromeTheme(for: colorScheme)
         List {
             ForEach(store.sessionGroups, id: \.self) { group in
