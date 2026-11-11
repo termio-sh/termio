@@ -187,7 +187,6 @@ public enum HugeIcon: Hashable, Sendable {
     case serverStack
     case keyboard
     case bot
-    case chartColumn
     case smartPhoneWifi
     case network
     case gitBranch
@@ -328,12 +327,6 @@ public enum HugeIcon: Hashable, Sendable {
             // shoulder arc — agents. Preferred over Hugeicons' own "bot", whose
             // ear stubs and mouth bar silt up into a grey block at sidebar size.
             return "M12 4V2m8 20a8 8 0 1 0-16 0M9.375 8.25H9.25m.25 0a.25.25 0 1 1-.5 0a.25.25 0 0 1 .5 0m5.375 0h-.125m.25 0a.25.25 0 1 1-.5 0a.25.25 0 0 1 .5 0 M15.154 4H8.846c-1.255 0-1.883 0-2.372.22A2.5 2.5 0 0 0 5.22 5.474C5 5.964 5 6.591 5 7.846c0 2.008 0 3.013.352 3.796a4 4 0 0 0 2.006 2.006C8.141 14 9.146 14 11.154 14h1.692c2.008 0 3.013 0 3.796-.352a4 4 0 0 0 2.006-2.006C19 10.859 19 9.854 19 7.846c0-1.255 0-1.883-.22-2.372a2.5 2.5 0 0 0-1.254-1.254C17.036 4 16.409 4 15.154 4"
-        case .chartColumn:
-            // Hugeicons "chart-column": three bars over an L axis — the Usage tab.
-            // Replaces "dashboard-speed-02", whose thin gauge arc and pivot dot
-            // read as an unrelated smudge at sidebar size. Unboxed on purpose, so
-            // it doesn't echo the framed terminal and keyboard marks beside it.
-            return "M8 9v8m5-12v12m5-4v4M3 3v10c0 3.771 0 5.657 1.172 6.828S7.229 21 11 21h10"
         case .smartPhoneWifi:
             // Hugeicons "smartphone-wifi": a phone with signal arcs rising off its
             // corner — the Mobile tab, which is about pairing an iPhone rather than

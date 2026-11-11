@@ -41,7 +41,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow!
     private let settings = AppSettings()
     private lazy var store = TermioStore.restored(settings: settings)
-    private lazy var usageMonitor = UsageMonitor(settings: settings)
     private var menuBar: MenuBarController?
     /// Rebuilds the main menu when the user rebinds a shortcut in Settings.
     private var keybindingsObserver: NSObjectProtocol?
@@ -1030,7 +1029,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // would otherwise let the window shrink below the size set above.
         settingsWindow?.contentView = NSHostingView(rootView: SettingsView(
             settings: settings,
-            usage: usageMonitor,
             store: store,
             initialTab: initialTab,
             onSSHConnect: { [weak self] host in

@@ -29,7 +29,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     /// Promoting it is what gives the local `termiod` a place to be looked at.
     ///
     /// First, in a group of its own, on a larger tile than the rows below. It
-    /// once opened the Workspaces / Agents / Usage group instead, on the worry
+    /// once opened the Workspaces / Agents group instead, on the worry
     /// that a group of one would read as a fifth kind of setting; the larger
     /// tile at the top is what answers that — it is the machine, not a
     /// preference.
@@ -40,7 +40,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case keyboard
     case workspaces
     case agents
-    case usage
     /// Every other machine sessions can run on, one row apiece, drilling into how
     /// that machine is reached, what it runs, and how a phone pairs with it.
     ///
@@ -75,9 +74,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     ///
     /// Grouped rather than run flat. Collapsing every local tab into one block
     /// would tell the top-level story in a single stroke — this Mac, then what
-    /// connects to it — but eight undifferentiated rows is the flat sidebar §D8
-    /// set out to fix, and finding Usage among eight is worse than finding it
-    /// among three. The gaps are cheap; the chunking is not.
+    /// connects to it — but seven undifferentiated rows is the flat sidebar §D8
+    /// set out to fix, and finding Agents among seven is worse than finding it
+    /// among two. The gaps are cheap; the chunking is not.
     var startsGroup: Bool {
         self == .general || self == .workspaces || self == .remoteHosts || self == .community
     }
@@ -110,7 +109,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .remoteHosts: return localized("Remote Hosts")
         case .keyboard: return localized("Keyboard")
         case .agents: return localized("Agents")
-        case .usage: return localized("Usage")
         case .community: return localized("Community")
         }
     }
@@ -127,7 +125,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .remoteHosts: return .network
         case .keyboard: return .keyboard
         case .agents: return .bot
-        case .usage: return .chartColumn
         case .community: return .bubbleChat
         }
     }
