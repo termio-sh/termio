@@ -17,6 +17,19 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.72.0",
+    date: "2026-11-10",
+    title: "Close a pane from its header",
+    changes: {
+      new: [
+        "Pane headers: a close button takes the place of the session icon while the pointer is over the header.",
+      ],
+      improved: [
+        "Settings: the Usage tab is removed. Each agent reports its own usage in the terminal.",
+      ],
+    },
+  },
+  {
     version: "0.71.1",
     date: "2026-11-10",
     title: "Drag panes again",
