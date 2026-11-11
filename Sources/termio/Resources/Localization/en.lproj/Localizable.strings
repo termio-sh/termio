@@ -6,8 +6,6 @@
 …and %lld more</key>
 	<string>
 …and %lld more</string>
-	<key> Cost is estimated at API rates.</key>
-	<string> Cost is estimated at API rates.</string>
 	<key>%1$@ changed on %2$@</key>
 	<string>%1$@ changed on %2$@</string>
 	<key>%@ and %@</key>
@@ -70,10 +68,6 @@
 %@</string>
 	<key>%@ stays published only until you log out of it. Termio couldn’t set it to keep services running after that.</key>
 	<string>%@ stays published only until you log out of it. Termio couldn’t set it to keep services running after that.</string>
-	<key>%@ tokens</key>
-	<string>%@ tokens</string>
-	<key>%@ · %@ tokens</key>
-	<string>%@ · %@ tokens</string>
 	<key>%@ — %@.</key>
 	<string>%@ — %@.</string>
 	<key>%@ — %@. Couldn’t update %@.</key>
@@ -140,8 +134,6 @@
 	<string>Accept the Xcode License</string>
 	<key>Access</key>
 	<string>Access</string>
-	<key>Activity</key>
-	<string>Activity</string>
 	<key>Add</key>
 	<string>Add</string>
 	<key>Add &amp; Connect</key>
@@ -202,12 +194,8 @@
 	<string>All changes to “%@” will be lost. This cannot be undone.</string>
 	<key>Allow</key>
 	<string>Allow</string>
-	<key>Allow Keychain Access…</key>
-	<string>Allow Keychain Access…</string>
 	<key>Allow Paired Devices</key>
 	<string>Allow Paired Devices</string>
-	<key>Allow Usage Access</key>
-	<string>Allow Usage Access</string>
 	<key>Allow agents to use %@?</key>
 	<string>Allow agents to use %@?</string>
 	<key>An older install points at %@. Update it to this version of Termio.</key>
@@ -624,8 +612,6 @@
 	<string>Edit…</string>
 	<key>Enable</key>
 	<string>Enable</string>
-	<key>Enable Claude Code, Codex, Kimi, or Grok in the Agents tab to see their usage here.</key>
-	<string>Enable Claude Code, Codex, Kimi, or Grok in the Agents tab to see their usage here.</string>
 	<key>Ended</key>
 	<string>Ended</string>
 	<key>Enter Code on GitHub</key>
@@ -812,18 +798,12 @@
 	<string>Key file</string>
 	<key>Keyboard</key>
 	<string>Keyboard</string>
-	<key>Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.</key>
-	<string>Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.</string>
 	<key>Labels</key>
 	<string>Labels</string>
 	<key>Language</key>
 	<string>Language</string>
 	<key>Language, notifications, and GitHub</key>
 	<string>Language, notifications, and GitHub</string>
-	<key>Last 30 days</key>
-	<string>Last 30 days</string>
-	<key>Last 7 days</key>
-	<string>Last 7 days</string>
 	<key>Last used</key>
 	<string>Last used</string>
 	<key>Later</key>
@@ -1024,8 +1004,6 @@
 	<string>No iOS simulator is downloaded. Get one in Xcode ▸ Settings ▸ Components, or in Terminal.</string>
 	<key>No issues found.</key>
 	<string>No issues found.</string>
-	<key>No local usage yet — run `%@` once, then Refresh.</key>
-	<string>No local usage yet — run `%@` once, then Refresh.</string>
 	<key>No matches</key>
 	<string>No matches</string>
 	<key>No network address found. Join a network, then reopen this pane.</key>
@@ -1224,10 +1202,6 @@
 	<string>Pinned</string>
 	<key>Placeholder: %@</key>
 	<string>Placeholder: %@</string>
-	<key>Plan limits</key>
-	<string>Plan limits</string>
-	<key>Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.</key>
-	<string>Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.</string>
 	<key>Play sound</key>
 	<string>Play sound</string>
 	<key>Pointing termiod at %@…</key>
@@ -1270,8 +1244,6 @@
 	<string>Push the current branch to the repository’s remote first, then try again. (The remote also needs to be a forge Termio recognizes: GitHub, GitLab, Bitbucket, or Gitea.)</string>
 	<key>Quit Termio</key>
 	<string>Quit Termio</string>
-	<key>Range</key>
-	<string>Range</string>
 	<key>Reachable</key>
 	<string>Reachable</string>
 	<key>Reached by</key>
@@ -1378,8 +1350,6 @@
 	<string>Restore Defaults</string>
 	<key>Reveal in Finder</key>
 	<string>Reveal in Finder</string>
-	<key>Revoke Access</key>
-	<string>Revoke Access</string>
 	<key>Rotate Left</key>
 	<string>Rotate Left</string>
 	<key>Rotate Right</key>
@@ -1618,8 +1588,6 @@
 	<string>Takes %@ out of the new-session menu. Its settings are kept.</string>
 	<key>Takes effect after Termio relaunches.</key>
 	<string>Takes effect after Termio relaunches.</string>
-	<key>Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@</key>
-	<string>Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@</string>
 	<key>Task completion</key>
 	<string>Task completion</string>
 	<key>Teaches agents the termio session commands.</key>
@@ -1630,12 +1598,6 @@
 	<string>Terminal default</string>
 	<key>Terminals</key>
 	<string>Terminals</string>
-	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it.</key>
-	<string>Termio can show %@'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it.</string>
-	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its `credentials/kimi-code.json` sign-in. Nothing is read until you allow it.</key>
-	<string>Termio can show %@'s token usage and plan limits by reading its local session logs and its `credentials/kimi-code.json` sign-in. Nothing is read until you allow it.</string>
-	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain.</key>
-	<string>Termio can show %@'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain.</string>
 	<key>Termio could not append to the repository’s .gitignore. Check its permissions and try again.</key>
 	<string>Termio could not append to the repository’s .gitignore. Check its permissions and try again.</string>
 	<key>Termio couldn’t open a channel for the simulator’s screen.</key>
@@ -1808,8 +1770,6 @@
 	<string>This machine’s termiod is too old to read git.</string>
 	<key>This machine’s termiod is too old to report its agents.</key>
 	<string>This machine’s termiod is too old to report its agents.</string>
-	<key>This month</key>
-	<string>This month</string>
 	<key>This pull request changes no files.</key>
 	<string>This pull request changes no files.</string>
 	<key>This relay has no valid URL pattern, so its address could never be read back.</key>
@@ -1818,14 +1778,10 @@
 	<string>This session couldn’t be started.</string>
 	<key>This session has no running terminal.</key>
 	<string>This session has no running terminal.</string>
-	<key>This week</key>
-	<string>This week</string>
 	<key>This workspace is no longer on your list.</key>
 	<string>This workspace is no longer on your list.</string>
 	<key>Timed out</key>
 	<string>Timed out</string>
-	<key>Today</key>
-	<string>Today</string>
 	<key>Toggle Appearance</key>
 	<string>Toggle Appearance</string>
 	<key>Toggle Full Screen</key>
@@ -1834,8 +1790,6 @@
 	<string>Toggle Project Files</string>
 	<key>Toggle Sidebar</key>
 	<string>Toggle Sidebar</string>
-	<key>Token usage</key>
-	<string>Token usage</string>
 	<key>Traffic crosses the relay you run yourself — no third party in the path.</key>
 	<string>Traffic crosses the relay you run yourself — no third party in the path.</string>
 	<key>Try Again</key>
@@ -1880,8 +1834,6 @@
 	<string>Update ready</string>
 	<key>Updated.</key>
 	<string>Updated.</string>
-	<key>Usage</key>
-	<string>Usage</string>
 	<key>Usage statistics</key>
 	<string>Usage statistics</string>
 	<key>Use Regular Expression</key>
@@ -1962,8 +1914,6 @@
 	<string>Xcode needs its license accepted before the simulator runs. Open Xcode, or accept it in Terminal.</string>
 	<key>Yellow</key>
 	<string>Yellow</string>
-	<key>Yesterday</key>
-	<string>Yesterday</string>
 	<key>You can restore it from the Trash.</key>
 	<string>You can restore it from the Trash.</string>
 	<key>Your Host entries from ~/.ssh/config — the same aliases `ssh` resolves. Right-click a host to connect.</key>
@@ -2054,8 +2004,6 @@ Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks
 	<string>termiod on this Mac is too old to search.</string>
 	<key>this Mac</key>
 	<string>this Mac</string>
-	<key>· resets %@</key>
-	<string>· resets %@</string>
 	<key>“%@” already exists.</key>
 	<string>“%@” already exists.</string>
 	<key>“%@” is already in your config.</key>

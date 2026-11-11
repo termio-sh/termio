@@ -560,16 +560,6 @@
         }
       }
     },
-    " Cost is estimated at API rates.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "费用按 API 价格估算。"
-          }
-        }
-      }
-    },
     "%1$@ changed on %2$@": {
       "localizations": {
         "zh-Hans": {
@@ -846,26 +836,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 只在你登录期间保持发布。Termio 无法让它在登出后继续运行服务。"
-          }
-        }
-      }
-    },
-    "%@ tokens": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ token"
-          }
-        }
-      }
-    },
-    "%@ · %@ tokens": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ · %@ token"
           }
         }
       }
@@ -1416,16 +1386,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "对“%@”的所有更改都将丢失。此操作无法撤销。"
-          }
-        }
-      }
-    },
-    "Allow Usage Access": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "允许访问用量"
           }
         }
       }
@@ -3212,16 +3172,6 @@
         }
       }
     },
-    "Enable Claude Code, Codex, Kimi, or Grok in the Agents tab to see their usage here.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在 Agents 标签页中启用 Claude Code、Codex、Kimi 或 Grok，即可在此查看其用量。"
-          }
-        }
-      }
-    },
     "Ended": {
       "localizations": {
         "zh-Hans": {
@@ -4069,26 +4019,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "语言、通知和 GitHub"
-          }
-        }
-      }
-    },
-    "Last 30 days": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "过去 30 天"
-          }
-        }
-      }
-    },
-    "Last 7 days": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "过去 7 天"
           }
         }
       }
@@ -7335,36 +7265,6 @@
         }
       }
     },
-    "Termio can show %@'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Termio 可通过读取 %@ 的本地会话日志及其 `auth.json` 登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容。"
-          }
-        }
-      }
-    },
-    "Termio can show %@'s token usage and plan limits by reading its local session logs and its `credentials/kimi-code.json` sign-in. Nothing is read until you allow it.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Termio 可通过读取 %@ 的本地会话日志及其 `credentials/kimi-code.json` 登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容。"
-          }
-        }
-      }
-    },
-    "Termio can show %@'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Termio 可通过读取 %@ 的本地会话日志及登录钥匙串中的登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容；macOS 会就钥匙串询问一次。"
-          }
-        }
-      }
-    },
     "Termio could not append to the repository’s .gitignore. Check its permissions and try again.": {
       "localizations": {
         "zh-Hans": {
@@ -8095,16 +7995,6 @@
         }
       }
     },
-    "Today": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "今天"
-          }
-        }
-      }
-    },
     "Toggle Full Screen": {
       "localizations": {
         "zh-Hans": {
@@ -8302,16 +8192,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "已更新。"
-          }
-        }
-      }
-    },
-    "Usage": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "用量"
           }
         }
       }
@@ -10120,146 +10000,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法从 %2$@ 移除“%1$@”"
-          }
-        }
-      }
-    },
-    "Activity": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "活动"
-          }
-        }
-      }
-    },
-    "Allow Keychain Access…": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "允许访问钥匙串…"
-          }
-        }
-      }
-    },
-    "Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "钥匙串访问已被拒绝，套餐限额保持隐藏。再次允许会重新显示 macOS 提示。"
-          }
-        }
-      }
-    },
-    "No local usage yet — run `%@` once, then Refresh.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暂无本地用量——运行一次 `%@`，然后点按“刷新”。"
-          }
-        }
-      }
-    },
-    "Plan limits": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "套餐限额"
-          }
-        }
-      }
-    },
-    "Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "套餐限额来自 %@ 的 OAuth 登录；不会存储任何密码。撤销后将停止读取 %@ 的所有数据。"
-          }
-        }
-      }
-    },
-    "Range": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "范围"
-          }
-        }
-      }
-    },
-    "Revoke Access": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "撤销访问"
-          }
-        }
-      }
-    },
-    "Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "根据 %@ 在这台 Mac 上所有终端和编辑器的本地会话日志统计——即你的实际用量，与套餐计费方式无关。%@"
-          }
-        }
-      }
-    },
-    "This month": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本月"
-          }
-        }
-      }
-    },
-    "This week": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本周"
-          }
-        }
-      }
-    },
-    "Token usage": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Token 用量"
-          }
-        }
-      }
-    },
-    "Yesterday": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "昨天"
-          }
-        }
-      }
-    },
-    "· resets %@": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "· 重置于 %@"
           }
         }
       }

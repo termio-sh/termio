@@ -6,8 +6,6 @@
 …and %lld more</key>
 	<string>
 …还有 %lld 个</string>
-	<key> Cost is estimated at API rates.</key>
-	<string>费用按 API 价格估算。</string>
 	<key>%1$@ changed on %2$@</key>
 	<string>%1$@ 在 %2$@ 上已被修改</string>
 	<key>%@ and %@</key>
@@ -70,10 +68,6 @@
 %3$@</string>
 	<key>%@ stays published only until you log out of it. Termio couldn’t set it to keep services running after that.</key>
 	<string>%@ 只在你登录期间保持发布。Termio 无法让它在登出后继续运行服务。</string>
-	<key>%@ tokens</key>
-	<string>%@ token</string>
-	<key>%@ · %@ tokens</key>
-	<string>%@ · %@ token</string>
 	<key>%@ — %@.</key>
 	<string>%@ — %@。</string>
 	<key>%@ — %@. Couldn’t update %@.</key>
@@ -140,8 +134,6 @@
 	<string>接受 Xcode 许可协议</string>
 	<key>Access</key>
 	<string>访问</string>
-	<key>Activity</key>
-	<string>活动</string>
 	<key>Add</key>
 	<string>添加</string>
 	<key>Add &amp; Connect</key>
@@ -202,12 +194,8 @@
 	<string>对“%@”的所有更改都将丢失。此操作无法撤销。</string>
 	<key>Allow</key>
 	<string>允许</string>
-	<key>Allow Keychain Access…</key>
-	<string>允许访问钥匙串…</string>
 	<key>Allow Paired Devices</key>
 	<string>允许已配对设备</string>
-	<key>Allow Usage Access</key>
-	<string>允许访问用量</string>
 	<key>Allow agents to use %@?</key>
 	<string>允许 Agent 使用“%@”吗？</string>
 	<key>An older install points at %@. Update it to this version of Termio.</key>
@@ -624,8 +612,6 @@
 	<string>编辑…</string>
 	<key>Enable</key>
 	<string>启用</string>
-	<key>Enable Claude Code, Codex, Kimi, or Grok in the Agents tab to see their usage here.</key>
-	<string>在 Agents 标签页中启用 Claude Code、Codex、Kimi 或 Grok，即可在此查看其用量。</string>
 	<key>Ended</key>
 	<string>已结束</string>
 	<key>Enter Code on GitHub</key>
@@ -812,18 +798,12 @@
 	<string>密钥文件</string>
 	<key>Keyboard</key>
 	<string>键盘</string>
-	<key>Keychain access was declined, so plan limits stay hidden. Allowing again re-shows the macOS prompt.</key>
-	<string>钥匙串访问已被拒绝，套餐限额保持隐藏。再次允许会重新显示 macOS 提示。</string>
 	<key>Labels</key>
 	<string>标签</string>
 	<key>Language</key>
 	<string>语言</string>
 	<key>Language, notifications, and GitHub</key>
 	<string>语言、通知和 GitHub</string>
-	<key>Last 30 days</key>
-	<string>过去 30 天</string>
-	<key>Last 7 days</key>
-	<string>过去 7 天</string>
 	<key>Last used</key>
 	<string>上次使用</string>
 	<key>Later</key>
@@ -1024,8 +1004,6 @@
 	<string>尚未下载 iOS 模拟器。请在 Xcode ▸ Settings ▸ Components 中获取，或在终端中下载。</string>
 	<key>No issues found.</key>
 	<string>未找到 issues。</string>
-	<key>No local usage yet — run `%@` once, then Refresh.</key>
-	<string>暂无本地用量——运行一次 `%@`，然后点按“刷新”。</string>
 	<key>No matches</key>
 	<string>无匹配结果</string>
 	<key>No network address found. Join a network, then reopen this pane.</key>
@@ -1224,10 +1202,6 @@
 	<string>已固定</string>
 	<key>Placeholder: %@</key>
 	<string>占位符：%@</string>
-	<key>Plan limits</key>
-	<string>套餐限额</string>
-	<key>Plan limits come from %@'s OAuth login; no passwords are stored. Revoking stops all reading of %@'s data.</key>
-	<string>套餐限额来自 %@ 的 OAuth 登录；不会存储任何密码。撤销后将停止读取 %@ 的所有数据。</string>
 	<key>Play sound</key>
 	<string>播放声音</string>
 	<key>Pointing termiod at %@…</key>
@@ -1270,8 +1244,6 @@
 	<string>请先将当前分支推送到仓库的远程，然后重试。（远程还需是 Termio 能识别的代码托管平台：GitHub、GitLab、Bitbucket 或 Gitea。）</string>
 	<key>Quit Termio</key>
 	<string>退出 Termio</string>
-	<key>Range</key>
-	<string>范围</string>
 	<key>Reachable</key>
 	<string>可连接</string>
 	<key>Reached by</key>
@@ -1378,8 +1350,6 @@
 	<string>恢复默认</string>
 	<key>Reveal in Finder</key>
 	<string>在“访达”中显示</string>
-	<key>Revoke Access</key>
-	<string>撤销访问</string>
 	<key>Rotate Left</key>
 	<string>向左旋转</string>
 	<key>Rotate Right</key>
@@ -1618,8 +1588,6 @@
 	<string>将 %@ 从新建会话菜单中移除，其设置会保留。</string>
 	<key>Takes effect after Termio relaunches.</key>
 	<string>重新启动 Termio 后生效。</string>
-	<key>Tallied from %@'s own local session logs across every terminal and editor on this Mac — your actual usage, regardless of how the plan bills.%@</key>
-	<string>根据 %@ 在这台 Mac 上所有终端和编辑器的本地会话日志统计——即你的实际用量，与套餐计费方式无关。%@</string>
 	<key>Task completion</key>
 	<string>任务完成</string>
 	<key>Teaches agents the termio session commands.</key>
@@ -1630,12 +1598,6 @@
 	<string>终端默认</string>
 	<key>Terminals</key>
 	<string>终端</string>
-	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it.</key>
-	<string>Termio 可通过读取 %@ 的本地会话日志及其 `auth.json` 登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容。</string>
-	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its `credentials/kimi-code.json` sign-in. Nothing is read until you allow it.</key>
-	<string>Termio 可通过读取 %@ 的本地会话日志及其 `credentials/kimi-code.json` 登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容。</string>
-	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain.</key>
-	<string>Termio 可通过读取 %@ 的本地会话日志及登录钥匙串中的登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容；macOS 会就钥匙串询问一次。</string>
 	<key>Termio could not append to the repository’s .gitignore. Check its permissions and try again.</key>
 	<string>Termio 无法将内容追加到该仓库的 .gitignore。请检查其权限后重试。</string>
 	<key>Termio couldn’t open a channel for the simulator’s screen.</key>
@@ -1808,8 +1770,6 @@
 	<string>该设备上的 termiod 版本过旧，无法读取 git。</string>
 	<key>This machine’s termiod is too old to report its agents.</key>
 	<string>该设备上的 termiod 版本过旧，无法查询其 Agent。</string>
-	<key>This month</key>
-	<string>本月</string>
 	<key>This pull request changes no files.</key>
 	<string>此 PR 未更改任何文件。</string>
 	<key>This relay has no valid URL pattern, so its address could never be read back.</key>
@@ -1818,14 +1778,10 @@
 	<string>这个会话没能启动。</string>
 	<key>This session has no running terminal.</key>
 	<string>此会话没有正在运行的终端。</string>
-	<key>This week</key>
-	<string>本周</string>
 	<key>This workspace is no longer on your list.</key>
 	<string>这个工作区已不在你的列表中。</string>
 	<key>Timed out</key>
 	<string>连接超时</string>
-	<key>Today</key>
-	<string>今天</string>
 	<key>Toggle Appearance</key>
 	<string>切换外观</string>
 	<key>Toggle Full Screen</key>
@@ -1834,8 +1790,6 @@
 	<string>切换项目文件</string>
 	<key>Toggle Sidebar</key>
 	<string>切换侧栏</string>
-	<key>Token usage</key>
-	<string>Token 用量</string>
 	<key>Traffic crosses the relay you run yourself — no third party in the path.</key>
 	<string>流量经由你自己运行的中继，路径中没有第三方。</string>
 	<key>Try Again</key>
@@ -1880,8 +1834,6 @@
 	<string>更新已就绪</string>
 	<key>Updated.</key>
 	<string>已更新。</string>
-	<key>Usage</key>
-	<string>用量</string>
 	<key>Usage statistics</key>
 	<string>使用统计</string>
 	<key>Use Regular Expression</key>
@@ -1962,8 +1914,6 @@
 	<string>需要先接受 Xcode 许可协议，模拟器才能运行。请打开 Xcode，或在终端中接受。</string>
 	<key>Yellow</key>
 	<string>黄色</string>
-	<key>Yesterday</key>
-	<string>昨天</string>
 	<key>You can restore it from the Trash.</key>
 	<string>可以从废纸篓恢复它。</string>
 	<key>Your Host entries from ~/.ssh/config — the same aliases `ssh` resolves. Right-click a host to connect.</key>
@@ -2054,8 +2004,6 @@ Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks
 	<string>这台 Mac 上的 termiod 版本过旧，不支持搜索。</string>
 	<key>this Mac</key>
 	<string>本机</string>
-	<key>· resets %@</key>
-	<string>· 重置于 %@</string>
 	<key>“%@” already exists.</key>
 	<string>“%@”已存在。</string>
 	<key>“%@” is already in your config.</key>

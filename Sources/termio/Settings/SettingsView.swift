@@ -11,7 +11,6 @@ import SwiftUI
 /// in `AppDelegate.openSettings`.
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
-    @ObservedObject var usage: UsageMonitor
     /// The Workspaces tab's subject. Actions elsewhere are injected as closures so
     /// a pane can't reach past its own concern, but that tab *is* a live view of
     /// the workspace list — a closure would have to hand over a copy that stops
@@ -38,14 +37,12 @@ struct SettingsView: View {
 
     init(
         settings: AppSettings,
-        usage: UsageMonitor,
         store: TermioStore,
         initialTab: SettingsTab = .general,
         onSSHConnect: @escaping (String) -> Void,
         onSetUpKey: @escaping (String, String) -> Void
     ) {
         self.settings = settings
-        self.usage = usage
         self.store = store
         self.onSSHConnect = onSSHConnect
         self.onSetUpKey = onSetUpKey
@@ -199,7 +196,6 @@ struct SettingsView: View {
         case .keyboard: KeybindingsSettingsTab()
         case .agents:
             AgentSettingsTab(settings: settings, store: store, onOpenMachine: open)
-        case .usage: UsageSettingsTab(settings: settings, usage: usage)
         case .community: CommunitySettingsTab()
         }
     }
