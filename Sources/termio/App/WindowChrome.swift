@@ -732,11 +732,48 @@ struct SashHandle: NSViewRepresentable {
 /// window itself is not movable by its background, since that also claimed presses meant for the
 /// SwiftUI dividers and started a window drag instead of a resize.
 struct WindowDragArea: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { DragView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    /// Whether the pointer is over the area, from a tracking area. SwiftUI's `onHover` never
+    /// fires over a pane card's header, so the header asks this view instead.
+    var onHover: ((Bool) -> Void)?
+
+    func makeNSView(context: Context) -> NSView {
+        let view = DragView()
+        view.onHover = onHover
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? DragView)?.onHover = onHover
+    }
 
     private final class DragView: NSView {
+        var onHover: ((Bool) -> Void)? {
+            didSet { if (oldValue == nil) != (onHover == nil) { updateTrackingAreas() } }
+        }
+        private var hoverArea: NSTrackingArea?
+
         override var mouseDownCanMoveWindow: Bool { true }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let hoverArea { removeTrackingArea(hoverArea) }
+            hoverArea = nil
+            guard onHover != nil else { return }
+            let area = NSTrackingArea(rect: .zero,
+                                      options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                      owner: self, userInfo: nil)
+            addTrackingArea(area)
+            hoverArea = area
+            // A header that moves or resizes under a still pointer gets no exit, so a split
+            // that slides a card away would leave its close showing. Ask where the pointer is.
+            if let window {
+                let inside = bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+                onHover?(inside)
+            }
+        }
+
+        override func mouseEntered(with event: NSEvent) { onHover?(true) }
+        override func mouseExited(with event: NSEvent) { onHover?(false) }
 
         override func mouseDown(with event: NSEvent) {
             if event.clickCount == 2 {

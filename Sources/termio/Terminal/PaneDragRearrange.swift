@@ -66,11 +66,26 @@ final class PaneDragRearrange {
     static let handleSize = CGSize(width: 80, height: 12)
 
     /// The handle's rect in a card of `size`, top-left origin — the space both
-    /// this hit test and `TerminalPane`'s overlay work in.
-    static func handleRect(in size: CGSize) -> CGRect {
-        CGRect(x: (size.width - handleSize.width) / 2,
-               y: (PaneCard.headerHeight - handleSize.height) / 2,
-               width: handleSize.width, height: handleSize.height)
+    /// this hit test and `TerminalPane`'s overlay work in. Centred, but only in the header's
+    /// free run between the leading close and the trailing buttons: on a narrow card, or one
+    /// notched for the window's controls, a full-width handle would sit under a control and
+    /// take its press. It narrows to fit, and a run too short for a grip has none.
+    static func handleRect(in size: CGSize, notchWidth: CGFloat, controlsMinX: CGFloat?) -> CGRect? {
+        let start = PaneCard.closeSlotEnd(notchWidth: notchWidth)
+        let end = controlsMinX ?? size.width
+        let width = min(handleSize.width, end - start)
+        guard width >= minimumHandleWidth else { return nil }
+        let x = min(max((size.width - width) / 2, start), end - width)
+        return CGRect(x: x, y: (PaneCard.headerHeight - handleSize.height) / 2,
+                      width: width, height: handleSize.height)
+    }
+
+    private static let minimumHandleWidth: CGFloat = 24
+
+    private func isOnHandle(_ hit: PaneHit) -> Bool {
+        let geometry = PaneCardGeometry.shared
+        return Self.handleRect(in: hit.size, notchWidth: geometry.notchWidth(hit.id),
+                               controlsMinX: geometry.controlsMinX(hit.id))?.contains(hit.point) ?? false
     }
 
     /// The header reveals the handle.
@@ -120,8 +135,7 @@ final class PaneDragRearrange {
         guard !dragging, let hit = rearrangeablePane(under: event),
               Self.isInHoverRegion(hit.point, in: hit.size)
         else { return setHover(nil) }
-        setHover(PaneHandleHover(pane: hit.id,
-                                 overHandle: Self.handleRect(in: hit.size).contains(hit.point)))
+        setHover(PaneHandleHover(pane: hit.id, overHandle: isOnHandle(hit)))
     }
 
     /// Takes down a sidebar-drag cue that outlived its drag.
@@ -162,7 +176,7 @@ final class PaneDragRearrange {
         // arriving, leaving the border on the card the user had just left. Not consumed:
         // the press still reaches the terminal.
         if store.selectedSessionID != hit.id { store.selectedSessionID = hit.id }
-        guard Self.handleRect(in: hit.size).contains(hit.point),
+        guard isOnHandle(hit),
               let contentView = event.window?.contentView
         else { return false }
         dragging = true
