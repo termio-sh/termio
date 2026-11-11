@@ -87,7 +87,8 @@ final class NavigatorGeometry: ObservableObject {
 @MainActor
 final class TrafficLights {
     private weak var window: NSWindow?
-    // Held for the window's lifetime, which is the app's; the blocks hold `self` weakly.
+    // Held for the window's lifetime; the blocks hold `self` weakly. A window that closes
+    // for good removes them (`stop`).
     private var observers: [NSObjectProtocol] = []
     private var isPlacing = false
     private var placeScheduled = false
@@ -105,6 +106,11 @@ final class TrafficLights {
         }
         // The titlebar is laid out after the window first shows.
         DispatchQueue.main.async { [weak self] in self?.place() }
+    }
+
+    func stop() {
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers = []
     }
 
     /// A frame change from AppKit re-places on the next turn, once however many arrive. Placing
@@ -342,9 +348,9 @@ struct ChromeMenuButton: View {
 /// The sidebar's own controls, in the titlebar strip above its list: the navigator toggle beside
 /// the traffic lights, the workspace name, then sort and `+` at the trailing edge.
 struct SidebarControlRow: View {
-    @EnvironmentObject var store: TermioStore
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject var geometry: NavigatorGeometry
+    @EnvironmentObject var window: WindowContext
 
     var body: some View {
         HStack(spacing: 2) {
@@ -357,7 +363,7 @@ struct SidebarControlRow: View {
             ChromeMenuButton(icon: .add, help: localized("New terminal or project"),
                              makeMenu: makeNewSessionMenu)
         }
-        .padding(.leading, WindowChrome.leadingInset(isFullScreen: store.windowIsFullScreen,
+        .padding(.leading, WindowChrome.leadingInset(isFullScreen: window.isFullScreen,
                                                      columnMinX: 0))
         .padding(.trailing, 8)
         .frame(height: WindowChrome.rowHeight)
@@ -372,7 +378,7 @@ struct SidebarControlRow: View {
     /// edge sits in the row's empty slot and hides nothing.
     private var clearOfWindowControls: some View {
         let feather: CGFloat = 6
-        let edge = WindowChrome.controlsEnd(isFullScreen: store.windowIsFullScreen) + geometry.sidebarTravel
+        let edge = WindowChrome.controlsEnd(isFullScreen: window.isFullScreen) + geometry.sidebarTravel
         return HStack(spacing: 0) {
             Color.clear.frame(width: max(0, edge - feather))
             LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
@@ -408,7 +414,7 @@ final class NavigatorToggleOverlay {
     // Held for the window's lifetime, which is the app's.
     private var observers: Set<AnyCancellable> = []
 
-    init(over container: NSView, store: TermioStore) {
+    init(over container: NSView, store: TermioStore, context: WindowContext) {
         let host = NSHostingView(rootView: NavigatorToggleButton())
         host.sizingOptions = []
         // The host sits inside the titlebar strip, and SwiftUI otherwise insets its content by the
@@ -429,32 +435,35 @@ final class NavigatorToggleOverlay {
         self.host = host
         // `@Published` sends before the store changes, so each sink takes the new value it is
         // handed rather than reading the store back.
-        store.$windowIsFullScreen
+        context.$isFullScreen
             .sink { [weak self] isFullScreen in self?.place(isFullScreen: isFullScreen) }
             .store(in: &observers)
         // A maximized detail fills the window and has no slot for the toggle — unless the
-        // sidebar has been brought back over it, whose row keeps one.
-        store.$inspectorMaximized.combineLatest(store.$sidebarVisible)
-            .sink { [weak host] maximized, sidebarVisible in host?.isHidden = maximized && !sidebarVisible }
+        // sidebar has been brought back over it, whose row keeps one. Only the active window
+        // holds the detail.
+        store.$inspectorMaximized.combineLatest(context.$sidebarVisible, context.$isActive)
+            .sink { [weak host] maximized, sidebarVisible, isActive in
+                host?.isHidden = isActive && maximized && !sidebarVisible
+            }
             .store(in: &observers)
         // The traffic lights take their place after the window first shows (`TrafficLights`).
-        DispatchQueue.main.async { [weak self, weak store] in
-            guard let store else { return }
-            self?.place(isFullScreen: store.windowIsFullScreen)
+        DispatchQueue.main.async { [weak self, weak context] in
+            guard let context else { return }
+            self?.place(isFullScreen: context.isFullScreen)
         }
     }
 
     /// Follows the traffic lights, which `TrafficLights` moves after the window first shows and
     /// again whenever AppKit lays them out anew: placed only once, the toggle read their position
     /// from before the first move and sat too far left of the slot the rows keep for it.
-    func follow(_ window: NSWindow, store: TermioStore) {
+    func follow(_ window: NSWindow, context: WindowContext) {
         guard let zoom = window.standardWindowButton(.zoomButton) else { return }
         zoom.postsFrameChangedNotifications = true
         NotificationCenter.default.publisher(for: NSView.frameDidChangeNotification, object: zoom)
             .receive(on: RunLoop.main)
-            .sink { [weak self, weak store] _ in
-                guard let store else { return }
-                self?.place(isFullScreen: store.windowIsFullScreen)
+            .sink { [weak self, weak context] _ in
+                guard let context else { return }
+                self?.place(isFullScreen: context.isFullScreen)
             }
             .store(in: &observers)
     }

@@ -36,6 +36,7 @@ enum KeyCommandID: String, CaseIterable, Identifiable {
     case decreaseFontSize = "font.decrease"
     case resetFontSize = "font.reset"
     // Window
+    case newWindow = "window.new"
     case closeWindow = "window.close"
     // Interface
     case toggleProjectFiles = "ui.toggle-project-files"
@@ -133,6 +134,9 @@ enum KeyCommandCatalog {
         .init(id: .resetFontSize, category: localized("Font"), title: localized("Reset Font Size"),
               defaultShortcut: .init(modifiers: [.command], key: .char("0"))),
         // Window
+        // ⌥⌘N, not ⌘N: ⌘N is New Chat and ⇧⌘N New Worktree.
+        .init(id: .newWindow, category: localized("Window"), title: localized("New Window"),
+              defaultShortcut: .init(modifiers: [.command, .option], key: .char("n"))),
         .init(id: .closeWindow, category: localized("Window"), title: localized("Close Window"),
               defaultShortcut: .init(modifiers: [.command, .shift], key: .char("w"))),
         // Interface

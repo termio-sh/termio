@@ -155,6 +155,11 @@
       "title": "Window",
       "commands": [
         {
+          "id": "newWindow",
+          "title": "New Window",
+          "shortcut": "⌥⌘N"
+        },
+        {
           "id": "closeWindow",
           "title": "Close Window",
           "shortcut": "⇧⌘W"
