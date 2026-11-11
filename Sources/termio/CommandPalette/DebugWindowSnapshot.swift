@@ -70,7 +70,7 @@ enum DebugWindowSnapshot {
         // A window capture leaves a Metal layer empty, so each stream pane
         // also draws itself offscreen.
         for (index, stream) in streamViews(in: view).enumerated() {
-            guard let image = stream.debugImage(),
+            guard let image = stream.screenImage(),
                   let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
             else { continue }
             try? png.write(to: URL(fileURLWithPath: stem + "-stream-\(index).png"))

@@ -201,8 +201,9 @@ final class TermiodStreamView: NSView {
     }
 
     /// The screen as this view draws it, offscreen at the drawable's size:
-    /// what the debug snapshot writes, since it cannot read the layer.
-    func debugImage() -> CGImage? {
+    /// what the debug snapshot writes and a pane drag lifts, since neither
+    /// can read the layer.
+    func screenImage() -> CGImage? {
         guard let renderer, let terminal = terminal() else { return nil }
         let size = metalLayer.drawableSize
         defer { needsFullDraw = true }
