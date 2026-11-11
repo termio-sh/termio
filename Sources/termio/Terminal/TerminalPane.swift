@@ -192,7 +192,8 @@ struct TerminalPane: View {
                     .frame(width: card.width, height: card.height)
                     // Before `position`, so the probe is the card's size rather than the pane's.
                     .background(PaneCardProbeView(sessionID: id,
-                                                  panelCovers: panel.frame != nil && panel.covers))
+                                                  panelCovers: panel.frame != nil && panel.covers,
+                                                  notchWidth: notch?.width ?? 0))
                     .position(x: card.midX, y: card.midY)
                     .opacity(isVisible ? 1 : 0)
                     .allowsHitTesting(isVisible)
@@ -324,8 +325,10 @@ struct TerminalPane: View {
             // still taken by the monitor.
             if let layout, !zoomed, store.paneDrag == nil {
                 ForEach(Array(layout.frames.keys).filter { store.visiblePaneIDs.contains($0) }, id: \.self) { id in
-                    if let frame = layout.frames[id] {
-                        let handle = PaneDragRearrange.handleRect(in: frame.size)
+                    if let frame = layout.frames[id],
+                       let handle = PaneDragRearrange.handleRect(in: frame.size,
+                                                                 notchWidth: cardNotch(frame, in: bounds)?.width ?? 0,
+                                                                 controlsMinX: PaneCardGeometry.shared.controlsMinX(id)) {
                         CursorArea(cursor: .openHand)
                             .frame(width: handle.width, height: handle.height)
                             .position(x: frame.minX + handle.midX, y: frame.minY + handle.midY)
@@ -337,7 +340,9 @@ struct TerminalPane: View {
             // taken by the event monitor, so this is purely the affordance.
             if let layout, !zoomed, store.paneDrag == nil,
                let hovered = store.paneHandleHover, let frame = layout.frames[hovered.pane] {
-                PaneGrabHandle(paneFrame: frame, isOverHandle: hovered.overHandle)
+                PaneGrabHandle(paneFrame: frame, isOverHandle: hovered.overHandle,
+                               notchWidth: cardNotch(frame, in: bounds)?.width ?? 0,
+                               controlsMinX: PaneCardGeometry.shared.controlsMinX(hovered.pane))
                     .allowsHitTesting(false)
             }
             // The drag's preview (issue #183): the drop-zone highlight is what
@@ -1258,15 +1263,19 @@ private struct PaneGrabHandle: View {
     /// True once the pointer is on the handle itself rather than in the band
     /// that reveals it: ghostty's two strengths, present then ready.
     let isOverHandle: Bool
+    let notchWidth: CGFloat
+    let controlsMinX: CGFloat?
 
     var body: some View {
-        let rect = PaneDragRearrange.handleRect(in: paneFrame.size)
-        Image(systemName: "ellipsis")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(.primary.opacity(isOverHandle ? 0.8 : 0.3))
-            .frame(width: rect.width, height: rect.height)
-            .position(x: paneFrame.minX + rect.midX, y: paneFrame.minY + rect.midY)
-            .transition(.opacity)
+        if let rect = PaneDragRearrange.handleRect(in: paneFrame.size, notchWidth: notchWidth,
+                                                   controlsMinX: controlsMinX) {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.primary.opacity(isOverHandle ? 0.8 : 0.3))
+                .frame(width: rect.width, height: rect.height)
+                .position(x: paneFrame.minX + rect.midX, y: paneFrame.minY + rect.midY)
+                .transition(.opacity)
+        }
     }
 }
 
@@ -1625,6 +1634,15 @@ enum PaneCard {
     /// The room between the navigator toggle and the notch's edge.
     static let notchGap: CGFloat = 4
 
+    /// Where a header's leading close ends, from the card's edge: past the notch, the header's
+    /// 10pt inset, and the 18pt button centred in the 14pt icon slot. A narrow card's grab handle
+    /// can reach this far, and the press there belongs to the close.
+    static func closeSlotEnd(notchWidth: CGFloat) -> CGFloat { notchWidth + 10 + 16 }
+
+    /// The card's own coordinate space, top-left origin: where its header measures its
+    /// trailing buttons for the grab handle to keep clear of.
+    static let coordinateSpace = "termio.paneCard"
+
     /// The corner the top-leading card leaves out where it runs under the traffic lights and the
     /// navigator toggle: window controls, not the card's, so they sit on the window's ground and
     /// the card's edge curves around them. It grows from nothing as the card slides under them
@@ -1760,9 +1778,12 @@ private struct PaneCardChrome: View {
             Spacer(minLength: 0)
         }
         .background(cardBackground, in: PaneCardShape(notch: notch))
+        .coordinateSpace(.named(PaneCard.coordinateSpace))
     }
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isHeaderHovering = false
+    @State private var isOverClose = false
 
     /// A stream pane's default background, which a program may set with
     /// OSC 11, carried into the pane's chrome. Never the top row's color: that
@@ -1791,7 +1812,22 @@ private struct PaneCardChrome: View {
         HStack(spacing: 6) {
             HStack(spacing: 6) {
                 Group {
-                    if session.isSSH {
+                    // Close swaps in for the icon under the pointer, as on a Safari tab: at the
+                    // leading edge, where macOS closes things, and away from the trailing buttons,
+                    // which sit over the panel when one is open and would read as closing it.
+                    // Swapping costs the title no width, so a narrow card's buttons stay clear
+                    // of the grab handle.
+                    if isHeaderHovering {
+                        Button { store.requestCloseSession(session.id) } label: {
+                            HugeIconView(icon: .close, size: 10, color: .secondary)
+                                .frame(width: 18, height: 18)
+                                .background(CloseHoverDisc(isHovering: isOverClose, diameter: 18))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { isOverClose = $0 }
+                        .help(localized("Close Session"))
+                    } else if session.isSSH {
                         HugeIconView(icon: .serverStack, size: 13, color: .secondary)
                     } else {
                         AgentIconView(agent: store.effectiveAgent(for: session), size: 13)
@@ -1820,18 +1856,24 @@ private struct PaneCardChrome: View {
             .frame(maxWidth: panelEdgeX.map { max(0, $0 - leadingPadding - 8) } ?? .infinity, alignment: .leading)
             .layoutPriority(1)
             Spacer(minLength: 8)
-            // Always laid out, only hidden: showing them must not reflow the title.
-            // Only the focused card's: the buttons act on the card you are in, and a row of
-            // them on every card — or on whichever one the pointer crosses — is noise.
-            buttons.opacity(isSelected ? 1 : 0)
-                .allowsHitTesting(isSelected)
-            // The inspector reads the focused session, so only the focused card opens it.
-            if isSelected {
-                // Pulled in so its glyph sits as far from the zoom glyph as the split glyphs sit
-                // from each other: the menu pads its glyph by 6 where an icon button's 24pt frame
-                // leaves 4.5, and the header's 6pt spacing is wider than the buttons' 2.
-                InspectorPaneMenu()
-                    .padding(.leading, -5.5)
+            HStack(spacing: 6) {
+                // Always laid out, only hidden: showing them must not reflow the title.
+                // Only the focused card's: the buttons act on the card you are in, and a row of
+                // them on every card — or on whichever one the pointer crosses — is noise.
+                buttons.opacity(isSelected ? 1 : 0)
+                    .allowsHitTesting(isSelected)
+                // The inspector reads the focused session, so only the focused card opens it.
+                if isSelected {
+                    // Pulled in so its glyph sits as far from the zoom glyph as the split glyphs sit
+                    // from each other: the menu pads its glyph by 6 where an icon button's 24pt frame
+                    // leaves 4.5, and the header's 6pt spacing is wider than the buttons' 2.
+                    InspectorPaneMenu()
+                        .padding(.leading, -5.5)
+                }
+            }
+            // Measured, not summed: the panel menu grows a label while a panel is open.
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(PaneCard.coordinateSpace)).minX } action: {
+                PaneCardGeometry.shared.setControlsMinX($0, for: session.id)
             }
         }
         .padding(.leading, leadingPadding)
@@ -1839,7 +1881,7 @@ private struct PaneCardChrome: View {
         .frame(height: PaneCard.headerHeight)
         // The header's empty run moves the window, as a titlebar would. A press here also
         // focuses the card (`PaneDragRearrange`), so the header needs no tap of its own.
-        .background(WindowDragArea())
+        .background(WindowDragArea(onHover: { isHeaderHovering = $0 }))
     }
 
     private var buttons: some View {
@@ -1923,6 +1965,9 @@ private struct CursorArea: NSViewRepresentable {
         var cursor: NSCursor = .arrow
         override var mouseDownCanMoveWindow: Bool { false }
         override func resetCursorRects() { addCursorRect(bounds, cursor: cursor) }
+        // A cursor rect needs no hit test, and one here would take the press of any header
+        // button the handle reaches on a narrow card.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
 
@@ -1931,11 +1976,11 @@ private struct CursorArea: NSViewRepresentable {
 /// beside the terminal (or a letterboxed grid) makes the card a different size, and a panel over
 /// it takes its clicks. Each card carries a `PaneCardProbe` sized to it, so the answer is read
 /// off the card's own view when asked, never a stored copy; a closed card's probe leaves with it.
-@MainActor
+@MainActor @Observable
 final class PaneCardGeometry {
     static let shared = PaneCardGeometry()
 
-    private var probes: [Session.ID: PaneCardProbe] = [:]
+    @ObservationIgnored private var probes: [Session.ID: PaneCardProbe] = [:]
 
     fileprivate func register(_ probe: PaneCardProbe, for id: Session.ID) { probes[id] = probe }
 
@@ -1955,11 +2000,32 @@ final class PaneCardGeometry {
     func panelCovers(_ id: Session.ID) -> Bool {
         probes[id]?.panelCovers ?? false
     }
+
+    /// How far the card's corner is left out for the window's controls (`PaneCard.notch`).
+    func notchWidth(_ id: Session.ID) -> CGFloat {
+        probes[id]?.notchWidth ?? 0
+    }
+
+    /// Where each header's trailing buttons begin, from the card's leading edge. Kept here
+    /// rather than on the probe, which the header may report before it is registered, and
+    /// observed: the drawn handle and its cursor rect follow it as a panel label grows.
+    private var controlsMinXs: [Session.ID: CGFloat] = [:]
+
+    /// Nil until the header has been measured.
+    func controlsMinX(_ id: Session.ID) -> CGFloat? {
+        controlsMinXs[id]
+    }
+
+    func setControlsMinX(_ x: CGFloat, for id: Session.ID) {
+        guard controlsMinXs[id] != x else { return }
+        controlsMinXs[id] = x
+    }
 }
 
 final class PaneCardProbe: NSView {
     var sessionID: Session.ID?
     var panelCovers = false
+    var notchWidth: CGFloat = 0
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
@@ -1967,6 +2033,7 @@ final class PaneCardProbe: NSView {
 private struct PaneCardProbeView: NSViewRepresentable {
     let sessionID: Session.ID
     let panelCovers: Bool
+    let notchWidth: CGFloat
 
     func makeNSView(context: Context) -> PaneCardProbe {
         let probe = PaneCardProbe()
@@ -1977,6 +2044,7 @@ private struct PaneCardProbeView: NSViewRepresentable {
 
     func updateNSView(_ probe: PaneCardProbe, context: Context) {
         probe.panelCovers = panelCovers
+        probe.notchWidth = notchWidth
         if probe.sessionID != sessionID {
             PaneCardGeometry.shared.unregister(probe)
             probe.sessionID = sessionID
