@@ -170,7 +170,7 @@ final class PaneDragRearrange {
         // Snapshot before anything moves, the way ghostty builds its drag image.
         // A surface that won't cache leaves this nil and the drag runs without a
         // preview rather than showing a blank card.
-        store.paneDragPreview = terminalView(for: hit.id, in: contentView)?.paneSnapshot
+        store.paneDragPreview = surface(for: hit.id, in: contentView)?.paneSnapshot
         store.paneDrag = PaneDragState(source: hit.id,
                                        pointer: PanePointer(pane: hit.id, local: hit.point))
         // The overlay washes translucently over live surfaces, which have to
@@ -273,9 +273,8 @@ final class PaneDragRearrange {
         // A press on a panel laid over a card's terminal is the panel's, not the pane's.
         if InspectorPanelHost.shared.contains(point, in: window, store: store) { return nil }
         let geometry = PaneCardGeometry.shared
-        for view in terminalViews(in: contentView) {
+        for (view, id) in surfaces(in: contentView) {
             guard view.window === window,
-                  let id = sessionID(for: view),
                   store.visiblePaneIDs.contains(id) else { continue }
             // The surface sits inside its card: under the header, inside the border, and before
             // any panel beside it. Window space is bottom-left-origin, so the header is above `maxY`.
@@ -295,20 +294,22 @@ final class PaneDragRearrange {
         return nil
     }
 
-    private func terminalView(for id: Session.ID, in root: NSView) -> TerminalView? {
-        terminalViews(in: root).first { sessionID(for: $0) == id }
+    private func surface(for id: Session.ID, in root: NSView) -> NSView? {
+        surfaces(in: root).first { $0.id == id }?.view
     }
 
-    // The two resolution helpers below mirror `TerminalContextMenu`'s private
-    // copies — small enough that sharing them isn't worth coupling the two
-    // interceptors.
-
-    /// All terminal surface views under `root`, in tree order.
-    private func terminalViews(in root: NSView) -> [TerminalView] {
-        var found: [TerminalView] = []
+    /// Every pane surface under `root` with its session, in tree order: the embedded
+    /// Ghostty surface, and the stream pane that termiod sessions draw in by default.
+    /// Looking for the embedded kind alone left a stream pane with no handle to drag.
+    private func surfaces(in root: NSView) -> [(view: NSView, id: Session.ID)] {
+        var found: [(view: NSView, id: Session.ID)] = []
         var stack: [NSView] = [root]
         while let view = stack.popLast() {
-            if let terminal = view as? TerminalView { found.append(terminal) }
+            if let stream = view as? TermiodStreamView, let id = stream.sessionID {
+                found.append((stream, id))
+            } else if let terminal = view as? TerminalView, let id = sessionID(for: terminal) {
+                found.append((terminal, id))
+            }
             stack.append(contentsOf: view.subviews)
         }
         return found
@@ -316,6 +317,7 @@ final class PaneDragRearrange {
 
     /// Maps a surface view back to its session through the store's surface
     /// cache — the view and its cached `TerminalViewState` share a controller.
+    /// Mirrors `TerminalContextMenu`'s private copy.
     private func sessionID(for view: TerminalView) -> Session.ID? {
         store?.surfaces.first { $0.value.controller === view.controller }?.key
     }
@@ -326,8 +328,12 @@ private extension NSView {
     /// (`SurfaceView.asImage`). Nil for an empty or uncacheable view, so callers
     /// degrade to no preview.
     var paneSnapshot: NSImage? {
-        guard bounds.width > 1, bounds.height > 1,
-              let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
+        guard bounds.width > 1, bounds.height > 1 else { return nil }
+        // A stream pane draws into a Metal layer, which `cacheDisplay` cannot read.
+        if let stream = self as? TermiodStreamView {
+            return stream.screenImage().map { NSImage(cgImage: $0, size: bounds.size) }
+        }
+        guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
         cacheDisplay(in: bounds, to: rep)
         let image = NSImage(size: bounds.size)
         image.addRepresentation(rep)
