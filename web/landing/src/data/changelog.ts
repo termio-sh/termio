@@ -17,6 +17,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.73.0",
+    date: "2026-11-14",
+    title: "More than one window",
+    changes: {
+      new: [
+        "Windows: open another window with File ▸ New Window (⌥⌘N), from the Dock, or with Open in New Window on a session. Each window shows its own session, and a session shows live in one window at a time.",
+      ],
+    },
+  },
+  {
     version: "0.72.0",
     date: "2026-11-10",
     title: "Close a pane from its header",
