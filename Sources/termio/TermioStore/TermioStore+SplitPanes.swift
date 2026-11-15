@@ -235,7 +235,11 @@ extension TermioStore {
     /// Opens an app card as a row of its own in a project, or in one of its worktrees.
     @discardableResult
     func addAppCard(_ app: InspectorTab, to projectID: Project.ID, worktreePath: String? = nil) -> Session.ID? {
-        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return nil }
+        guard let index = projects.firstIndex(where: { $0.id == projectID }),
+              // A card on its own reads the row it is filed in, and that row's path is on
+              // another machine: read from here it would show this Mac's disk under that
+              // name. There a card opens beside a session, which carries its machine.
+              !isOnAnotherDevice(projects[index]) else { return nil }
         var card = Session(title: app.title)
         card.app = app
         card.worktreePath = worktreePath

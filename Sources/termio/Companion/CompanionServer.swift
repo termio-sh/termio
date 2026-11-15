@@ -1347,7 +1347,7 @@ extension TermioStore {
     private func findCompanionSession(_ wireID: String) -> Session? {
         let prefix = wireID.lowercased()
         guard !prefix.isEmpty else { return nil }
-        return allSessions.first { $0.id.uuidString.lowercased().hasPrefix(prefix) }
+        return allSessions.first { !$0.isApp && $0.id.uuidString.lowercased().hasPrefix(prefix) }
     }
 }
 

@@ -234,15 +234,24 @@ final class TermioStore: ObservableObject {
 
     /// Shows `tab` for the selected session: the app card of that kind in its split group
     /// becomes the live one, and where there is none a new card opens beside the selection.
-    /// The selection does not move, so the terminal keeps the keyboard.
+    ///
+    /// A selected terminal keeps the selection, and so the keyboard. A selected app card
+    /// hands it to the card that was asked for: the live card is the selected one whenever
+    /// an app card is selected, or the card on screen would be a picture nothing can wake.
     func showApp(_ tab: InspectorTab) {
         guard let selected = selectedSessionID, let session = session(selected) else { return }
         if session.app == tab {
             liveAppID = selected
-        } else if let existing = splitMembers(of: selected).first(where: { self.session($0)?.app == tab }) {
-            liveAppID = existing
-        } else if let created = addAppCard(tab, beside: selected, takeFocus: false) {
-            liveAppID = created
+            return
+        }
+        guard let target = splitMembers(of: selected).first(where: { self.session($0)?.app == tab })
+                ?? addAppCard(tab, beside: selected, takeFocus: false) else { return }
+        // Zoom shows the selected card alone, which would hide the card just asked for.
+        isPaneZoomed = false
+        if session.isApp {
+            selectedSessionID = target
+        } else {
+            liveAppID = target
         }
     }
 

@@ -9,7 +9,8 @@ struct SessionInfoView: View {
     @EnvironmentObject var store: TermioStore
 
     private var session: Session? {
-        store.inspectorSubjectID.flatMap { store.session($0) }
+        // A card left on its own has no session to describe, and is not one itself.
+        store.inspectorSubjectID.flatMap { store.session($0) }.flatMap { $0.isApp ? nil : $0 }
     }
 
     /// Where the session runs *on this Mac*: its worktree if it has one, else the

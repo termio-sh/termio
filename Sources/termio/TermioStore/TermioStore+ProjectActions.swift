@@ -1392,7 +1392,7 @@ extension TermioStore {
             // a restored row that was never selected has no link, and detaching
             // instead would leave every agent of a removed project running with
             // nothing left on this side that can reach it.
-            destroyDaemonSession(for: session, rememberClosed: true)
+            if !session.isApp { destroyDaemonSession(for: session, rememberClosed: true) }
             let sessionID = session.id
             surfaces[sessionID] = nil
             monitors[sessionID] = nil

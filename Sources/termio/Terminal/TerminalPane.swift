@@ -144,7 +144,14 @@ struct TerminalPane: View {
                 store.cancelRemoteFileOpen()
                 store.openIssueDetail = nil
             }
-            requestSelectedTerminalFocus(reason: .overlayClosed)
+            // An app card has no terminal to hand the keyboard to: its list takes it, so
+            // the arrow keys work without a click.
+            if let id = store.selectedSessionID, store.session(id)?.isApp == true,
+               let view = InspectorPanelHost.shared.controller?.view {
+                view.window?.makeFirstResponder(view)
+            } else {
+                requestSelectedTerminalFocus(reason: .overlayClosed)
+            }
         }
         // Dev-only: perform the real AppKit failure while the main window stays key.
         // The driver focuses the selected TerminalView, resigns it to nil on the next
@@ -633,7 +640,11 @@ struct TerminalPane: View {
     /// survive. Focuses the session first (VSCode's focus-on-drop), and if its shell
     /// isn't attached yet, activates the session so its surface mounts and retries
     /// once it has come up. Returns whether a drop was accepted at all.
-    private func sendPaths(_ urls: [URL], to id: Session.ID) -> Bool {
+    private func sendPaths(_ urls: [URL], to dropped: Session.ID) -> Bool {
+        // A path dropped on an app card goes to the terminal the card stands beside, the
+        // one its own "Add to Chat" types into. A card on its own has nowhere to send it.
+        let id = store.session(dropped)?.isApp == true
+            ? store.companionTerminal(of: dropped) ?? dropped : dropped
         guard !urls.isEmpty,
               let session = store.session(id), !session.isApp else { return false }
         // The drop is also a selection: the path lands where the pointer released, so

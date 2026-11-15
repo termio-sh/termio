@@ -121,6 +121,41 @@ final class AppCardTests: XCTestCase {
         XCTAssertEqual(store.splitMembers(of: terminal.id).count, 3)
     }
 
+    /// With an app card selected, the card asked for takes the selection. Left behind, the
+    /// selected card would be a picture with nothing to wake it: a click on it selects
+    /// what is already selected.
+    func testAskingFromACardSelectsTheCardAskedFor() throws {
+        let terminal = Session(title: "Terminal 1")
+        let store = makeStore(sessions: [terminal])
+        store.selectedSessionID = terminal.id
+        let changes = try XCTUnwrap(store.addAppCard(.changes, beside: terminal.id))
+        XCTAssertEqual(store.selectedSessionID, changes)
+
+        store.showApp(.files)
+
+        let live = try XCTUnwrap(store.liveAppID)
+        XCTAssertEqual(store.session(live)?.app, .files)
+        XCTAssertEqual(store.selectedSessionID, live)
+    }
+
+    /// Zoom shows the selected card alone, so a card opened from a zoomed terminal has
+    /// to end the zoom to be seen.
+    func testACardOpenedFromAZoomedTerminalEndsTheZoom() throws {
+        let terminal = Session(title: "Terminal 1")
+        let other = Session(title: "Terminal 2")
+        let store = makeStore(sessions: [terminal, other])
+        store.groupSession(other.id, with: terminal.id)
+        store.selectedSessionID = terminal.id
+        store.toggleSelectedPaneZoom()
+        XCTAssertTrue(store.isPaneZoomed)
+
+        store.showApp(.files)
+
+        XCTAssertFalse(store.isPaneZoomed)
+        XCTAssertEqual(store.selectedSessionID, terminal.id)
+        XCTAssertNotNil(store.liveAppID)
+    }
+
     /// A card reads and types for the terminal beside it, and for no one when alone.
     func testACardAnswersForTheTerminalBesideIt() throws {
         let terminal = Session(title: "Terminal 1")

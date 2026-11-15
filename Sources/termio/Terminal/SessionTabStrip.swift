@@ -231,9 +231,11 @@ struct SessionTabStrip: View {
     private func newMenu() -> NSMenu {
         let selected = store.selectedSessionID.flatMap(store.session)
         var items: [SidebarMenuItem] = [.action(localized("New Terminal")) { store.addTerminalHere() }]
-        guard let selected, case .project(let projectID)? = store.group(of: selected.id) else {
-            // Terminals and Chats have no checkout of their own for an app to read, so
-            // an app there opens beside the terminal whose directory it will show.
+        guard let selected, case .project(let projectID)? = store.group(of: selected.id),
+              let project = store.projects.first(where: { $0.id == projectID }),
+              !store.isOnAnotherDevice(project) else {
+            // Terminals, Chats and a project on another machine have no checkout here for
+            // an app to read, so an app there opens beside the session it will read for.
             if let selected, !selected.isApp {
                 items.append(.separator)
                 items += settings.offeredApps(standalone: false).map { app in

@@ -132,7 +132,10 @@ final class InspectorPanelHost {
     /// terminal sits inside that geometry; they ask this first, so the panel gets its own right-
     /// click menu, presses and drops instead of the terminal underneath.
     func contains(_ point: NSPoint, in window: NSWindow, store: TermioStore) -> Bool {
-        guard store.inspectorVisible, let view = controller?.view, view.window === window else { return false }
+        // Hidden counts as absent: a live card off screen (its group zoomed onto another
+        // card) keeps its view mounted at the frame it last had, over whatever is there now.
+        guard store.inspectorVisible, let view = controller?.view, view.window === window,
+              !view.isHiddenOrHasHiddenAncestor else { return false }
         return view.convert(view.bounds, to: nil).contains(point)
     }
 
