@@ -236,6 +236,8 @@
 	<string>Auth failed</string>
 	<key>Available when Termio runs from the built app bundle.</key>
 	<string>Available when Termio runs from the built app bundle.</string>
+	<key>Back (⌘[)</key>
+	<string>Back (⌘[)</string>
 	<key>Bar</key>
 	<string>Bar</string>
 	<key>Base Branch Missing</key>
@@ -684,6 +686,8 @@
 	<string>Font</string>
 	<key>Font name</key>
 	<string>Font name</string>
+	<key>Forward (⌘])</key>
+	<string>Forward (⌘])</string>
 	<key>From your Ghostty config</key>
 	<string>From your Ghostty config</string>
 	<key>From your session history</key>

@@ -135,7 +135,7 @@ fn the_bleed_is_gone_under_pending_wrap() {
 fn the_bleed_is_gone_from_scrollback() {
     let mut host = VtTerminal::new(3, 10).expect("host terminal");
     host.vt_write(b"\x1b[41mX\x1b[5G\x1b[0mZ\r\nline2\r\nline3\r\nline4");
-    let mut client = replay(&mut host, 3, 10);
+    let client = replay(&mut host, 3, 10);
     let host_history = host.scrollback(1).expect("host scrollback");
     let client_history = client.scrollback(1).expect("client scrollback");
     for (column, (want, got)) in host_history.rows[0]

@@ -19,16 +19,20 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
-use libghostty_vt::render::{CellIterator, Dirty, RenderState, RowIterator};
-use libghostty_vt::screen::{CellContentTag, RowSemanticPrompt, Screen};
-use libghostty_vt::style::{Palette, RgbColor, StyleColor};
-use libghostty_vt::terminal::{
-    ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode, Point,
-    PointCoordinate, PrimaryDeviceAttributes, ProgramStatusState, SecondaryDeviceAttributes,
-    SemanticPromptKind, SizeReportSize, TertiaryDeviceAttributes,
+use libghostty_vt::color::{Palette, Rgb as RgbColor};
+use libghostty_vt::effect::{
+    ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, PrimaryDeviceAttributes,
+    ProgramStatusState, SecondaryDeviceAttributes, SemanticPromptKind, TertiaryDeviceAttributes,
 };
-use libghostty_vt::{Error, Terminal, TerminalOptions};
+use libghostty_vt::fmt::{Extras, Format, Formatter};
+use libghostty_vt::mode::Mode;
+use libghostty_vt::point::{Coordinate as PointCoordinate, Point};
+use libghostty_vt::render::{CellIterator, Dirty, RenderState, RowIterator};
+use libghostty_vt::report::{ColorScheme, SizeReportSize};
+use libghostty_vt::screen::{CellContentTag, RowSemanticPrompt, Screen};
+use libghostty_vt::snapshot::Decoder as SnapshotDecoder;
+use libghostty_vt::style::StyleColor;
+use libghostty_vt::{Error, Terminal};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Rgb {
@@ -320,7 +324,7 @@ fn listen(
             };
             reports.borrow_mut().push(VtEvent::ProgramStatus {
                 state,
-                id: report.id().to_string(),
+                id: String::from_utf8_lossy(report.id()).into_owned(),
             });
         }),
         "Terminal::on_program_status",
@@ -328,7 +332,7 @@ fn listen(
     let prompts = events.clone();
     check(
         terminal.on_semantic_prompt(move |_terminal, event| {
-            if event.kind() == Some(SemanticPromptKind::PromptStart) {
+            if matches!(event.kind(), Ok(SemanticPromptKind::PromptStart)) {
                 prompts.borrow_mut().push(VtEvent::PromptStart);
             }
         }),
@@ -420,18 +424,15 @@ pub const CONTINUATION_LIMIT: usize = 1 << 20;
 impl VtTerminal {
     pub fn new(rows: u16, cols: u16) -> Result<Self> {
         kitty_png::install();
-        let mut terminal = check(
-            Terminal::new(TerminalOptions {
-                cols,
-                rows,
-                max_scrollback: 1_000,
-            }),
-            "Terminal::new",
+        let mut terminal = check(Terminal::new(cols, rows), "Terminal::new")?;
+        check(
+            terminal.set_scrollback_max_lines(Some(1_000)),
+            "Terminal::set_scrollback_max_lines",
         )?;
         // Before any input: tracking only covers bytes written after it is on.
         check(
-            terminal.set_continuation_limit(CONTINUATION_LIMIT),
-            "Terminal::set_continuation_limit",
+            terminal.set_continuation_max_bytes(CONTINUATION_LIMIT),
+            "Terminal::set_continuation_max_bytes",
         )?;
         // Grapheme clustering (mode 2027), as Ghostty's default
         // `grapheme-width-method = unicode` sets it: a skin-tone or ZWJ emoji is
@@ -449,10 +450,16 @@ impl VtTerminal {
     /// `vt_stream` plane builds its own.
     pub fn from_native_snapshot(snapshot: &[u8]) -> Result<Self> {
         kitty_png::install();
-        let terminal = check(
-            Terminal::decode_snapshot(snapshot, CONTINUATION_LIMIT),
-            "Terminal::decode_snapshot",
+        let mut decoder = check(SnapshotDecoder::new_buf(snapshot), "snapshot::Decoder::new_buf")?;
+        check(
+            decoder.set_max_continuation_bytes(CONTINUATION_LIMIT),
+            "snapshot::Decoder::set_max_continuation_bytes",
         )?;
+        check(
+            decoder.set_retain_continuation(true),
+            "snapshot::Decoder::set_retain_continuation",
+        )?;
+        let terminal = check(decoder.decode(), "snapshot::Decoder::decode")?;
         Self::wrap(terminal)
     }
 
@@ -527,8 +534,12 @@ impl VtTerminal {
     /// `vt_stream` client decodes it into a fresh terminal, so nothing the
     /// client's previous terminal held can survive an attach.
     pub fn native_snapshot(&self) -> Result<Vec<u8>> {
-        let bytes = check(self.terminal.encode_snapshot(), "Terminal::encode_snapshot")?;
-        Ok(bytes.to_vec())
+        let bytes = check(self.terminal.encode_snapshot_alloc(None), "Terminal::encode_snapshot_alloc")?;
+        // A complete snapshot always carries its envelope, so no bytes is a
+        // failure to report, never an empty screen to send.
+        bytes
+            .map(|bytes| bytes.to_vec())
+            .ok_or_else(|| VtError("Terminal::encode_snapshot_alloc: no bytes".to_string()))
     }
 
     pub fn vt_write(&mut self, bytes: &[u8]) {
@@ -666,6 +677,36 @@ impl VtTerminal {
         check(row.semantic_prompt(), "Row::semantic_prompt")
     }
 
+    /// The formatter `format_vt` writes with, shared with the tests that
+    /// compare it against the Swift client's.
+    ///
+    /// Deliberately without `PALETTE`: emitting OSC 4 would push the host's
+    /// palette onto the client and override the local theme. And without
+    /// `TABSTOPS`: see `format_vt`, the walk that writes them lands the cursor
+    /// on the last stop, and 9d8fbd1 emits it ahead of the content.
+    fn vt_formatter(&self) -> Result<Formatter<'_, 'static, 'static>> {
+        let mut formatter = check(Formatter::new(&self.terminal), "Formatter::new(terminal)")?;
+        check(formatter.set_format(Format::Vt), "Formatter::set_format")?;
+        check(formatter.set_unwrap(false), "Formatter::set_unwrap")?;
+        check(formatter.set_trim(false), "Formatter::set_trim")?;
+        check(
+            formatter.set_extras(
+                Extras::MODES
+                    | Extras::SCROLLING_REGION
+                    | Extras::PWD
+                    | Extras::KEYBOARD
+                    | Extras::CURSOR
+                    | Extras::STYLE
+                    | Extras::HYPERLINK
+                    | Extras::PROTECTION
+                    | Extras::KITTY_KEYBOARD
+                    | Extras::CHARSETS,
+            ),
+            "Formatter::set_extras",
+        )?;
+        Ok(formatter)
+    }
+
     /// Serialise the current screen back into **VT sequences** — the repaint a
     /// client can feed straight into its own terminal.
     ///
@@ -693,33 +734,9 @@ impl VtTerminal {
     /// The payload carries its own prologue (`SNAPSHOT_PROLOGUE`), so a client
     /// applies it raw and must not prepend a reset of its own.
     pub fn format_vt(&mut self) -> Result<Vec<u8>> {
-        let options = FormatterOptions::new()
-            .with_format(Format::Vt)
-            .with_unwrap(false)
-            .with_trim(false)
-            // Deliberately false: emitting OSC 4 would push the host's palette
-            // onto the client and override the local theme.
-            .with_palette(false)
-            .with_modes(true)
-            .with_scrolling_region(true)
-            // See the note above: the walk that writes these lands the cursor
-            // on the last stop, and 9d8fbd1 emits it ahead of the content.
-            .with_tabstops(false)
-            .with_pwd(true)
-            .with_keyboard(true)
-            .with_cursor(true)
-            .with_style(true)
-            .with_hyperlink(true)
-            .with_protection(true)
-            .with_kitty_keyboard(true)
-            .with_charsets(true);
-
         let mut formatted = SNAPSHOT_PROLOGUE.to_vec();
         {
-            let mut formatter = check(
-                Formatter::new(&self.terminal, options),
-                "Formatter::new(terminal)",
-            )?;
+            let mut formatter = self.vt_formatter()?;
             let bytes = check(formatter.format_alloc(None), "Formatter::format_alloc")?;
             formatted.extend_from_slice(&bytes);
         }
@@ -924,10 +941,10 @@ impl VtTerminal {
     }
 
     fn title(&self) -> Result<Option<String>> {
-        // The engine reports an unset title as an empty borrowed string, and
-        // reports a non-UTF-8 one as an error; neither is a daemon failure.
+        // The engine reports an unset title as empty bytes and never stores a
+        // title that is not UTF-8, so the lossy decode only guards the type.
         Ok(match self.terminal.title() {
-            Ok(title) if !title.is_empty() => Some(title.to_string()),
+            Ok(title) if !title.is_empty() => Some(String::from_utf8_lossy(title).into_owned()),
             _ => None,
         })
     }
@@ -1509,26 +1526,9 @@ mod tests {
     /// the prologue and fixups that method adds, for comparing a client written
     /// in another language against this one.
     fn formatted(terminal: &VtTerminal) -> Vec<u8> {
-        let options = super::FormatterOptions::new()
-            .with_format(super::Format::Vt)
-            .with_unwrap(false)
-            .with_trim(false)
-            .with_palette(false)
-            .with_modes(true)
-            .with_scrolling_region(true)
-            .with_tabstops(false)
-            .with_pwd(true)
-            .with_keyboard(true)
-            .with_cursor(true)
-            .with_style(true)
-            .with_hyperlink(true)
-            .with_protection(true)
-            .with_kitty_keyboard(true)
-            .with_charsets(true);
-        let mut formatter =
-            super::Formatter::new(&terminal.terminal, options).expect("formatter");
-        // A blank screen formats to nothing, which `format_alloc` and
-        // `format_len` both report as an error.
+        let mut formatter = terminal.vt_formatter().expect("formatter");
+        // A fixed buffer, so a screen of any size up to it reads back in one
+        // call.
         let mut text = vec![0; 1 << 16];
         let length = formatter.format_buf(&mut text).expect("formatted screen");
         text.truncate(length);

@@ -14,6 +14,12 @@ struct FileFindBar: View {
     let onPrevious: () -> Void
     let onClose: () -> Void
     var focusTrigger: Int = 0
+    /// False where the search can only match text as written — a PDF's, which PDFKit
+    /// searches itself. The bar then offers Match Case alone.
+    var supportsWordAndRegex = true
+    /// True while a search is still running, so the bar doesn't report "No results" for
+    /// a document it hasn't finished reading.
+    var searching = false
     /// The replace row's wiring, or nil where the text can't be written — the diff overlay
     /// searches a read-only document, so it gets no disclosure at all.
     var replace: Replace? = nil
@@ -146,11 +152,13 @@ struct FileFindBar: View {
             optionToggle(label: .symbol("textformat"), active: options.caseSensitive, tooltip: localized("Match Case")) {
                 options.caseSensitive.toggle()
             }
-            optionToggle(label: .text("ab", underline: true), active: options.wholeWord, tooltip: localized("Match Whole Word")) {
-                options.wholeWord.toggle()
-            }
-            optionToggle(label: .text(".*", underline: false), active: options.regex, tooltip: localized("Use Regular Expression")) {
-                options.regex.toggle()
+            if supportsWordAndRegex {
+                optionToggle(label: .text("ab", underline: true), active: options.wholeWord, tooltip: localized("Match Whole Word")) {
+                    options.wholeWord.toggle()
+                }
+                optionToggle(label: .text(".*", underline: false), active: options.regex, tooltip: localized("Use Regular Expression")) {
+                    options.regex.toggle()
+                }
             }
         }
     }
@@ -196,6 +204,8 @@ struct FileFindBar: View {
     private var countLabel: some View {
         if query.isEmpty {
             EmptyView()
+        } else if totalMatches == 0, searching {
+            ProgressView().controlSize(.small).scaleEffect(0.7)
         } else if totalMatches == 0 {
             Text(localized("No results"))
                 .font(.system(size: 11))

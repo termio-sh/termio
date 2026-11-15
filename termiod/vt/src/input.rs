@@ -10,7 +10,7 @@
 use libghostty_vt::key::{self, Key, Mods, OptionAsAlt};
 use libghostty_vt::mouse;
 use libghostty_vt::screen::Screen;
-use libghostty_vt::terminal::Mode;
+use libghostty_vt::mode::Mode;
 
 use crate::{Result, VtError, VtTerminal};
 
@@ -394,8 +394,11 @@ impl InputEncoder {
             padding_left: 0,
         };
         if self.mouse_size != Some(size) {
-            self.mouse.set_size(size);
-            self.mouse_size = Some(size);
+            // Left unrecorded on failure, so the next event tries again.
+            match self.mouse.set_size(size) {
+                Ok(_) => self.mouse_size = Some(size),
+                Err(error) => eprintln!("termiod-vt: mouse encoder size not set: {error}"),
+            }
         }
     }
 }
@@ -764,9 +767,9 @@ mod tests {
 
         // One row, one column: cell SGR is still told from pixels.
         let mut tiny = VtTerminal::new(1, 1).unwrap();
-        let mut one = encoder(&mut tiny, b"\x1b[?1003h\x1b[?1016h\x1b[?1006h");
+        let one = encoder(&mut tiny, b"\x1b[?1003h\x1b[?1016h\x1b[?1006h");
         assert!(!one.pixel_reports, "cell SGR on a one-cell grid");
-        let mut pixels = encoder(&mut tiny, b"\x1b[?1006h\x1b[?1016h");
+        let pixels = encoder(&mut tiny, b"\x1b[?1006h\x1b[?1016h");
         assert!(pixels.pixel_reports, "SGR-Pixels set last");
     }
 
