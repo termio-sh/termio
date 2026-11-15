@@ -34,7 +34,7 @@ pub(crate) fn install() {
         let hook: ffi::SysDecodePngFn = Some(decode);
         let pointer = hook.map_or(std::ptr::null(), |function| function as *const std::ffi::c_void);
         // SAFETY: the option takes a function pointer with this signature.
-        let result = unsafe { ffi::ghostty_sys_set(ffi::SysOption::GHOSTTY_SYS_OPT_DECODE_PNG, pointer) };
+        let result = unsafe { ffi::ghostty_sys_set(ffi::SysOption::DECODE_PNG, pointer) };
         if result != ffi::Result::SUCCESS {
             eprintln!("termiod-vt: PNG decoder not installed ({result})");
         }
