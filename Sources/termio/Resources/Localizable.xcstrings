@@ -10043,6 +10043,26 @@
           }
         }
       }
+    },
+    "Back (⌘[)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后退 (⌘[)"
+          }
+        }
+      }
+    },
+    "Forward (⌘])": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前进 (⌘])"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -234,6 +234,8 @@
 	<string>认证失败</string>
 	<key>Available when Termio runs from the built app bundle.</key>
 	<string>仅当 Termio 从构建的应用包运行时可用。</string>
+	<key>Back (⌘[)</key>
+	<string>后退 (⌘[)</string>
 	<key>Bar</key>
 	<string>竖线</string>
 	<key>Base Branch Missing</key>
@@ -680,6 +682,8 @@
 	<string>字体</string>
 	<key>Font name</key>
 	<string>字体名称</string>
+	<key>Forward (⌘])</key>
+	<string>前进 (⌘])</string>
 	<key>From your Ghostty config</key>
 	<string>来自 Ghostty 配置</string>
 	<key>From your session history</key>

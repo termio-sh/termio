@@ -26,6 +26,13 @@ struct PDFReaderView: View {
     /// list column.
     @AppStorage("pdfReaderSidebarWidth") private var sidebarWidth: Double = 216
 
+    // Find — the bar the editor and the diff use, over PDFKit's own search.
+    @State private var findVisible = false
+    @State private var findQuery = ""
+    @State private var findOptions = FindOptions()
+    /// Bumped on every ⌘F so the field takes the keyboard even when the bar is already open.
+    @State private var findFocusTrigger = 0
+
     init(
         url: URL,
         settings: AppSettings,
@@ -57,7 +64,7 @@ struct PDFReaderView: View {
 
     /// Room at both ends of the header for the rail switch on one side and the page field
     /// plus window controls on the other, so a centered title clears the wider of the two.
-    private static let titleClearance: CGFloat = 150
+    private static let titleClearance: CGFloat = 200
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,6 +84,9 @@ struct PDFReaderView: View {
                             railDivider(ceiling: ceiling)
                         }
                         PDFDocumentView(model: model)
+                            .overlay(alignment: .topTrailing) {
+                                if findVisible { findBar }
+                            }
                     }
                     .frame(width: geo.size.width, height: geo.size.height)
                     .coordinateSpace(.named(Self.dragSpace))
@@ -91,7 +101,70 @@ struct PDFReaderView: View {
             }
         }
         .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
-        .onExitCommand(perform: onClose)
+        // Esc puts away the innermost thing first: the search, then the reader.
+        .onExitCommand { if findVisible { closeFind() } else { onClose() } }
+        .onReceive(NotificationCenter.default.publisher(for: .termioShowFindBar)) { _ in
+            guard model.opened else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 1)) { findVisible = true }
+            findFocusTrigger += 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .termioFindNext)) { _ in
+            if findVisible { model.stepFind(by: 1) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .termioFindPrevious)) { _ in
+            if findVisible { model.stepFind(by: -1) }
+        }
+        // Searches as you type, a beat behind the keys: each search reads the whole book.
+        .task(id: FindRequest(query: findQuery, caseSensitive: findOptions.caseSensitive, visible: findVisible)) {
+            guard findVisible else { return }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            startFind()
+        }
+    }
+
+    private struct FindRequest: Hashable {
+        let query: String
+        let caseSensitive: Bool
+        let visible: Bool
+    }
+
+    private var findBar: some View {
+        FileFindBar(
+            query: $findQuery,
+            options: $findOptions,
+            currentMatch: model.findMatchCount == 0 ? 0 : model.findIndex + 1,
+            totalMatches: model.findMatchCount,
+            onSubmit: {
+                // Return on the search already showing steps to its next result.
+                if model.isShowingFind(findQuery, caseSensitive: findOptions.caseSensitive) {
+                    model.stepFind(by: 1)
+                } else {
+                    startFind()
+                }
+            },
+            onNext: { model.stepFind(by: 1) },
+            onPrevious: { model.stepFind(by: -1) },
+            onClose: closeFind,
+            focusTrigger: findFocusTrigger,
+            supportsWordAndRegex: false,
+            searching: model.isFinding
+        )
+        .transition(.move(edge: .trailing).combined(with: .opacity))
+    }
+
+    private func startFind() {
+        guard !model.isShowingFind(findQuery, caseSensitive: findOptions.caseSensitive) else { return }
+        model.find(findQuery, caseSensitive: findOptions.caseSensitive)
+    }
+
+    private func closeFind() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 1)) { findVisible = false }
+        findQuery = ""
+        findOptions = FindOptions()
+        model.endFind()
+        // Hand the keyboard back to the document, so space and the arrows scroll again.
+        model.pdfView.window?.makeFirstResponder(model.pdfView)
     }
 
     /// The seam between the rail and the page, built the way the inspector's list column
@@ -134,6 +207,7 @@ struct PDFReaderView: View {
             HStack(spacing: 8) {
                 DetailListColumnToggle()
                 PDFSidebarSwitch(model: model)
+                PDFHistoryButtons(model: model)
                 Spacer(minLength: 8)
                 if model.pageCount > 0 {
                     PDFPageField(model: model)
@@ -195,6 +269,23 @@ struct PDFSidebarSwitch: View {
             Capsule(style: .continuous)
                 .fill(Color.primary.opacity(0.14))
                 .matchedGeometryEffect(id: model.sidebar, in: pillNamespace, isSource: false)
+        }
+    }
+}
+
+/// Back and forward through the places you have jumped from. A link, a section in the
+/// rail and a search result all take you somewhere else; these are the way home.
+struct PDFHistoryButtons: View {
+    @ObservedObject var model: PDFReaderModel
+
+    var body: some View {
+        HStack(spacing: 2) {
+            DetailChromeButton(icon: .chevronLeft, help: localized("Back (⌘[)"), action: model.goBack)
+                .disabled(!model.canGoBack)
+                .opacity(model.canGoBack ? 1 : 0.35)
+            DetailChromeButton(icon: .chevronRight, help: localized("Forward (⌘])"), action: model.goForward)
+                .disabled(!model.canGoForward)
+                .opacity(model.canGoForward ? 1 : 0.35)
         }
     }
 }
