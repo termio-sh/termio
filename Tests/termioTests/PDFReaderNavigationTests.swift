@@ -221,7 +221,9 @@ final class PDFReaderNavigationTests: XCTestCase {
     }
 
     /// Quitting takes no view out of its window, so the place is saved on the way out too.
-    func testQuittingSavesThePlaceWithinThePage() throws {
+    /// The save is called directly: posting the app's quit notification here would reach
+    /// every other observer in the test process, the tunnel and the simulator host included.
+    func testThePlaceWithinThePageIsSaved() throws {
         let (model, window) = try openInWindow()
         defer { window.orderOut(nil) }
         let pdf = try XCTUnwrap(model.pdfView.document)
@@ -231,7 +233,7 @@ final class PDFReaderNavigationTests: XCTestCase {
         settle(0.3)
         let here = try XCTUnwrap(model.pdfView.currentDestination)
 
-        NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: NSApp)
+        model.rememberPosition()
         let saved = try XCTUnwrap(PDFReadingPosition.place(for: document))
         XCTAssertEqual(saved.page, 2)
         XCTAssertEqual(saved.y, here.point.y, accuracy: 1)
