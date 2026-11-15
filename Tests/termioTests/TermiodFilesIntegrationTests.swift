@@ -57,7 +57,7 @@ final class TermiodFilesIntegrationTests: XCTestCase {
     /// Starts a daemon on this test's socket and waits for it to answer. Split
     /// out because one test kills it mid-flight to make sure a pooled channel
     /// that died between requests reconnects rather than failing the click.
-    private func startDaemon() throws -> Process {
+    private func startDaemon(searchPath: String? = nil) throws -> Process {
         // A killed daemon leaves its socket file behind, and a client that finds
         // one nobody is listening on would try to autostart a daemon from the
         // bundle rather than use this test's binary. Wait for *this* daemon's
@@ -74,6 +74,7 @@ final class TermiodFilesIntegrationTests: XCTestCase {
             // count would pin nothing.
             "TERMIOD_TEST_SEARCH_STALL": stallDirectory.path,
         ]) { _, new in new }
+        if let searchPath { serve.environment?["PATH"] = searchPath }
         serve.standardOutput = FileHandle.nullDevice
         serve.standardError = FileHandle.nullDevice
         try serve.run()
@@ -164,6 +165,31 @@ final class TermiodFilesIntegrationTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(entries["ignored.log"]).isIgnored)
         XCTAssertFalse(try XCTUnwrap(entries["keep.log"]).isIgnored)
         XCTAssertFalse(try XCTUnwrap(entries["new.swift"]).isIgnored)
+    }
+
+    /// The decoration is matched inside the daemon. It used to be a `git
+    /// check-ignore` child the reply waited on, so a slow git on the device was
+    /// a floor under every folder the tree opened.
+    func testAListingDoesNotWaitOnGit() throws {
+        let tools = try XCTUnwrap(socketDirectory).appendingPathComponent("tools")
+        try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+        let slowGit = tools.appendingPathComponent("git")
+        try Data("#!/bin/sh\nsleep 3\n".utf8).write(to: slowGit)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: slowGit.path)
+        try Data("*.log\n".utf8).write(to: root.appendingPathComponent(".gitignore"))
+        try Data("content".utf8).write(to: root.appendingPathComponent("ignored.log"))
+
+        Termiod.ControlPool.closeAll()
+        daemon?.terminate()
+        daemon?.waitUntilExit()
+        let inherited = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+        daemon = try startDaemon(searchPath: tools.path + ":" + inherited)
+
+        let started = ContinuousClock.now
+        let listing = try XCTUnwrap(Termiod.listDirectories(
+            route: .local, root: root.path, paths: [root.path]).listings.first)
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(2))
+        XCTAssertTrue(try XCTUnwrap(listing.entries.first { $0.name == "ignored.log" }).isIgnored)
     }
 
     func testTheRootListsAsTheTreeWouldDrawIt() throws {
