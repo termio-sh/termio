@@ -760,12 +760,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NotificationCenter.default.post(name: .termioUseSelectionForFind, object: nil)
     }
 
-    /// Opens a card for a freshly opened detail where there is none, and ends a zoom that
-    /// hides the card the detail is in. The selection stays where it is: a file that
-    /// arrives late from another machine must not take it from a terminal being typed in.
+    /// Opens a card for a freshly opened detail where there is none. Nothing else moves:
+    /// this also fires for a file arriving late from another machine, which must not take
+    /// the selection or a zoom from a terminal being typed in.
     private func revealInspectorForDetail() {
         if !store.inspectorVisible { store.inspectorVisible = true }
-        if let live = store.liveAppID, !store.isPaneOnScreen(live) { store.isPaneZoomed = false }
     }
 
 

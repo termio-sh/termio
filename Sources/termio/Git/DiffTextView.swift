@@ -148,7 +148,8 @@ struct DiffTextPane: NSViewRepresentable {
 
         if autoFocuses {
             DispatchQueue.main.async { [weak textView] in
-                guard let textView, let window = textView.window else { return }
+                guard let textView, InspectorPanelHost.shared.detailMayTakeKeyboard,
+                      let window = textView.window else { return }
                 if window.firstResponder === window || window.firstResponder is NSTextView == false {
                     window.makeFirstResponder(textView)
                 }

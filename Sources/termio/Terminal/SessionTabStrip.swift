@@ -237,7 +237,9 @@ struct SessionTabStrip: View {
             guard let selected,
                   let anchor = selected.isApp ? store.companionTerminal(of: selected.id) : selected.id
             else { return [] }
-            return settings.offeredApps(standalone: false).map { app in
+            // One card of a kind per group: a second could never be reached by `showApp`.
+            let open = Set(store.splitMembers(of: anchor).compactMap { store.session($0)?.app })
+            return settings.offeredApps(standalone: false).filter { !open.contains($0) }.map { app in
                 .action(app.title) { store.addAppCard(app, beside: anchor) }
             }
         }
@@ -261,7 +263,6 @@ struct SessionTabStrip: View {
     }
 
     /// Every group, the current one checked — the collapsed sidebar's list, as a menu.
-
     private func groupMenu() -> NSMenu {
         let menu = NSMenu()
         let current = store.selectedSessionID.flatMap(store.group(of:))

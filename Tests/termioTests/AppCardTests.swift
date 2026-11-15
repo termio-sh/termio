@@ -156,6 +156,41 @@ final class AppCardTests: XCTestCase {
         XCTAssertNotNil(store.liveAppID)
     }
 
+    /// A card something else asked for (an agent's `termio sim`) opens without taking the
+    /// live pane from the card the person has running, or their selection.
+    func testACardNobodyAskedForLeavesTheLiveOneAlone() throws {
+        let terminal = Session(title: "Terminal 1")
+        let store = makeStore(sessions: [terminal])
+        store.selectedSessionID = terminal.id
+        store.showApp(.files)
+        let files = try XCTUnwrap(store.liveAppID)
+
+        store.showApp(.simulator, byPerson: false)
+
+        XCTAssertEqual(store.liveAppID, files)
+        XCTAssertEqual(store.selectedSessionID, terminal.id)
+        XCTAssertEqual(store.splitMembers(of: terminal.id).count, 3)
+    }
+
+    /// The View menu's toggle closes a card that is on screen, and shows one that a zoom
+    /// is hiding: closing what nobody can see would look like the menu doing nothing.
+    func testTheToggleShowsACardHiddenByZoom() throws {
+        let terminal = Session(title: "Terminal 1")
+        let store = makeStore(sessions: [terminal])
+        store.selectedSessionID = terminal.id
+        store.showApp(.files)
+        let files = try XCTUnwrap(store.liveAppID)
+        store.toggleSelectedPaneZoom()
+        XCTAssertTrue(store.isPaneZoomed)
+
+        store.toggleApp(.files)
+        XCTAssertNotNil(store.session(files))
+        XCTAssertFalse(store.isPaneZoomed)
+
+        store.toggleApp(.files)
+        XCTAssertNil(store.session(files))
+    }
+
     /// A card reads and types for the terminal beside it, and for no one when alone.
     func testACardAnswersForTheTerminalBesideIt() throws {
         let terminal = Session(title: "Terminal 1")

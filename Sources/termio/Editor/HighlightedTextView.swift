@@ -170,6 +170,7 @@ struct HighlightedTextView: NSViewRepresentable {
     private static func claimFocus(_ textView: NSTextView) {
         DispatchQueue.main.async { [weak textView] in
             guard let textView, !textView.isHiddenOrHasHiddenAncestor,
+                  InspectorPanelHost.shared.detailMayTakeKeyboard,
                   let window = textView.window else { return }
             window.makeFirstResponder(textView)
         }

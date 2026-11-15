@@ -18,9 +18,20 @@ final class FileBrowserHostingController: NSHostingController<AnyView>, @preconc
     /// movie doesn't depend on that file happening to be the selected row.
     private var quickLookURL: URL?
 
+    private weak var store: TermioStore?
+
+    /// Whether a detail mounting in the live card may take the keyboard: only while that
+    /// card is the selected one. A file that opens beside a terminal being typed in — a
+    /// download landing late, a card an agent asked for — must leave the keys there.
+    fileprivate var detailMayTakeKeyboard: Bool {
+        guard let store else { return true }
+        return store.selectedSessionID == store.liveAppID
+    }
+
     init(store: TermioStore, settings: AppSettings) {
         let state = FileBrowserState()
         self.state = state
+        self.store = store
         super.init(rootView: AnyView(
             // The inspector shows its list (tree / search / changes / issues) with any open detail
             // — editor, diff, PR/issue — layered on top of it (see `InspectorRoot`), so a
@@ -116,6 +127,10 @@ final class InspectorPanelHost {
 
     var controller: FileBrowserHostingController?
 
+    /// See `FileBrowserHostingController.detailMayTakeKeyboard`. True with no inspector
+    /// at all, where there is no card to ask about.
+    var detailMayTakeKeyboard: Bool { controller?.detailMayTakeKeyboard ?? true }
+
     /// Opens `url` in the shared Quick Look panel — the preview a cmd-clicked video, audio file,
     /// or office document gets, since the in-app preview only renders images and PDFs.
     func quickLook(_ url: URL) {
@@ -143,7 +158,9 @@ final class InspectorPanelHost {
     /// Metal-backed content (a Markdown preview, a PDF) may come out blank — the picture is
     /// a reminder of where the card was, and focusing the card brings the real one back.
     func snapshot() -> NSImage? {
-        guard let view = controller?.view, view.window != nil,
+        // A hidden view has nothing to picture, and a blank one would replace the picture
+        // the card already keeps.
+        guard let view = controller?.view, view.window != nil, !view.isHiddenOrHasHiddenAncestor,
               view.bounds.width > 1, view.bounds.height > 1,
               let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: rep)

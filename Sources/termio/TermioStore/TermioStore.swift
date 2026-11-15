@@ -251,10 +251,12 @@ final class TermioStore: ObservableObject {
                 ?? addAppCard(tab, beside: selected, takeFocus: false) else { return }
         // Zoom shows the selected card alone, which would hide the card just asked for.
         if byPerson { isPaneZoomed = false }
-        if !session.isApp {
+        if session.isApp {
+            if byPerson { selectedSessionID = target }
+        } else if byPerson || liveAppID == nil {
+            // Asked for by something else, the card does not take the live pane from one
+            // the person has running beside their terminal.
             liveAppID = target
-        } else if byPerson {
-            selectedSessionID = target
         }
     }
 
@@ -2222,9 +2224,17 @@ final class TermioStore: ObservableObject {
             InspectorPanelHost.shared.quickLook(url)
             return
         }
-        // Show where the file lives, as VS Code does: the Files tab, expanded down to its row.
-        // The tab goes first, because switching tabs closes whatever detail is open.
+        // Show where the file lives, as VS Code does: the Files card, expanded down to its row.
+        // The card goes first, because moving to it closes whatever detail it had open.
         inspectorTab = .files
+        if liveAppID == nil { showApp(.files) }
+        // The person asked for this file, so its card takes the selection and, with it, the
+        // keyboard — and a zoom on the terminal they clicked in ends, or it would move
+        // onto the card and hide that terminal.
+        if let live = liveAppID, selectedSessionID != live {
+            isPaneZoomed = false
+            selectedSessionID = live
+        }
         if let root = inspectorCheckout?.localRoot, url.path.hasPrefix(root.hasSuffix("/") ? root : root + "/") {
             pendingFileReveal = url.path
         }
