@@ -2338,8 +2338,7 @@ private struct AlternateScreenSniffer {
 enum EmbeddedGhostty {
     static let version: String = {
         let info = ghostty_info()
-        guard let version = info.version else { return "" }
-        return String(decoding: UnsafeRawBufferPointer(start: version, count: Int(info.version_len)), as: UTF8.self)
+        return String(decoding: UnsafeRawBufferPointer(start: info.version, count: Int(info.version_len)), as: UTF8.self)
     }()
 }
 
