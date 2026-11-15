@@ -17,6 +17,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.73.1",
+    date: "2026-11-14",
+    title: "Smooth scrolling through every file of a pull request",
+    changes: {
+      fixed: [
+        "Pull requests: dragging the scroller through a pull request with many files no longer freezes the app.",
+      ],
+    },
+  },
+  {
     version: "0.73.0",
     date: "2026-11-14",
     title: "More than one window",
