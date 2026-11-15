@@ -299,7 +299,7 @@ extension TermioStore {
     /// Opens the inspector on the Simulator pane, as choosing it from the pane
     /// menu does.
     private func showSimulatorPane() {
-        showApp(.simulator)
+        showApp(.simulator, byPerson: false)
     }
 
     // MARK: Formatting

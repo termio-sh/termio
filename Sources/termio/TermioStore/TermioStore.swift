@@ -238,7 +238,10 @@ final class TermioStore: ObservableObject {
     /// A selected terminal keeps the selection, and so the keyboard. A selected app card
     /// hands it to the card that was asked for: the live card is the selected one whenever
     /// an app card is selected, or the card on screen would be a picture nothing can wake.
-    func showApp(_ tab: InspectorTab) {
+    ///
+    /// `byPerson` is off for a card something else asked for (an agent's `termio sim`):
+    /// that opens the card and leaves the person's selection and zoom where they are.
+    func showApp(_ tab: InspectorTab, byPerson: Bool = true) {
         guard let selected = selectedSessionID, let session = session(selected) else { return }
         if session.app == tab {
             liveAppID = selected
@@ -247,11 +250,11 @@ final class TermioStore: ObservableObject {
         guard let target = splitMembers(of: selected).first(where: { self.session($0)?.app == tab })
                 ?? addAppCard(tab, beside: selected, takeFocus: false) else { return }
         // Zoom shows the selected card alone, which would hide the card just asked for.
-        isPaneZoomed = false
-        if session.isApp {
-            selectedSessionID = target
-        } else {
+        if byPerson { isPaneZoomed = false }
+        if !session.isApp {
             liveAppID = target
+        } else if byPerson {
+            selectedSessionID = target
         }
     }
 
@@ -266,7 +269,9 @@ final class TermioStore: ObservableObject {
     /// Closes the live app card when `tab` is on screen, and shows it otherwise: the
     /// View menu's toggle.
     func toggleApp(_ tab: InspectorTab) {
-        if let live = liveAppID, session(live)?.app == tab {
+        // Only a card on screen is closed. One hidden behind a zoomed terminal is shown
+        // instead: closing what nobody can see would look like the menu doing nothing.
+        if let live = liveAppID, session(live)?.app == tab, isPaneOnScreen(live) {
             closeSession(live)
         } else {
             showApp(tab)

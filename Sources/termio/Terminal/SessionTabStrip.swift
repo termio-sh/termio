@@ -225,37 +225,42 @@ struct SessionTabStrip: View {
         tab.first.flatMap(store.session).map { sessionMenuItems(store: store, session: $0) } ?? []
     }
 
-    /// Every group, the current one checked — the collapsed sidebar's list, as a menu.
     /// Everything a tab can be, in one menu: a terminal, an agent, an app. Each opens as a
     /// tab of its own in the group on screen; grouping it with another is a drag.
     private func newMenu() -> NSMenu {
         let selected = store.selectedSessionID.flatMap(store.session)
         var items: [SidebarMenuItem] = [.action(localized("New Terminal")) { store.addTerminalHere() }]
-        guard let selected, case .project(let projectID)? = store.group(of: selected.id),
-              let project = store.projects.first(where: { $0.id == projectID }),
-              !store.isOnAnotherDevice(project) else {
-            // Terminals, Chats and a project on another machine have no checkout here for
-            // an app to read, so an app there opens beside the session it will read for.
-            if let selected, !selected.isApp {
-                items.append(.separator)
-                items += settings.offeredApps(standalone: false).map { app in
-                    .action(app.title) { store.addAppCard(app, beside: selected.id) }
+        // Where an app has no checkout on this Mac to read as a row of its own —
+        // Terminals, Chats, a project on another machine — it opens beside a session
+        // instead: the selected terminal, or the one the selected app card stands beside.
+        func appsBeside() -> [SidebarMenuItem] {
+            guard let selected,
+                  let anchor = selected.isApp ? store.companionTerminal(of: selected.id) : selected.id
+            else { return [] }
+            return settings.offeredApps(standalone: false).map { app in
+                .action(app.title) { store.addAppCard(app, beside: anchor) }
+            }
+        }
+        var apps = appsBeside()
+        if let selected, case .project(let projectID)? = store.group(of: selected.id),
+           let project = store.projects.first(where: { $0.id == projectID }) {
+            let worktree = selected.worktreePath
+            items.append(.submenu(localized("New Agent Session"), enabledAgentPresets(settings)
+                .filter { $0 != .terminal }
+                .map { preset in
+                    .agent(preset) { store.addSession(to: projectID, agent: preset, worktreePath: worktree) }
+                }))
+            if !store.isOnAnotherDevice(project) {
+                apps = settings.offeredApps(standalone: true).map { app in
+                    .action(app.title) { store.addAppCard(app, to: projectID, worktreePath: worktree) }
                 }
             }
-            return sidebarMenu(items)
         }
-        let worktree = selected.worktreePath
-        items.append(.submenu(localized("New Agent Session"), enabledAgentPresets(settings)
-            .filter { $0 != .terminal }
-            .map { preset in
-                .agent(preset) { store.addSession(to: projectID, agent: preset, worktreePath: worktree) }
-            }))
-        items.append(.separator)
-        items += settings.offeredApps(standalone: true).map { app in
-            .action(app.title) { store.addAppCard(app, to: projectID, worktreePath: worktree) }
-        }
-        return sidebarMenu(items)
+        if !apps.isEmpty { items.append(.separator) }
+        return sidebarMenu(items + apps)
     }
+
+    /// Every group, the current one checked — the collapsed sidebar's list, as a menu.
 
     private func groupMenu() -> NSMenu {
         let menu = NSMenu()
