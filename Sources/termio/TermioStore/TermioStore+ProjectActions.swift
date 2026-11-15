@@ -26,7 +26,7 @@ extension TermioStore {
             addRemoteTerminal(host: alias, agent: agent, project: projectID)
             return nil
         }
-        let terminalCount = project.sessions.filter { $0.agent == .terminal }.count
+        let terminalCount = project.sessions.filter { $0.agent == .terminal && !$0.isApp }.count
         let title = agent == .terminal
             ? "Terminal \(terminalCount + 1)"
             : agent.displayName
@@ -1576,7 +1576,9 @@ extension TermioStore {
         // killed in the daemon too — unlike quit/detach, which keeps it alive.
         // By name, not through the link: a link exists only while a pane has
         // rendered, and a close must land whether or not one ever did (#528).
-        destroyDaemonSession(for: session, rememberClosed: true)
+        // An app card never had a daemon session: there is nothing to kill, and no
+        // close to journal for a name the daemon never heard.
+        if !session.isApp { destroyDaemonSession(for: session, rememberClosed: true) }
         surfaces[id] = nil
         monitors[id] = nil
         removeRuntime(for: id)

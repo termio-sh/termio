@@ -190,12 +190,16 @@ struct TerminalPane: View {
                 // full bounds; its hidden siblings keep their laid-out frames. An
                 // ungrouped session has no split geometry and fills the pane.
                 let card = zoomed && isSelected ? bounds : (paneFrames[id] ?? bounds)
-                let panel = PaneCard.panelLayout(in: card, isOpen: store.openPanels.contains(id),
-                                                 width: panelWidth(for: id),
-                                                 covers: slidePanels.covering.contains(id),
-                                                 heldWidth: slidePanels.widths[id])
+                // An app card is all pane: the live inspector, or the picture it left, fills
+                // the body, and nothing here may ask for a surface it does not have.
+                let app = item.session.app
+                let panel = app != nil
+                    ? (terminal: CGRect.zero, frame: Optional(PaneCard.terminalRect(in: card)), covers: true)
+                    : PaneCard.panelLayout(in: card, isOpen: store.openPanels.contains(id),
+                                           width: panelWidth(for: id),
+                                           covers: slidePanels.covering.contains(id),
+                                           heldWidth: slidePanels.widths[id])
                 let rect = panel.terminal
-                let context = store.surface(for: item.session)
                 let notch = cardNotch(card, in: bounds)
                 PaneCardChrome(session: item.session, isSelected: isSelected,
                                background: paneBackground, notch: notch,
@@ -208,7 +212,9 @@ struct TerminalPane: View {
                     .position(x: card.midX, y: card.midY)
                     .opacity(isVisible ? 1 : 0)
                     .allowsHitTesting(isVisible)
-                if let link = store.runtime(for: id).streamLink {
+                if app != nil {
+                    EmptyView()
+                } else if let link = store.runtime(for: id).streamLink {
                     // Stays mounted while the view comes and goes, so the link
                     // hears a hidden pane stop counting toward the session's size.
                     StreamLinkReport(isVisible: isVisible, colors: store.streamTheme(dark: colorScheme == .dark),
@@ -241,6 +247,7 @@ struct TerminalPane: View {
                         .position(x: rect.midX, y: rect.midY)
                     }
                 } else {
+                let context = store.surface(for: item.session)
                 SharedGridLetterbox(
                     runtime: store.runtime(for: id),
                     sessionName: id.uuidString,
@@ -272,16 +279,18 @@ struct TerminalPane: View {
                 }
                 // An open panel on a card without focus: the picture it left, which a
                 // click turns back into the live panel by focusing the card.
-                if let frame = panel.frame, !isSelected, isVisible {
-                    PanelSnapshot(image: store.panelSnapshots[id], background: paneBackground)
+                if let frame = panel.frame, isVisible, app != nil ? store.liveAppID != id : !isSelected {
+                    PanelSnapshot(image: store.panelSnapshots[id], background: paneBackground, app: app)
                         .frame(width: frame.width, height: frame.height)
                         .clipShape(PaneCard.panelClip(covers: panel.covers, notched: notch != nil))
                         .position(x: frame.midX, y: frame.midY)
                         .onTapGesture { store.selectedSessionID = id }
-                    let edge = PaneCard.panelEdgeFrame(frame, covers: panel.covers)
-                    PanelEdge(covers: panel.covers, notched: notch != nil)
-                        .frame(width: edge.width, height: edge.height)
-                        .position(x: edge.midX, y: edge.midY)
+                    if app == nil {
+                        let edge = PaneCard.panelEdgeFrame(frame, covers: panel.covers)
+                        PanelEdge(covers: panel.covers, notched: notch != nil)
+                            .frame(width: edge.width, height: edge.height)
+                            .position(x: edge.midX, y: edge.midY)
+                    }
                 }
                 if let frame = panel.frame, isVisible, !panel.covers {
                     // Above the live panel, which comes later in this stack: the grip lights
@@ -314,12 +323,6 @@ struct TerminalPane: View {
                 .onChange(of: live) { _, frame in
                     if let frame { lastLivePanelFrame = frame }
                 }
-            if let livePanel {
-                let edge = PaneCard.panelEdgeFrame(livePanel.frame, covers: livePanel.covers)
-                PanelEdge(covers: livePanel.covers, notched: livePanel.notched)
-                    .frame(width: edge.width, height: edge.height)
-                    .position(x: edge.midX, y: edge.midY)
-            }
             if let layout, !zoomed {
                 ForEach(layout.dividers) { divider in
                     SplitDividerHandle(
@@ -406,15 +409,13 @@ struct TerminalPane: View {
     /// The focused card's panel, when its panel is open and the card is on screen.
     private func livePanelLayout(bounds: CGRect, paneFrames: [Session.ID: CGRect],
                                  zoomed: Bool) -> (frame: CGRect, covers: Bool, notched: Bool)? {
-        guard let id = store.selectedSessionID, store.openPanels.contains(id),
-              store.visiblePaneIDs.contains(id) || zoomed else { return nil }
+        // The live app card's body. Zoom shows the selected card alone, so a live card
+        // beside a zoomed terminal is off screen with the rest of its group.
+        guard let id = store.liveAppID,
+              zoomed ? store.selectedSessionID == id : store.visiblePaneIDs.contains(id)
+        else { return nil }
         let card = zoomed ? bounds : (paneFrames[id] ?? bounds)
-        let slidePanels = panelsThroughSlide(bounds: bounds, zoomed: zoomed)
-        let layout = PaneCard.panelLayout(in: card, isOpen: true, width: panelWidth(for: id),
-                                          covers: slidePanels.covering.contains(id),
-                                          heldWidth: slidePanels.widths[id])
-        let notched = cardNotch(card, in: bounds) != nil
-        return layout.frame.map { ($0, layout.covers, notched) }
+        return (PaneCard.terminalRect(in: card), true, cardNotch(card, in: bounds) != nil)
     }
 
     /// How the open panels hold still while the sidebar slides: the slide moves boxes, and what is
@@ -550,7 +551,8 @@ struct TerminalPane: View {
     /// TerminalViewState delegate, retry with capped exponential backoff until it is
     /// windowed, and explicitly resign the previously focused surface before moving.
     private func requestTerminalFocus(for id: Session.ID, reason: TerminalFocusReason) {
-        guard let session = store.session(id) else { return }
+        // An app card has no terminal to focus: its own views take the keyboard.
+        guard let session = store.session(id), !session.isApp else { return }
         // A stream pane has no embedded view for the driver to find, and would
         // be retried forever; its own view is focused directly instead.
         if store.runtimes[id]?.streamLink != nil {
@@ -593,8 +595,10 @@ struct TerminalPane: View {
     static func terminalMayTakeKeyboard(_ id: Session.ID, store: TermioStore) -> Bool {
         // An open detail keeps the keyboard while it is on screen: in its panel, or
         // maximized over the window, which shows it whether the panel is open or not.
+        // A detail in an app card beside the terminal is another card's: selecting the
+        // terminal is what asks for its keyboard. Only a maximized detail covers it.
         let hasDetail = store.openFileURL != nil || store.openingRemoteFile != nil || store.openDiff != nil
-        let detailShown = hasDetail && (store.inspectorVisible || store.inspectorMaximized)
+        let detailShown = hasDetail && store.inspectorMaximized
         return store.selectedSessionID == id
             && store.visiblePaneIDs.contains(id)
             && !detailShown
@@ -606,7 +610,7 @@ struct TerminalPane: View {
         guard AppChannel.isDev,
               let id = store.selectedSessionID,
               store.runtimes[id]?.streamLink == nil,
-              let session = store.session(id) else { return }
+              let session = store.session(id), !session.isApp else { return }
         let state = store.surface(for: session)
         focusDriver.injectOrphan(
             in: state,
@@ -631,7 +635,7 @@ struct TerminalPane: View {
     /// once it has come up. Returns whether a drop was accepted at all.
     private func sendPaths(_ urls: [URL], to id: Session.ID) -> Bool {
         guard !urls.isEmpty,
-              let session = store.session(id) else { return false }
+              let session = store.session(id), !session.isApp else { return false }
         // The drop is also a selection: the path lands where the pointer released, so
         // that pane takes the write token before focus moves (`requestTerminalFocus`
         // only focuses the selected session).
@@ -659,7 +663,7 @@ struct TerminalPane: View {
     private func dumpSelectedTerminalLayers() {
         guard AppChannel.isDev,
               let id = store.selectedSessionID,
-              let session = store.session(id) else { return }
+              let session = store.session(id), !session.isApp else { return }
         let state = store.surface(for: session)
         focusDriver.dumpLayers(of: state, sessionID: id)
     }
@@ -1769,10 +1773,9 @@ enum PaneCard {
     /// The room between the navigator toggle and the notch's edge.
     static let notchGap: CGFloat = 4
 
-    /// Where a header's leading close ends, from the card's edge: past the notch, the header's
-    /// 10pt inset, and the 18pt button centred in the 14pt icon slot. A narrow card's grab handle
-    /// can reach this far, and the press there belongs to the close.
-    static func closeSlotEnd(notchWidth: CGFloat) -> CGFloat { notchWidth + 10 + 16 }
+    /// Where a header's leading icon ends, from the card's edge: past the notch, the header's
+    /// 10pt inset and the icon's slot. A narrow card's grab handle starts no earlier.
+    static func iconSlotEnd(notchWidth: CGFloat) -> CGFloat { notchWidth + 10 + 16 }
 
     /// The card's own coordinate space, top-left origin: where its header measures its
     /// trailing buttons for the grab handle to keep clear of.
@@ -1921,8 +1924,6 @@ private struct PaneCardChrome: View {
     }
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var isHeaderHovering = false
-    @State private var isOverClose = false
 
     /// A stream pane's default background, which a program may set with
     /// OSC 11, carried into the pane's chrome. Never the top row's color: that
@@ -1951,21 +1952,8 @@ private struct PaneCardChrome: View {
         HStack(spacing: 6) {
             HStack(spacing: 6) {
                 Group {
-                    // Close swaps in for the icon under the pointer, as on a Safari tab: at the
-                    // leading edge, where macOS closes things, and away from the trailing buttons,
-                    // which sit over the panel when one is open and would read as closing it.
-                    // Swapping costs the title no width, so a narrow card's buttons stay clear
-                    // of the grab handle.
-                    if isHeaderHovering {
-                        Button { store.requestCloseSession(session.id) } label: {
-                            HugeIconView(icon: .close, size: 10, color: .secondary)
-                                .frame(width: 18, height: 18)
-                                .background(CloseHoverDisc(isHovering: isOverClose, diameter: 18))
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .onHover { isOverClose = $0 }
-                        .help(localized("Close Session"))
+                    if let app = session.app {
+                        HugeIconView(icon: app.icon, size: 13, color: .secondary)
                     } else if session.isSSH {
                         HugeIconView(icon: .serverStack, size: 13, color: .secondary)
                     } else {
@@ -1973,13 +1961,24 @@ private struct PaneCardChrome: View {
                     }
                 }
                 .frame(width: 14)
-                Text(location)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(location)
-                    .layoutPriority(1)
+                if let app = session.app {
+                    Text(app.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                // An app card is named for its pane. Its folder is in the pane's own bar, so
+                // the header does not say it a second time.
+                if !session.isApp {
+                    Text(location)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(location)
+                        .layoutPriority(1)
+                }
                 if let branch {
                     HStack(spacing: 3) {
                         HugeIconView(icon: .gitBranch, size: 11, color: .secondary)
@@ -1995,22 +1994,38 @@ private struct PaneCardChrome: View {
             .frame(maxWidth: panelEdgeX.map { max(0, $0 - leadingPadding - 8) } ?? .infinity, alignment: .leading)
             .layoutPriority(1)
             Spacer(minLength: 8)
-            HStack(spacing: 6) {
+            // One order on every card, ending on the two that act on the card itself: what
+            // adds a card (split, split), a rule, then Zoom and Close. Close is last
+            // and never hidden, so it is in the same place on every card.
+            HStack(spacing: 2) {
                 // Always laid out, only hidden: showing them must not reflow the title.
                 // Only the focused card's: the buttons act on the card you are in, and a row of
                 // them on every card — or on whichever one the pointer crosses — is noise.
-                buttons.opacity(isSelected ? 1 : 0)
-                    .allowsHitTesting(isSelected)
-                // The inspector reads the focused session, so only the focused card opens it.
-                if isSelected {
-                    // Pulled in so its glyph sits as far from the zoom glyph as the split glyphs sit
-                    // from each other: the menu pads its glyph by 6 where an icon button's 24pt frame
-                    // leaves 4.5, and the header's 6pt spacing is wider than the buttons' 2.
-                    InspectorPaneMenu()
-                        .padding(.leading, -5.5)
+                HStack(spacing: 2) {
+                    buttons
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.12))
+                        .frame(width: 1, height: 14)
+                        .padding(.horizontal, 3)
+                    // Zoom only means something inside a split, as in the palette and ⌘⇧↩.
+                    if store.splitRoot != nil {
+                        ChromeIconButton(icon: store.isPaneZoomed ? .collapse : .expand,
+                                         help: localized("Zoom Split"), isOn: store.isPaneZoomed) {
+                            store.selectedSessionID = session.id
+                            store.toggleSelectedPaneZoom()
+                        }
+                    }
                 }
+                .opacity(isSelected ? 1 : 0)
+                .allowsHitTesting(isSelected)
+                // Quieter on a card without focus: there to be found, not to be read.
+                ChromeIconButton(icon: .close,
+                                 help: session.isApp ? localized("Close") : localized("Close Session")) {
+                    store.requestCloseSession(session.id)
+                }
+                .opacity(isSelected ? 1 : 0.55)
             }
-            // Measured, not summed: the panel menu grows a label while a panel is open.
+            // Measured, not summed: the split's Zoom comes and goes with the group.
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(PaneCard.coordinateSpace)).minX } action: {
                 if publishesGeometry { PaneCardGeometry.shared.setControlsMinX($0, for: session.id) }
             }
@@ -2020,7 +2035,7 @@ private struct PaneCardChrome: View {
         .frame(height: PaneCard.headerHeight)
         // The header's empty run moves the window, as a titlebar would. A press here also
         // focuses the card (`PaneDragRearrange`), so the header needs no tap of its own.
-        .background(WindowDragArea(onHover: { isHeaderHovering = $0 }))
+        .background(WindowDragArea())
     }
 
     private var buttons: some View {
@@ -2030,14 +2045,6 @@ private struct PaneCardChrome: View {
             }
             ChromeIconButton(icon: .layoutRows, help: localized("Split Down")) {
                 splitting(.vertical)
-            }
-            // Zoom only means something inside a split, as in the palette and ⌘⇧↩.
-            if store.splitRoot != nil {
-                ChromeIconButton(icon: store.isPaneZoomed ? .collapse : .expand,
-                                 help: localized("Zoom Split"), isOn: store.isPaneZoomed) {
-                    store.selectedSessionID = session.id
-                    store.toggleSelectedPaneZoom()
-                }
             }
         }
     }
@@ -2289,6 +2296,9 @@ private struct PaneCardBorder: View {
 private struct PanelSnapshot: View {
     let image: NSImage?
     let background: Color
+    /// The card's pane, named in place of a picture it has never had: a card that has not
+    /// been live since launch has nothing to show until it is selected.
+    var app: InspectorTab?
 
     /// At the size it was taken, pinned top-leading and cut at the panel's edges. The card can
     /// change width after the picture is taken (the sidebar sliding, a window resize); filled to
@@ -2298,6 +2308,16 @@ private struct PanelSnapshot: View {
         background
             .overlay(alignment: .topLeading) {
                 if let image { Image(nsImage: image) }
+            }
+            .overlay {
+                if image == nil, let app {
+                    VStack(spacing: 8) {
+                        HugeIconView(icon: app.icon, size: 22, color: .secondary)
+                        Text(app.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .clipped()
             .contentShape(Rectangle())

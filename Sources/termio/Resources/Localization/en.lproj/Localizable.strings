@@ -218,6 +218,8 @@
 	<string>Approve this Mac in the Tailscale admin console.</string>
 	<key>Approve…</key>
 	<string>Approve…</string>
+	<key>Apps</key>
+	<string>Apps</string>
 	<key>Arguments</key>
 	<string>Arguments</string>
 	<key>Arrow</key>
@@ -260,6 +262,8 @@
 	<string>Branch</string>
 	<key>Bring All to Front</key>
 	<string>Bring All to Front</string>
+	<key>Browse and open the project’s files.</key>
+	<string>Browse and open the project’s files.</string>
 	<key>Built-In Tailscale</key>
 	<string>Built-In Tailscale</string>
 	<key>Built-in</key>
@@ -862,6 +866,8 @@
 	<string>Merged</string>
 	<key>Minimize</key>
 	<string>Minimize</string>
+	<key>Mirror and drive an iOS Simulator.</key>
+	<string>Mirror and drive an iOS Simulator.</string>
 	<key>Missing on %lld devices</key>
 	<string>Missing on %lld devices</string>
 	<key>Missing on %lld machines</key>
@@ -910,6 +916,8 @@
 	<string>New Agent</string>
 	<key>New Agent Session</key>
 	<string>New Agent Session</string>
+	<key>New App</key>
+	<string>New App</string>
 	<key>New Chat</key>
 	<string>New Chat</string>
 	<key>New File</key>
@@ -1078,6 +1086,8 @@
 	<string>OK</string>
 	<key>Off — SSH only</key>
 	<string>Off — SSH only</string>
+	<key>Offers the Issues app for projects whose remote is on GitHub.</key>
+	<string>Offers the Issues app for projects whose remote is on GitHub.</string>
 	<key>Offline</key>
 	<string>Offline</string>
 	<key>Offline · %@</key>
@@ -1258,6 +1268,8 @@
 	<string>Reached over SSH</string>
 	<key>Reaching %@…</key>
 	<string>Reaching %@…</string>
+	<key>Read the project’s GitHub issues and pull requests.</key>
+	<string>Read the project’s GitHub issues and pull requests.</string>
 	<key>Reads ~/.ssh/config directly — Termio keeps no separate host list.</key>
 	<string>Reads ~/.ssh/config directly — Termio keeps no separate host list.</string>
 	<key>Ready</key>
@@ -1356,6 +1368,8 @@
 	<string>Restore Defaults</string>
 	<key>Reveal in Finder</key>
 	<string>Reveal in Finder</string>
+	<key>Review uncommitted changes, branch comparisons and history.</key>
+	<string>Review uncommitted changes, branch comparisons and history.</string>
 	<key>Rotate Left</key>
 	<string>Rotate Left</string>
 	<key>Rotate Right</key>
@@ -1414,12 +1428,16 @@
 	<string>Search Project</string>
 	<key>Search commands</key>
 	<string>Search commands</string>
+	<key>Search the contents of the project’s files.</key>
+	<string>Search the contents of the project’s files.</string>
 	<key>Search themes</key>
 	<string>Search themes</string>
 	<key>Search themes…</key>
 	<string>Search themes…</string>
 	<key>Searching…</key>
 	<string>Searching…</string>
+	<key>See what a session is running and where.</key>
+	<string>See what a session is running and where.</string>
 	<key>Select All</key>
 	<string>Select All</string>
 	<key>Select Element</key>
@@ -1520,6 +1538,8 @@
 	<string>Signs in with the keys ssh offers by default.</string>
 	<key>Signs this Mac’s device out of your tailnet.</key>
 	<string>Signs this Mac’s device out of your tailnet.</string>
+	<key>Simulator</key>
+	<string>Simulator</string>
 	<key>Simulator Unavailable</key>
 	<string>Simulator Unavailable</string>
 	<key>Size</key>

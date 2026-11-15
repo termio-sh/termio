@@ -723,13 +723,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func debugShowInspectorPane(_ note: Notification) {
         guard let name = note.object as? String, let tab = InspectorTab(rawValue: name) else { return }
         DispatchQueue.main.async { [self] in
-            store.inspectorTab = tab
-            if !store.inspectorVisible { toggleFilesInspector(nil) }
+            store.showApp(tab)
         }
     }
 
     @objc func toggleFilesInspector(_ sender: Any?) {
-        store.inspectorVisible.toggle()
+        store.toggleApp(.files)
     }
 
     /// Edit ▸ Paste. File URLs copied in Finder become absolute paths at the

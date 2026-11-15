@@ -9,7 +9,7 @@ struct SessionInfoView: View {
     @EnvironmentObject var store: TermioStore
 
     private var session: Session? {
-        store.selectedSessionID.flatMap { store.session($0) }
+        store.inspectorSubjectID.flatMap { store.session($0) }
     }
 
     /// Where the session runs *on this Mac*: its worktree if it has one, else the
@@ -35,7 +35,7 @@ struct SessionInfoView: View {
     /// carried in Claude Code's hook stream, or discovered from Codex's on-disk rollout.
     /// `nil` until the agent reports its first status.
     private var transcriptPath: String? {
-        store.selectedSessionID.flatMap { store.transcriptPaths[$0] }
+        store.inspectorSubjectID.flatMap { store.transcriptPaths[$0] }
     }
 
     /// The working directory's page on its forge (GitHub, GitLab, …), detected from
@@ -48,8 +48,8 @@ struct SessionInfoView: View {
             // path is available even for a session that fired no termio hook (one
             // started before the hook was installed). Runs once per selection, only
             // while the path is still unknown; a later hook value simply agrees.
-            .task(id: store.selectedSessionID) {
-                guard let id = store.selectedSessionID,
+            .task(id: store.inspectorSubjectID) {
+                guard let id = store.inspectorSubjectID,
                       store.transcriptPaths[id] == nil,
                       let path = store.resolveTranscriptPath(for: id) else { return }
                 store.transcriptPaths[id] = path

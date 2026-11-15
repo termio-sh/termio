@@ -12,6 +12,7 @@ import TermioShared
 /// one click away.
 struct SessionTabStrip: View {
     @EnvironmentObject var store: TermioStore
+    @EnvironmentObject var settings: AppSettings
     /// The tab pressed, from mouse-down to mouse-up, whether or not it is ever dragged.
     @State private var press: TabDrag?
     /// The tab under the pointer while it is dragged along the strip.
@@ -123,9 +124,7 @@ struct SessionTabStrip: View {
                 }
                 .frame(height: SessionTab.height + 4)
             }
-            ChromeIconButton(icon: .add, help: localized("New Terminal"), prominence: .glass) {
-                store.addTerminalHere()
-            }
+            ChromeMenuButton(icon: .add, help: localized("New"), makeMenu: newMenu)
             if group == nil { Spacer(minLength: 0) }
         }
         .frame(height: WindowChrome.rowHeight)
@@ -227,6 +226,35 @@ struct SessionTabStrip: View {
     }
 
     /// Every group, the current one checked — the collapsed sidebar's list, as a menu.
+    /// Everything a tab can be, in one menu: a terminal, an agent, an app. Each opens as a
+    /// tab of its own in the group on screen; grouping it with another is a drag.
+    private func newMenu() -> NSMenu {
+        let selected = store.selectedSessionID.flatMap(store.session)
+        var items: [SidebarMenuItem] = [.action(localized("New Terminal")) { store.addTerminalHere() }]
+        guard let selected, case .project(let projectID)? = store.group(of: selected.id) else {
+            // Terminals and Chats have no checkout of their own for an app to read, so
+            // an app there opens beside the terminal whose directory it will show.
+            if let selected, !selected.isApp {
+                items.append(.separator)
+                items += settings.offeredApps(standalone: false).map { app in
+                    .action(app.title) { store.addAppCard(app, beside: selected.id) }
+                }
+            }
+            return sidebarMenu(items)
+        }
+        let worktree = selected.worktreePath
+        items.append(.submenu(localized("New Agent Session"), enabledAgentPresets(settings)
+            .filter { $0 != .terminal }
+            .map { preset in
+                .agent(preset) { store.addSession(to: projectID, agent: preset, worktreePath: worktree) }
+            }))
+        items.append(.separator)
+        items += settings.offeredApps(standalone: true).map { app in
+            .action(app.title) { store.addAppCard(app, to: projectID, worktreePath: worktree) }
+        }
+        return sidebarMenu(items)
+    }
+
     private func groupMenu() -> NSMenu {
         let menu = NSMenu()
         let current = store.selectedSessionID.flatMap(store.group(of:))
@@ -335,7 +363,7 @@ private struct TabIconStack: View {
                 WorkingIndicator(tint: .sidebarWorkingInk)
                     .frame(width: 12, height: 12)
             } else if let session = store.session(id) {
-                AgentIconView(agent: store.effectiveAgent(for: session), size: 12)
+                SessionIconView(session: session, size: 12)
             }
         }
         .frame(width: Self.tile, height: Self.tile)

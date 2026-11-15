@@ -9,6 +9,22 @@ import TermioShared
 /// to the right ink. Resolving eagerly against the caller's appearance is wrong —
 /// the menu bar tints from the wallpaper and can be dark while the dropdown menu
 /// (system theme) is light, which baked those marks in as invisible white-on-white.
+/// A session's mark wherever one is drawn: its pane's glyph for an app card, and the
+/// agent's (or shell's) mark for everything else.
+struct SessionIconView: View {
+    @EnvironmentObject var store: TermioStore
+    let session: Session
+    let size: CGFloat
+
+    var body: some View {
+        if let app = session.app {
+            HugeIconView(icon: app.icon, size: size, color: .secondary)
+        } else {
+            AgentIconView(agent: store.effectiveAgent(for: session), size: size)
+        }
+    }
+}
+
 @MainActor
 func agentMenuImage(for agent: AgentPreset, side: CGFloat = 15) -> NSImage? {
     NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
