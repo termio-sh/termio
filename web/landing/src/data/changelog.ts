@@ -17,6 +17,21 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.74.0",
+    date: "2026-11-14",
+    title: "Read PDFs without losing your place",
+    changes: {
+      new: [
+        "PDF: go back and forward with ⌘[ and ⌘] after following a link, a contents entry or a search result.",
+        "PDF: rest the pointer on a link inside the document to preview where it goes.",
+        "PDF: search the document with ⌘F.",
+      ],
+      improved: [
+        "A PDF reopens on the page where you left it.",
+      ],
+    },
+  },
+  {
     version: "0.73.1",
     date: "2026-11-14",
     title: "Smooth scrolling through every file of a pull request",
