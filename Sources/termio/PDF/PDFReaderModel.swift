@@ -91,7 +91,8 @@ final class PDFReaderModel: ObservableObject {
 
     /// The search in progress: how many places the words turn up, and which one you are on.
     @Published private(set) var findMatchCount = 0
-    @Published private(set) var findIndex = 0
+    /// The result being shown, zero-based; `nil` until a search has shown one.
+    @Published private(set) var findIndex: Int?
     /// True until the document has been read to its end. A long book takes seconds the
     /// first time, and "no results" while it is still looking would be a lie.
     @Published private(set) var isFinding = false
@@ -101,10 +102,11 @@ final class PDFReaderModel: ObservableObject {
     /// The page the search started from: the first result shown is the next one from
     /// there, not the first in the book.
     private var findOrigin = 0
-    private var findHasFocusedMatch = false
     private static let findMatchColor = NSColor.findHighlightColor.withAlphaComponent(0.45)
     private static let findCurrentMatchColor = NSColor.systemOrange.withAlphaComponent(0.75)
     private var findMarkedOrigin = false
+    /// History changes the search itself caused and PDFKit has yet to report.
+    private var ownHistoryChanges = 0
 
     /// Set once the saved reading position has been applied. Until then the view sits on
     /// page one, and remembering *that* would overwrite the place it is about to return to.
@@ -278,19 +280,24 @@ final class PDFReaderModel: ObservableObject {
 
     func goBack() {
         guard pdfView.canGoBack else { return }
-        // Going back spends the place a search filed; the next result stepped to files
-        // the new one, so there is always a way back from a result.
-        findMarkedOrigin = false
         pdfView.goBack(nil)
     }
 
     func goForward() {
         guard pdfView.canGoForward else { return }
-        findMarkedOrigin = false
         pdfView.goForward(nil)
     }
 
     private func readHistory() {
+        // The history moved for a reason other than a search filing its own place, so that
+        // place is spent or buried: the next result stepped to files a new one.
+        // PDFKit reports a change after the fact, so the search's own filing is counted
+        // off, not recognised by timing.
+        if ownHistoryChanges > 0 {
+            ownHistoryChanges -= 1
+        } else {
+            findMarkedOrigin = false
+        }
         canGoBack = pdfView.canGoBack
         canGoForward = pdfView.canGoForward
     }
@@ -304,7 +311,8 @@ final class PDFReaderModel: ObservableObject {
               let destination = pdfView.currentDestination, let page = destination.page else { return }
         let index = document.index(for: page)
         guard index != NSNotFound else { return }
-        PDFReadingPosition.remember(.init(page: index, y: destination.point.y), for: url)
+        PDFReadingPosition.remember(
+            .init(page: index, x: destination.point.x, y: destination.point.y), for: url)
     }
 
     /// Returns to where this document was last read. Runs once, after the view has a size —
@@ -317,7 +325,7 @@ final class PDFReaderModel: ObservableObject {
         guard let place = PDFReadingPosition.place(for: url), let document = pdfView.document,
               place.page < document.pageCount, let page = document.page(at: place.page),
               place.page > 0 || place.y < page.bounds(for: .cropBox).maxY - 1 else { return }
-        scrollQuietly(to: CGRect(x: 0, y: place.y, width: 1, height: 0), on: page, centered: false)
+        scrollQuietly(to: CGRect(x: place.x, y: place.y, width: 0, height: 0), on: page, centered: false)
     }
 
     /// Moves the view without `go(to:)`, which files every move in the history: reopening
@@ -335,7 +343,13 @@ final class PDFReaderModel: ObservableObject {
         }
         let bounds = documentView.bounds
         y = max(bounds.minY, min(y, bounds.maxY - visible.height))
-        documentView.scroll(CGPoint(x: visible.minX, y: y))
+        // Sideways only when it has to: zoomed into one column, a result in the other is
+        // off screen, but a result already in view must not make the page lurch.
+        var x = visible.minX
+        if centered, target.minX < visible.minX || target.maxX > visible.maxX {
+            x = max(bounds.minX, min(target.midX - visible.width / 2, bounds.maxX - visible.width))
+        }
+        documentView.scroll(CGPoint(x: x, y: y))
         // PDFKit works out which page it is on from the scroll view's live-scroll
         // notification, not from the scroll itself; without this the page field and the
         // contents rail stay on the page the view just left.
@@ -350,11 +364,7 @@ final class PDFReaderModel: ObservableObject {
     /// reads pages, so the first one is on screen long before a long book is finished.
     func find(_ query: String, caseSensitive: Bool) {
         guard let document = pdfView.document else { return }
-        // Cancelling reports the old search as ended before it returns. The search is marked
-        // over first, so that report is ignored: a half-finished search has no "first
-        // result" worth jumping to.
-        isFinding = false
-        document.cancelFindString()
+        stopFinding()
         resetFind()
         findQuery = query
         findCaseSensitive = caseSensitive
@@ -362,6 +372,19 @@ final class PDFReaderModel: ObservableObject {
         findOrigin = currentPage
         isFinding = true
         document.beginFindString(query, withOptions: caseSensitive ? [] : [.caseInsensitive])
+    }
+
+    /// Stops a search that is still reading, keeping what it has found. Called the moment
+    /// the query changes: left running through the typing pause, the old search could
+    /// finish, wrap to its first result, and move the page the new search starts from.
+    func stopFinding() {
+        guard isFinding else { return }
+        // Cancelling reports the search as ended before it returns. It is marked over
+        // first, so that report is ignored.
+        isFinding = false
+        pdfView.document?.cancelFindString()
+        findMatchCount = findMatches.count
+        pdfView.highlightedSelections = findMatches.isEmpty ? nil : findMatches
     }
 
     /// Whether the search on screen is already the one for these words.
@@ -372,27 +395,37 @@ final class PDFReaderModel: ObservableObject {
     func stepFind(by offset: Int) {
         let count = findMatches.count
         guard count > 0 else { return }
-        focusMatch(((findIndex + offset) % count + count) % count)
+        // With no result shown yet, the first step shows the first (or last) one.
+        guard let current = findIndex else { return focusMatch(offset >= 0 ? 0 : count - 1) }
+        focusMatch(((current + offset) % count + count) % count)
     }
 
     func endFind() {
-        isFinding = false
-        pdfView.document?.cancelFindString()
+        stopFinding()
         resetFind()
         findQuery = ""
-        findMarkedOrigin = false
     }
 
     private func resetFind() {
+        // The result the search stopped on is a selection too; left behind, Copy and Add to
+        // Chat would act on a passage the bar no longer shows. A selection the reader made
+        // since is theirs and stays.
+        if let index = findIndex, findMatches.indices.contains(index),
+           let selected = pdfView.currentSelection, Self.samePlace(selected, findMatches[index]) {
+            pdfView.clearSelection()
+        }
         findMatches = []
         findMatchCount = 0
-        findIndex = 0
+        findIndex = nil
         isFinding = false
-        // The result the last search stopped on is a selection too; left behind, Copy and
-        // Add to Chat would still act on a passage the bar no longer shows.
-        if findHasFocusedMatch { pdfView.clearSelection() }
-        findHasFocusedMatch = false
+        findMarkedOrigin = false
+        ownHistoryChanges = 0
         pdfView.highlightedSelections = nil
+    }
+
+    private static func samePlace(_ lhs: PDFSelection, _ rhs: PDFSelection) -> Bool {
+        guard lhs.pages == rhs.pages, let page = lhs.pages.first else { return false }
+        return lhs.bounds(for: page) == rhs.bounds(for: page)
     }
 
     private func foundMatch(_ selection: PDFSelection) {
@@ -402,7 +435,7 @@ final class PDFReaderModel: ObservableObject {
         // The count is published in steps: a common word turns up thousands of times, and
         // a redraw of the bar for each one is the search's whole cost.
         if findMatches.count <= 20 || findMatches.count % 50 == 0 { findMatchCount = findMatches.count }
-        guard !findHasFocusedMatch, let page = selection.pages.first, let document = pdfView.document,
+        guard findIndex == nil, let page = selection.pages.first, let document = pdfView.document,
               document.index(for: page) >= findOrigin else { return }
         focusMatch(findMatches.count - 1)
     }
@@ -412,7 +445,7 @@ final class PDFReaderModel: ObservableObject {
         isFinding = false
         findMatchCount = findMatches.count
         // Nothing from the starting page onward: wrap to the first one in the book.
-        if !findHasFocusedMatch, !findMatches.isEmpty { focusMatch(0) }
+        if findIndex == nil, !findMatches.isEmpty { focusMatch(0) }
         pdfView.highlightedSelections = findMatches.isEmpty ? nil : findMatches
     }
 
@@ -421,7 +454,9 @@ final class PDFReaderModel: ObservableObject {
         let selection = findMatches[index]
         // The result you are on is inked apart from the rest; among a page of yellow
         // nothing else says which of them "9 of 130" is.
-        if findMatches.indices.contains(findIndex) { findMatches[findIndex].color = Self.findMatchColor }
+        if let previous = findIndex, findMatches.indices.contains(previous) {
+            findMatches[previous].color = Self.findMatchColor
+        }
         selection.color = Self.findCurrentMatchColor
         // The count is published in steps while a search runs; it must never trail the
         // result being shown, or the bar reads "21 of 20".
@@ -429,13 +464,14 @@ final class PDFReaderModel: ObservableObject {
         findIndex = index
         if !isFinding { pdfView.highlightedSelections = findMatches }
         pdfView.setCurrentSelection(selection, animate: true)
-        findHasFocusedMatch = true
         // A "go" to where the view already is files that place in the history without
         // moving. Once per run of results: Back then returns to where the stepping began,
-        // however many queries and results came after.
+        // however many results came after. Any other move through the history — Back, a
+        // link followed, a section picked — ends the run (see `readHistory`).
         if !findMarkedOrigin, let here = pdfView.currentDestination {
-            findMarkedOrigin = true
+            ownHistoryChanges += 1
             pdfView.go(to: here)
+            findMarkedOrigin = true
         }
         if let page = selection.pages.first {
             scrollQuietly(to: selection.bounds(for: page), on: page, centered: true)

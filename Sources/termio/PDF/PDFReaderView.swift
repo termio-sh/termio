@@ -117,6 +117,8 @@ struct PDFReaderView: View {
         // Searches as you type, a beat behind the keys: each search reads the whole book.
         .task(id: FindRequest(query: findQuery, caseSensitive: findOptions.caseSensitive, visible: findVisible)) {
             guard findVisible else { return }
+            // The search for the old words stops now, not after the pause.
+            if !model.isShowingFind(findQuery, caseSensitive: findOptions.caseSensitive) { model.stopFinding() }
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             startFind()
@@ -133,7 +135,7 @@ struct PDFReaderView: View {
         FileFindBar(
             query: $findQuery,
             options: $findOptions,
-            currentMatch: model.findMatchCount == 0 ? 0 : model.findIndex + 1,
+            currentMatch: model.findIndex.map { $0 + 1 } ?? 0,
             totalMatches: model.findMatchCount,
             onSubmit: {
                 // Return on the search already showing steps to its next result.

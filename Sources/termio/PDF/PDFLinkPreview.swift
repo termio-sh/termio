@@ -98,7 +98,9 @@ enum PDFReadingPosition {
     struct Place: Equatable {
         /// Zero-based page at the top of the view.
         let page: Int
-        /// The view's top edge on that page, in page space.
+        /// The view's top-left corner on that page, in page space. Both coordinates: on a
+        /// page stored rotated, scrolling down the screen moves along the page's x.
+        let x: Double
         let y: Double
     }
 
@@ -108,14 +110,14 @@ enum PDFReadingPosition {
 
     static func place(for url: URL, defaults: UserDefaults = .standard) -> Place? {
         guard let entry = (defaults.dictionary(forKey: key) as? [String: [Double]])?[url.path],
-              entry.count >= 2, entry[0] >= 0 else { return nil }
-        return Place(page: Int(entry[0]), y: entry[1])
+              entry.count == 4, entry[0] >= 0 else { return nil }
+        return Place(page: Int(entry[0]), x: entry[1], y: entry[2])
     }
 
     static func remember(_ place: Place, for url: URL, defaults: UserDefaults = .standard,
                          now: Date = Date()) {
         var all = defaults.dictionary(forKey: key) as? [String: [Double]] ?? [:]
-        all[url.path] = [Double(place.page), place.y, now.timeIntervalSinceReferenceDate]
+        all[url.path] = [Double(place.page), place.x, place.y, now.timeIntervalSinceReferenceDate]
         if all.count > limit {
             let oldest = all.sorted { ($0.value.last ?? 0) < ($1.value.last ?? 0) }
             for (path, _) in oldest.prefix(all.count - limit) { all.removeValue(forKey: path) }

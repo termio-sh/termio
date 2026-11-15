@@ -40,10 +40,10 @@ final class PDFReaderNavigationTests: XCTestCase {
     func testReadingPositionIsKeptPerDocument() {
         let other = directory.appendingPathComponent("other.pdf")
         XCTAssertNil(PDFReadingPosition.place(for: document, defaults: defaults))
-        PDFReadingPosition.remember(.init(page: 41, y: 512.5), for: document, defaults: defaults)
-        PDFReadingPosition.remember(.init(page: 3, y: 90), for: other, defaults: defaults)
-        XCTAssertEqual(PDFReadingPosition.place(for: document, defaults: defaults), .init(page: 41, y: 512.5))
-        XCTAssertEqual(PDFReadingPosition.place(for: other, defaults: defaults), .init(page: 3, y: 90))
+        PDFReadingPosition.remember(.init(page: 41, x: 12, y: 512.5), for: document, defaults: defaults)
+        PDFReadingPosition.remember(.init(page: 3, x: 0, y: 90), for: other, defaults: defaults)
+        XCTAssertEqual(PDFReadingPosition.place(for: document, defaults: defaults), .init(page: 41, x: 12, y: 512.5))
+        XCTAssertEqual(PDFReadingPosition.place(for: other, defaults: defaults), .init(page: 3, x: 0, y: 90))
     }
 
     /// The list is bounded, and what goes is the document read longest ago — not the one
@@ -52,7 +52,7 @@ final class PDFReaderNavigationTests: XCTestCase {
         let start = Date(timeIntervalSinceReferenceDate: 1_000)
         func url(_ index: Int) -> URL { directory.appendingPathComponent("book-\(index).pdf") }
         for index in 0..<205 {
-            PDFReadingPosition.remember(.init(page: index, y: 0), for: url(index), defaults: defaults,
+            PDFReadingPosition.remember(.init(page: index, x: 0, y: 0), for: url(index), defaults: defaults,
                                         now: start.addingTimeInterval(TimeInterval(index)))
         }
         XCTAssertNil(PDFReadingPosition.place(for: url(0), defaults: defaults))
@@ -224,7 +224,45 @@ final class PDFReaderNavigationTests: XCTestCase {
         model.find("no such words anywhere", caseSensitive: false)
         try waitForFind(model)
         XCTAssertEqual(model.findMatchCount, 0)
+        XCTAssertNil(model.findIndex)
         XCTAssertNil(model.pdfView.currentSelection?.string)
+    }
+
+    /// A passage the reader selected after searching is theirs: closing the search must
+    /// not take it away from Copy, Highlight and Add to Chat.
+    func testClosingFindKeepsASelectionTheReaderMade() throws {
+        let (model, window) = try openInWindow()
+        defer { window.orderOut(nil) }
+        model.find("needle", caseSensitive: false)
+        try waitForFind(model)
+        let pdf = try XCTUnwrap(model.pdfView.document)
+        let page = try XCTUnwrap(pdf.page(at: 0))
+        model.pdfView.currentSelection = try XCTUnwrap(pdf.selection(
+            from: page, atCharacterIndex: 0, to: page, atCharacterIndex: 12))
+        let chosen = try XCTUnwrap(model.pdfView.currentSelection?.string)
+
+        model.endFind()
+        XCTAssertEqual(model.pdfView.currentSelection?.string, chosen)
+    }
+
+    /// Following a link in the middle of a search is a move of its own. The next result
+    /// files the place the link led to, so Back returns there and not to an older result.
+    func testAResultAfterFollowingALinkGoesBackToTheLink() throws {
+        let (model, window) = try openInWindow()
+        defer { window.orderOut(nil) }
+        model.find("needle", caseSensitive: false)
+        try waitForFind(model)
+        let pdf = try XCTUnwrap(model.pdfView.document)
+        model.pdfView.go(to: PDFDestination(page: try XCTUnwrap(pdf.page(at: 3)), at: CGPoint(x: 0, y: 700)))
+        settle(0.3)
+        XCTAssertEqual(model.currentPage, 3)
+
+        model.stepFind(by: 5)
+        settle(0.3)
+        XCTAssertEqual(model.currentPage, 5)
+        model.goBack()
+        settle(0.3)
+        XCTAssertEqual(model.currentPage, 3)
     }
 
     /// Back spends the place a search filed. Stepping on from there files the new place, so
