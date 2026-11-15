@@ -34,7 +34,7 @@ final class DiffPaneLayoutTests: XCTestCase {
     private func pane(wraps: Bool, document: DiffDocument,
                       width: CGFloat = 300) -> DiffTextPane.PaneViews {
         let views = DiffTextPane.makeViews(
-            wraps: wraps, embedded: false, showsVerticalScroller: true,
+            wraps: wraps, showsVerticalScroller: true,
             backgroundColor: .black, numberColor: .gray, font: font)
         views.textView.frame = NSRect(x: 0, y: 0, width: width, height: 4000)
         views.textView.textStorage?.setAttributedString(document.attributed)
