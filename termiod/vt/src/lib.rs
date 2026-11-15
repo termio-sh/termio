@@ -941,8 +941,8 @@ impl VtTerminal {
     }
 
     fn title(&self) -> Result<Option<String>> {
-        // The engine reports an unset title as an empty borrowed string, and
-        // reports a non-UTF-8 one as an error; neither is a daemon failure.
+        // The engine reports an unset title as empty bytes and never stores a
+        // title that is not UTF-8, so the lossy decode only guards the type.
         Ok(match self.terminal.title() {
             Ok(title) if !title.is_empty() => Some(String::from_utf8_lossy(title).into_owned()),
             _ => None,
@@ -1527,8 +1527,8 @@ mod tests {
     /// in another language against this one.
     fn formatted(terminal: &VtTerminal) -> Vec<u8> {
         let mut formatter = terminal.vt_formatter().expect("formatter");
-        // A blank screen formats to nothing, which `format_alloc` and
-        // `format_len` both report as an error.
+        // A fixed buffer, so a screen of any size up to it reads back in one
+        // call.
         let mut text = vec![0; 1 << 16];
         let length = formatter.format_buf(&mut text).expect("formatted screen");
         text.truncate(length);

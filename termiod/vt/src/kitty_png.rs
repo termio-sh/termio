@@ -10,10 +10,9 @@
 //! size; if the library then cannot decode the pixels, the image is stored
 //! as zeros at that size, on both ends.
 //!
-//! The hook is installed through the raw `ghostty_sys_set`, not
-//! `kitty::graphics::set_png_decoder`. That wrapper dispatches through a
-//! thread-local, so a terminal written on any thread but the installing one
-//! would see no decoder and refuse every PNG.
+//! The hook is installed through the raw `ghostty_sys_set`, once per process,
+//! so the decoder sees the bytes and the size limits exactly as termiod checks
+//! them, on whichever thread the terminal is written.
 
 use std::io::Cursor;
 use std::sync::Once;
