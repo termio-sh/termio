@@ -10063,6 +10063,106 @@
           }
         }
       }
+    },
+    "Apps": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用"
+          }
+        }
+      }
+    },
+    "Simulator": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模拟器"
+          }
+        }
+      }
+    },
+    "New App": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建应用"
+          }
+        }
+      }
+    },
+    "Browse and open the project’s files.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "浏览并打开项目中的文件。"
+          }
+        }
+      }
+    },
+    "Search the contents of the project’s files.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索项目文件的内容。"
+          }
+        }
+      }
+    },
+    "Review uncommitted changes, branch comparisons and history.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看未提交的更改、分支对比和历史记录。"
+          }
+        }
+      }
+    },
+    "Read the project’s GitHub issues and pull requests.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看项目在 GitHub 上的 Issue 和 Pull Request。"
+          }
+        }
+      }
+    },
+    "See what a session is running and where.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看会话正在运行什么，以及在哪里运行。"
+          }
+        }
+      }
+    },
+    "Mirror and drive an iOS Simulator.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "镜像并操控 iOS 模拟器。"
+          }
+        }
+      }
+    },
+    "Offers the Issues app for projects whose remote is on GitHub.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "为远程仓库位于 GitHub 的项目提供 Issues 应用。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

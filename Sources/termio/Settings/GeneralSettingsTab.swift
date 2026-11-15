@@ -27,10 +27,23 @@ struct GeneralSettingsTab: View {
                 SectionHeaderLabel(title: localized("Language"))
             }
             Section {
+                ForEach(InspectorTab.allCases, id: \.self) { app in
+                    Toggle(isOn: Binding(
+                        get: { settings.isAppEnabled(app) },
+                        set: { settings.setApp(app, enabled: $0) }
+                    )) {
+                        SettingsLabel(title: app.title, subtext: app.settingsSubtext)
+                    }
+                    .toggleStyle(.switch)
+                }
+            } header: {
+                SectionHeaderLabel(title: localized("Apps"))
+            }
+            Section {
                 Toggle(isOn: $settings.githubIntegrationEnabled) {
                     SettingsLabel(
                         title: localized("GitHub"),
-                        subtext: localized("Shows the Issues pane in the inspector for projects whose remote is on GitHub.")
+                        subtext: localized("Offers the Issues app for projects whose remote is on GitHub.")
                     )
                 }
                 .toggleStyle(.switch)

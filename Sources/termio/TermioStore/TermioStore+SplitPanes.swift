@@ -50,7 +50,7 @@ extension TermioStore {
         guard let focusedID = selectedSessionID, let home = locate(focusedID) else { return }
 
         let siblings = roster(at: home)
-        let terminalCount = siblings.filter { $0.agent == .terminal }.count
+        let terminalCount = siblings.filter { $0.agent == .terminal && !$0.isApp }.count
         var newSession = Session(title: "Terminal \(terminalCount + 1)")
         // A worktree session runs somewhere other than the project root; the
         // companion shell should land where the focused session actually works.
@@ -145,7 +145,7 @@ extension TermioStore {
         }
 
         let title = agent == .terminal
-            ? "Terminal \(scope.sessions.filter { $0.agent == .terminal }.count + 1)"
+            ? "Terminal \(scope.sessions.filter { $0.agent == .terminal && !$0.isApp }.count + 1)"
             : agent.displayName
         var newSession = Session(title: title, agent: agent)
         // Share the anchor's working directory so a worktree agent's sibling lands
@@ -168,30 +168,7 @@ extension TermioStore {
         // rows and draws its ┌/└ bracket (see `splitLinkMarks`).
         insertSession(newSession, at: anchorHome.atSession(anchorHome.sessionIndex + 1))
 
-        // A lone anchor opens side by side; an anchor that already has a
-        // neighbour keeps its full pane, with the newcomer stacked into the
-        // opposite side of its divider (see `splitting(oppositeLeaf:adding:)`).
-        // An explicit direction overrides the stack rule — the caller said
-        // where the pane goes relative to itself, so its own leaf splits.
-        if let group = groupIndex(containing: anchorID) {
-            if let direction {
-                splitGroups[group] = splitGroups[group]
-                    .splitting(leaf: anchorID, direction: direction, adding: newSession.id,
-                               newShare: ratio)
-            } else if splitGroups[group].branchDirection(childLeaf: anchorID) != nil {
-                splitGroups[group] = splitGroups[group]
-                    .splitting(oppositeLeaf: anchorID, adding: newSession.id, newShare: ratio)
-            } else {
-                splitGroups[group] = splitGroups[group]
-                    .splitting(leaf: anchorID, direction: .horizontal, adding: newSession.id,
-                               newShare: ratio)
-            }
-            splitGroups[group] = splitGroups[group].equalized()
-        } else {
-            splitGroups.append(.split(SplitBranch(direction: direction ?? .horizontal,
-                                                  adding: .leaf(newSession.id), at: .second,
-                                                  share: ratio, to: .leaf(anchorID))))
-        }
+        placeInLayout(newSession.id, beside: anchorID, direction: direction, ratio: ratio)
         if takeFocus {
             selectedSessionID = newSession.id
             isPaneZoomed = false
@@ -199,6 +176,76 @@ extension TermioStore {
             activateInBackground(newSession.id)
         }
         return newSession.id
+    }
+
+    /// Gives a session just added to the roster its place in the layout, beside `anchorID`.
+    ///
+    /// A lone anchor opens side by side; an anchor that already has a neighbour keeps
+    /// its full pane, with the newcomer stacked into the opposite side of its divider
+    /// (see `splitting(oppositeLeaf:adding:)`). An explicit direction overrides the
+    /// stack rule — the caller said where the pane goes relative to itself, so its own
+    /// leaf splits.
+    private func placeInLayout(_ new: Session.ID, beside anchorID: Session.ID,
+                               direction: SplitDirection?, ratio: Double?) {
+        // One assignment, so observers of the groups see the finished layout only.
+        var groups = splitGroups
+        if let group = groupIndex(containing: anchorID) {
+            if let direction {
+                groups[group] = groups[group]
+                    .splitting(leaf: anchorID, direction: direction, adding: new, newShare: ratio)
+            } else if groups[group].branchDirection(childLeaf: anchorID) != nil {
+                groups[group] = groups[group]
+                    .splitting(oppositeLeaf: anchorID, adding: new, newShare: ratio)
+            } else {
+                groups[group] = groups[group]
+                    .splitting(leaf: anchorID, direction: .horizontal, adding: new, newShare: ratio)
+            }
+            groups[group] = groups[group].equalized()
+        } else {
+            groups.append(.split(SplitBranch(direction: direction ?? .horizontal,
+                                             adding: .leaf(new), at: .second,
+                                             share: ratio, to: .leaf(anchorID))))
+        }
+        splitGroups = groups
+    }
+
+    // MARK: - App cards
+
+    /// Opens an app card beside `anchor`, in its split group: the same checkout, the same
+    /// bucket of the sidebar, so the two read as one tab. With `takeFocus` off the
+    /// selection stays where it is — a terminal that asked for a pane keeps the keyboard.
+    @discardableResult
+    func addAppCard(_ app: InspectorTab, beside anchor: Session.ID, takeFocus: Bool = true) -> Session.ID? {
+        guard let anchorHome = locate(anchor), let anchorSession = session(anchor) else { return nil }
+        var card = Session(title: app.title)
+        card.app = app
+        card.worktreePath = anchorSession.worktreePath
+        // Where a card left on its own still points: the directory its terminal was in.
+        card.lastWorkingDirectory = liveWorkingDirectory(for: anchor) ?? anchorSession.lastWorkingDirectory
+        card.inheritDevice(from: anchorSession)
+        insertSession(card, at: anchorHome.atSession(anchorHome.sessionIndex + 1))
+        placeInLayout(card.id, beside: anchor, direction: nil, ratio: nil)
+        if takeFocus {
+            selectedSessionID = card.id
+            isPaneZoomed = false
+        }
+        return card.id
+    }
+
+    /// Opens an app card as a row of its own in a project, or in one of its worktrees.
+    @discardableResult
+    func addAppCard(_ app: InspectorTab, to projectID: Project.ID, worktreePath: String? = nil) -> Session.ID? {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }),
+              // A card on its own reads the row it is filed in, and that row's path is on
+              // another machine: read from here it would show this Mac's disk under that
+              // name. There a card opens beside a session, which carries its machine.
+              !isOnAnotherDevice(projects[index]) else { return nil }
+        var card = Session(title: app.title)
+        card.app = app
+        card.worktreePath = worktreePath
+        projects[index].sessions.insert(card, at: 0)
+        selectedSessionID = card.id
+        return card.id
     }
 
     // MARK: - Type switching (联合 ⇄ 独立)

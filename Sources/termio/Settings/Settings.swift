@@ -109,7 +109,7 @@ final class AppSettings: ObservableObject {
         Key.scrollbackMegabytes, Key.copyOnSelect,
         Key.interfaceFontFamily, Key.interfaceFontSize, Key.interfaceRowPadding,
         Key.agentCommands, Key.devices,
-        Key.bypassPermissionAgents, Key.agentArguments, Key.disabledAgents,
+        Key.bypassPermissionAgents, Key.agentArguments, Key.disabledAgents, Key.disabledApps,
         Key.addedAgents, Key.agentOrder, Key.agentHooksEnabled,
         Key.sessionControlEnabled, Key.githubIntegrationEnabled,
         Key.notifyTaskCompletion, Key.notificationSound,
@@ -156,6 +156,7 @@ final class AppSettings: ObservableObject {
         /// they describe the agent, not the box it runs on.
         static let agentArguments = "agents.arguments"
         static let disabledAgents = "agents.disabled"
+        static let disabledApps = "apps.disabled"
         static let addedAgents = "agents.added"
         static let agentOrder = "agents.order"
         static let agentHooksEnabled = "agents.hooksEnabled"
@@ -657,6 +658,7 @@ final class AppSettings: ObservableObject {
         bypassPermissionAgents = Set(store.stringArray(Key.bypassPermissionAgents) ?? [])
         agentArguments = store.stringDictionary(Key.agentArguments) ?? [:]
         disabledAgents = Set(store.stringArray(Key.disabledAgents) ?? [])
+        disabledApps = Set(store.stringArray(Key.disabledApps) ?? [])
         addedAgents = Set(store.stringArray(Key.addedAgents) ?? [])
         agentOrder = store.stringArray(Key.agentOrder) ?? []
         agentHooksEnabled = store.bool(Key.agentHooksEnabled)
@@ -789,6 +791,38 @@ final class AppSettings: ObservableObject {
             bypassPermissionAgents.insert(agent.rawValue)
         } else {
             bypassPermissionAgents.remove(agent.rawValue)
+        }
+    }
+
+    // MARK: Apps
+
+    /// The apps the person turned off in Settings: they leave every menu that opens an
+    /// app card. A card already open stays until it is closed.
+    @Published var disabledApps: Set<String> {
+        didSet { store.set(Array(disabledApps), forKey: Key.disabledApps) }
+    }
+
+    func isAppEnabled(_ app: InspectorTab) -> Bool {
+        !disabledApps.contains(app.rawValue)
+    }
+
+    func setApp(_ app: InspectorTab, enabled: Bool) {
+        if enabled { disabledApps.remove(app.rawValue) } else { disabledApps.insert(app.rawValue) }
+    }
+
+    /// The apps a menu offers, in their fixed order. `standalone` is a card opened as a
+    /// row of its own, which Info cannot be: it describes the terminal it stands beside.
+    /// Issues follows the GitHub switch, and Simulator is absent where it cannot run.
+    @MainActor
+    func offeredApps(standalone: Bool) -> [InspectorTab] {
+        InspectorTab.allCases.filter { app in
+            guard isAppEnabled(app) else { return false }
+            switch app {
+            case .info: return !standalone
+            case .issues: return githubIntegrationEnabled
+            case .simulator: return SimulatorHost.shared.unavailableReason == nil
+            default: return true
+            }
         }
     }
 

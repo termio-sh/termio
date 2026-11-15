@@ -1086,19 +1086,22 @@ extension TermioStore {
 
     /// The roster one slot belongs to, named the way `list` prints it.
     private func scope(at home: SessionSlot) -> ControlScope {
+        // Terminals only. An app card has no terminal to list, read or send to, and
+        // a `send` that reached one would start a shell behind it.
+        func terminals(_ sessions: [Session]) -> [Session] { sessions.filter { !$0.isApp } }
         switch home {
         case .project(let index, _):
             let project = projects[index]
             return ControlScope(id: project.id, name: project.name,
-                                sessions: project.sessions, project: project)
+                                sessions: terminals(project.sessions), project: project)
         case .terminals(let index, _):
             let workspace = workspaces[index]
             return ControlScope(id: workspace.id, name: "\(workspace.name) — Terminals",
-                                sessions: workspace.terminals, project: nil)
+                                sessions: terminals(workspace.terminals), project: nil)
         case .chats(let index, _):
             let workspace = workspaces[index]
             return ControlScope(id: workspace.id, name: "\(workspace.name) — Chats",
-                                sessions: workspace.chats, project: nil)
+                                sessions: terminals(workspace.chats), project: nil)
         }
     }
 

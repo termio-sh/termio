@@ -44,8 +44,12 @@ struct GitDiffView: View {
     /// Keeps the two columns on one viewport (see `DiffPaneScrollSync`).
     @State private var scrollSync = DiffPaneScrollSync()
 
-    /// The docked inspector is too narrow for two columns.
-    private var isSplitView: Bool { settings.diffSplitView && store.inspectorMaximized }
+    /// Whether the diff is wide enough for two readable columns. A card decides that by its
+    /// width — beside a terminal it is not, zoomed or on its own it is.
+    @State private var fitsTwoColumns = false
+    private static let twoColumnMinWidth: CGFloat = 900
+
+    private var isSplitView: Bool { settings.diffSplitView && fitsTwoColumns }
 
     // Find bar — the same `FileFindBar` the code editor uses, over the diff's read-only text.
     @State private var findBarVisible = false
@@ -77,8 +81,11 @@ struct GitDiffView: View {
         .onKeyPress(.rightArrow) { walk(+1) ? .handled : .ignored }
         .onExitCommand(perform: onClose)
         .task(id: request) { await load() }
-        // Maximizing (and restoring) changes whether the pane can split, so the document has
-        // to be rebuilt for the shape that applies now.
+        .onGeometryChange(for: Bool.self) { $0.size.width >= Self.twoColumnMinWidth } action: {
+            fitsTwoColumns = $0
+        }
+        // The card's width changes whether the pane can split, so the document has to be
+        // rebuilt for the shape that applies now.
         .onChange(of: isSplitView) { rebuildDocument() }
         // Appearance flips change both the wash palette and the highlighter theme.
         .task(id: colorScheme) {
@@ -236,9 +243,8 @@ struct GitDiffView: View {
             }
             .font(.system(size: 11, weight: .medium, design: .monospaced))
             .fixedSize()
-            // Inline or side by side. Only a diff with the whole window to spend gets the
-            // choice: docked, the pane is a column of the inspector and has no room for two.
-            if store.inspectorMaximized {
+            // Inline or side by side. Only a diff with the width to spend gets the choice.
+            if fitsTwoColumns {
                 DetailChromeButton(
                     icon: isSplitView ? .layoutRows : .layoutColumns,
                     help: isSplitView ? localized("Show one column (inline diff)")

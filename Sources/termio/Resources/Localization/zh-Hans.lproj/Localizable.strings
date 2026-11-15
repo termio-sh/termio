@@ -218,6 +218,8 @@
 	<string>在 Tailscale 管理控制台中批准这台 Mac。</string>
 	<key>Approve…</key>
 	<string>批准…</string>
+	<key>Apps</key>
+	<string>应用</string>
 	<key>Arguments</key>
 	<string>参数</string>
 	<key>Arrow</key>
@@ -262,6 +264,8 @@
 	<string>分支</string>
 	<key>Bring All to Front</key>
 	<string>前置全部窗口</string>
+	<key>Browse and open the project’s files.</key>
+	<string>浏览并打开项目中的文件。</string>
 	<key>Built-In Tailscale</key>
 	<string>内置 Tailscale</string>
 	<key>Built-in</key>
@@ -866,6 +870,8 @@
 	<string>已合并</string>
 	<key>Minimize</key>
 	<string>最小化</string>
+	<key>Mirror and drive an iOS Simulator.</key>
+	<string>镜像并操控 iOS 模拟器。</string>
 	<key>Missing on %lld devices</key>
 	<string>%lld 台设备上缺失</string>
 	<key>Missing on %lld machines</key>
@@ -914,6 +920,8 @@
 	<string>新建 Agent</string>
 	<key>New Agent Session</key>
 	<string>新建 Agent 会话</string>
+	<key>New App</key>
+	<string>新建应用</string>
 	<key>New Chat</key>
 	<string>新建聊天</string>
 	<key>New File</key>
@@ -1082,6 +1090,8 @@
 	<string>好</string>
 	<key>Off — SSH only</key>
 	<string>关闭 — 仅 SSH</string>
+	<key>Offers the Issues app for projects whose remote is on GitHub.</key>
+	<string>为远程仓库位于 GitHub 的项目提供 Issues 应用。</string>
 	<key>Offline</key>
 	<string>离线</string>
 	<key>Offline · %@</key>
@@ -1262,6 +1272,8 @@
 	<string>通过 SSH 连接</string>
 	<key>Reaching %@…</key>
 	<string>正在连接 %@…</string>
+	<key>Read the project’s GitHub issues and pull requests.</key>
+	<string>查看项目在 GitHub 上的 Issue 和 Pull Request。</string>
 	<key>Reads ~/.ssh/config directly — Termio keeps no separate host list.</key>
 	<string>直接读取 ~/.ssh/config——Termio 不保留单独的主机列表。</string>
 	<key>Ready</key>
@@ -1360,6 +1372,8 @@
 	<string>恢复默认</string>
 	<key>Reveal in Finder</key>
 	<string>在“访达”中显示</string>
+	<key>Review uncommitted changes, branch comparisons and history.</key>
+	<string>查看未提交的更改、分支对比和历史记录。</string>
 	<key>Rotate Left</key>
 	<string>向左旋转</string>
 	<key>Rotate Right</key>
@@ -1418,12 +1432,16 @@
 	<string>搜索项目</string>
 	<key>Search commands</key>
 	<string>搜索命令</string>
+	<key>Search the contents of the project’s files.</key>
+	<string>搜索项目文件的内容。</string>
 	<key>Search themes</key>
 	<string>搜索主题</string>
 	<key>Search themes…</key>
 	<string>搜索主题…</string>
 	<key>Searching…</key>
 	<string>正在搜索…</string>
+	<key>See what a session is running and where.</key>
+	<string>查看会话正在运行什么，以及在哪里运行。</string>
 	<key>Select All</key>
 	<string>全选</string>
 	<key>Select Element</key>
@@ -1524,6 +1542,8 @@
 	<string>使用 ssh 默认提供的密钥登录。</string>
 	<key>Signs this Mac’s device out of your tailnet.</key>
 	<string>让这台 Mac 的设备退出你的 tailnet。</string>
+	<key>Simulator</key>
+	<string>模拟器</string>
 	<key>Simulator Unavailable</key>
 	<string>模拟器不可用</string>
 	<key>Size</key>

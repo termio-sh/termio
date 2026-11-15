@@ -892,6 +892,11 @@ func projectMenuItems(store: TermioStore, settings: AppSettings, project: Projec
             .submenu(localized("New Agent Session"), enabledAgentPresets(settings)
                 .filter { $0 != .terminal }
                 .map { preset in .agent(preset) { addSession(preset) } }),
+            .submenu(localized("New App"), settings.offeredApps(standalone: true).map { app in
+                .action(app.title) {
+                    store.addAppCard(app, to: project.id, worktreePath: worktree?.path)
+                }
+            }),
         ]
         : []
     if let worktree {
@@ -949,34 +954,48 @@ func projectMenuItems(store: TermioStore, settings: AppSettings, project: Projec
 /// A session's right-click menu, on its sidebar row or on its tab.
 @MainActor
 func sessionMenuItems(store: TermioStore, session: Session) -> [SidebarMenuItem] {
-    var items: [SidebarMenuItem] = [
-        .action(localized("Open in New Window")) {
-            (NSApp.delegate as? AppDelegate)?.openWindow(selecting: session.id)
-        },
-        .separator,
-        .action(localized("Rename…")) { store.renameSession(session.id) },
-        .action(localized("Copy Session Link")) {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(store.sessionLink(for: session), forType: .string)
-        },
-    ]
+    // An app card is a pane, not a running session: there is nothing to link to, and
+    // closing it ends nothing.
+    var items: [SidebarMenuItem] = session.isApp
+        ? [.action(localized("Rename…")) { store.renameSession(session.id) }]
+        : [
+            .action(localized("Open in New Window")) {
+                (NSApp.delegate as? AppDelegate)?.openWindow(selecting: session.id)
+            },
+            .separator,
+            .action(localized("Rename…")) { store.renameSession(session.id) },
+            .action(localized("Copy Session Link")) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(store.sessionLink(for: session), forType: .string)
+            },
+        ]
     let targets = store.groupableTargets(for: session.id)
-    if store.isInSplitGroup(session.id) || !targets.isEmpty { items.append(.separator) }
+    // The apps a terminal can take beside it: the ones not already in its group.
+    let open = Set(store.splitMembers(of: session.id).compactMap { store.session($0)?.app })
+    let apps = session.isApp ? [] : store.settings.offeredApps(standalone: false).filter { !open.contains($0) }
+    if store.isInSplitGroup(session.id) || !targets.isEmpty || !apps.isEmpty { items.append(.separator) }
     if store.isInSplitGroup(session.id) {
         items.append(.action(localized("Ungroup")) { store.detachFromSplit(session.id) })
     }
-    if !targets.isEmpty {
-        items.append(.submenu(localized("Group with"), targets.map { target in
+    if !targets.isEmpty || !apps.isEmpty {
+        var rows: [SidebarMenuItem] = targets.map { target in
             .action(store.displayTitle(for: target)) {
                 store.groupSession(session.id, with: target.id)
             }
-        }))
+        }
+        if !targets.isEmpty, !apps.isEmpty { rows.append(.separator) }
+        rows += apps.map { app in
+            .action(app.title) { store.addAppCard(app, beside: session.id, takeFocus: false) }
+        }
+        items.append(.submenu(localized("Group with"), rows))
     }
     items.append(contentsOf: [
         .separator,
         .action(session.pinned ? localized("Unpin") : localized("Pin")) { store.toggleSessionPinned(session.id) },
         .separator,
-        .action(localized("Close Session")) { store.requestCloseSession(session.id) },
+        session.isApp
+            ? .action(localized("Close")) { store.closeSession(session.id) }
+            : .action(localized("Close Session")) { store.requestCloseSession(session.id) },
     ])
     return items
 }
@@ -1297,7 +1316,7 @@ private struct SessionRow: View {
                     WorkingIndicator(tint: .sidebarWorkingInk)
                         .frame(width: 12, height: 12)
                 } else {
-                    AgentIconView(agent: store.effectiveAgent(for: session), size: 12)
+                    SessionIconView(session: session, size: 12)
                 }
             }
             .frame(width: 20, height: 20)

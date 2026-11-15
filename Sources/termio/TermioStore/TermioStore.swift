@@ -82,15 +82,8 @@ final class TermioStore: ObservableObject {
             // Suppressed during launch restore: `restored()` seeds every session's layout
             // and applies the selected one by hand, so capturing here would overwrite a
             // just-seeded layout with the still-default live inspector.
-            if !isRestoringInspector {
-                if let old = oldValue {
-                    inspectorStates[old] = captureInspectorState()
-                    // The panel still shows the session being left: picture it before the
-                    // arriving session's layout replaces it.
-                    if openPanels.contains(old) { panelSnapshots[old] = InspectorPanelHost.shared.snapshot() }
-                }
-                applyInspectorState(selectedSessionID.flatMap { inspectorStates[$0] } ?? InspectorState())
-            }
+            recordTerminalSelection()
+            followLiveApp()
             if let id = selectedSessionID {
                 // Looking at a session is being in its workspace. A global verb —
                 // a deep link, the palette, a notification, an SSH shell filed
@@ -144,12 +137,173 @@ final class TermioStore: ObservableObject {
     @Published var splitGroups: [SplitNode] = [] {
         didSet {
             guard oldValue != splitGroups else { return }
+            followLiveApp()
             persistDebounce?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 MainActor.assumeIsolated { self?.persist() }
             }
             persistDebounce = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+        }
+    }
+
+    /// The app card whose pane is live. There is one inspector (one file watcher, one
+    /// `git status`), and it draws in this card; every other app card shows the picture
+    /// it left (`panelSnapshots`) until it is selected.
+    ///
+    /// It is the selected card when that is an app card. While a terminal is selected it
+    /// stays on an app card of the same split group, so the Files or Changes card beside
+    /// an agent keeps running while the person types to the agent.
+    @Published private(set) var liveAppID: Session.ID? {
+        didSet {
+            guard oldValue != liveAppID, !isRestoringInspector else { return }
+            if let old = oldValue, session(old) != nil {
+                inspectorStates[old] = captureInspectorState()
+                // The card still shows its pane: picture it before the arriving card's
+                // layout replaces it.
+                if let picture = InspectorPanelHost.shared.snapshot() { panelSnapshots[old] = picture }
+            }
+            // A card opened for a detail already in hand (a path cmd-clicked in a terminal
+            // with no Files card yet) keeps that detail: there is no layout of its own to
+            // put back, and restating one would close the file that asked for the card.
+            if oldValue == nil, let live = liveAppID, inspectorStates[live] == nil,
+               let app = session(live)?.app {
+                isRestatingDetail = true
+                inspectorTab = app
+                isRestatingDetail = false
+                return
+            }
+            applyInspectorState(appState(for: liveAppID))
+        }
+    }
+
+    /// The terminal last selected, which an app card selected on its own still reads
+    /// for (see `companionTerminal`).
+    private var lastTerminalSelection: Session.ID?
+
+    /// Records the selection as the terminal last selected, when it is one. The
+    /// selection's didSet does this on every change; the two places that set a selection
+    /// without firing it — the designated init and the launch restore — call this.
+    private func recordTerminalSelection() {
+        if let id = selectedSessionID, session(id)?.isApp == false { lastTerminalSelection = id }
+    }
+
+    /// Every session sharing `id`'s split group, itself included; just `id` when it is alone.
+    func splitMembers(of id: Session.ID) -> [Session.ID] {
+        splitGroups.first { $0.contains(id) }?.leafIDs ?? [id]
+    }
+
+    /// The terminal an app card stands beside: the one last selected in its group, else
+    /// the group's first. `nil` for an app card on its own.
+    func companionTerminal(of app: Session.ID) -> Session.ID? {
+        let terminals = splitMembers(of: app).filter { session($0)?.isApp == false }
+        if let last = lastTerminalSelection, terminals.contains(last) { return last }
+        return terminals.first
+    }
+
+    /// The session the panes read for: the selected terminal, or the terminal beside the
+    /// selected app card. An app card on its own answers for itself, from the row it is
+    /// filed in.
+    var inspectorSubjectID: Session.ID? {
+        guard let id = selectedSessionID else { return nil }
+        guard session(id)?.isApp == true else { return id }
+        return companionTerminal(of: id) ?? id
+    }
+
+    /// The terminal that "Add to Chat" and its siblings type into: the selected one, or
+    /// the one beside the selected app card.
+    var promptSessionID: Session.ID? {
+        inspectorSubjectID.flatMap { session($0)?.isApp == false ? $0 : nil }
+    }
+
+    /// Moves the live pane to where the selection is (see `liveAppID`).
+    private func followLiveApp() {
+        guard let id = selectedSessionID, let selected = session(id) else {
+            liveAppID = nil
+            return
+        }
+        if selected.isApp {
+            liveAppID = id
+            return
+        }
+        let apps = splitMembers(of: id).filter { session($0)?.isApp == true }
+        if let live = liveAppID, apps.contains(live) { return }
+        liveAppID = apps.first
+    }
+
+    /// The layout an app card comes back to. Its pane is the card's own, whatever was saved.
+    private func appState(for id: Session.ID?) -> InspectorState {
+        guard let id, let app = session(id)?.app else { return InspectorState() }
+        var state = inspectorStates[id] ?? InspectorState()
+        state.tab = app
+        return state
+    }
+
+    /// Shows `tab` for the selected session: the app card of that kind in its split group
+    /// becomes the live one, and where there is none a new card opens beside the selection.
+    ///
+    /// A selected terminal keeps the selection, and so the keyboard. A selected app card
+    /// hands it to the card that was asked for: the live card is the selected one whenever
+    /// an app card is selected, or the card on screen would be a picture nothing can wake.
+    ///
+    /// `byPerson` is off for a card something else asked for (an agent's `termio sim`):
+    /// that opens the card and leaves the person's selection and zoom where they are.
+    func showApp(_ tab: InspectorTab, byPerson: Bool = true) {
+        guard let selected = selectedSessionID, let session = session(selected) else { return }
+        if session.app == tab {
+            liveAppID = selected
+            return
+        }
+        guard let target = splitMembers(of: selected).first(where: { self.session($0)?.app == tab })
+                ?? addAppCard(tab, beside: selected, takeFocus: false) else { return }
+        // Zoom shows the selected card alone, which would hide the card just asked for.
+        if byPerson { isPaneZoomed = false }
+        if session.isApp {
+            if byPerson { selectedSessionID = target }
+        } else if byPerson || liveAppID == nil {
+            // Asked for by something else, the card does not take the live pane from one
+            // the person has running beside their terminal.
+            liveAppID = target
+        }
+    }
+
+    /// The person opened a detail from outside its card — a path cmd-clicked in a terminal,
+    /// a file picked in the palette. The card takes the selection and, with it, the
+    /// keyboard, and a zoom on the terminal they were in ends: it would otherwise move onto
+    /// the card and hide that terminal. Where there is no card yet, one opens for the pane
+    /// in hand.
+    func selectCardForOpenedDetail() {
+        if liveAppID == nil { showApp(inspectorTab) }
+        guard let live = liveAppID else {
+            // No card could open — nothing is selected to open one beside. A detail left
+            // set would show nowhere now and turn up later, in the next card to open.
+            openDiff = nil
+            openFileURL = nil
+            openIssueDetail = nil
+            return
+        }
+        guard selectedSessionID != live else { return }
+        isPaneZoomed = false
+        selectedSessionID = live
+    }
+
+    /// Hands the keyboard back from the selected app card to the terminal beside it:
+    /// Escape in a pane that has nothing left to dismiss.
+    func leaveApp() {
+        guard let id = selectedSessionID, session(id)?.isApp == true,
+              let terminal = companionTerminal(of: id) else { return }
+        selectedSessionID = terminal
+    }
+
+    /// Closes the live app card when `tab` is on screen, and shows it otherwise: the
+    /// View menu's toggle.
+    func toggleApp(_ tab: InspectorTab) {
+        // Only a card on screen is closed. One hidden behind a zoomed terminal is shown
+        // instead: closing what nobody can see would look like the menu doing nothing.
+        if let live = liveAppID, session(live)?.app == tab, isPaneOnScreen(live) {
+            closeSession(live)
+        } else {
+            showApp(tab)
         }
     }
 
@@ -574,7 +728,7 @@ final class TermioStore: ObservableObject {
     /// Whether the selected session is running a coding agent (not a plain shell) —
     /// gates the file tree's "Add to Chat" row action.
     var selectedSessionRunsAgent: Bool {
-        guard let id = selectedSessionID, let session = session(id) else { return false }
+        guard let id = promptSessionID, let session = session(id) else { return false }
         return !session.agent.isShell
     }
 
@@ -583,7 +737,7 @@ final class TermioStore: ObservableObject {
     /// the row on the terminal (`TerminalPane.sendPaths`, which shares these tokens).
     @discardableResult
     func addPathToSelectedSessionPrompt(_ url: URL) -> Bool {
-        guard let id = selectedSessionID, let session = session(id) else { return false }
+        guard let id = promptSessionID, let session = session(id) else { return false }
         return typeAtPrompt(Self.promptToken(for: url) + " ", in: session)
     }
 
@@ -592,6 +746,8 @@ final class TermioStore: ObservableObject {
     /// the link is attached.
     @discardableResult
     func typeAtPrompt(_ text: String, in session: Session) -> Bool {
+        // An app card has no terminal, and asking for its surface would start one.
+        guard !session.isApp else { return false }
         if let link = runtimes[session.id]?.streamLink, link.isStreaming {
             link.send(Data(text.utf8))
             return true
@@ -613,7 +769,7 @@ final class TermioStore: ObservableObject {
     /// PTY input.
     @discardableResult
     func addSnippetToSelectedSessionPrompt(_ text: String) -> Bool {
-        guard let id = selectedSessionID, let session = session(id) else { return false }
+        guard let id = promptSessionID, let session = session(id) else { return false }
         let state = surface(for: session)
         guard case let .inMemory(backend) = state.configuration.backend else { return false }
         backend.sendInput(Data(("\u{1B}[200~" + text + "\u{1B}[201~").utf8))
@@ -637,6 +793,13 @@ final class TermioStore: ObservableObject {
     @Published var inspectorTab: InspectorTab = .files {
         didSet {
             guard inspectorTab != oldValue else { return }
+            // Each card shows one pane. Asking for another is asking for the card that
+            // shows it, which `showApp` finds or opens; that lands back here with the
+            // tab already in step.
+            if !isRestatingDetail, liveAppID.flatMap({ session($0)?.app }) != inspectorTab {
+                showApp(inspectorTab)
+                return
+            }
             openFileURL = nil
             openDiff = nil
             openIssueDetail = nil
@@ -663,7 +826,7 @@ final class TermioStore: ObservableObject {
     /// loose chat takes the scoped scratch directory. Whether that candidate is
     /// this Mac's to read is the checkout's answer, not the slot's.
     var inspectorCheckout: Checkout? {
-        guard let id = selectedSessionID, let slot = locate(id) else { return nil }
+        guard let id = inspectorSubjectID, let slot = locate(id) else { return nil }
         let session = self[slot]
         let project: Project?
         let localRoot: String?
@@ -781,11 +944,12 @@ final class TermioStore: ObservableObject {
     /// closed, which would otherwise leave the git pane's auto-refresh spawning
     /// `git status` for a pane nobody can see.
     var inspectorVisible: Bool {
-        get { selectedSessionID.map { openPanels.contains($0) } ?? false }
+        get { liveAppID != nil }
         set {
-            guard let id = selectedSessionID else { return }
-            if newValue { openPanels.insert(id) } else { openPanels.remove(id) }
-            persistSoon()
+            // Showing opens the card for the pane in hand. Hiding is closing that card,
+            // which is the card's own close button, not a flag to clear here.
+            guard newValue, liveAppID == nil else { return }
+            showApp(inspectorTab)
         }
     }
 
@@ -1384,6 +1548,7 @@ final class TermioStore: ObservableObject {
         // `syncRuntimes` reads it.
         rebuildSessionSlots()
         syncRuntimes()
+        recordTerminalSelection()
 
         // Re-style already-open terminals whenever appearance settings change.
         // `objectWillChange` fires *before* the new value lands, so we hop to the
@@ -1735,7 +1900,10 @@ final class TermioStore: ObservableObject {
         if let layouts = snapshot.inspectorLayouts {
             let live = Set(store.allSessions.map(\.id))
             for (key, layout) in layouts {
-                guard let id = UUID(uuidString: key), live.contains(id) else { continue }
+                // Only an app card has a pane to restore. A layout saved for a terminal is
+                // from a build where every card had a panel.
+                guard let id = UUID(uuidString: key), live.contains(id),
+                      store.session(id)?.isApp == true else { continue }
                 var state = InspectorState(tab: layout.tab)
                 if let path = layout.filePath, FileManager.default.fileExists(atPath: path) {
                     state.openFileURL = URL(fileURLWithPath: path)
@@ -1762,12 +1930,12 @@ final class TermioStore: ObservableObject {
         if let id = snapshot.selectedSessionID, store.session(id) != nil {
             store.selectedSessionID = id
         }
+        // Neither assignment fires the selection's didSet, which is what records the
+        // terminal an app card reads for.
+        store.recordTerminalSelection()
         // The designated init set the selection without firing its didSet, and re-setting
         // it to the same id above is a no-op, so apply the selected session's restored
         // layout to the live inspector props explicitly.
-        if let id = store.selectedSessionID, let state = store.inspectorStates[id] {
-            store.applyInspectorState(state)
-        }
         store.isRestoringInspector = false
         // Restore the split groups, keeping only those whose panes all still
         // resolve to live sessions (a stale group is dropped whole rather than
@@ -1781,6 +1949,12 @@ final class TermioStore: ObservableObject {
         // whose rows a since-ungrouped session still sits between; heal it on load
         // rather than waiting for the next group edit.
         store.gatherSplitRuns()
+        // The live app card, with the layout seeded for it above. Guarded like the
+        // selection: nothing here is an edit to save.
+        store.isRestoringInspector = true
+        store.followLiveApp()
+        store.applyInspectorState(store.appState(for: store.liveAppID))
+        store.isRestoringInspector = false
         // Closes made while a route was offline (or right before a crash) come
         // back as pending kills; the first roster refresh per route settles them.
         store.closedSessionJournal = snapshot.closedDaemonSessions ?? []
@@ -1793,7 +1967,7 @@ final class TermioStore: ObservableObject {
         // Fold the current selection's live inspector layout in — it isn't copied into
         // `inspectorStates` until the selection leaves it.
         var states = inspectorStates
-        if let id = selectedSessionID { states[id] = captureInspectorState() }
+        if let id = liveAppID { states[id] = captureInspectorState() }
         var layouts: [String: StateFile.InspectorLayout] = [:]
         for id in Set(states.keys).union(openPanels) {
             let state = states[id] ?? InspectorState()
@@ -1960,6 +2134,9 @@ final class TermioStore: ObservableObject {
     /// freeze a remote row at `<project> · <host>` for the rest of its life.
     func displayTitle(for session: Session) -> String {
         if let given = session.givenTitle { return given }
+        // Named for its pane, in the language the app runs in now rather than the one
+        // it was created in.
+        if let app = session.app { return app.title }
         if session.agent != .terminal {
             return AgentSessionTitle.automatic(
                 native: runtimes[session.id]?.liveTitle ?? session.liveTitle,
@@ -2078,9 +2255,10 @@ final class TermioStore: ObservableObject {
             InspectorPanelHost.shared.quickLook(url)
             return
         }
-        // Show where the file lives, as VS Code does: the Files tab, expanded down to its row.
-        // The tab goes first, because switching tabs closes whatever detail is open.
+        // Show where the file lives, as VS Code does: the Files card, expanded down to its row.
+        // The card goes first, because moving to it closes whatever detail it had open.
         inspectorTab = .files
+        selectCardForOpenedDetail()
         if let root = inspectorCheckout?.localRoot, url.path.hasPrefix(root.hasSuffix("/") ? root : root + "/") {
             pendingFileReveal = url.path
         }

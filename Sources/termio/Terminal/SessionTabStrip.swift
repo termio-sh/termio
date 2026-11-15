@@ -12,6 +12,7 @@ import TermioShared
 /// one click away.
 struct SessionTabStrip: View {
     @EnvironmentObject var store: TermioStore
+    @EnvironmentObject var settings: AppSettings
     /// The tab pressed, from mouse-down to mouse-up, whether or not it is ever dragged.
     @State private var press: TabDrag?
     /// The tab under the pointer while it is dragged along the strip.
@@ -123,9 +124,7 @@ struct SessionTabStrip: View {
                 }
                 .frame(height: SessionTab.height + 4)
             }
-            ChromeIconButton(icon: .add, help: localized("New Terminal"), prominence: .glass) {
-                store.addTerminalHere()
-            }
+            ChromeMenuButton(icon: .add, help: localized("New"), makeMenu: newMenu)
             if group == nil { Spacer(minLength: 0) }
         }
         .frame(height: WindowChrome.rowHeight)
@@ -224,6 +223,43 @@ struct SessionTabStrip: View {
     /// session, the one whose title and icon the tab shows.
     private func tabMenuItems(for tab: [Session.ID]) -> [SidebarMenuItem] {
         tab.first.flatMap(store.session).map { sessionMenuItems(store: store, session: $0) } ?? []
+    }
+
+    /// Everything a tab can be, in one menu: a terminal, an agent, an app. Each opens as a
+    /// tab of its own in the group on screen; grouping it with another is a drag.
+    private func newMenu() -> NSMenu {
+        let selected = store.selectedSessionID.flatMap(store.session)
+        var items: [SidebarMenuItem] = [.action(localized("New Terminal")) { store.addTerminalHere() }]
+        // Where an app has no checkout on this Mac to read as a row of its own —
+        // Terminals, Chats, a project on another machine — it opens beside a session
+        // instead: the selected terminal, or the one the selected app card stands beside.
+        func appsBeside() -> [SidebarMenuItem] {
+            guard let selected,
+                  let anchor = selected.isApp ? store.companionTerminal(of: selected.id) : selected.id
+            else { return [] }
+            // One card of a kind per group: a second could never be reached by `showApp`.
+            let open = Set(store.splitMembers(of: anchor).compactMap { store.session($0)?.app })
+            return settings.offeredApps(standalone: false).filter { !open.contains($0) }.map { app in
+                .action(app.title) { store.addAppCard(app, beside: anchor) }
+            }
+        }
+        var apps = appsBeside()
+        if let selected, case .project(let projectID)? = store.group(of: selected.id),
+           let project = store.projects.first(where: { $0.id == projectID }) {
+            let worktree = selected.worktreePath
+            items.append(.submenu(localized("New Agent Session"), enabledAgentPresets(settings)
+                .filter { $0 != .terminal }
+                .map { preset in
+                    .agent(preset) { store.addSession(to: projectID, agent: preset, worktreePath: worktree) }
+                }))
+            if !store.isOnAnotherDevice(project) {
+                apps = settings.offeredApps(standalone: true).map { app in
+                    .action(app.title) { store.addAppCard(app, to: projectID, worktreePath: worktree) }
+                }
+            }
+        }
+        if !apps.isEmpty { items.append(.separator) }
+        return sidebarMenu(items + apps)
     }
 
     /// Every group, the current one checked — the collapsed sidebar's list, as a menu.
@@ -335,7 +371,7 @@ private struct TabIconStack: View {
                 WorkingIndicator(tint: .sidebarWorkingInk)
                     .frame(width: 12, height: 12)
             } else if let session = store.session(id) {
-                AgentIconView(agent: store.effectiveAgent(for: session), size: 12)
+                SessionIconView(session: session, size: 12)
             }
         }
         .frame(width: Self.tile, height: Self.tile)
