@@ -158,8 +158,8 @@ private struct MarkdownReaderWebView: NSViewRepresentable {
     /// flipped back, and a hidden view must not hold focus.
     private func claimFocus(_ view: WKWebView) {
         DispatchQueue.main.async { [weak view] in
-            guard let view, !view.isHidden, InspectorPanelHost.shared.detailMayTakeKeyboard,
-                  let window = view.window else { return }
+            guard let view, !view.isHidden, let window = view.window,
+                  InspectorPanelHost.shared.detailMayTakeKeyboard(in: window) else { return }
             window.makeFirstResponder(view)
         }
     }

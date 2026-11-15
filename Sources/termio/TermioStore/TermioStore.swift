@@ -260,6 +260,21 @@ final class TermioStore: ObservableObject {
         }
     }
 
+    /// The person opened a detail from outside its card — a path cmd-clicked in a terminal,
+    /// a file picked in the palette. The card takes the selection and, with it, the
+    /// keyboard, and a zoom on the terminal they were in ends: it would otherwise move onto
+    /// the card and hide that terminal. Where there is no card yet, one opens for the pane
+    /// in hand.
+    func selectCardForOpenedDetail() {
+        if liveAppID == nil { showApp(inspectorTab) }
+        guard let live = liveAppID, selectedSessionID != live else { return }
+        // The card reads for the terminal the person is leaving, which a selection restored
+        // at launch never recorded.
+        if let id = selectedSessionID, session(id)?.isApp == false { lastTerminalSelection = id }
+        isPaneZoomed = false
+        selectedSessionID = live
+    }
+
     /// Hands the keyboard back from the selected app card to the terminal beside it:
     /// Escape in a pane that has nothing left to dismiss.
     func leaveApp() {
@@ -1902,6 +1917,11 @@ final class TermioStore: ObservableObject {
         if let id = snapshot.selectedSessionID, store.session(id) != nil {
             store.selectedSessionID = id
         }
+        // Neither assignment fires the selection's didSet, which is what records the
+        // terminal an app card reads for.
+        if let id = store.selectedSessionID, store.session(id)?.isApp == false {
+            store.lastTerminalSelection = id
+        }
         // The designated init set the selection without firing its didSet, and re-setting
         // it to the same id above is a no-op, so apply the selected session's restored
         // layout to the live inspector props explicitly.
@@ -2227,14 +2247,7 @@ final class TermioStore: ObservableObject {
         // Show where the file lives, as VS Code does: the Files card, expanded down to its row.
         // The card goes first, because moving to it closes whatever detail it had open.
         inspectorTab = .files
-        if liveAppID == nil { showApp(.files) }
-        // The person asked for this file, so its card takes the selection and, with it, the
-        // keyboard — and a zoom on the terminal they clicked in ends, or it would move
-        // onto the card and hide that terminal.
-        if let live = liveAppID, selectedSessionID != live {
-            isPaneZoomed = false
-            selectedSessionID = live
-        }
+        selectCardForOpenedDetail()
         if let root = inspectorCheckout?.localRoot, url.path.hasPrefix(root.hasSuffix("/") ? root : root + "/") {
             pendingFileReveal = url.path
         }

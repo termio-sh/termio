@@ -129,7 +129,13 @@ final class InspectorPanelHost {
 
     /// See `FileBrowserHostingController.detailMayTakeKeyboard`. True with no inspector
     /// at all, where there is no card to ask about.
-    var detailMayTakeKeyboard: Bool { controller?.detailMayTakeKeyboard ?? true }
+    ///
+    /// The rule is about cards, so it holds in a main window only. The same editor in a
+    /// sheet or in Settings has no card beside a terminal, and takes the keyboard as before.
+    func detailMayTakeKeyboard(in window: NSWindow?) -> Bool {
+        guard let window, MainWindowController.isMain(window) else { return true }
+        return controller?.detailMayTakeKeyboard ?? true
+    }
 
     /// Opens `url` in the shared Quick Look panel — the preview a cmd-clicked video, audio file,
     /// or office document gets, since the in-app preview only renders images and PDFs.
