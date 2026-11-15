@@ -950,6 +950,10 @@ func projectMenuItems(store: TermioStore, settings: AppSettings, project: Projec
 @MainActor
 func sessionMenuItems(store: TermioStore, session: Session) -> [SidebarMenuItem] {
     var items: [SidebarMenuItem] = [
+        .action(localized("Open in New Window")) {
+            (NSApp.delegate as? AppDelegate)?.openWindow(selecting: session.id)
+        },
+        .separator,
         .action(localized("Rename…")) { store.renameSession(session.id) },
         .action(localized("Copy Session Link")) {
             NSPasteboard.general.clearContents()
@@ -1176,6 +1180,7 @@ private struct PressShrinkStyle: ButtonStyle {
 /// opacity-reveal pattern as the project header).
 private struct SessionRow: View {
     @EnvironmentObject var store: TermioStore
+    @EnvironmentObject private var window: WindowContext
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject private var sidebarDrag: SidebarDragState
     let session: Session
@@ -1226,7 +1231,7 @@ private struct SessionRow: View {
         return group.contains(session.id)
     }
 
-    private var isSelected: Bool { store.selectedSessionID == session.id }
+    private var isSelected: Bool { window.selectedSessionID == session.id }
 
     /// The machine this row runs on, or `nil` when it runs here — or when the
     /// workspace *is* that machine, since its name is already in the toolbar band.
@@ -1416,7 +1421,7 @@ private struct SessionRow: View {
             // open file editor. Tapping a *different* session must NOT clear here: the
             // selection didSet captures the outgoing session's inspector layout first
             // (issue #160), so clearing pre-capture would drop its open file.
-            if store.selectedSessionID == session.id {
+            if window.selectedSessionID == session.id {
                 store.openFileURL = nil
             }
             store.selectedSessionID = session.id
@@ -1466,6 +1471,7 @@ private struct SessionRow: View {
 /// which is what the user means by clicking a row that used to work.
 private struct EndedSessionRow: View {
     @EnvironmentObject var store: TermioStore
+    @EnvironmentObject private var window: WindowContext
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject private var sidebarDrag: SidebarDragState
     let session: Session
@@ -1474,7 +1480,7 @@ private struct EndedSessionRow: View {
     var leadingIndent: CGFloat = 16
     @State private var isHovering = false
 
-    private var isSelected: Bool { store.selectedSessionID == session.id }
+    private var isSelected: Bool { window.selectedSessionID == session.id }
 
     /// The same group target and gap the live row draws.
     private var isDropTarget: Bool { sidebarDrag.groupTarget == session.id }

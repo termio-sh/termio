@@ -23,12 +23,21 @@ enum DebugWindowSnapshot {
         static let shared = Trigger()
         @objc func fire(_ note: Notification) {
             let title = note.userInfo?["title"] as? String
+            // `inactive` captures a main window other than the active one, without raising it.
+            let inactive = note.userInfo?["inactive"] != nil
             let tab = (note.userInfo?["settings"] as? String).flatMap(SettingsTab.init(rawValue:))
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     // `settings: <tab>` opens that tab first, from inside the
                     // app: driven from outside, the window loses the focus race
                     // to whatever sends the keystroke.
+                    if inactive {
+                        let other = MainWindowController.all.first {
+                            $0 !== MainWindowController.active && $0.window.isVisible
+                        }
+                        DebugWindowSnapshot.capture(window: other?.window)
+                        return
+                    }
                     guard let tab, let delegate = NSApp.delegate as? AppDelegate else {
                         DebugWindowSnapshot.capture(title: title)
                         return
@@ -43,8 +52,8 @@ enum DebugWindowSnapshot {
     }
 
     @MainActor
-    static func capture(title: String? = nil, autosaveName: String? = nil) {
-        let named = autosaveName.flatMap { name in NSApp.windows.first { $0.frameAutosaveName == name } }
+    static func capture(title: String? = nil, autosaveName: String? = nil, window chosen: NSWindow? = nil) {
+        let named = chosen ?? autosaveName.flatMap { name in NSApp.windows.first { $0.frameAutosaveName == name } }
         // A sheet open on the window is what is on screen, so it is the capture.
         guard let window = (named ?? target(title: title)).map({ $0.attachedSheet ?? $0 }) else {
             // Says what there was to pick from, so the next try names one.
@@ -129,7 +138,7 @@ enum DebugWindowSnapshot {
         return NSApp.orderedWindows.first {
             $0.isVisible && !($0 is NSPanel) && $0.contentView != nil
         }
-        ?? NSApp.windows.first { $0.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName }
+        ?? NSApp.windows.first { MainWindowController.isMain($0) }
         ?? NSApp.mainWindow
     }
 

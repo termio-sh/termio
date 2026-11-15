@@ -342,6 +342,8 @@
 	<string>选取…</string>
 	<key>Clear</key>
 	<string>清除</string>
+	<key>Click to show it here</key>
+	<string>点按以在此处显示</string>
 	<key>Clone</key>
 	<string>克隆</string>
 	<key>Clone a Repository</key>
@@ -928,6 +930,8 @@
 	<string>新建终端</string>
 	<key>New Terminal at Home</key>
 	<string>在个人文件夹新建终端</string>
+	<key>New Window</key>
+	<string>新建窗口</string>
 	<key>New Workspace</key>
 	<string>新建工作区</string>
 	<key>New Workspace on %@</key>
@@ -1128,6 +1132,8 @@
 	<string>在浏览器中打开</string>
 	<key>Open in Editor</key>
 	<string>在编辑器中打开</string>
+	<key>Open in New Window</key>
+	<string>在新窗口中打开</string>
 	<key>Open on GitHub</key>
 	<string>在 GitHub 上打开</string>
 	<key>Open one to see how it is reached and what it runs.</key>
@@ -1482,6 +1488,8 @@
 	<string>显示单栏（行内差异）</string>
 	<key>Show two columns (side-by-side diff)</key>
 	<string>显示双栏（并排差异）</string>
+	<key>Showing in another window</key>
+	<string>正显示在另一个窗口中</string>
 	<key>Shows files and folders ignored by Git in a muted color.</key>
 	<string>以较淡的颜色显示 Git 忽略的文件和文件夹。</string>
 	<key>Shows the Issues pane in the inspector for projects whose remote is on GitHub.</key>

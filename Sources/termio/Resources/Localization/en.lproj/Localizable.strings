@@ -342,6 +342,8 @@
 	<string>Choose…</string>
 	<key>Clear</key>
 	<string>Clear</string>
+	<key>Click to show it here</key>
+	<string>Click to show it here</string>
 	<key>Clone</key>
 	<string>Clone</string>
 	<key>Clone a Repository</key>
@@ -928,6 +930,8 @@
 	<string>New Terminal</string>
 	<key>New Terminal at Home</key>
 	<string>New Terminal at Home</string>
+	<key>New Window</key>
+	<string>New Window</string>
 	<key>New Workspace</key>
 	<string>New Workspace</string>
 	<key>New Workspace on %@</key>
@@ -1128,6 +1132,8 @@
 	<string>Open in Browser</string>
 	<key>Open in Editor</key>
 	<string>Open in Editor</string>
+	<key>Open in New Window</key>
+	<string>Open in New Window</string>
 	<key>Open on GitHub</key>
 	<string>Open on GitHub</string>
 	<key>Open one to see how it is reached and what it runs.</key>
@@ -1482,6 +1488,8 @@
 	<string>Show one column (inline diff)</string>
 	<key>Show two columns (side-by-side diff)</key>
 	<string>Show two columns (side-by-side diff)</string>
+	<key>Showing in another window</key>
+	<string>Showing in another window</string>
 	<key>Shows files and folders ignored by Git in a muted color.</key>
 	<string>Shows files and folders ignored by Git in a muted color.</string>
 	<key>Shows the Issues pane in the inspector for projects whose remote is on GitHub.</key>

@@ -46,12 +46,23 @@ struct TerminalPane: View {
     @EnvironmentObject var store: TermioStore
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject var geometry: NavigatorGeometry
+    @EnvironmentObject var window: WindowContext
     @Environment(\.colorScheme) private var colorScheme
     @State private var focusDriver = TerminalFocusDriver()
     @State private var activated: [Session.ID] = []
     @State private var lastLivePanelFrame: CGRect = .zero
 
+    /// The active window draws the store's selection with everything live; any other
+    /// window draws its own selection read-only until a click makes it active.
     var body: some View {
+        if window.isActive {
+            activeBody
+        } else {
+            InactiveWindowPane()
+        }
+    }
+
+    private var activeBody: some View {
         GeometryReader { geo in
             // The terminal group fills the whole pane. File editors, diffs and PR/issue details
             // now open in the right inspector (see `InspectorDetailHost`) rather than covering
@@ -148,7 +159,7 @@ struct TerminalPane: View {
         // key asks the driver to repair an orphan; it does not mutate a FocusState.
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             guard let window = note.object as? NSWindow,
-                  window.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName
+                  MainWindowController.isMain(window)
             else { return }
             requestSelectedTerminalFocus(reason: .windowBecameKey)
         }
@@ -202,7 +213,7 @@ struct TerminalPane: View {
                     // hears a hidden pane stop counting toward the session's size.
                     StreamLinkReport(isVisible: isVisible, colors: store.streamTheme(dark: colorScheme == .dark),
                                      scrollbackBytes: store.streamScrollbackBytes,
-                                     link: link) { store.reportRendering($0, for: id) }
+                                     link: link) { store.reportRendering($0, for: id, viewer: ObjectIdentifier(window)) }
                         .id(ObjectIdentifier(link))
                     // Unlike the embedded surface, which owns its terminal and so
                     // stays mounted at zero opacity, the stream view is mounted
@@ -244,7 +255,7 @@ struct TerminalPane: View {
                         isSelected: isSelected,
                         isVisible: isVisible,
                         onFocused: { selectFocusedSurface(id) },
-                        onVisibility: { store.reportRendering($0, for: id) },
+                        onVisibility: { store.reportRendering($0, for: id, viewer: ObjectIdentifier(window)) },
                         requestFocus: { reason in
                             requestTerminalFocus(for: id, reason: reason)
                         }
@@ -868,6 +879,127 @@ private struct SharedGridLetterbox<Content: View>: View {
 /// colors to use, from a view that stays mounted while the pane's own view is
 /// mounted only when it shows: a hidden pane's terminal still answers color
 /// queries from a program running in it.
+/// A window that is not active: its own selection, drawn read-only. A session the active
+/// window shows live, or one on the embedded surface — a view that can be in one window
+/// only — shows a placeholder card. Rex's `DetachedTabPlaceholder`, except that a click
+/// anywhere makes this window active, and the terminal comes here.
+private struct InactiveWindowPane: View {
+    @EnvironmentObject var store: TermioStore
+    @EnvironmentObject var settings: AppSettings
+    @EnvironmentObject var geometry: NavigatorGeometry
+    @EnvironmentObject var window: WindowContext
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        GeometryReader { geo in
+            let leading = max(0, PaneCard.spacing - geometry.paneMinX)
+            let bounds = CGRect(x: leading, y: PaneCard.spacing,
+                                width: max(0, geo.size.width - leading - PaneCard.spacing),
+                                height: max(0, geo.size.height - 2 * PaneCard.spacing))
+            ZStack(alignment: .topLeading) {
+                if !window.isOpen {
+                    EmptyView()
+                } else if let selection {
+                    let frames = paneFrames(for: selection, in: bounds)
+                    let shownLive = Set(store.visiblePaneIDs)
+                    ForEach(Array(frames.keys), id: \.self) { id in
+                        if let session = store.session(id), let card = frames[id] {
+                            cardView(session, frame: card, bounds: bounds, shownLive: shownLive.contains(id))
+                        }
+                    }
+                } else {
+                    WelcomeView()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
+            }
+        }
+        .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// This window's selection, while its session still exists.
+    private var selection: Session.ID? {
+        window.selectedSessionID.flatMap { store.session($0) == nil ? nil : $0 }
+    }
+
+    /// The cards of the selection's split group, or the selection alone filling the pane.
+    private func paneFrames(for selection: Session.ID, in bounds: CGRect) -> [Session.ID: CGRect] {
+        guard let root = store.splitGroups.first(where: { $0.contains(selection) }) else {
+            return [selection: bounds]
+        }
+        return root.layout(in: bounds, dividerThickness: PaneCard.spacing).frames
+    }
+
+    @ViewBuilder
+    private func cardView(_ session: Session, frame card: CGRect, bounds: CGRect, shownLive: Bool) -> some View {
+        let id = session.id
+        let notch = PaneCard.notch(
+            isTopLeading: PaneCard.isTopLeading(card, in: bounds) && settings.tabLayout == .vertical,
+            isFullScreen: window.isFullScreen, cardWindowMinX: geometry.paneMinX + card.minX)
+        let rect = PaneCard.panelLayout(in: card, isOpen: false, width: 0).terminal
+        PaneCardChrome(session: session, isSelected: id == window.selectedSessionID,
+                       background: paneBackground, notch: notch, publishesGeometry: false)
+            .frame(width: card.width, height: card.height)
+            .position(x: card.midX, y: card.midY)
+        Group {
+            let elsewhere = shownLive || drawnByEarlierWindow(id)
+            if !elsewhere, let link = store.runtime(for: id).streamLink {
+                TermiodStreamPane(
+                    link: link,
+                    sessionID: id,
+                    appearance: store.streamAppearance(),
+                    takesKeyboard: false,
+                    copyOnSelect: settings.copyOnSelect,
+                    readOnly: true,
+                    // Read-only: a window the user left never sizes the session. Its layout
+                    // drops the panel, tabs and zoom, and two such windows would fight.
+                    onViewport: { _ in },
+                    onFocused: {},
+                    onBackgroundColor: { color in store.runtime(for: id).streamBackgroundColor = color }
+                )
+                .id(ObjectIdentifier(link))
+                .onAppear { store.reportRendering(true, for: id, viewer: viewer) }
+                .onDisappear { store.reportRendering(false, for: id, viewer: viewer) }
+            } else {
+                Text(elsewhere ? localized("Showing in another window") : localized("Click to show it here"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(width: rect.width, height: rect.height)
+        .background(paneBackground)
+        .clipShape(PaneCard.bodyClip(leading: true, trailing: true, topLeading: notch != nil))
+        .position(x: rect.midX, y: rect.midY)
+        PaneCardBorder(isFocused: false, notch: notch)
+            .frame(width: card.width, height: card.height)
+            .position(x: card.midX, y: card.midY)
+            .allowsHitTesting(false)
+    }
+
+    /// Whether an older inactive window already draws `id`. Two views of one stream
+    /// terminal share its dirty rows, so the second would miss changes; the way Rex
+    /// keeps a tab in one window, the oldest one draws it and the rest say where it is.
+    private func drawnByEarlierWindow(_ id: Session.ID) -> Bool {
+        for controller in MainWindowController.all {
+            let other = controller.context
+            if other === window { return false }
+            guard other.isOpen, !other.isActive,
+                  let selection = other.selectedSessionID, store.session(selection) != nil else { continue }
+            let group = store.splitGroups.first { $0.contains(selection) }
+            if selection == id || group?.contains(id) == true { return true }
+        }
+        return false
+    }
+
+    /// Reported apart from this window's active pane area, so the two never cancel out
+    /// while the window changes between them.
+    private var viewer: AnyHashable { "inactive-\(ObjectIdentifier(window).debugDescription)" }
+
+    private var paneBackground: Color {
+        settings.isBackgroundTranslucent ? .clear : Color(nsColor: settings.terminalBackgroundColor)
+    }
+}
+
 private struct StreamLinkReport: View {
     let isVisible: Bool
     let colors: TermiodStreamTerminal.Theme?
@@ -880,6 +1012,8 @@ private struct StreamLinkReport: View {
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
             .onChange(of: isVisible, initial: true) { _, visible in report(visible) }
+            // The window went inactive or closed: it shows nothing any more.
+            .onDisappear { report(false) }
             .onChange(of: colors, initial: true) { _, colors in
                 if let colors { link.setStreamTheme(colors) }
             }
@@ -939,6 +1073,7 @@ private struct ManagedTerminalSurface: View {
                 DispatchQueue.main.async { applySurfaceVisibility(visible, for: context) }
                 onVisibility(visible)
             }
+            .onDisappear { onVisibility(false) }
             // A relaunched session gets a fresh TerminalViewState (see
             // `relaunchSession`); keying the mounted view on the state's identity
             // remounts the NSView for the new surface. Without this the
@@ -1764,6 +1899,10 @@ private struct PaneCardChrome: View {
     /// sits beside the terminal. The edge runs the card's full height (`PanelEdge`), so the
     /// title stops short of it and the buttons past it sit in the panel.
     var panelEdgeX: CGFloat?
+    /// Whether the header's measurements feed the shared pane-drag geometry. Only the active
+    /// window's cards do: the geometry is keyed by session, and an inactive window drawing the
+    /// same group at another width would move the active window's drag boundary.
+    var publishesGeometry = true
 
     /// The header starts past the notch, so the title waits beside the toggle while the card
     /// slides under it.
@@ -1873,7 +2012,7 @@ private struct PaneCardChrome: View {
             }
             // Measured, not summed: the panel menu grows a label while a panel is open.
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(PaneCard.coordinateSpace)).minX } action: {
-                PaneCardGeometry.shared.setControlsMinX($0, for: session.id)
+                if publishesGeometry { PaneCardGeometry.shared.setControlsMinX($0, for: session.id) }
             }
         }
         .padding(.leading, leadingPadding)
