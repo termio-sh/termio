@@ -50,14 +50,9 @@ struct DiffTextPane: NSViewRepresentable {
     var reclaimFocus: Int = 0
     /// Inactive columns consume the reclaim token without taking focus.
     var reclaimsFocus: Bool = true
-    /// Embedded mode: the pane is stacked inside an outer scroll (the multi-file card list), so it
-    /// must not scroll or grab focus itself — it grows to its content and reports that height back so
-    /// the SwiftUI card can size to it, letting the outer list own the scroll.
-    var embedded: Bool = false
-    var onContentHeight: ((CGFloat) -> Void)? = nil
     /// "Add to Chat" in the right-click menu: the argument is the selected diff text,
     /// `nil` when nothing is selected (the owner inserts the diffed file's path instead).
-    /// Left `nil` where the pane has no chat to feed (the embedded PR file cards).
+    /// Left `nil` where the pane has no chat to feed.
     var addToChat: ((String?) -> Void)? = nil
     var canAddToChat: (() -> Bool)? = nil
 
@@ -71,7 +66,7 @@ struct DiffTextPane: NSViewRepresentable {
         let ruler: DiffGutterRulerView
     }
 
-    static func makeViews(wraps: Bool, embedded: Bool, showsVerticalScroller: Bool,
+    static func makeViews(wraps: Bool, showsVerticalScroller: Bool,
                           backgroundColor: NSColor, numberColor: NSColor,
                           font: NSFont) -> PaneViews {
         let storage = NSTextStorage()
@@ -106,10 +101,7 @@ struct DiffTextPane: NSViewRepresentable {
         // Keep the vertical scrollbar off the seam between split columns.
         scrollView.hasVerticalScroller = showsVerticalScroller
         scrollView.hasHorizontalScroller = !wraps
-        // Embedded panes are sized to their content by the SwiftUI card, so they never actually scroll
-        // — but keep the scroll view otherwise standard (only auto-hide the overlay scroller) so its
-        // ruler still lays out to the full height. Disabling the scroller knocks the gutter short.
-        if !wraps || embedded {
+        if !wraps {
             scrollView.autohidesScrollers = true
             scrollView.scrollerStyle = .overlay
         }
@@ -136,14 +128,13 @@ struct DiffTextPane: NSViewRepresentable {
     }
 
     func makeScrollView(coordinator: Coordinator) -> NSScrollView {
-        let views = Self.makeViews(wraps: wraps, embedded: embedded,
+        let views = Self.makeViews(wraps: wraps,
                                    showsVerticalScroller: wraps || paneSide != .left,
                                    backgroundColor: backgroundColor, numberColor: numberColor,
                                    font: font)
         let scrollView = views.scrollView
         let textView = views.textView
         coordinator.scrollView = scrollView
-        coordinator.embedded = embedded
         coordinator.scrollSync = scrollSync
         coordinator.paneSide = paneSide
         if let scrollSync, let paneSide { scrollSync.register(scrollView, side: paneSide) }
@@ -155,7 +146,7 @@ struct DiffTextPane: NSViewRepresentable {
         coordinator.observeScroll(of: scrollView)
         updateScrollView(scrollView, coordinator: coordinator)
 
-        if !embedded, autoFocuses {
+        if autoFocuses {
             DispatchQueue.main.async { [weak textView] in
                 guard let textView, let window = textView.window else { return }
                 if window.firstResponder === window || window.firstResponder is NSTextView == false {
@@ -195,8 +186,6 @@ struct DiffTextPane: NSViewRepresentable {
         coordinator.updateFind(query: findQuery, options: findOptions,
                                focusedMatch: findFocusedMatch, in: textView)
         coordinator.reclaimFocusIfNeeded(reclaimFocus, allowed: reclaimsFocus, in: textView)
-        coordinator.onContentHeight = onContentHeight
-        coordinator.reportHeightIfNeeded()
     }
 
     /// Swaps the document in when it changed (initial load, band expand) and lays the
@@ -254,27 +243,7 @@ struct DiffTextPane: NSViewRepresentable {
         var onMatchesChanged: (([DiffFindMatch]) -> Void)?
         var scrollSync: DiffPaneScrollSync?
         var paneSide: DiffPaneScrollSync.Side?
-        // Embedded (card-stacked) sizing: measure the laid-out content and hand its height to SwiftUI.
         weak var scrollView: NSScrollView?
-        var embedded = false
-        var onContentHeight: ((CGFloat) -> Void)?
-        private var reportedHeight: CGFloat = -1
-
-        /// Measure the text's laid-out height and report it (once, on change) so the SwiftUI card sizes
-        /// to fit and the outer list scrolls. No-op unless embedded.
-        func reportHeightIfNeeded() {
-            guard embedded, let scrollView,
-                  let textView = scrollView.documentView as? DiffTextView,
-                  let layoutManager = textView.layoutManager,
-                  let container = textView.textContainer else { return }
-            layoutManager.ensureLayout(for: container)
-            let height = layoutManager.usedRect(for: container).height
-                + textView.textContainerInset.height * 2
-            guard abs(height - reportedHeight) > 0.5 else { return }
-            reportedHeight = height
-            let callback = onContentHeight
-            DispatchQueue.main.async { callback?(height) }
-        }
         /// The same incremental-find engine the code editor uses — highlights and semantics
         /// stay identical across the two ⌘F surfaces.
         private let find = TextFindEngine()
@@ -334,8 +303,6 @@ struct DiffTextPane: NSViewRepresentable {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.ruler?.needsDisplay = true
-                    // A width change re-wraps the text, so the content height moves — re-measure.
-                    self?.reportHeightIfNeeded()
                 }
             }
         }

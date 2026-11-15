@@ -59,6 +59,7 @@ let package = Package(
             exclude: [
                 "Editor/Highlightr/README.md",
                 "FileBrowser/PierreTrees",
+                "Git/PierreDiffs",
                 // The String Catalog is the *editing* source for UI strings, not a
                 // shippable resource: `swift build` can't compile .xcstrings
                 // (swiftlang/swift-package-manager#6993), so scripts/compile-strings.sh
