@@ -2456,14 +2456,13 @@ async fn process_control(
                 let out = out.clone();
                 tokio::spawn(async move {
                     let listed = tokio::task::spawn_blocking(move || {
-                        crate::files::list(&root, &paths, after.as_deref())
+                        let mut listings = crate::files::list(&root, &paths, after.as_deref())?;
+                        crate::git::decorate_listings(&mut listings);
+                        Ok::<_, anyhow::Error>(listings)
                     })
                     .await;
                     let response = match listed {
-                        Ok(Ok(mut listings)) => {
-                            crate::git::decorate_listings(&mut listings).await;
-                            Control::FsListed { seq: stamp, listings, re: seq }
-                        },
+                        Ok(Ok(listings)) => Control::FsListed { seq: stamp, listings, re: seq },
                         Ok(Err(e)) => error(seq, ErrorCode::Denied, format!("{e:#}"), false),
                         Err(e) => error(seq, ErrorCode::Internal, e.to_string(), true),
                     };

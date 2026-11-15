@@ -15,12 +15,13 @@
 //! here reimplements git.
 
 use crate::protocol::{
-    Event, GitBranchEntry, GitCommitEntry, GitCommitFile, GitFileStatus, GitStatusCode,
+    EntryKind, Event, GitBranchEntry, GitCommitEntry, GitCommitFile, GitFileStatus, GitStatusCode,
     GitStatusEntry, GitUnmergedCode,
 };
 use anyhow::{bail, Context, Result};
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// A `git.diff` reply is cut here — the same preview budget as `fs.read`.
 pub const DIFF_CAP: usize = 1024 * 1024;
@@ -54,221 +55,312 @@ fn git_command(root: &str) -> tokio::process::Command {
     command
 }
 
-/// Listings coalesce per repository while a check is running, even across
-/// control connections: an idle repository runs a request at once, and whatever
-/// arrives meanwhile rides the next `git check-ignore` together.
+/// One repository's ignore rules, read for the listings of one request.
 ///
-/// Never a timed window. The decoration rides the listing's own reply, so a
-/// quiet period here is a floor under every folder expand — 500 ms of spinner
-/// for a check git answers in single-digit milliseconds, and a sliding one that
-/// each prefetch pushed further out. VS Code can afford that debounce because
-/// its explorer renders first and decorates after; this reply cannot.
+/// Matched in this process, never by a `git check-ignore` child. The
+/// decoration rides the listing's own reply, so a child process put its spawn,
+/// its read of the index and a 5 s timeout under every folder expand, and the
+/// listings of one repository waited on each other for it.
 ///
-/// Keep only pending work: each re-list asks Git afresh, so index and
-/// ignore-rule edits cannot leave a cached decoration behind.
-#[derive(Default)]
-struct IgnoreBatch {
-    paths: HashSet<String>,
-    replies: Vec<tokio::sync::oneshot::Sender<std::result::Result<HashSet<String>, String>>>,
+/// Nothing is kept between requests: each re-list reads the rule files afresh,
+/// so an edited `.gitignore` cannot leave a cached decoration behind.
+///
+/// What this cannot know is the index. Git never reports a tracked file as
+/// ignored; a file that was force-added under a rule is dimmed here.
+struct IgnoreRules {
+    root: PathBuf,
+    case_insensitive: bool,
+    /// `.git/info/exclude`, then the user's global excludes file: the two
+    /// sources git consults after every `.gitignore`, in that order.
+    fallbacks: Vec<Gitignore>,
+    /// Each directory's own `.gitignore`, read once per request. A batched
+    /// listing asks about many folders under the same few parents.
+    by_directory: HashMap<PathBuf, Option<Gitignore>>,
 }
 
-/// A repository's key is present exactly while its worker runs; the value is
-/// the batch waiting for that worker's next turn.
-///
-/// A blocking mutex, not an async one: every critical section is a few map
-/// operations with no await inside, and an enqueue that completes on its first
-/// poll is what keeps a caller from being parked in a fair lock's queue behind
-/// a request nobody is polling.
-type IgnoreQueue = std::sync::Mutex<HashMap<String, IgnoreBatch>>;
+impl IgnoreRules {
+    fn new(root: &Path) -> Self {
+        let common = common_git_directory(root);
+        let case_insensitive = common
+            .as_deref()
+            .and_then(|common| read_regular_file(&common.join("config"), true))
+            .is_some_and(|config| config_ignores_case(&String::from_utf8_lossy(&config)));
+        let mut rules = IgnoreRules {
+            root: root.to_path_buf(),
+            case_insensitive,
+            fallbacks: Vec::new(),
+            by_directory: HashMap::new(),
+        };
+        let sources = [
+            common.map(|common| common.join("info").join("exclude")),
+            ignore::gitignore::gitconfig_excludes_path(),
+        ];
+        for source in sources.into_iter().flatten() {
+            if let Some(matcher) = rules.read(root, &source, true) {
+                rules.fallbacks.push(matcher);
+            }
+        }
+        rules
+    }
 
-fn ignore_queue() -> std::sync::MutexGuard<'static, HashMap<String, IgnoreBatch>> {
-    static QUEUE: std::sync::OnceLock<IgnoreQueue> = std::sync::OnceLock::new();
-    // No section can leave the map half-edited, so a poisoned lock still
-    // guards a consistent one.
-    QUEUE
-        .get_or_init(IgnoreQueue::default)
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Retires a worker's key however the worker ends. A runtime shutting down
-/// mid-check drops the task at its await, and a key left behind would make
-/// every later request for that repository wait on a worker that is gone;
-/// removing it drops the waiting replies, so those requests fail instead.
-struct IgnoreWorker {
-    root: String,
-    retired: bool,
-}
-
-impl Drop for IgnoreWorker {
-    fn drop(&mut self) {
-        if !self.retired {
-            ignore_queue().remove(&self.root);
+    /// The rules in one file, anchored at `base`. A line git would reject is
+    /// skipped and the rest still apply, as git does.
+    ///
+    /// Fed a line at a time from bytes read here: the crate's own reader stops
+    /// at the first line that is not UTF-8 and drops every rule after it. Such
+    /// a line is skipped instead. Entry names reach the matcher as UTF-8, so a
+    /// rule that is not could only match a name it does not spell.
+    fn read(&self, base: &Path, file: &Path, follow_links: bool) -> Option<Gitignore> {
+        let bytes = read_regular_file(file, follow_links)?;
+        let mut builder = GitignoreBuilder::new(base);
+        if let Err(error) = builder.case_insensitive(self.case_insensitive) {
+            eprintln!("[git] ignore rules: {error}");
+        }
+        let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
+        for line in bytes.split(|byte| *byte == b'\n') {
+            let Ok(line) = std::str::from_utf8(line) else {
+                continue;
+            };
+            let line = literal_braces(line.strip_suffix('\r').unwrap_or(line));
+            if let Err(error) = builder.add_line(Some(file.to_path_buf()), &line) {
+                eprintln!("[git] {}: {error}", file.display());
+            }
+        }
+        match builder.build() {
+            Ok(matcher) if !matcher.is_empty() => Some(matcher),
+            Ok(_) => None,
+            Err(error) => {
+                eprintln!("[git] {}: {error}", file.display());
+                None
+            }
         }
     }
-}
 
-async fn check_ignored(root: String, paths: Vec<String>) -> Result<HashSet<String>> {
-    let (reply, receive) = tokio::sync::oneshot::channel();
-    let start = {
-        let mut queue = ignore_queue();
-        let start = !queue.contains_key(&root);
-        let batch = queue.entry(root.clone()).or_default();
-        batch.paths.extend(paths);
-        batch.replies.push(reply);
-        start
-    };
-    if start {
-        // Built before the spawn, so a task dropped before its first poll
-        // still retires the key it was started to serve.
-        let worker = IgnoreWorker { root: root.clone(), retired: false };
-        tokio::spawn(async move {
-            // The whole guard, by name: a precise capture of `worker.retired`
-            // alone would copy the bool in and drop the guard right here.
-            let mut worker = worker;
-            loop {
-                let batch = {
-                    let mut queue = ignore_queue();
-                    // Retired under the same lock a request enqueues under, so
-                    // a request either lands in a batch this worker will take
-                    // or finds no key and starts the next worker.
-                    let Some(pending) = queue.get_mut(&root) else {
-                        worker.retired = true;
-                        return;
-                    };
-                    if pending.replies.is_empty() {
-                        queue.remove(&root);
-                        worker.retired = true;
-                        return;
-                    }
-                    std::mem::take(pending)
-                };
-                let result = run_check_ignore(&root, &batch.paths)
-                    .await
-                    .map_err(|error| format!("{error:#}"));
-                for reply in batch.replies {
-                    // A closed receiver means its listing was cancelled.
-                    let _ = reply.send(result.clone());
+    fn own_rules(&mut self, directory: &Path) -> Option<&Gitignore> {
+        if !self.by_directory.contains_key(directory) {
+            // Git refuses a `.gitignore` that is a link, so one that points out
+            // of the checkout cannot bring its rules in.
+            let matcher = self.read(directory, &directory.join(".gitignore"), false);
+            self.by_directory.insert(directory.to_path_buf(), matcher);
+        }
+        self.by_directory.get(directory).and_then(Option::as_ref)
+    }
+
+    /// Whether `path` is ignored, given that no directory above it is. The
+    /// deepest `.gitignore` that has a rule for the path decides, and within
+    /// one file the last such rule; a `!` rule there un-ignores it.
+    fn matches(&mut self, path: &Path, is_dir: bool) -> bool {
+        let mut directory = path.parent();
+        while let Some(current) = directory.filter(|current| current.starts_with(&self.root)) {
+            if let Some(matcher) = self.own_rules(current) {
+                match matcher.matched(path, is_dir) {
+                    ignore::Match::Ignore(_) => return true,
+                    ignore::Match::Whitelist(_) => return false,
+                    ignore::Match::None => {}
                 }
             }
-        });
-    }
-    receive
-        .await
-        .context("ignore check cancelled")?
-        .map_err(anyhow::Error::msg)
-}
-
-async fn run_check_ignore(root: &str, paths: &HashSet<String>) -> Result<HashSet<String>> {
-    use std::process::Stdio;
-    use tokio::io::AsyncWriteExt;
-
-    let mut input = Vec::new();
-    for path in paths {
-        input.extend_from_slice(path.as_bytes());
-        input.push(0);
-    }
-    let mut child = git_command(root)
-        .args(["check-ignore", "-v", "-z", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .context("starting git check-ignore")?;
-    let mut stdin = child.stdin.take().context("git check-ignore stdin")?;
-    let operation = async move {
-        // Drain output while writing: a wide directory can fill both pipes.
-        let (written, output) = tokio::join!(
-            async move {
-                stdin.write_all(&input).await?;
-                stdin.shutdown().await
-            },
-            child.wait_with_output()
-        );
-        let output = output.context("waiting for git check-ignore")?;
-        if !output.status.success() && output.status.code() != Some(1) {
-            bail!(
-                "git check-ignore: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
+            directory = current.parent();
         }
-        written.context("writing git check-ignore paths")?;
-        Ok(parse_ignored(&output.stdout))
-    };
-    tokio::time::timeout(std::time::Duration::from_secs(5), operation)
-        .await
-        .context("git check-ignore timed out")?
-}
-
-fn parse_ignored(output: &[u8]) -> HashSet<String> {
-    // -v -z emits source, line, pattern, pathname as four NUL-separated fields.
-    output
-        .split(|byte| *byte == 0)
-        .collect::<Vec<_>>()
-        .chunks_exact(4)
-        .filter(|fields| !fields[2].is_empty() && !fields[2].starts_with(b"!"))
-        .map(|fields| String::from_utf8_lossy(fields[3]).into_owned())
-        .collect()
-}
-
-pub async fn decorate_listings(listings: &mut [crate::protocol::PathListing]) {
-    let directories: Vec<_> = listings
-        .iter()
-        .map(|listing| listing.path.clone())
-        .collect();
-    let resolved = tokio::task::spawn_blocking(move || {
-        directories
-            .iter()
-            .map(|directory| {
-                let directory = std::fs::canonicalize(directory).ok()?;
-                let root = directory
-                    .ancestors()
-                    .find(|path| path.join(".git").exists())?;
-                Some((root.to_string_lossy().into_owned(), directory))
-            })
-            .collect::<Vec<_>>()
-    })
-    .await;
-    let resolved = match resolved {
-        Ok(resolved) => resolved,
-        Err(error) => {
-            eprintln!("[git] resolving ignore roots: {error}");
-            return;
-        }
-    };
-    let mut groups: HashMap<String, Vec<String>> = HashMap::new();
-    for (listing, location) in listings.iter().zip(&resolved) {
-        if let Some((root, directory)) = location {
-            groups.entry(root.clone()).or_default().extend(
-                listing
-                    .entries
-                    .iter()
-                    .filter(|entry| entry.name != ".git")
-                    .map(|entry| directory.join(&entry.name).to_string_lossy().into_owned()),
-            );
-        }
-    }
-    let results = futures_util::future::join_all(
-        groups
-            .into_iter()
-            .filter(|(_, paths)| !paths.is_empty())
-            .map(|(root, paths)| check_ignored(root, paths)),
-    )
-    .await;
-    let mut ignored = HashSet::new();
-    for result in results {
-        match result {
-            Ok(paths) => ignored.extend(paths),
-            Err(error) => eprintln!("[git] ignored file decorations: {error:#}"),
-        }
-    }
-    for (listing, location) in listings.iter_mut().zip(resolved) {
-        if let Some((_, directory)) = location {
-            for entry in &mut listing.entries {
-                entry.ignored =
-                    ignored.contains(directory.join(&entry.name).to_string_lossy().as_ref());
+        for matcher in &self.fallbacks {
+            match matcher.matched(path, is_dir) {
+                ignore::Match::Ignore(_) => return true,
+                ignore::Match::Whitelist(_) => return false,
+                ignore::Match::None => {}
             }
+        }
+        false
+    }
+
+    /// Whether `directory` sits inside an ignored directory, or is one. Git
+    /// never looks inside such a directory, so nothing in it can be
+    /// un-ignored and every entry is ignored with it.
+    fn is_inside_ignored(&mut self, directory: &Path) -> bool {
+        let Ok(relative) = directory.strip_prefix(&self.root) else {
+            return false;
+        };
+        let mut current = self.root.clone();
+        for component in relative.components() {
+            current.push(component);
+            if self.matches(&current, true) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// The most of a rule file or a git config that is read. Real ones are a few
+/// kilobytes; a checkout is not trusted to keep them that way.
+const RULE_FILE_LIMIT: u64 = 1024 * 1024;
+
+/// A file's bytes, when it is a regular file no larger than `RULE_FILE_LIMIT`.
+///
+/// Opened without blocking and judged by the descriptor that was opened, not
+/// by a look at the path first: a FIFO at one of these names would hold a
+/// plain open, and the listing with it, until something wrote to it.
+fn read_regular_file(path: &Path, follow_links: bool) -> Option<Vec<u8>> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let flags = if follow_links {
+        libc::O_NONBLOCK
+    } else {
+        libc::O_NONBLOCK | libc::O_NOFOLLOW
+    };
+    let file = match std::fs::OpenOptions::new().read(true).custom_flags(flags).open(path) {
+        Ok(file) => file,
+        // Most directories have no rule file, and a link that was refused
+        // reports ELOOP. Neither is worth a line per listing.
+        Err(error) => {
+            if error.kind() != std::io::ErrorKind::NotFound && error.raw_os_error() != Some(libc::ELOOP) {
+                eprintln!("[git] {}: {error}", path.display());
+            }
+            return None;
+        }
+    };
+    match file.metadata() {
+        Ok(found) if found.is_file() && found.len() <= RULE_FILE_LIMIT => {}
+        Ok(found) if found.is_file() => {
+            eprintln!("[git] {}: over {RULE_FILE_LIMIT} bytes, not read", path.display());
+            return None;
+        }
+        Ok(_) => return None,
+        Err(error) => {
+            eprintln!("[git] {}: {error}", path.display());
+            return None;
+        }
+    }
+    let mut bytes = Vec::new();
+    // Capped again here: the file can grow between the look and the read.
+    match file.take(RULE_FILE_LIMIT).read_to_end(&mut bytes) {
+        Ok(_) => Some(bytes),
+        Err(error) => {
+            eprintln!("[git] {}: {error}", path.display());
+            None
+        }
+    }
+}
+
+/// A rule with its braces made literal. The crate reads `{a,b}` as a choice
+/// between `a` and `b`; git has no such syntax and matches the braces
+/// themselves. Inside a `[...]` class they already are literal.
+fn literal_braces(line: &str) -> std::borrow::Cow<'_, str> {
+    if !line.contains(['{', '}']) {
+        return line.into();
+    }
+    let mut escaped = String::with_capacity(line.len() + 4);
+    let mut in_class = false;
+    let mut characters = line.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '\\' => {
+                escaped.push(character);
+                escaped.extend(characters.next());
+                continue;
+            }
+            '[' => in_class = true,
+            ']' => in_class = false,
+            '{' | '}' if !in_class => escaped.push('\\'),
+            _ => {}
+        }
+        escaped.push(character);
+    }
+    escaped.into()
+}
+
+/// Where a checkout keeps the files every worktree of it shares, `info/exclude`
+/// and `config` among them. A linked worktree's `.git` is a file that names its
+/// own directory, and that directory names the shared one in `commondir`.
+///
+/// Only the line ending is cut from either path, as git cuts it: a
+/// directory's name may end in a space.
+fn common_git_directory(root: &Path) -> Option<PathBuf> {
+    fn path_in(bytes: &[u8]) -> String {
+        String::from_utf8_lossy(bytes).trim_end_matches(['\n', '\r']).to_owned()
+    }
+    let dot_git = root.join(".git");
+    let own = if dot_git.is_dir() {
+        dot_git
+    } else {
+        let pointer = path_in(&read_regular_file(&dot_git, true)?);
+        root.join(pointer.strip_prefix("gitdir: ")?)
+    };
+    match read_regular_file(&own.join("commondir"), true) {
+        Some(common) => Some(own.join(path_in(&common))),
+        None => Some(own),
+    }
+}
+
+/// `core.ignorecase`, which `git init` writes on a filesystem that folds case.
+/// Git matches ignore rules without regard to case when it is set.
+///
+/// The last setting wins, as in git. A value in quotes or one carried in from
+/// an `include` is not read; such a checkout is matched with regard to case.
+fn config_ignores_case(config: &str) -> bool {
+    let mut in_core = false;
+    let mut ignores_case = false;
+    // A line ending in a backslash carries its value onto the next line,
+    // which is then no setting of its own.
+    let mut continued = false;
+    for line in config.strip_prefix('\u{feff}').unwrap_or(config).lines() {
+        let is_continuation = continued;
+        let line = line.split(['#', ';']).next().unwrap_or_default().trim();
+        continued = line.ends_with('\\');
+        if is_continuation {
+            continue;
+        }
+        if line.starts_with('[') {
+            in_core = line.eq_ignore_ascii_case("[core]");
+            continue;
+        }
+        let (key, value) = match line.split_once('=') {
+            Some((key, value)) => (key.trim(), Some(value.trim())),
+            None => (line, None),
+        };
+        if in_core && key.eq_ignore_ascii_case("ignorecase") {
+            // A key with no value is git's spelling of true, and so is any
+            // number but zero.
+            ignores_case = value.is_none_or(|value| {
+                ["true", "yes", "on"].iter().any(|yes| value.eq_ignore_ascii_case(yes))
+                    || value.parse::<i64>().is_ok_and(|number| number != 0)
+            });
+        }
+    }
+    ignores_case
+}
+
+/// Marks the entries of each listing that the repository's ignore rules cover.
+/// A listing outside any repository is left as it is.
+///
+/// Reads files, so it runs on the blocking pool beside the listing itself.
+pub fn decorate_listings(listings: &mut [crate::protocol::PathListing]) {
+    let mut repositories: HashMap<PathBuf, IgnoreRules> = HashMap::new();
+    for listing in listings.iter_mut() {
+        // Canonical, so a folder reached through a link is matched against
+        // the repository it is really in.
+        let Ok(directory) = std::fs::canonicalize(&listing.path) else {
+            continue;
+        };
+        let Some(root) = directory
+            .ancestors()
+            .find(|path| path.join(".git").exists())
+            .map(Path::to_path_buf)
+        else {
+            continue;
+        };
+        let rules = repositories
+            .entry(root.clone())
+            .or_insert_with(|| IgnoreRules::new(&root));
+        let inside_ignored = rules.is_inside_ignored(&directory);
+        for entry in &mut listing.entries {
+            // The repository's own directory is never a file of the checkout.
+            if entry.name == ".git" && directory == root {
+                entry.ignored = false;
+                continue;
+            }
+            // A link is a file to git, whatever it points at.
+            let is_dir = matches!(entry.kind, EntryKind::Dir | EntryKind::UnloadedDir);
+            entry.ignored = inside_ignored || rules.matches(&directory.join(&entry.name), is_dir);
         }
     }
 }
@@ -1568,86 +1660,181 @@ mod tests {
         bytes
     }
 
-    #[tokio::test]
-    async fn ignored_listings_distinguish_directories_negations_and_tracked_files() {
+    fn ignored_flags(root: &Path, directory: &Path) -> HashMap<String, bool> {
+        let root = root.to_string_lossy().into_owned();
+        let path = directory.to_string_lossy().into_owned();
+        let mut listings = crate::files::list(&root, &[path], None).unwrap();
+        decorate_listings(&mut listings);
+        listings[0].entries.iter().map(|entry| (entry.name.clone(), entry.ignored)).collect()
+    }
+
+    #[test]
+    fn ignored_listings_distinguish_directories_negations_and_local_excludes() {
         let directory = scratch_repo("ignored-listings");
         write(&directory, "tracked.log", "tracked");
         commit(&directory, "tracked file");
-        write(&directory, ".gitignore", "node_modules/\n*.log\n!keep.log\n\\!literal\n");
+        write(&directory, ".gitignore", "node_modules/\n*.log\n!keep.log\n\\!literal\n/anchored\n");
         std::fs::create_dir(directory.join("node_modules")).unwrap();
-        for name in ["new.swift", "debug.log", "keep.log", "!literal", "line\nbreak.log"] {
+        std::fs::create_dir(directory.join("sub")).unwrap();
+        write(&directory, "sub/anchored", "content");
+        // A rule for directories does not cover a link, which is a file to git.
+        std::os::unix::fs::symlink(directory.join("sub"), directory.join("node_modules-link")).unwrap();
+        for name in ["new.swift", "debug.log", "keep.log", "!literal", "line\nbreak.log", "anchored"] {
             write(&directory, name, "content");
         }
         write(&directory, ".git/info/exclude", "local-only\n");
         write(&directory, "local-only", "excluded");
-        let root = directory.to_string_lossy().into_owned();
-        let mut listings = crate::files::list(&root, &[root.clone()], None).unwrap();
-        decorate_listings(&mut listings).await;
-        let flags: HashMap<_, _> = listings[0].entries.iter()
-            .map(|entry| (entry.name.as_str(), entry.ignored)).collect();
-        for name in ["node_modules", "debug.log", "!literal", "line\nbreak.log", "local-only"] {
+        let flags = ignored_flags(&directory, &directory);
+        // `tracked.log` is in the index, and git would not call it ignored.
+        // The rules alone cannot tell, so it is dimmed with the other logs.
+        for name in ["node_modules", "debug.log", "!literal", "line\nbreak.log", "local-only", "anchored", "tracked.log"] {
             assert_eq!(flags[name], true, "{name}");
         }
-        for name in ["new.swift", "tracked.log", "keep.log"] {
+        for name in ["new.swift", "keep.log", ".git", ".gitignore", "sub", "node_modules-link"] {
             assert_eq!(flags[name], false, "{name}");
         }
+        assert!(!ignored_flags(&directory, &directory.join("sub"))["anchored"]);
         // The same listing must lose its decoration after the rule is removed.
         write(&directory, ".gitignore", "");
-        decorate_listings(&mut listings).await;
-        assert!(!listings[0].entries.iter().find(|entry| entry.name == "node_modules").unwrap().ignored);
+        assert!(!ignored_flags(&directory, &directory)["node_modules"]);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[tokio::test]
-    async fn ignore_requests_share_one_pending_batch_per_repository() {
-        let directory = scratch_repo("ignored-batch");
-        write(&directory, ".gitignore", "*.log\n!keep.log\n");
-        write(&directory, "first.log", "");
-        write(&directory, "keep.log", "");
-        let root = directory.to_string_lossy().into_owned();
-        let first = directory.join("first.log").to_string_lossy().into_owned();
-        let keep = directory.join("keep.log").to_string_lossy().into_owned();
-        // Both enqueue before the worker's first turn, so one git run answers both.
-        let mut requests = Box::pin(futures_util::future::join_all([
-            check_ignored(root.clone(), vec![first.clone()]),
-            check_ignored(root.clone(), vec![keep.clone()]),
-        ]));
-        assert!(futures_util::FutureExt::now_or_never(&mut requests).is_none());
-        {
-            let queue = ignore_queue();
-            let batch = queue.get(&root).unwrap();
-            assert_eq!(batch.replies.len(), 2);
-            assert_eq!(batch.paths, HashSet::from([first.clone(), keep.clone()]));
+    #[test]
+    fn a_deeper_gitignore_overrides_a_shallower_one_but_not_an_ignored_directory() {
+        let directory = scratch_repo("ignored-depth");
+        write(&directory, ".gitignore", "*.log\nbuild/\n");
+        for folder in ["app", "app/inner", "build", "build/out"] {
+            std::fs::create_dir(directory.join(folder)).unwrap();
         }
-        // The worker takes the batch on its first turn, with no quiet window:
-        // the old 500 ms one put a floor under every folder expand. On this
-        // single-threaded runtime the git child cannot finish inside that
-        // turn, so a key with nothing pending means the check is running.
-        let mut turns = 0;
-        while ignore_queue().get(&root).is_some_and(|pending| !pending.replies.is_empty()) {
-            assert!(turns < 8, "the worker must take a batch without waiting");
-            tokio::task::yield_now().await;
-            turns += 1;
+        write(&directory, "app/.gitignore", "!kept.log\n*.tmp\n");
+        for name in ["app/kept.log", "app/other.log", "app/scratch.tmp", "app/inner/kept.log", "app/inner/deep.tmp"] {
+            write(&directory, name, "");
         }
-        assert!(ignore_queue().contains_key(&root));
-        // A request arriving mid-check rides the next batch instead of
-        // starting a second git beside the first.
-        let mut later = Box::pin(check_ignored(root.clone(), vec![keep.clone()]));
-        assert!(futures_util::FutureExt::now_or_never(&mut later).is_none());
-        assert_eq!(ignore_queue().get(&root).unwrap().replies.len(), 1);
-        for result in requests.await {
-            assert_eq!(result.unwrap(), HashSet::from([first.clone()]));
-        }
-        assert!(later.await.unwrap().is_empty());
-        assert!(!ignore_queue().contains_key(&root));
-        // Exit 1 and a negative-only match both mean nothing is ignored.
-        assert!(run_check_ignore(&root, &HashSet::from([keep])).await.unwrap().is_empty());
-        assert!(run_check_ignore(&root, &HashSet::from(["new.swift".into()])).await.unwrap().is_empty());
+        // Git stops at an ignored directory, so a rule inside it re-includes nothing.
+        write(&directory, "build/.gitignore", "!artifact.log\n");
+        write(&directory, "build/artifact.log", "");
+        write(&directory, "build/out/main.o", "");
+
+        let app = ignored_flags(&directory, &directory.join("app"));
+        assert_eq!((app["kept.log"], app["other.log"], app["scratch.tmp"]), (false, true, true));
+        let inner = ignored_flags(&directory, &directory.join("app/inner"));
+        assert_eq!((inner["kept.log"], inner["deep.tmp"]), (false, true));
+        assert!(ignored_flags(&directory, &directory.join("build")).values().all(|ignored| *ignored));
+        assert!(ignored_flags(&directory, &directory.join("build/out"))["main.o"]);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[tokio::test]
-    async fn ignore_listings_resolve_nested_repositories_and_symlinked_roots_on_the_host() {
+    #[test]
+    fn a_linked_worktree_reads_the_excludes_and_case_setting_its_checkout_shares() {
+        let directory = scratch_repo("ignored-worktree");
+        write(&directory, "file", "content");
+        commit(&directory, "first");
+        write(&directory, ".git/info/exclude", "shared-exclude\n");
+        run_git(&directory, &["config", "core.ignorecase", "true"]);
+        let linked = directory.join("linked");
+        run_git(&directory, &["worktree", "add", "-q", linked.to_str().unwrap()]);
+        assert!(linked.join(".git").is_file());
+        write(&linked, ".gitignore", "Build\n");
+        for name in ["shared-exclude", "build", "other"] {
+            write(&linked, name, "");
+        }
+        let flags = ignored_flags(&linked, &linked);
+        assert_eq!((flags["shared-exclude"], flags["build"], flags["other"]), (true, true, false));
+
+        run_git(&directory, &["config", "core.ignorecase", "false"]);
+        assert!(!ignored_flags(&linked, &linked)["build"]);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rule_files_that_are_not_plain_text_files_cost_nothing_else() {
+        let directory = scratch_repo("ignored-odd-files");
+        std::fs::write(directory.join(".gitignore"), b"# legacy \xff comment\nbuild\n").unwrap();
+        for folder in ["linked", "piped", "husk"] {
+            std::fs::create_dir(directory.join(folder)).unwrap();
+        }
+        for name in ["build", "linked/out", "piped/out", "husk/out"] {
+            write(&directory, name, "");
+        }
+        // A rule after a line that is not UTF-8 still applies.
+        assert!(ignored_flags(&directory, &directory)["build"]);
+        // A rule that is not UTF-8 itself is dropped, not bent onto another name.
+        std::fs::write(directory.join(".gitignore"), b"foo\xff\n").unwrap();
+        write(&directory, "foo\u{fffd}", "");
+        assert!(!ignored_flags(&directory, &directory)["foo\u{fffd}"]);
+        // Braces are the characters themselves, as in git, not a choice.
+        write(&directory, ".gitignore", "{one,two}\n*.{js,css}\n[{]class\n");
+        for name in ["one", "two", "{one,two}", "app.js", "app.{js,css}", "{class"] {
+            write(&directory, name, "");
+        }
+        let flags = ignored_flags(&directory, &directory);
+        for (name, ignored) in [("one", false), ("two", false), ("{one,two}", true), ("app.js", false), ("app.{js,css}", true), ("{class", true)] {
+            assert_eq!(flags[name], ignored, "{name}");
+        }
+        // A rule file past the size limit is not read at all.
+        let huge = std::fs::File::create(directory.join("husk/.gitignore")).unwrap();
+        std::io::Write::write_all(&mut &huge, b"out\n").unwrap();
+        huge.set_len(RULE_FILE_LIMIT + 1).unwrap();
+        assert!(!ignored_flags(&directory, &directory.join("husk"))["out"]);
+        std::fs::remove_file(directory.join("husk/.gitignore")).unwrap();
+        // Git does not follow a `.gitignore` that is a link.
+        write(&directory, "rules", "out\n");
+        std::os::unix::fs::symlink(directory.join("rules"), directory.join("linked/.gitignore")).unwrap();
+        assert!(!ignored_flags(&directory, &directory.join("linked"))["out"]);
+        // A FIFO is never opened: reading one would wait for a writer forever.
+        for fifo in ["piped/.gitignore", "husk/.git"] {
+            let made = std::process::Command::new("mkfifo").arg(directory.join(fifo)).status().unwrap();
+            assert!(made.success());
+        }
+        assert!(!ignored_flags(&directory, &directory.join("piped"))["out"]);
+        assert!(!ignored_flags(&directory, &directory.join("husk"))["out"]);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_case_setting_is_read_the_way_git_writes_and_accepts_it() {
+        for config in [
+            "[core]\n\tignorecase = true\n",
+            "[core] # note\n ignorecase = yes ; note\n",
+            "[CORE]\nIgnoreCase=1\n",
+            "[core]\nignorecase\n",
+            "[core]\nignorecase = false\n[user]\nname = x\n[core]\nignorecase = on\n",
+            "\u{feff}[core]\nignorecase = 2\n",
+        ] {
+            assert!(config_ignores_case(config), "{config:?}");
+        }
+        for config in [
+            "",
+            "[core]\nignorecase = false\n",
+            "[core \"sub\"]\nignorecase = true\n",
+            "[user]\nignorecase = true\n",
+            "[core]\n# ignorecase = true\n",
+            "[core]\nignorecase = true\nignorecase = false\n",
+            "[core]\nignorecase = 0\n",
+            "[core]\neditor = echo \\\n ignorecase\n",
+        ] {
+            assert!(!config_ignores_case(config), "{config:?}");
+        }
+    }
+
+    #[test]
+    fn a_git_directory_kept_elsewhere_is_found_by_its_exact_name() {
+        let directory = scratch_repo("ignored-separate");
+        let checkout = directory.join("checkout");
+        // The name ends in a space, which a trim would cut off.
+        let store = directory.join("store ");
+        run_git(&directory, &["init", "-q", "--separate-git-dir", store.to_str().unwrap(), checkout.to_str().unwrap()]);
+        write(&store, "info/exclude", "excluded\n");
+        write(&checkout, "excluded", "");
+        write(&checkout, "kept", "");
+        let flags = ignored_flags(&checkout, &checkout);
+        assert_eq!((flags["excluded"], flags["kept"]), (true, false));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn ignore_listings_resolve_nested_repositories_and_symlinked_roots_on_the_host() {
         let directory = scratch_repo("ignored-roots");
         write(&directory, ".gitignore", "*.log\n");
         let nested = directory.join("nested");
@@ -1661,14 +1848,14 @@ mod tests {
         let root = directory.to_string_lossy().into_owned();
         let paths = [nested.to_string_lossy().into_owned(), alias.to_string_lossy().into_owned()];
         let mut listings = crate::files::list(&root, &paths, None).unwrap();
-        decorate_listings(&mut listings).await;
+        decorate_listings(&mut listings);
         for listing in listings {
             assert!(listing.entries.iter().find(|entry| entry.name == "ignored.tmp").unwrap().ignored);
             assert!(!listing.entries.iter().find(|entry| entry.name == "keep.log").unwrap().ignored);
         }
         std::fs::remove_dir_all(directory.join(".git")).unwrap();
         let mut plain = crate::files::list(&root, &[root.clone()], None).unwrap();
-        decorate_listings(&mut plain).await;
+        decorate_listings(&mut plain);
         assert!(plain[0].entries.iter().all(|entry| !entry.ignored));
         std::fs::remove_dir_all(directory).unwrap();
     }
