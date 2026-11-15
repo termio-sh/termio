@@ -29,6 +29,9 @@ export const changelog: ChangelogEntry[] = [
       improved: [
         "A PDF reopens on the page where you left it.",
       ],
+      fixed: [
+        "Files: opening a folder no longer waits on git, so a slow git on the device no longer slows every folder in the tree.",
+      ],
     },
   },
   {
