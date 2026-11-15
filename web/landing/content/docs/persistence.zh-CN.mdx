@@ -99,7 +99,13 @@ unit 会跟着你的会话一起停。
 在有值得保护的活儿时，Termio 确实会把机器挡在*闲置*睡眠之外。只要还有会话在工作中或者在
 等你，server 就会续一个短的 `caffeinate` 租约，这样一台插着电的 Mac 就仍然能被连上——正好
 是那个在权限提示上安静下来的 Agent 最需要的时刻，也正好是你的手机要去回答它的时候。用电池
-时它根本不取租约；合上盖子机器照样睡：用户态的任何东西都覆盖不了合盖睡眠。
+时它根本不取租约。
+
+`caffeinate` 租约管不到合上的盖子。macOS 只在两种情况下让合盖的 MacBook 继续运行：合盖显示
+模式（插着电，并接着外接显示器和键盘或鼠标），或者整机关闭睡眠：
+`sudo pmset -a disablesleep 1` 会一直关着睡眠（用电池时也是），直到你运行
+`sudo pmset -a disablesleep 0`。能让 MacBook 合盖保持唤醒的应用，比如
+[Keep Mac Awake](https://keepmacawake.com/?utm_source=termio&utm_medium=referral&utm_campaign=partner-docs)，就是在一个会话期间关掉同一个设置，结束时再打开。
 
 <Callout type="warning">
   如果你想要一个随时都能连上的会话，就把它跑在一台一直开着的机器上——一台 VPS，或者桌上
