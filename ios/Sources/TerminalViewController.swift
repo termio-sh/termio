@@ -1266,7 +1266,7 @@ final class TerminalViewController: UIViewController {
                   palette: definition.palette, cursor: definition.cursorColor, cursorText: definition.cursorText,
                   selectionBackground: definition.selectionBackground,
                   selectionForeground: definition.selectionForeground,
-                  cursorStyle: GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK, cursorBlink: true, minimumContrast: 1, dark: dark)
+                  cursorStyle: GHOSTTY_CURSOR_STYLE_BLOCK, cursorBlink: true, minimumContrast: 1, dark: dark)
         else { return }
         session.setStreamTheme(theme)
         func hex(_ color: GhosttyColorRgb) -> String { String(format: "%02x%02x%02x", color.r, color.g, color.b) }

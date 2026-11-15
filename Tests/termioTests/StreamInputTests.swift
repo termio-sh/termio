@@ -334,7 +334,7 @@ final class StreamInputTests: XCTestCase {
         palette[0] = GhosttyColorRgb(r: 0, g: 0, b: 0)
         var theme = TermiodStreamTerminal.Theme(
             foreground: GhosttyColorRgb(r: 200, g: 200, b: 200), background: GhosttyColorRgb(r: 10, g: 10, b: 10),
-            cursor: nil, palette: palette, cursorStyle: GHOSTTY_TERMINAL_CURSOR_STYLE_BAR, cursorBlink: false
+            cursor: nil, palette: palette, cursorStyle: GHOSTTY_CURSOR_STYLE_BAR, cursorBlink: false
         )
         try terminal.setTheme(theme)
         let appearance = TermiodStreamRenderer.Appearance(
