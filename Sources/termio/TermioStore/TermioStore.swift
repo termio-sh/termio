@@ -82,7 +82,7 @@ final class TermioStore: ObservableObject {
             // Suppressed during launch restore: `restored()` seeds every session's layout
             // and applies the selected one by hand, so capturing here would overwrite a
             // just-seeded layout with the still-default live inspector.
-            if let id = selectedSessionID, session(id)?.isApp == false { lastTerminalSelection = id }
+            recordTerminalSelection()
             followLiveApp()
             if let id = selectedSessionID {
                 // Looking at a session is being in its workspace. A global verb —
@@ -181,6 +181,13 @@ final class TermioStore: ObservableObject {
     /// for (see `companionTerminal`).
     private var lastTerminalSelection: Session.ID?
 
+    /// Records the selection as the terminal last selected, when it is one. The
+    /// selection's didSet does this on every change; the two places that set a selection
+    /// without firing it — the designated init and the launch restore — call this.
+    private func recordTerminalSelection() {
+        if let id = selectedSessionID, session(id)?.isApp == false { lastTerminalSelection = id }
+    }
+
     /// Every session sharing `id`'s split group, itself included; just `id` when it is alone.
     func splitMembers(of id: Session.ID) -> [Session.ID] {
         splitGroups.first { $0.contains(id) }?.leafIDs ?? [id]
@@ -267,10 +274,15 @@ final class TermioStore: ObservableObject {
     /// in hand.
     func selectCardForOpenedDetail() {
         if liveAppID == nil { showApp(inspectorTab) }
-        guard let live = liveAppID, selectedSessionID != live else { return }
-        // The card reads for the terminal the person is leaving, which a selection restored
-        // at launch never recorded.
-        if let id = selectedSessionID, session(id)?.isApp == false { lastTerminalSelection = id }
+        guard let live = liveAppID else {
+            // No card could open — nothing is selected to open one beside. A detail left
+            // set would show nowhere now and turn up later, in the next card to open.
+            openDiff = nil
+            openFileURL = nil
+            openIssueDetail = nil
+            return
+        }
+        guard selectedSessionID != live else { return }
         isPaneZoomed = false
         selectedSessionID = live
     }
@@ -1536,6 +1548,7 @@ final class TermioStore: ObservableObject {
         // `syncRuntimes` reads it.
         rebuildSessionSlots()
         syncRuntimes()
+        recordTerminalSelection()
 
         // Re-style already-open terminals whenever appearance settings change.
         // `objectWillChange` fires *before* the new value lands, so we hop to the
@@ -1919,9 +1932,7 @@ final class TermioStore: ObservableObject {
         }
         // Neither assignment fires the selection's didSet, which is what records the
         // terminal an app card reads for.
-        if let id = store.selectedSessionID, store.session(id)?.isApp == false {
-            store.lastTerminalSelection = id
-        }
+        store.recordTerminalSelection()
         // The designated init set the selection without firing its didSet, and re-setting
         // it to the same id above is a no-op, so apply the selected session's restored
         // layout to the live inspector props explicitly.

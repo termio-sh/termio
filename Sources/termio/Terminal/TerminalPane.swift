@@ -131,6 +131,14 @@ struct TerminalPane: View {
             // (issue #160), so we no longer clear the overlays here. The editor overlay's
             // `.onDisappear` still flushes any pending auto-save when a restore replaces it.
             requestSelectedTerminalFocus(reason: .selectionChanged)
+            // An app card selected from outside it (its row, the palette, a path opened in
+            // it) takes the keyboard from the terminal that had it. A press inside the card
+            // already put the keyboard on one of its views, which is left alone.
+            if let id, store.session(id)?.isApp == true,
+               let view = InspectorPanelHost.shared.controller?.view, let window = view.window,
+               !((window.firstResponder as? NSView)?.isDescendant(of: view) ?? false) {
+                window.makeFirstResponder(view)
+            }
         }
         // The toolbar's close button posts this; tear the overlay down the same way the overlay's
         // own Esc / close does (clear the store, return focus to the selected session's terminal).
