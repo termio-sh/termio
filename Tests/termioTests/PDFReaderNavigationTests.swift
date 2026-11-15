@@ -173,7 +173,97 @@ final class PDFReaderNavigationTests: XCTestCase {
         XCTAssertFalse(reopened.canGoBack, "returning to your place is not a jump to go back from")
     }
 
+    /// The file at a path can be replaced by a shorter one. A place past its end is not a
+    /// place: the reader opens at the top instead of asking PDFKit for a page that is gone.
+    func testAPlacePastTheEndOfAShorterDocumentIsIgnored() throws {
+        let (model, window) = try openInWindow()
+        let pdf = try XCTUnwrap(model.pdfView.document)
+        model.pdfView.go(to: PDFDestination(page: try XCTUnwrap(pdf.page(at: 5)), at: CGPoint(x: 0, y: 450)))
+        settle(0.3)
+        model.rememberPosition()
+        window.orderOut(nil)
+
+        let shorter = try XCTUnwrap(PDFDocument(url: document))
+        for _ in 0..<4 { shorter.removePage(at: shorter.pageCount - 1) }
+        XCTAssertTrue(shorter.write(to: document))
+
+        let (reopened, second) = try openInWindow()
+        defer { second.orderOut(nil) }
+        XCTAssertEqual(reopened.pageCount, 2)
+        XCTAssertEqual(reopened.currentPage, 0)
+    }
+
+    /// Quitting takes no view out of its window, so the place is saved on the way out too.
+    func testQuittingSavesThePlaceWithinThePage() throws {
+        let (model, window) = try openInWindow()
+        defer { window.orderOut(nil) }
+        let pdf = try XCTUnwrap(model.pdfView.document)
+        model.pdfView.go(to: PDFDestination(page: try XCTUnwrap(pdf.page(at: 2)), at: CGPoint(x: 0, y: 700)))
+        settle(0.3)
+        model.pdfView.go(to: PDFDestination(page: try XCTUnwrap(pdf.page(at: 2)), at: CGPoint(x: 0, y: 420)))
+        settle(0.3)
+        let here = try XCTUnwrap(model.pdfView.currentDestination)
+
+        NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: NSApp)
+        let saved = try XCTUnwrap(PDFReadingPosition.place(for: document))
+        XCTAssertEqual(saved.page, 2)
+        XCTAssertEqual(saved.y, here.point.y, accuracy: 1)
+    }
+
     // MARK: - Find
+
+    /// Typing a different query drops the result the last one stopped on: a selection left
+    /// behind would still be what Copy and Add to Chat act on.
+    func testANewQueryDropsTheLastResult() throws {
+        let (model, window) = try openInWindow()
+        defer { window.orderOut(nil) }
+        model.find("needle", caseSensitive: false)
+        try waitForFind(model)
+        XCTAssertNotNil(model.pdfView.currentSelection)
+
+        model.find("no such words anywhere", caseSensitive: false)
+        try waitForFind(model)
+        XCTAssertEqual(model.findMatchCount, 0)
+        XCTAssertNil(model.pdfView.currentSelection?.string)
+    }
+
+    /// Back spends the place a search filed. Stepping on from there files the new place, so
+    /// a result always has a way back.
+    func testSteppingOnAfterBackCanGoBackAgain() throws {
+        let (model, window) = try openInWindow()
+        defer { window.orderOut(nil) }
+        model.find("needle", caseSensitive: false)
+        try waitForFind(model)
+        model.stepFind(by: 3)
+        settle(0.3)
+        model.goBack()
+        settle(0.3)
+        XCTAssertEqual(model.currentPage, 0)
+        XCTAssertFalse(model.canGoBack)
+
+        model.stepFind(by: 1)
+        settle(0.3)
+        XCTAssertEqual(model.currentPage, 4)
+        XCTAssertTrue(model.canGoBack)
+        model.goBack()
+        settle(0.3)
+        XCTAssertEqual(model.currentPage, 0)
+    }
+
+    /// Starting a second search while the first is still reading must not land on the
+    /// first one's leftovers.
+    func testRestartingASearchMidwayDoesNotJump() throws {
+        let (model, window) = try openInWindow()
+        defer { window.orderOut(nil) }
+        model.go(toPage: 5)
+        settle(0.3)
+        model.find("needle", caseSensitive: false)
+        model.find("row 3:", caseSensitive: false)
+        try waitForFind(model)
+        XCTAssertEqual(model.findMatchCount, Self.pageCount)
+        XCTAssertEqual(model.currentPage, 5, "the search began on the last page and has a result there")
+        XCTAssertEqual(model.findIndex, 5)
+    }
 
     func testFindStartsFromThePageYouAreOnAndWraps() throws {
         let (model, window) = try openInWindow()
