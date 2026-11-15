@@ -58,7 +58,10 @@ enum PDFLinkPreview {
             context.fill(rect)
             context.saveGState()
             context.scaleBy(x: scale, y: scale)
-            context.translateBy(x: -region.minX, y: -region.minY)
+            // `draw(with:)` already puts the box's own corner at the origin, so only the
+            // region's offset inside the box is left to take off. Subtracting the region's
+            // page coordinates would shift a page with trimmed margins twice.
+            context.translateBy(x: -(region.minX - box.minX), y: -(region.minY - box.minY))
             page.draw(with: .cropBox, to: context)
             context.restoreGState()
             // A tick in the margin at the anchor: in a reference list of twelve entries,

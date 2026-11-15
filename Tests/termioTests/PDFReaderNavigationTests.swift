@@ -95,6 +95,33 @@ final class PDFReaderNavigationTests: XCTestCase {
         XCTAssertEqual(PDFLinkPreview.size(fitting: 100).width, 240, "a narrow pane still gets a readable preview")
     }
 
+    /// A page with trimmed margins has a crop box that starts away from the page's origin.
+    /// The preview must show the anchor where it says it does, not shifted by that offset.
+    func testPreviewOfACroppedPageShowsTheAnchor() throws {
+        let pdf = try XCTUnwrap(PDFDocument(url: document))
+        let page = try XCTUnwrap(pdf.page(at: 4))
+        page.setBounds(CGRect(x: 60, y: 120, width: 480, height: 600), for: .cropBox)
+        // A black block on the page, and a link destination at its top edge.
+        let block = CGRect(x: 300, y: 380, width: 40, height: 20)
+        let ink = PDFAnnotation(bounds: block, forType: .square, withProperties: nil)
+        ink.color = .black
+        ink.interiorColor = .black
+        page.addAnnotation(ink)
+        let destination = PDFDestination(page: page, at: CGPoint(x: 0, y: block.maxY))
+
+        let size = PDFLinkPreview.size(fitting: 480)
+        let image = try XCTUnwrap(PDFLinkPreview.image(of: destination, size: size))
+        let bitmap = try XCTUnwrap(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
+        // The region is as wide as the crop box, so page x maps straight across; the anchor
+        // sits two fifths of the way down the preview.
+        let scaleX = CGFloat(bitmap.pixelsWide) / 480
+        let scaleY = CGFloat(bitmap.pixelsHigh) / image.size.height
+        let x = Int((block.midX - 60) * (size.width / 480) * scaleX)
+        let y = Int((image.size.height * 0.4 + 10 * (size.width / 480)) * scaleY)
+        let pixel = try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+        XCTAssertLessThan(pixel.brightnessComponent, 0.3, "the block is not where the anchor says it is")
+    }
+
     // MARK: - History
 
     /// Following a link and pressing Back returns to the line you were reading, not to the
@@ -226,6 +253,22 @@ final class PDFReaderNavigationTests: XCTestCase {
         XCTAssertEqual(model.findMatchCount, 0)
         XCTAssertNil(model.findIndex)
         XCTAssertNil(model.pdfView.currentSelection?.string)
+    }
+
+    /// Typing a letter and deleting it stops the search and must start it again: the part
+    /// that was read before the stop is not the answer.
+    func testASearchStoppedPartwayIsNotTheWholeSearch() throws {
+        let (model, window) = try openInWindow()
+        defer { window.orderOut(nil) }
+        model.find("needle", caseSensitive: false)
+        XCTAssertTrue(model.isShowingFind("needle", caseSensitive: false))
+        model.stopFinding()
+        XCTAssertFalse(model.isShowingFind("needle", caseSensitive: false))
+
+        model.find("needle", caseSensitive: false)
+        try waitForFind(model)
+        XCTAssertTrue(model.isShowingFind("needle", caseSensitive: false))
+        XCTAssertEqual(model.findMatchCount, Self.pageCount)
     }
 
     /// A passage the reader selected after searching is theirs: closing the search must

@@ -105,6 +105,7 @@ final class PDFReaderModel: ObservableObject {
     private static let findMatchColor = NSColor.findHighlightColor.withAlphaComponent(0.45)
     private static let findCurrentMatchColor = NSColor.systemOrange.withAlphaComponent(0.75)
     private var findMarkedOrigin = false
+    private var findStoppedEarly = false
     /// History changes the search itself caused and PDFKit has yet to report.
     private var ownHistoryChanges = 0
 
@@ -323,8 +324,7 @@ final class PDFReaderModel: ObservableObject {
         // The file at this path may have been replaced by a shorter one since, and asking
         // PDFKit for a page past the end raises instead of returning nil.
         guard let place = PDFReadingPosition.place(for: url), let document = pdfView.document,
-              place.page < document.pageCount, let page = document.page(at: place.page),
-              place.page > 0 || place.y < page.bounds(for: .cropBox).maxY - 1 else { return }
+              place.page < document.pageCount, let page = document.page(at: place.page) else { return }
         scrollQuietly(to: CGRect(x: place.x, y: place.y, width: 0, height: 0), on: page, centered: false)
     }
 
@@ -382,14 +382,17 @@ final class PDFReaderModel: ObservableObject {
         // Cancelling reports the search as ended before it returns. It is marked over
         // first, so that report is ignored.
         isFinding = false
+        findStoppedEarly = true
         pdfView.document?.cancelFindString()
         findMatchCount = findMatches.count
         pdfView.highlightedSelections = findMatches.isEmpty ? nil : findMatches
     }
 
-    /// Whether the search on screen is already the one for these words.
+    /// Whether the search on screen is already the whole search for these words. A search
+    /// stopped partway is not: typing a letter and deleting it must start it again, or the
+    /// bar would go on counting the part that was read.
     func isShowingFind(_ query: String, caseSensitive: Bool) -> Bool {
-        query == findQuery && caseSensitive == findCaseSensitive
+        query == findQuery && caseSensitive == findCaseSensitive && !findStoppedEarly
     }
 
     func stepFind(by offset: Int) {
@@ -419,12 +422,15 @@ final class PDFReaderModel: ObservableObject {
         findIndex = nil
         isFinding = false
         findMarkedOrigin = false
+        findStoppedEarly = false
         ownHistoryChanges = 0
         pdfView.highlightedSelections = nil
     }
 
     private static func samePlace(_ lhs: PDFSelection, _ rhs: PDFSelection) -> Bool {
-        guard lhs.pages == rhs.pages, let page = lhs.pages.first else { return false }
+        // The words as well as the box: a selection stretched a few words past a result
+        // that wraps can have the result's exact bounding box.
+        guard lhs.pages == rhs.pages, lhs.string == rhs.string, let page = lhs.pages.first else { return false }
         return lhs.bounds(for: page) == rhs.bounds(for: page)
     }
 

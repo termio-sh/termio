@@ -109,10 +109,10 @@ struct PDFReaderView: View {
             findFocusTrigger += 1
         }
         .onReceive(NotificationCenter.default.publisher(for: .termioFindNext)) { _ in
-            if findVisible { model.stepFind(by: 1) }
+            if findVisible { stepFind(by: 1) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .termioFindPrevious)) { _ in
-            if findVisible { model.stepFind(by: -1) }
+            if findVisible { stepFind(by: -1) }
         }
         // Searches as you type, a beat behind the keys: each search reads the whole book.
         .task(id: FindRequest(query: findQuery, caseSensitive: findOptions.caseSensitive, visible: findVisible)) {
@@ -137,22 +137,26 @@ struct PDFReaderView: View {
             options: $findOptions,
             currentMatch: model.findIndex.map { $0 + 1 } ?? 0,
             totalMatches: model.findMatchCount,
-            onSubmit: {
-                // Return on the search already showing steps to its next result.
-                if model.isShowingFind(findQuery, caseSensitive: findOptions.caseSensitive) {
-                    model.stepFind(by: 1)
-                } else {
-                    startFind()
-                }
-            },
-            onNext: { model.stepFind(by: 1) },
-            onPrevious: { model.stepFind(by: -1) },
+            onSubmit: { stepFind(by: 1) },
+            onNext: { stepFind(by: 1) },
+            onPrevious: { stepFind(by: -1) },
             onClose: closeFind,
             focusTrigger: findFocusTrigger,
             supportsWordAndRegex: false,
             searching: model.isFinding
         )
         .transition(.move(edge: .trailing).combined(with: .opacity))
+    }
+
+    /// Return, ⌘G and the arrows step through the search for the words in the field. In the
+    /// pause after typing, the results on hand are still the old words'; stepping through
+    /// those would move the page for a query no longer shown, so the new search starts instead.
+    private func stepFind(by offset: Int) {
+        if model.isShowingFind(findQuery, caseSensitive: findOptions.caseSensitive) {
+            model.stepFind(by: offset)
+        } else {
+            startFind()
+        }
     }
 
     private func startFind() {
