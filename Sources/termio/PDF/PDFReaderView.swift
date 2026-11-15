@@ -155,13 +155,13 @@ struct PDFReaderView: View {
         if model.isShowingFind(findQuery, caseSensitive: findOptions.caseSensitive) {
             model.stepFind(by: offset)
         } else {
-            startFind()
+            startFind(backward: offset < 0)
         }
     }
 
-    private func startFind() {
+    private func startFind(backward: Bool = false) {
         guard !model.isShowingFind(findQuery, caseSensitive: findOptions.caseSensitive) else { return }
-        model.find(findQuery, caseSensitive: findOptions.caseSensitive)
+        model.find(findQuery, caseSensitive: findOptions.caseSensitive, backward: backward)
     }
 
     private func closeFind() {

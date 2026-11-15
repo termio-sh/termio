@@ -271,6 +271,27 @@ final class PDFReaderNavigationTests: XCTestCase {
         XCTAssertEqual(model.findMatchCount, Self.pageCount)
     }
 
+    /// A search started by Previous lands on the result before the page you are on, and
+    /// wraps to the last one when there is none.
+    func testASearchStartedBackwardLandsBeforeThePage() throws {
+        let (model, window) = try openInWindow()
+        defer { window.orderOut(nil) }
+        model.go(toPage: 3)
+        settle(0.3)
+        model.find("needle", caseSensitive: false, backward: true)
+        try waitForFind(model)
+        XCTAssertEqual(model.findIndex, 2)
+        settle(0.3)
+        XCTAssertEqual(model.currentPage, 2)
+
+        model.endFind()
+        model.go(toPage: 0)
+        settle(0.3)
+        model.find("needle", caseSensitive: false, backward: true)
+        try waitForFind(model)
+        XCTAssertEqual(model.findIndex, Self.pageCount - 1)
+    }
+
     /// A passage the reader selected after searching is theirs: closing the search must
     /// not take it away from Copy, Highlight and Add to Chat.
     func testClosingFindKeepsASelectionTheReaderMade() throws {

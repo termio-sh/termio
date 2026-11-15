@@ -106,6 +106,7 @@ final class PDFReaderModel: ObservableObject {
     private static let findCurrentMatchColor = NSColor.systemOrange.withAlphaComponent(0.75)
     private var findMarkedOrigin = false
     private var findStoppedEarly = false
+    private var findBackward = false
     /// History changes the search itself caused and PDFKit has yet to report.
     private var ownHistoryChanges = 0
 
@@ -362,12 +363,16 @@ final class PDFReaderModel: ObservableObject {
 
     /// Starts looking for `query` through the whole document. Results arrive as PDFKit
     /// reads pages, so the first one is on screen long before a long book is finished.
-    func find(_ query: String, caseSensitive: Bool) {
+    ///
+    /// `backward` is for a search started by Previous: it lands on the nearest result
+    /// before the page you are on, which is only known once the reading is done.
+    func find(_ query: String, caseSensitive: Bool, backward: Bool = false) {
         guard let document = pdfView.document else { return }
         stopFinding()
         resetFind()
         findQuery = query
         findCaseSensitive = caseSensitive
+        findBackward = backward
         guard !query.isEmpty else { return }
         findOrigin = currentPage
         isFinding = true
@@ -441,8 +446,8 @@ final class PDFReaderModel: ObservableObject {
         // The count is published in steps: a common word turns up thousands of times, and
         // a redraw of the bar for each one is the search's whole cost.
         if findMatches.count <= 20 || findMatches.count % 50 == 0 { findMatchCount = findMatches.count }
-        guard findIndex == nil, let page = selection.pages.first, let document = pdfView.document,
-              document.index(for: page) >= findOrigin else { return }
+        guard findIndex == nil, !findBackward, let page = selection.pages.first,
+              let document = pdfView.document, document.index(for: page) >= findOrigin else { return }
         focusMatch(findMatches.count - 1)
     }
 
@@ -450,8 +455,18 @@ final class PDFReaderModel: ObservableObject {
         guard isFinding, pdfView.document?.isFinding == false else { return }
         isFinding = false
         findMatchCount = findMatches.count
-        // Nothing from the starting page onward: wrap to the first one in the book.
-        if findIndex == nil, !findMatches.isEmpty { focusMatch(0) }
+        if findIndex == nil, !findMatches.isEmpty {
+            if findBackward, let document = pdfView.document {
+                // The last result before the starting page, or the last in the book.
+                let before = findMatches.lastIndex { match in
+                    match.pages.first.map { document.index(for: $0) < findOrigin } ?? false
+                }
+                focusMatch(before ?? findMatches.count - 1)
+            } else {
+                // Nothing from the starting page onward: wrap to the first one in the book.
+                focusMatch(0)
+            }
+        }
         pdfView.highlightedSelections = findMatches.isEmpty ? nil : findMatches
     }
 
