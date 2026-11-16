@@ -96,6 +96,9 @@ struct DiffWebSingle {
     /// Nil while the find bar is closed.
     var find: DiffWebFind? = nil
     var onFindCount: (Int) -> Void = { _ in }
+    /// Escape, when it has something to close before the diff itself, as an open find bar.
+    /// Nil sends Escape to `onClose`.
+    var onEscape: (() -> Void)? = nil
     /// The file changed after its diff was read, so a band could not be expanded.
     var onStale: () -> Void = {}
     /// Steps to the previous or next file. False at either end.
@@ -383,8 +386,12 @@ final class DiffWebBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "selection":
             selectedText = body["text"] as? String ?? ""
             return (nil, nil)
+        case "findCount":
+            // The page counted again by itself: a band opened and the whole file came in.
+            if sentFind != nil, let count = body["count"] as? Int { single?.onFindCount(count) }
+            return (nil, nil)
         case "close":
-            onClose()
+            if let onEscape = single?.onEscape { onEscape() } else { onClose() }
             return (nil, nil)
         case "log":
             Log.issues.error("diff page: \(body["message"] as? String ?? "", privacy: .public)")

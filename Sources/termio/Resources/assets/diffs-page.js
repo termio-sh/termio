@@ -20,6 +20,10 @@
   let single = false;
   /** The input each item was built from, by item id. */
   const files = new Map();
+  /** Every item on the page, in order. */
+  let itemIds = [];
+  /** The library's renderer for each item that is on screen, by item id. */
+  const instances = new Map();
   /**
    * The one source of item versions, for loads and folds alike. `CodeView` drops an update
    * whose version matches the item it holds, so a version is never handed out twice.
@@ -70,18 +74,28 @@
     return head + '--- ' + from + '\n+++ ' + to + '\n' + file.patch + (file.patch.endsWith('\n') ? '' : '\n');
   }
 
-  function item(file, collapsed) {
-    let fileDiff = null;
+  /**
+   * The items one file draws as. Nearly always one. A path that changes type, as a symlink
+   * replaced by a regular file, is two diffs in git's output: the old one deleted, the new
+   * one added.
+   */
+  function items(file) {
+    let parsed = [];
     try {
-      const parsed = Diffs.parsePatchFiles(patchText(file), { cacheKeyPrefix: generation + ':' + file.id });
-      fileDiff = parsed[0] && parsed[0].files[0];
+      const patches = Diffs.parsePatchFiles(patchText(file), { cacheKeyPrefix: generation + ':' + file.id });
+      parsed = patches.flatMap((patch) => patch.files);
     } catch (error) {
       post({ type: 'log', message: 'parse ' + file.path + ': ' + String(error) });
     }
-    if (!fileDiff) return null;
-    fileDiff.name = file.path;
-    if (file.oldPath && file.oldPath !== file.path) fileDiff.prevName = file.oldPath;
-    return { id: file.id, type: 'diff', fileDiff, collapsed, version: generation };
+    return parsed.map((fileDiff, index) => {
+      // A path cannot hold a NUL, so the extra ids never collide with a file's.
+      const id = index === 0 ? file.id : file.id + '\u0000' + index;
+      fileDiff.name = file.path;
+      if (file.oldPath && file.oldPath !== file.path) fileDiff.prevName = file.oldPath;
+      const held = viewer && viewer.getItem(id);
+      // A refresh keeps the files the reader folded shut.
+      return { id, type: 'diff', fileDiff, collapsed: Boolean(held && held.collapsed), version: generation };
+    });
   }
 
   /**
@@ -186,7 +200,12 @@
       loadDiffFiles,
       renderHeaderPrefix: chevron,
       renderHeaderFilenameSuffix: note,
-      onPostRender: scheduleFindPaint,
+      onPostRender: (node, instance, phase, context) => {
+        const id = context && context.item && context.item.id;
+        if (id && phase === 'unmount') instances.delete(id);
+        else if (id) instances.set(id, instance);
+        scheduleFindPaint();
+      },
       unsafeCSS: look.css + findCSS,
     };
   }
@@ -199,16 +218,24 @@
 
   // Find. The matches are counted from the diff itself, because the lines off screen are
   // not in the DOM. The paint runs over the lines that are, after every render.
+  //
+  // Until a reader expands a band the page holds only the lines of the patch, so find covers
+  // those. Expanding one loads the whole file, and from then on find covers the whole file:
+  // a match inside a band that is still shut opens the band when the reader steps to it.
 
   const findCSS = `
     ::highlight(termio-find) { background-color: rgba(255, 204, 0, 0.35); }
     ::highlight(termio-find-focused) { background-color: rgba(255, 204, 0, 0.7); }
   `;
   let findPattern = null;
-  /** Every match in the lines the diff shows before any context is expanded, in reading order. */
+  /** Every match, in reading order. */
   let findMatches = [];
   let findFocused = null;
   let findPaintQueued = false;
+  /** The items whose whole file the matches were last counted from. */
+  const hydrated = new Set();
+  /** The bands find has opened, as item id and band index, so each opens once. */
+  const revealed = new Set();
 
   function pattern(spec) {
     if (!spec || !spec.query) return null;
@@ -234,22 +261,35 @@
 
   function collectMatches() {
     findMatches = [];
-    if (!findPattern || !viewer) return;
-    for (const id of files.keys()) {
+    hydrated.clear();
+    if (!viewer) return;
+    for (const id of itemIds) {
       const entry = viewer.getItem(id);
       const diff = entry && entry.fileDiff;
       if (!diff) continue;
-      const scan = (side, lines, index, number, count) => {
+      const whole = !diff.isPartial;
+      if (whole) hydrated.add(id);
+      if (!findPattern) continue;
+      const scan = (side, lines, index, number, count, band) => {
         for (let offset = 0; offset < count; offset++) {
           const text = (lines[index + offset] || '').replace(/\r?\n$/, '');
           for (const [start, end] of spans(text)) {
-            findMatches.push({ id, side, line: number + offset, start, end });
+            findMatches.push({ id, side, line: number + offset, start, end, band });
           }
         }
       };
-      for (const hunk of diff.hunks) {
+      // The unchanged lines between two hunks, which a band hides. `band` is the index the
+      // library opens it by: the hunk below it, or one past the last hunk for the file's end.
+      const between = (from, to, band) => {
+        if (whole && to > from) scan('additions', diff.additionLines, from - 1, from, to - from, band);
+      };
+      let shown = 1;
+      diff.hunks.forEach((hunk, index) => {
         let oldNumber = hunk.deletionStart;
         let newNumber = hunk.additionStart;
+        // A hunk that adds nothing names the line above it, not its own first line.
+        const first = hunk.additionCount > 0 ? newNumber : newNumber + 1;
+        between(shown, first, index);
         for (const content of hunk.hunkContent) {
           if (content.type === 'context') {
             // An unchanged line shows in both columns of a split diff. It counts once.
@@ -263,8 +303,32 @@
             newNumber += content.additions;
           }
         }
-      }
+        shown = hunk.additionCount > 0 ? newNumber : first;
+      });
+      if (diff.hunks.length > 0) between(shown, diff.additionLines.length + 1, diff.hunks.length);
     }
+  }
+
+  /** Opens the band a match sits in, so the line exists to scroll to. */
+  function reveal(match) {
+    if (match.band === undefined) return;
+    const key = match.id + '\u0000' + match.band;
+    const instance = instances.get(match.id);
+    if (revealed.has(key) || !instance || typeof instance.expandHunk !== 'function') return;
+    revealed.add(key);
+    instance.expandHunk(match.band, 'both', Number.MAX_SAFE_INTEGER);
+  }
+
+  /** A band was expanded for the first time, so the whole file is there to search now. */
+  function recountIfHydrated() {
+    if (!findPattern || !viewer) return;
+    const grew = itemIds.some((id) => {
+      const entry = viewer.getItem(id);
+      return entry && entry.fileDiff && !entry.fileDiff.isPartial && !hydrated.has(id);
+    });
+    if (!grew) return;
+    collectMatches();
+    post({ type: 'findCount', count: findMatches.length });
   }
 
   function scheduleFindPaint() {
@@ -273,6 +337,7 @@
     // A timer, not an animation frame: the paint has to run while the pane is covered too.
     setTimeout(() => {
       findPaintQueued = false;
+      recountIfHydrated();
       paintFind();
     }, 30);
   }
@@ -361,9 +426,12 @@
       } else {
         viewer.setOptions(options());
       }
-      // A refresh keeps the files the reader folded shut.
-      const folded = (id) => Boolean(viewer.getItem(id) && viewer.getItem(id).collapsed);
-      viewer.setItems(payload.files.map((file) => item(file, folded(file.id))).filter(Boolean));
+      const next = payload.files.flatMap(items);
+      itemIds = next.map((entry) => entry.id);
+      instances.clear();
+      revealed.clear();
+      hydrated.clear();
+      viewer.setItems(next);
       if (single) root.scrollTo(0, 0);
       collectMatches();
       scheduleFindPaint();
@@ -386,6 +454,7 @@
       collectMatches();
       findFocused = (spec && findMatches[spec.index]) || null;
       if (findFocused && viewer) {
+        reveal(findFocused);
         viewer.scrollTo({
           type: 'line', id: findFocused.id, lineNumber: findFocused.line,
           side: findFocused.side, align: 'center',

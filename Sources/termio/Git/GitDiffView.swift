@@ -263,20 +263,17 @@ struct GitDiffView: View {
         DiffWebView(
             files: [change],
             patches: [change.path: patch],
-            fileText: { [request] _ in
-                await DiffSource.fullText(
-                    for: change, in: request.repoRoot, device: request.device,
-                    commit: request.commit, range: request.range)
-            },
+            fileText: { _ in await fullText(of: change, shownAs: patch) },
             look: DiffLook(settings: settings, colorScheme: colorScheme),
-            // Escape closes the find bar first, then the overlay.
-            onClose: { if findBarVisible { closeFindBar() } else { onClose() } },
+            onClose: onClose,
             single: DiffWebSingle(
                 isSplit: isSplitView,
                 find: findBarVisible
                     ? DiffWebFind(query: findQuery, options: findOptions, index: findFocusedIndex)
                     : nil,
                 onFindCount: noteFindCount,
+                // Escape closes the find bar first, then the overlay.
+                onEscape: { if findBarVisible { closeFindBar() } else { onClose() } },
                 onStale: { Task { await load() } },
                 onWalk: { walk($0) },
                 // Cursor's split, like the editor: a selection goes over as the pasted
@@ -312,6 +309,23 @@ struct GitDiffView: View {
     }
 
     // MARK: Loading
+
+    /// The whole file, for the page to expand a band from. The diff is read again beside it:
+    /// when the file has changed since `patch` was drawn, its lines no longer sit under the
+    /// hunks on screen, so the overlay loads the new diff and expands nothing.
+    private func fullText(of change: GitChange, shownAs patch: String) async -> DiffFullText? {
+        let text = await DiffSource.fullText(
+            for: change, in: request.repoRoot, device: request.device,
+            commit: request.commit, range: request.range)
+        let current = await DiffSource.patch(
+            for: change, in: request.repoRoot, device: request.device,
+            commit: request.commit, range: request.range)
+        guard current == patch else {
+            await load()
+            return nil
+        }
+        return text
+    }
 
     private func load() async {
         let change = request.change
