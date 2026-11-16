@@ -235,16 +235,12 @@ public enum HugeIcon: Hashable, Sendable {
     case home
     case laptop
     case dashboardSquareAdd
-    case moreHorizontal
 
     /// Side length of the source SVG's square viewBox (Hugeicons uses 24).
     public var viewBox: CGFloat { 24 }
 
     public var pathData: String {
         switch self {
-        case .moreHorizontal:
-            // Three dots in a row: a card's More menu.
-            return "M5.625 12H5.5M5.75 12C5.75 12.1381 5.63807 12.25 5.5 12.25C5.36193 12.25 5.25 12.1381 5.25 12C5.25 11.8619 5.36193 11.75 5.5 11.75C5.63807 11.75 5.75 11.8619 5.75 12Z M12.125 12H12M12.25 12C12.25 12.1381 12.13807 12.25 12 12.25C11.86193 12.25 11.75 12.1381 11.75 12C11.75 11.8619 11.86193 11.75 12 11.75C12.13807 11.75 12.25 11.8619 12.25 12Z M18.625 12H18.5M18.75 12C18.75 12.1381 18.63807 12.25 18.5 12.25C18.36193 12.25 18.25 12.1381 18.25 12C18.25 11.8619 18.36193 11.75 18.5 11.75C18.63807 11.75 18.75 11.8619 18.75 12Z"
         case .laptop:
             // Hugeicons "laptop": this Mac in the machine switcher.
             return "M20.4999 16.5V8.5C20.4999 6.14298 20.4999 4.96447 19.7676 4.23223C19.0354 3.5 17.8569 3.5 15.4999 3.5H8.49988C6.14286 3.5 4.96434 3.5 4.23211 4.23223C3.49988 4.96447 3.49988 6.14298 3.49988 8.5V16.5M21.9841 20.5H2.01567C1.63273 20.5 1.38367 20.1088 1.55493 19.7764L3.49988 16.5H20.4999L22.4448 19.7764C22.6161 20.1088 22.367 20.5 21.9841 20.5Z"

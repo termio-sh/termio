@@ -2013,21 +2013,15 @@ private struct PaneCardChrome: View {
             .frame(maxWidth: panelEdgeX.map { max(0, $0 - leadingPadding - 8) } ?? .infinity, alignment: .leading)
             .layoutPriority(1)
             Spacer(minLength: 8)
-            // One order on every card. What puts a card beside this one comes first: the menu
-            // of apps, split, split. Zoom and Close act on the card itself, end the row, and
-            // are on every card, so neither moves when the card takes or loses the selection.
+            // One order on every card. What puts a card beside this one comes first: split,
+            // split. Zoom and Close act on the card itself, end the row, and are on every
+            // card, so neither moves when the card takes or loses the selection.
             HStack(spacing: 4) {
                 // Only the focused card's: these act on the card you are in, and a row of
                 // them on every card — or on whichever one the pointer crosses — is noise.
-                HStack(spacing: 4) {
-                    if hasMoreMenu {
-                        ChromeMenuButton(icon: .moreHorizontal, help: localized("More"),
-                                         prominence: .plain, makeMenu: moreMenu)
-                    }
-                    buttons
-                }
-                .opacity(isSelected ? 1 : 0)
-                .allowsHitTesting(isSelected)
+                buttons
+                    .opacity(isSelected ? 1 : 0)
+                    .allowsHitTesting(isSelected)
                 // Zoom only means something inside a split. Alone, the card keeps the button,
                 // drawn disabled: a button that comes and goes moves its neighbors.
                 let canZoom = store.isInSplitGroup(session.id)
@@ -2045,7 +2039,7 @@ private struct PaneCardChrome: View {
                 }
                 .opacity(isSelected ? 1 : 0.55)
             }
-            // Measured, not summed: the menu button comes and goes with what it can offer.
+            // Measured, not summed, so the header's layout stays the one source of this edge.
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(PaneCard.coordinateSpace)).minX } action: {
                 if publishesGeometry { PaneCardGeometry.shared.setControlsMinX($0, for: session.id) }
             }
@@ -2056,40 +2050,6 @@ private struct PaneCardChrome: View {
         // The header's empty run moves the window, as a titlebar would. A press here also
         // focuses the card (`PaneDragRearrange`), so the header needs no tap of its own.
         .background(WindowDragArea())
-    }
-
-    /// The apps a terminal can have beside it, in the order Settings lists them.
-    private var offeredApps: [InspectorTab] {
-        session.isApp ? [] : store.settings.offeredApps(standalone: false)
-    }
-
-    /// Whether the menu would have a row: an app to open, or a group to leave.
-    private var hasMoreMenu: Bool {
-        !offeredApps.isEmpty || store.isInSplitGroup(session.id)
-    }
-
-    /// What goes beside this card, and the way out of its group. An app that is open is
-    /// checked, and choosing it again closes it.
-    private func moreMenu() -> NSMenu {
-        let menu = NSMenu()
-        let members = store.splitMembers(of: session.id)
-        for app in offeredApps {
-            let open = members.first { store.session($0)?.app == app }
-            let item = ClosureMenuItem(title: app.title) {
-                if let open {
-                    store.closeSession(open)
-                } else {
-                    _ = store.addAppCard(app, beside: session.id, takeFocus: false)
-                }
-            }
-            item.state = open == nil ? .off : .on
-            menu.addItem(item)
-        }
-        if store.isInSplitGroup(session.id) {
-            if !menu.items.isEmpty { menu.addItem(.separator()) }
-            menu.addItem(ClosureMenuItem(title: localized("Ungroup")) { store.detachFromSplit(session.id) })
-        }
-        return menu
     }
 
     private var buttons: some View {
