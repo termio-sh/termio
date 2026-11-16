@@ -736,18 +736,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         presenter.presentAsSheet(hostVC)
     }
 
+    /// View ▸ Show Project Files (and the card's panel menu) — opens or closes the focused
+    /// card's panel. Reached via the responder chain (the menu item and the panel menu both
+    /// target `nil`), like the other app actions.
     @objc private func debugShowInspectorPane(_ note: Notification) {
         guard let name = note.object as? String, let tab = InspectorTab(rawValue: name) else { return }
         DispatchQueue.main.async { [self] in
-            store.showApp(tab)
+            store.inspectorTab = tab
+            if !store.inspectorVisible { toggleFilesInspector(nil) }
         }
     }
 
-    /// View ▸ Show Project Files — opens a Files card beside the focused session, or closes
-    /// the one already there. Reached via the responder chain (the menu item targets `nil`),
-    /// like the other app actions.
     @objc func toggleFilesInspector(_ sender: Any?) {
-        store.toggleApp(.files)
+        store.inspectorVisible.toggle()
     }
 
     /// Edit ▸ Paste. File URLs copied in Finder become absolute paths at the
@@ -779,9 +780,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NotificationCenter.default.post(name: .termioUseSelectionForFind, object: nil)
     }
 
-    /// Opens a card for a freshly opened detail where there is none. Nothing else moves:
-    /// this also fires for a file arriving late from another machine, which must not take
-    /// the selection or a zoom from a terminal being typed in.
+    /// Opens the focused card's panel for a freshly opened detail, at the width it last had.
     private func revealInspectorForDetail() {
         if !store.inspectorVisible { store.inspectorVisible = true }
     }

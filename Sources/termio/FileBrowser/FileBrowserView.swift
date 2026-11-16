@@ -277,7 +277,7 @@ struct FileBrowserView: View {
                             route: deviceCheckout.device.route, root: deviceRoot),
                         host: deviceCheckout.device.name,
                         root: deviceRoot),
-                    onDismiss: { store.leaveApp() }
+                    onDismiss: { store.inspectorTab = .files }
                 )
                 .id(deviceCheckout.deviceIdentity + "\u{1f}" + deviceRoot)
             } else if let deviceCheckout {
@@ -290,7 +290,7 @@ struct FileBrowserView: View {
                     scope: .thisMac(
                         DeviceFileProvider(route: .local, root: projectPath),
                         URL(fileURLWithPath: projectPath)),
-                    onDismiss: { store.leaveApp() }
+                    onDismiss: { store.inspectorTab = .files }
                 )
                 // Fresh identity per project, so a stale query/result set
                 // doesn't carry over when the root moves.

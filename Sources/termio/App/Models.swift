@@ -166,8 +166,8 @@ extension Workspace {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
-        terminals = try c.decodeIfPresent([Session].self, forKey: .terminals) ?? []
-        chats = try c.decodeIfPresent([Session].self, forKey: .chats) ?? []
+        terminals = try c.decodeIfPresent(SavedSessions.self, forKey: .terminals)?.sessions ?? []
+        chats = try c.decodeIfPresent(SavedSessions.self, forKey: .chats)?.sessions ?? []
         deviceAlias = try c.decodeIfPresent(String.self, forKey: .deviceAlias)
         deviceID = try c.decodeIfPresent(String.self, forKey: .deviceID)
         isAutoCreated = try c.decodeIfPresent(Bool.self, forKey: .isAutoCreated)
@@ -322,7 +322,7 @@ extension Project {
         name = try container.decode(String.self, forKey: .name)
         path = try container.decode(String.self, forKey: .path)
         branch = try container.decode(String.self, forKey: .branch)
-        sessions = try container.decode([Session].self, forKey: .sessions)
+        sessions = try container.decode(SavedSessions.self, forKey: .sessions).sessions
         worktrees = try container.decodeIfPresent([Worktree].self, forKey: .worktrees) ?? []
         pinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
         remoteCheckouts =
@@ -458,6 +458,35 @@ enum SessionStatus: Hashable {
 
 /// A single terminal session within a project. Each session owns one live
 /// libghostty terminal surface (see `TermioStore.surface(for:in:)`).
+/// A saved list of sessions, read without the app cards termio 0.75.0 wrote into it.
+/// A card had no terminal behind it, and this build would open one as a terminal.
+struct SavedSessions: Decodable {
+    let sessions: [Session]
+
+    private struct Entry: Decodable {
+        let session: Session
+        let isAppCard: Bool
+
+        private enum CodingKeys: String, CodingKey { case app }
+
+        init(from decoder: Decoder) throws {
+            session = try Session(from: decoder)
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            isAppCard = try container.contains(.app) && !container.decodeNil(forKey: .app)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        var list = try decoder.unkeyedContainer()
+        var kept: [Session] = []
+        while !list.isAtEnd {
+            let entry = try list.decode(Entry.self)
+            if !entry.isAppCard { kept.append(entry.session) }
+        }
+        sessions = kept
+    }
+}
+
 struct Session: Identifiable, Hashable, Codable {
     var id = UUID()
     var title: String
@@ -532,17 +561,6 @@ struct Session: Identifiable, Hashable, Codable {
     var sshKeyToInstall: String?
 
     var isSSH: Bool { sshHost != nil }
-
-    /// When set, this session is an **app card**: a card that shows one inspector
-    /// pane (Files, Changes, Search…) instead of a terminal. It has a row, a place
-    /// in a split group and a tab like any session, and no PTY and no daemon
-    /// session behind it — nothing may ask for its surface (see `isApp`).
-    ///
-    /// It reads the checkout of the row it is filed in: grouping is confined to one
-    /// project and one worktree, so the card beside an agent shows that agent's files.
-    var app: InspectorTab?
-
-    var isApp: Bool { app != nil }
 
     /// When set, this session runs **inside a `termiod` daemon on an SSH host**
     /// rather than locally: the Mac attaches over `ssh <host> termio stdio` and
@@ -659,7 +677,7 @@ struct Session: Identifiable, Hashable, Codable {
         case id, title, agent, createdAt, worktreePath, resumeID, launched, launchedAt,
              liveTitle, promptTitle, lastWorkingDirectory, spawnDirectory, sshHost, pinned,
              termiodRemoteHost, termiodRemoteCwd, deviceID, termiodSessionName,
-             termiodDaemonID, givenTitle, app
+             termiodDaemonID, givenTitle
     }
 
     /// The name to recover from a state file written before `givenTitle` existed,
@@ -710,11 +728,8 @@ struct Session: Identifiable, Hashable, Codable {
         termiodSessionName = try container.decodeIfPresent(
             String.self, forKey: .termiodSessionName)
         termiodDaemonID = try container.decodeIfPresent(String.self, forKey: .termiodDaemonID)
-        // Read as text: a pane this build does not know must cost one card, not the
-        // whole state file, which a thrown decode would (see `StateFile.load`).
-        app = try container.decodeIfPresent(String.self, forKey: .app).flatMap(InspectorTab.init(rawValue:))
         givenTitle = try container.decodeIfPresent(String.self, forKey: .givenTitle)
-            ?? (app == nil ? Self.recoveredGivenTitle(title, agent: agent, remoteHost: termiodRemoteHost) : nil)
+            ?? Self.recoveredGivenTitle(title, agent: agent, remoteHost: termiodRemoteHost)
     }
 }
 

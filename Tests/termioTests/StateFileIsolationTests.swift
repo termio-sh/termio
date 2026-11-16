@@ -67,3 +67,21 @@ final class StateFileIsolationTests: XCTestCase {
             "the store did persist — to the isolated channel, which is the point")
     }
 }
+
+/// A state file termio 0.75.0 wrote can hold app cards. They are skipped on load, so a
+/// card never comes back as a terminal.
+final class SavedAppCardTests: XCTestCase {
+    func testSavedAppCardsAreSkipped() throws {
+        let terminal = Session(title: "Terminal 1")
+        let card = Session(title: "Files")
+        var cardObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(card)) as? [String: Any])
+        cardObject["app"] = "files"
+        let terminalObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(terminal))
+        let data = try JSONSerialization.data(withJSONObject: [terminalObject, cardObject])
+
+        let saved = try JSONDecoder().decode(SavedSessions.self, from: data)
+
+        XCTAssertEqual(saved.sessions.map(\.id), [terminal.id])
+    }
+}

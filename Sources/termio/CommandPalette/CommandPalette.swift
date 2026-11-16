@@ -557,7 +557,6 @@ struct CommandPaletteView: View {
             store.addProject(at: URL(fileURLWithPath: recent.path))
         case .file(let file):
             store.openFileInEditor(file.url)
-            store.selectCardForOpenedDetail()
         case .action(let action):
             action.perform(store)
         case .theme:

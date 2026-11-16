@@ -1075,9 +1075,7 @@ extension TermioStore {
         projects: [Project], workspaces: [Workspace], splitGroups: [SplitNode],
         name: (Session) -> String
     ) -> Termiod.ViewImport {
-        func groups(of all: [Session]) -> [Termiod.ViewImport.Group] {
-            // The host's view holds its own sessions. An app card is this app's alone.
-            let sessions = all.filter { !$0.isApp }
+        func groups(of sessions: [Session]) -> [Termiod.ViewImport.Group] {
             let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             var grouped: Set<Session.ID> = []
             var result: [Termiod.ViewImport.Group] = []
@@ -2166,7 +2164,7 @@ extension TermioStore {
             // the label: a composed name that isn't the auto convention reads as one
             // the user chose, so the row could never become `Claude Code` and then
             // follow the agent's own title the way its local twin does.
-            let count = projects[index].sessions.filter { $0.agent == .terminal && !$0.isApp }.count
+            let count = projects[index].sessions.filter { $0.agent == .terminal }.count
             session.title = agent == .terminal ? "Terminal \(count + 1)" : agent.displayName
             // Newest first, the same as a local project's sessions (`addSession`).
             projects[index].sessions.insert(session, at: 0)
@@ -2180,7 +2178,7 @@ extension TermioStore {
         // numbers itself like any other terminal instead of repeating the machine
         // name down the column (`ukvps ▸ ukvps`).
         if title == nil {
-            let count = workspaces[index].terminals.filter { $0.agent == .terminal && !$0.isApp }.count
+            let count = workspaces[index].terminals.filter { $0.agent == .terminal }.count
             session.title = agent == .terminal ? "Terminal \(count + 1)" : agent.displayName
         }
         workspaces[index].terminals.append(session)

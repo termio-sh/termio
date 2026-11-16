@@ -1347,7 +1347,7 @@ extension TermioStore {
     private func findCompanionSession(_ wireID: String) -> Session? {
         let prefix = wireID.lowercased()
         guard !prefix.isEmpty else { return nil }
-        return allSessions.first { !$0.isApp && $0.id.uuidString.lowercased().hasPrefix(prefix) }
+        return allSessions.first { $0.id.uuidString.lowercased().hasPrefix(prefix) }
     }
 }
 
@@ -1399,7 +1399,7 @@ extension TermioStore {
                     workspaceName: workspace.name,
                     deviceAlias: alias,
                     kind: "terminals",
-                    sessions: workspace.terminals.filter { !$0.isApp }.map(rosterSession)))
+                    sessions: workspace.terminals.map(rosterSession)))
             }
             if !workspace.chats.isEmpty {
                 projects.append(RosterProject(
@@ -1410,7 +1410,7 @@ extension TermioStore {
                     workspaceName: workspace.name,
                     deviceAlias: alias,
                     kind: "chats",
-                    sessions: workspace.chats.filter { !$0.isApp }.map(rosterSession)))
+                    sessions: workspace.chats.map(rosterSession)))
             }
             projects += self.projects(inWorkspace: workspace.id).map { project in
                 RosterProject(
@@ -1424,8 +1424,7 @@ extension TermioStore {
                     // says empty so the phone has one thing to test.
                     branch: Self.wireBranch(branchModel.branch(for: project.path) ?? project.branch),
                     kind: "folder",
-                    // The phone lists what it can attach to, and an app card has no terminal.
-                    sessions: project.sessions.filter { !$0.isApp }.map(rosterSession)
+                    sessions: project.sessions.map(rosterSession)
                 )
             }
         }
