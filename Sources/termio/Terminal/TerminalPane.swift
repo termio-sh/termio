@@ -2013,30 +2013,25 @@ private struct PaneCardChrome: View {
             .frame(maxWidth: panelEdgeX.map { max(0, $0 - leadingPadding - 8) } ?? .infinity, alignment: .leading)
             .layoutPriority(1)
             Spacer(minLength: 8)
-            // One order on every card, ending on the two that act on the card itself: what
-            // adds a card (split, split), a rule, then Zoom and Close. Close is last
-            // and never hidden, so it is in the same place on every card.
-            HStack(spacing: 2) {
-                // Always laid out, only hidden: showing them must not reflow the title.
-                // Only the focused card's: the buttons act on the card you are in, and a row of
+            // One order on every card. What puts a card beside this one comes first: split,
+            // split. Zoom and Close act on the card itself, end the row, and are on every
+            // card, so neither moves when the card takes or loses the selection.
+            HStack(spacing: 4) {
+                // Only the focused card's: these act on the card you are in, and a row of
                 // them on every card — or on whichever one the pointer crosses — is noise.
-                HStack(spacing: 2) {
-                    buttons
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.12))
-                        .frame(width: 1, height: 14)
-                        .padding(.horizontal, 3)
-                    // Zoom only means something inside a split, as in the palette and ⌘⇧↩.
-                    if store.splitRoot != nil {
-                        ChromeIconButton(icon: store.isPaneZoomed ? .collapse : .expand,
-                                         help: localized("Zoom Split"), isOn: store.isPaneZoomed) {
-                            store.selectedSessionID = session.id
-                            store.toggleSelectedPaneZoom()
-                        }
-                    }
+                buttons
+                    .opacity(isSelected ? 1 : 0)
+                    .allowsHitTesting(isSelected)
+                // Zoom only means something inside a split. Alone, the card keeps the button,
+                // drawn disabled: a button that comes and goes moves its neighbors.
+                let canZoom = store.isInSplitGroup(session.id)
+                ChromeIconButton(icon: store.isPaneZoomed ? .collapse : .expand,
+                                 help: localized("Zoom Split"), isOn: canZoom && store.isPaneZoomed) {
+                    store.selectedSessionID = session.id
+                    store.toggleSelectedPaneZoom()
                 }
-                .opacity(isSelected ? 1 : 0)
-                .allowsHitTesting(isSelected)
+                .disabled(!canZoom)
+                .opacity(canZoom ? (isSelected ? 1 : 0.55) : 0.3)
                 // Quieter on a card without focus: there to be found, not to be read.
                 ChromeIconButton(icon: .close,
                                  help: session.isApp ? localized("Close") : localized("Close Session")) {
@@ -2044,7 +2039,7 @@ private struct PaneCardChrome: View {
                 }
                 .opacity(isSelected ? 1 : 0.55)
             }
-            // Measured, not summed: the split's Zoom comes and goes with the group.
+            // Measured, not summed, so the header's layout stays the one source of this edge.
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(PaneCard.coordinateSpace)).minX } action: {
                 if publishesGeometry { PaneCardGeometry.shared.setControlsMinX($0, for: session.id) }
             }
@@ -2058,7 +2053,7 @@ private struct PaneCardChrome: View {
     }
 
     private var buttons: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             ChromeIconButton(icon: .layoutColumns, help: localized("Split Right")) {
                 splitting(.horizontal)
             }
