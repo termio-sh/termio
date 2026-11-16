@@ -3,8 +3,8 @@ title: Termio server
 description: 一台机器上跑着什么，才让会话比应用活得久——termiod 怎么装、怎么保活、怎么原地升级，以及出问题时怎么查。
 x-i18n:
   source_path: server.mdx
-  source_hash: ed135392cd22190538e8819e626902d97b4a9e718ceea1c1121e263c58ec7bc8
-  generated_at: 2026-10-25
+  source_hash: 385e5cbbba6fedbef27049fb3f7d30f068c44bd8b2344898c05f62d7b4588279
+  generated_at: 2026-11-16
 ---
 
 每个会话都跑在 `termiod` —— Termio server —— 里，跑在拥有它的那台机器上，本机的会话也
@@ -102,7 +102,20 @@ termio pair --qr            # 连上之后，打印配对链接和二维码
 
 ## 升级而不丢会话
 
+在 Linux 机器上，一条命令就能升到最新版本：
+
+```bash
+termio update            # 这台机器
+termio -H mybox update   # 另一台机器，走 SSH
+termio update --check    # 只打印两边的版本，什么都不改
+```
+
+它下载新的二进制，用版本的校验和逐个核对，再把正在运行的 daemon 交接给新版本。
+`systemd` 和 Tailscale 保持原样。`--version 0.63.0` 改装那个版本。在 Mac 上，Termio
+跟着应用一起更新。
+
 新版本会**原地**替换正在运行的那个：进程保留自己的 pid 和 PTY，会话完全察觉不到。
+要交接给你自己放好的版本：
 
 ```bash
 termio server handoff
