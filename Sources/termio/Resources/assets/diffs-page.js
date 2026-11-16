@@ -327,8 +327,13 @@
       return entry && entry.fileDiff && !entry.fileDiff.isPartial && !hydrated.has(id);
     });
     if (!grew) return;
+    // The new matches land in between the old ones, so the focused one has a new index.
+    const held = findFocused;
     collectMatches();
-    post({ type: 'findCount', count: findMatches.length });
+    const index = held ? findMatches.findIndex((match) => match.id === held.id
+      && match.side === held.side && match.line === held.line && match.start === held.start) : -1;
+    findFocused = index < 0 ? null : findMatches[index];
+    post({ type: 'findCount', count: findMatches.length, index: Math.max(index, 0) });
   }
 
   function scheduleFindPaint() {

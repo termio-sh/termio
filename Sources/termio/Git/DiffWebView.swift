@@ -95,7 +95,9 @@ struct DiffWebSingle {
     var isSplit = false
     /// Nil while the find bar is closed.
     var find: DiffWebFind? = nil
-    var onFindCount: (Int) -> Void = { _ in }
+    /// How many matches there are. The second argument is set when the page counted again by
+    /// itself, and is where the focused match now sits in the longer list.
+    var onFindCount: (Int, Int?) -> Void = { _, _ in }
     /// Escape, when it has something to close before the diff itself, as an open find bar.
     /// Nil sends Escape to `onClose`.
     var onEscape: (() -> Void)? = nil
@@ -115,6 +117,9 @@ struct DiffWebFind: Equatable {
     var options: FindOptions
     /// The match to bring into view.
     var index: Int
+    /// Bumped on every step, so a step that lands on the same index is still sent. With one
+    /// match, Next has nowhere else to go, and it must still bring that match into view.
+    var step = 0
 }
 
 /// What the page draws with: termio's terminal font and background, and its scheme.
@@ -299,7 +304,7 @@ final class DiffWebBridge: NSObject, WKScriptMessageHandlerWithReply {
         sentFind = single.find
         guard let find = single.find, !find.query.isEmpty else {
             call("termioDiffs.find(null)", [:])
-            single.onFindCount(0)
+            single.onFindCount(0, nil)
             return
         }
         let spec: [String: Any] = [
@@ -314,7 +319,7 @@ final class DiffWebBridge: NSObject, WKScriptMessageHandlerWithReply {
             case .success(let count):
                 // An answer for a query the reader has since changed is dropped.
                 guard let self, self.sentFind == find else { return }
-                self.single?.onFindCount(count as? Int ?? 0)
+                self.single?.onFindCount(count as? Int ?? 0, nil)
             case .failure(let error):
                 Log.issues.error("diff page find: \(error.localizedDescription, privacy: .public)")
             }
@@ -388,7 +393,11 @@ final class DiffWebBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (nil, nil)
         case "findCount":
             // The page counted again by itself: a band opened and the whole file came in.
-            if sentFind != nil, let count = body["count"] as? Int { single?.onFindCount(count) }
+            if sentFind != nil, let count = body["count"] as? Int, let index = body["index"] as? Int {
+                // The page already holds this index, so it is not sent back.
+                sentFind?.index = index
+                single?.onFindCount(count, index)
+            }
             return (nil, nil)
         case "close":
             if let onEscape = single?.onEscape { onEscape() } else { onClose() }

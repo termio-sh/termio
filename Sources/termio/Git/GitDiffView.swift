@@ -43,6 +43,8 @@ struct GitDiffView: View {
     @State private var findOptions = FindOptions()
     @State private var findFocusedIndex = 0
     @State private var findCount = 0
+    /// Bumped on every step through the matches (see `DiffWebFind.step`).
+    @State private var findStep = 0
     /// The query at the last Return press; a second Return on the same query advances.
     @State private var findLastSubmittedQuery = ""
     /// Bumped on every ⌘F so the field re-focuses even when the bar is already open.
@@ -115,11 +117,12 @@ struct GitDiffView: View {
     private func advanceFind(by offset: Int) {
         guard findCount > 0 else { return }
         findFocusedIndex = ((findFocusedIndex + offset) % findCount + findCount) % findCount
+        findStep &+= 1
     }
 
-    private func noteFindCount(_ count: Int) {
+    private func noteFindCount(_ count: Int, _ index: Int?) {
         findCount = count
-        if findFocusedIndex >= count { findFocusedIndex = 0 }
+        if let index { findFocusedIndex = index } else if findFocusedIndex >= count { findFocusedIndex = 0 }
     }
 
     // MARK: Walking
@@ -269,7 +272,8 @@ struct GitDiffView: View {
             single: DiffWebSingle(
                 isSplit: isSplitView,
                 find: findBarVisible
-                    ? DiffWebFind(query: findQuery, options: findOptions, index: findFocusedIndex)
+                    ? DiffWebFind(query: findQuery, options: findOptions,
+                                  index: findFocusedIndex, step: findStep)
                     : nil,
                 onFindCount: noteFindCount,
                 // Escape closes the find bar first, then the overlay.
