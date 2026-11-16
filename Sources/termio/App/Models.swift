@@ -166,8 +166,8 @@ extension Workspace {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
-        terminals = try c.decodeIfPresent([Session].self, forKey: .terminals) ?? []
-        chats = try c.decodeIfPresent([Session].self, forKey: .chats) ?? []
+        terminals = try c.decodeIfPresent(SavedSessions.self, forKey: .terminals)?.sessions ?? []
+        chats = try c.decodeIfPresent(SavedSessions.self, forKey: .chats)?.sessions ?? []
         deviceAlias = try c.decodeIfPresent(String.self, forKey: .deviceAlias)
         deviceID = try c.decodeIfPresent(String.self, forKey: .deviceID)
         isAutoCreated = try c.decodeIfPresent(Bool.self, forKey: .isAutoCreated)
@@ -322,7 +322,7 @@ extension Project {
         name = try container.decode(String.self, forKey: .name)
         path = try container.decode(String.self, forKey: .path)
         branch = try container.decode(String.self, forKey: .branch)
-        sessions = try container.decode([Session].self, forKey: .sessions)
+        sessions = try container.decode(SavedSessions.self, forKey: .sessions).sessions
         worktrees = try container.decodeIfPresent([Worktree].self, forKey: .worktrees) ?? []
         pinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
         remoteCheckouts =
@@ -458,6 +458,35 @@ enum SessionStatus: Hashable {
 
 /// A single terminal session within a project. Each session owns one live
 /// libghostty terminal surface (see `TermioStore.surface(for:in:)`).
+/// A saved list of sessions, read without the app cards termio 0.75.0 wrote into it.
+/// A card had no terminal behind it, and this build would open one as a terminal.
+struct SavedSessions: Decodable {
+    let sessions: [Session]
+
+    private struct Entry: Decodable {
+        let session: Session
+        let isAppCard: Bool
+
+        private enum CodingKeys: String, CodingKey { case app }
+
+        init(from decoder: Decoder) throws {
+            session = try Session(from: decoder)
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            isAppCard = try container.contains(.app) && !container.decodeNil(forKey: .app)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        var list = try decoder.unkeyedContainer()
+        var kept: [Session] = []
+        while !list.isAtEnd {
+            let entry = try list.decode(Entry.self)
+            if !entry.isAppCard { kept.append(entry.session) }
+        }
+        sessions = kept
+    }
+}
+
 struct Session: Identifiable, Hashable, Codable {
     var id = UUID()
     var title: String
