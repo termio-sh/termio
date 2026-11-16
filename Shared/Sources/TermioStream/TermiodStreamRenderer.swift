@@ -237,15 +237,15 @@ public final class TermiodStreamRenderer {
             origin: uniforms.origin, cell: uniforms.cell,
             textureWidth: texture.width, textureHeight: texture.height
         )
-        func drawImages(_ layer: GhosttyRenderStateImageLayer) {
+        func drawImages(_ layer: GhosttyImageLayer) {
             images.encode(layer, layout: layout, encoder: encoder, pipeline: resources.imagePipeline)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<TermiodStreamUniforms>.stride, index: 1)
         }
-        drawImages(GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_BACKGROUND)
+        drawImages(GHOSTTY_IMAGE_LAYER_BELOW_BACKGROUND)
         // Rectangles carry their own pass order: backgrounds and the block
         // cursor go under the text, decorations and the thin cursors over it.
         drawRectangles(rectangles.filter { !$0.overText }, encoder: encoder)
-        drawImages(GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT)
+        drawImages(GHOSTTY_IMAGE_LAYER_BELOW_TEXT)
         if !glyphs.isEmpty,
            let data = device.makeBuffer(bytes: glyphs, length: glyphs.count * MemoryLayout<TermiodStreamGlyph>.stride) {
             encoder.setRenderPipelineState(resources.glyphPipeline)
@@ -253,7 +253,7 @@ public final class TermiodStreamRenderer {
             encoder.setFragmentTexture(atlas.texture, index: 0)
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: glyphs.count)
         }
-        drawImages(GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT)
+        drawImages(GHOSTTY_IMAGE_LAYER_ABOVE_TEXT)
         drawRectangles(rectangles.filter(\.overText), encoder: encoder)
         encoder.endEncoding()
         return true
@@ -507,7 +507,7 @@ fragment float4 glyph_fragment(VertexOut in [[stage_in]], texture2d<float> atlas
 /// when its generation moves, and pixels only for a generation not yet held.
 public final class TermiodStreamImages {
     public struct Placement: Equatable {
-        public init(id: UInt32, generation: UInt64, layer: GhosttyRenderStateImageLayer, z: Int32, column: Int32, row: Int32, offsetX: UInt32, offsetY: UInt32, width: UInt32, height: UInt32, sourceX: UInt32, sourceY: UInt32, sourceWidth: UInt32, sourceHeight: UInt32) {
+        public init(id: UInt32, generation: UInt64, layer: GhosttyImageLayer, z: Int32, column: Int32, row: Int32, offsetX: UInt32, offsetY: UInt32, width: UInt32, height: UInt32, sourceX: UInt32, sourceY: UInt32, sourceWidth: UInt32, sourceHeight: UInt32) {
             self.id = id
             self.generation = generation
             self.layer = layer
@@ -525,7 +525,7 @@ public final class TermiodStreamImages {
         }
         public var id: UInt32
         public var generation: UInt64
-        public var layer: GhosttyRenderStateImageLayer
+        public var layer: GhosttyImageLayer
         public var z: Int32
         public var column: Int32
         public var row: Int32
@@ -630,7 +630,7 @@ public final class TermiodStreamImages {
                   kind == GHOSTTY_IMAGE_PROTOCOL_KITTY
             else { continue }
             var placement = Placement(
-                id: 0, generation: 0, layer: GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT, z: 0, column: 0, row: 0,
+                id: 0, generation: 0, layer: GHOSTTY_IMAGE_LAYER_BELOW_TEXT, z: 0, column: 0, row: 0,
                 offsetX: 0, offsetY: 0, width: 0, height: 0, sourceX: 0, sourceY: 0, sourceWidth: 0, sourceHeight: 0
             )
             func read<Value>(_ key: GhosttyRenderStateImageData, _ value: inout Value) -> Bool {
@@ -691,7 +691,7 @@ public final class TermiodStreamImages {
     }
 
     /// The quads of one layer, in pixels of the drawable, clipped to the grid.
-    public func quads(_ layer: GhosttyRenderStateImageLayer, layout: Layout) -> [(Key, SIMD4<Float>, SIMD4<Float>)] {
+    public func quads(_ layer: GhosttyImageLayer, layout: Layout) -> [(Key, SIMD4<Float>, SIMD4<Float>)] {
         let scale = SIMD2(
             layout.cell.x / Float(TermiodStreamTerminal.cellWidth),
             layout.cell.y / Float(TermiodStreamTerminal.cellHeight)
@@ -712,7 +712,7 @@ public final class TermiodStreamImages {
     }
 
     public func encode(
-        _ layer: GhosttyRenderStateImageLayer, layout: Layout, encoder: MTLRenderCommandEncoder,
+        _ layer: GhosttyImageLayer, layout: Layout, encoder: MTLRenderCommandEncoder,
         pipeline: MTLRenderPipelineState
     ) {
         let quads = quads(layer, layout: layout)
@@ -1326,7 +1326,7 @@ public final class TermiodStreamFrameBuilder {
             builtAtlas = atlas
             builtGeneration = atlas.generation
             var clean = GHOSTTY_RENDER_STATE_DIRTY_FALSE
-            _ = ghostty_render_state_set(state, GHOSTTY_RENDER_STATE_OPTION_DIRTY, &clean)
+            _ = ghostty_render_state_set(state, GHOSTTY_RENDER_STATE_OPT_DIRTY, &clean)
         }
         // The cursor moves without dirtying any cell, so it is compared on
         // its own every frame.
@@ -1388,7 +1388,7 @@ public final class TermiodStreamFrameBuilder {
             guard full || rowDirty || extra.contains(y) else { continue }
             rebuildRow(y, colors: colors, atlas: atlas)
             var clean = false
-            _ = ghostty_render_state_row_set(rowIterator, GHOSTTY_RENDER_STATE_ROW_OPTION_DIRTY, &clean)
+            _ = ghostty_render_state_row_set(rowIterator, GHOSTTY_RENDER_STATE_ROW_OPT_DIRTY, &clean)
         }
     }
 
@@ -1420,13 +1420,13 @@ public final class TermiodStreamFrameBuilder {
             // The terminal's own style: the program's DECSCUSR, or the setting
             // where it chose none (`TermiodStreamTerminal.Theme.cursorStyle`).
             // An unfocused pane always shows the outline.
-            var visual = GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK
+            var visual = GHOSTTY_CURSOR_STYLE_BLOCK
             _ = ghostty_render_state_get(state, GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE, &visual)
             switch (focused, visual) {
             case (false, _): shape = .hollow
-            case (_, GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR): shape = .bar
-            case (_, GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE): shape = .underline
-            case (_, GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW): shape = .hollow
+            case (_, GHOSTTY_CURSOR_STYLE_BAR): shape = .bar
+            case (_, GHOSTTY_CURSOR_STYLE_UNDERLINE): shape = .underline
+            case (_, GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW): shape = .hollow
             default: shape = .block
             }
             // On the right half of a wide character the cursor covers all of it.
@@ -1557,7 +1557,6 @@ public final class TermiodStreamFrameBuilder {
             if span == 2 { wideStarts.insert(x) }
 
             var style = GhosttyStyle()
-            style.size = MemoryLayout<GhosttyStyle>.size
             var hasStyling = false
             _ = ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_HAS_STYLING, &hasStyling)
             if hasStyling {
@@ -1613,9 +1612,12 @@ public final class TermiodStreamFrameBuilder {
             if Int(length) > codepoints.count {
                 codepoints = [UInt32](repeating: 0, count: Int(length))
             }
-            codepoints.withUnsafeMutableBufferPointer { buffer in
-                _ = ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, buffer.baseAddress)
+            // The buffer was sized from GRAPHEMES_LEN, so it always fits.
+            let copied = codepoints.withUnsafeMutableBufferPointer { buffer in
+                var graphemes = GhosttyCodepointBuffer(ptr: buffer.baseAddress, cap: buffer.count, len: 0)
+                return ghostty_render_state_row_cells_get(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, &graphemes)
             }
+            guard copied == GHOSTTY_SUCCESS else { continue }
             let grapheme = Array(codepoints.prefix(Int(length)))
             if grapheme == [0x20] { continue }
             // Ghostty's `neverExtendBg`: a Powerline segment drawn to the cell
@@ -1747,9 +1749,9 @@ public final class TermiodStreamFrameBuilder {
             ))
         }
         var underlineColor = foreground
-        if style.underline_color.tag == GHOSTTY_STYLE_COLOR_RGB {
+        if style.underline_color.tag == UInt8(GHOSTTY_STYLE_COLOR_RGB.rawValue) {
             underlineColor = style.underline_color.value.rgb
-        } else if style.underline_color.tag == GHOSTTY_STYLE_COLOR_PALETTE {
+        } else if style.underline_color.tag == UInt8(GHOSTTY_STYLE_COLOR_PALETTE.rawValue) {
             // The palette in effect now, OSC 4 changes included.
             let index = Int(style.underline_color.value.palette)
             underlineColor = withUnsafeBytes(of: colors.palette) { buffer in
@@ -1757,7 +1759,7 @@ public final class TermiodStreamFrameBuilder {
             }
         }
         let position = metrics.underlinePosition
-        switch Int32(style.underline) {
+        switch style.underline {
         case GHOSTTY_SGR_UNDERLINE_SINGLE.rawValue:
             line(position, color: underlineColor)
         case GHOSTTY_SGR_UNDERLINE_DOUBLE.rawValue:
@@ -1949,4 +1951,21 @@ public final class TermiodStreamFrameBuilder {
             r: cell.r, g: cell.g, b: cell.b, a: cell.a
         )
     }
+}
+
+/// libghostty-vt 1.0 packs a style's attributes into one `flags` field. These
+/// read them back under the names the renderer was written against. The bits
+/// are `style.h`'s `GHOSTTY_STYLE_FLAG_*`, which Swift does not import because
+/// each is a cast expression; the header freezes them as ABI.
+extension GhosttyStyle {
+    private func has(_ bit: Int) -> Bool { flags & (GhosttyStyleFlags(1) << bit) != 0 }
+    var bold: Bool { has(0) }
+    var italic: Bool { has(1) }
+    var faint: Bool { has(2) }
+    var inverse: Bool { has(4) }
+    var invisible: Bool { has(5) }
+    var strikethrough: Bool { has(6) }
+    var overline: Bool { has(7) }
+    /// A `GhosttySgrUnderline` raw value; zero is no underline.
+    var underline: UInt32 { UInt32((flags >> GHOSTTY_STYLE_UNDERLINE_SHIFT) & 0x7) }
 }

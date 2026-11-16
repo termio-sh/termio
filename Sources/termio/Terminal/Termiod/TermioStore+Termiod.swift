@@ -2997,9 +2997,9 @@ extension TermioStore {
         }
         guard let definition else { return nil }
         let cursorStyle = switch settings.cursorStyle {
-        case .block: GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK
-        case .bar: GHOSTTY_TERMINAL_CURSOR_STYLE_BAR
-        case .underline: GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE
+        case .block: GHOSTTY_CURSOR_STYLE_BLOCK
+        case .bar: GHOSTTY_CURSOR_STYLE_BAR
+        case .underline: GHOSTTY_CURSOR_STYLE_UNDERLINE
         }
         return TermiodStreamTerminal.Theme(
             hexForeground: definition.foreground, background: background ?? definition.background,

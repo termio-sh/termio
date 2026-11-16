@@ -71,7 +71,7 @@ final class StreamRendererTests: XCTestCase {
         return TermiodStreamTerminal.Theme(
             foreground: GhosttyColorRgb(r: 230, g: 230, b: 230),
             background: GhosttyColorRgb(r: 20, g: 20, b: 20),
-            cursor: nil, palette: palette, cursorStyle: GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK,
+            cursor: nil, palette: palette, cursorStyle: GHOSTTY_CURSOR_STYLE_BLOCK,
             cursorBlink: false
         )
     }
@@ -336,7 +336,7 @@ final class StreamRendererTests: XCTestCase {
     func testTheCursorSettingIsTheDefaultAProgramCanOverride() throws {
         let terminal = try terminal()
         var theme = colors()
-        theme.cursorStyle = GHOSTTY_TERMINAL_CURSOR_STYLE_BAR
+        theme.cursorStyle = GHOSTTY_CURSOR_STYLE_BAR
         try terminal.setTheme(theme)
         let renderer = try TermiodStreamRenderer(appearance: appearance, scale: 2)
         let builder = try TermiodStreamFrameBuilder()

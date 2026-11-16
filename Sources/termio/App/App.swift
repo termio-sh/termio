@@ -10,6 +10,24 @@ import TermioShared
 /// app — `.regular` activation policy plus an explicit activate — and hosts the
 /// SwiftUI tree in a window. This keeps key/focus handling reliable for the
 /// terminal surface without needing an Xcode app bundle.
+/// The process's SIGPIPE policy, owned here rather than inherited.
+///
+/// A write to a pipe whose reader exited raises SIGPIPE on the whole process,
+/// and its default action kills it. `ghostty_init` happens to ignore the signal,
+/// but only once the first surface exists, so anything that ran earlier ran
+/// under the default action. The test process, which starts no surface until
+/// late in the suite, died of it (#858). Ignored, the write fails with `EPIPE`
+/// instead, which every writer already handles.
+enum BrokenPipe {
+    private static let installed: Void = {
+        signal(SIGPIPE, SIG_IGN)
+    }()
+
+    static func ignore() {
+        installed
+    }
+}
+
 @main
 enum Termio {
     @MainActor
@@ -17,6 +35,7 @@ enum Termio {
         // First line of Swift in the process: stamps the launch timeline, whose
         // zero is `exec` (see `LaunchTrace`).
         LaunchTrace.mark("main")
+        BrokenPipe.ignore()
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate
