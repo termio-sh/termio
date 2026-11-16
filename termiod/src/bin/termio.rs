@@ -38,6 +38,13 @@ const ROOT_TEMPLATE: &str = "\
 {about-with-newline}
 {usage-heading} {usage}
 
+Common:
+  session list        List this project's sessions and their status
+  session spawn       Start a new agent session on a prompt
+  session send        Type text into a session, then press Return
+  session read        Print a session's screen
+  session attach      Attach this terminal to a session
+
 Sessions:
   session     List, start, drive and close sessions [alias: sessions]
   agent       Report an agent's status; install or remove agent hooks
