@@ -184,6 +184,9 @@ enum ChromeGlyph {
         case .filter, .add: base * 0.85
         case .expand, .collapse: base * 0.87
         case .edit, .view, .bookOpen, .network: base * 0.9
+        // A chevron is twice as tall as it is wide, so the shape fits it by height and it fills
+        // the whole box where its neighbours stop at three quarters. Scaled to the ✕'s height.
+        case .chevronLeft, .chevronRight: base * 0.6
         default: base
         }
     }
