@@ -130,6 +130,12 @@ struct DiffLook: Equatable {
     let lineHeight: CGFloat
     let background: String
     let foreground: String
+    /// The inks of the diff overlay's gutter and bands, which keep the look they had
+    /// before the library drew them.
+    let numberInk: String
+    let bandInk: String
+    let additionSign: String
+    let deletionSign: String
 
     @MainActor
     init(settings: AppSettings, colorScheme: ColorScheme) {
@@ -142,18 +148,28 @@ struct DiffLook: Equatable {
             + settings.codeLineSpacing(for: font)).rounded()
         background = FileTreeWebView.css(settings.terminalBackgroundColor, in: appearance)
         foreground = FileTreeWebView.css(.labelColor, in: appearance)
+        numberInk = FileTreeWebView.css(settings.gutterInk(for: colorScheme), in: appearance)
+        bandInk = FileTreeWebView.css(.secondaryLabelColor, in: appearance)
+        additionSign = FileTreeWebView.css(.systemGreen, in: appearance)
+        deletionSign = FileTreeWebView.css(.systemRed, in: appearance)
     }
 
     var payload: [String: Any] {
         let family = "\"\(fontFamily.replacingOccurrences(of: "\"", with: ""))\", ui-monospace, monospace"
         return [
             "scheme": isDark ? "dark" : "light",
+            "lineHeight": lineHeight,
             "variables": [
                 "--diffs-bg": background,
                 "--diffs-font-family": family,
                 "--diffs-font-size": "\(fontSize)px",
                 "--diffs-line-height": "\(lineHeight)px",
                 "--diffs-header-font-family": "-apple-system, system-ui, sans-serif",
+                "--termio-number-ink": numberInk,
+                "--termio-band-ink": bandInk,
+                "--termio-addition-sign": additionSign,
+                "--termio-deletion-sign": deletionSign,
+                "--termio-number-size": "\(max(9, fontSize - 1.5))px",
             ],
             // The theme sets its own ground above the diff; the terminal's background
             // replaces it there, so the list reads as part of the pane.

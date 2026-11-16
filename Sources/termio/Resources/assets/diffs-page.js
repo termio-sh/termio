@@ -194,9 +194,16 @@
       stickyHeaders: !single,
       disableFileHeader: single,
       preferredHighlighter: 'highlights',
-      hunkSeparators: 'line-info',
+      hunkSeparators: single ? 'line-info-basic' : 'line-info',
+      diffIndicators: single ? 'none' : 'bars',
+      // One step of a band's reveal, the same count the native diff used.
+      expansionLineCount: single ? 20 : 100,
       lineDiffType: 'word',
       layout: single ? { paddingTop: 0, paddingBottom: 0, gap: 0 } : { paddingTop: 10, paddingBottom: 10, gap: 10 },
+      // The list places rows it has not drawn yet by these heights, so they follow the CSS.
+      itemMetrics: single
+        ? { lineHeight: look.lineHeight, hunkSeparatorHeight: look.lineHeight + 10, spacing: 0, paddingTop: 8, paddingBottom: 8 }
+        : undefined,
       loadDiffFiles,
       renderHeaderPrefix: chevron,
       renderHeaderFilenameSuffix: note,
@@ -204,16 +211,210 @@
         const id = context && context.item && context.item.id;
         if (id && phase === 'unmount') instances.delete(id);
         else if (id) instances.set(id, instance);
+        if (single && id && phase !== 'unmount') watch(node, id);
         scheduleFindPaint();
       },
-      unsafeCSS: look.css + findCSS,
+      unsafeCSS: look.css + findCSS + (single ? overlayCSS() : ''),
     };
+  }
+
+  /**
+   * The gutter's columns. Both are as wide as the longest line number, and a file that is
+   * all additions or all deletions has no numbers for the other side, so that column goes.
+   */
+  function sizeGutter() {
+    if (!single || !viewer) return;
+    let longest = 1;
+    let old = false;
+    let fresh = false;
+    for (const id of itemIds) {
+      const diff = (viewer.getItem(id) || {}).fileDiff;
+      if (!diff) continue;
+      if (!diff.isPartial) longest = Math.max(longest, diff.additionLines.length, diff.deletionLines.length);
+      for (const hunk of diff.hunks) {
+        longest = Math.max(longest, hunk.additionStart + hunk.additionCount, hunk.deletionStart + hunk.deletionCount);
+        old = old || hunk.deletionCount > 0;
+        fresh = fresh || hunk.additionCount > 0;
+      }
+    }
+    root.style.setProperty('--termio-digits', String(Math.max(2, String(longest).length)));
+    if (old) root.style.removeProperty('--termio-old-column');
+    else root.style.setProperty('--termio-old-column', 'none');
+    if (fresh) root.style.removeProperty('--termio-new-column');
+    else root.style.setProperty('--termio-new-column', 'none');
   }
 
   function applyLook() {
     for (const [name, value] of Object.entries(look.variables)) root.style.setProperty(name, value);
     document.documentElement.style.background = look.variables['--diffs-bg'] || 'transparent';
     document.documentElement.style.colorScheme = look.scheme;
+  }
+
+  // The overlay's look. One file in the diff overlay keeps the look it had as a native
+  // view, GitHub Desktop's: an old and a new number column, a sign column, washes mixed
+  // from the pane's background, and flat bands that name the lines they hide. The library
+  // draws the rows; this CSS and `decorate` restyle them.
+
+  function overlayCSS() {
+    const dark = look.scheme === 'dark';
+    // A dark background swallows a tint that is plenty on a light one.
+    const wash = dark ? 20 : 12;
+    const emphasis = dark ? 26 : 20;
+    const ink = dark ? '#fff' : '#000';
+    const mix = (base, tint, amount) => 'color-mix(in oklab, ' + base + ', ' + tint + ' ' + amount + '%)';
+    const glyph = (path) => "url('data:image/svg+xml;utf8," + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22" fill="none" '
+      + 'stroke="black" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">' + path + '</svg>') + "')";
+    const dots = (y) => [7.5, 9.9, 12.3, 14.7].map((x) => '<rect x="' + x + '" y="' + y + '" width="1.2" height="1.2" fill="black" stroke="none"/>').join('');
+    const up = glyph('<path d="M11 11.8V6.8M8.5 9.2 11 6.8l2.5 2.4"/>' + dots(14.2));
+    const down = glyph('<path d="M11 10.2v5M8.5 12.8 11 15.2l2.5-2.4"/>' + dots(6.6));
+    const all = glyph('<path d="M11 2.9v5M8.5 5.5 11 7.9l2.5-2.4M11 19.1v-5M8.5 16.5 11 14.1l2.5 2.4"/>' + dots(10.4));
+    return `
+    :host {
+      --termio-addition: ${dark ? '#5ecc71' : '#0dbe4e'};
+      --termio-deletion: ${dark ? '#ff6762' : '#ff2e3f'};
+      --termio-addition-wash: ${mix('var(--diffs-bg)', 'var(--termio-addition)', wash)};
+      --termio-deletion-wash: ${mix('var(--diffs-bg)', 'var(--termio-deletion)', wash)};
+      --termio-addition-gutter: ${mix('var(--diffs-bg)', 'var(--termio-addition)', wash * 1.6)};
+      --termio-deletion-gutter: ${mix('var(--diffs-bg)', 'var(--termio-deletion)', wash * 1.6)};
+      --termio-addition-emphasis: ${mix('var(--termio-addition-wash)', 'var(--termio-addition)', emphasis)};
+      --termio-deletion-emphasis: ${mix('var(--termio-deletion-wash)', 'var(--termio-deletion)', emphasis)};
+      --termio-band: ${mix('var(--diffs-bg)', ink, 5)};
+      --termio-band-control: ${mix('var(--diffs-bg)', ink, 11)};
+      --termio-column: calc(var(--termio-digits, 2) * 1ch);
+    }
+    [data-line], [data-no-newline] { padding-inline: 11px; background-color: var(--diffs-bg); }
+    [data-line][data-line-type=change-addition], [data-no-newline][data-line-type=change-addition] { background-color: var(--termio-addition-wash); }
+    [data-line][data-line-type=change-deletion], [data-no-newline][data-line-type=change-deletion] { background-color: var(--termio-deletion-wash); }
+    [data-line-type=change-addition] [data-diff-span] { background-color: var(--termio-addition-emphasis); border-radius: 0; }
+    [data-line-type=change-deletion] [data-diff-span] { background-color: var(--termio-deletion-emphasis); border-radius: 0; }
+
+    [data-gutter] [data-column-number], [data-gutter] [data-gutter-buffer] {
+      display: flex; gap: 8px; padding: 0 2px 0 8px; border-right: 0;
+      background-color: var(--diffs-bg); color: var(--termio-number-ink);
+      font-family: -apple-system, system-ui, sans-serif; font-variant-numeric: tabular-nums;
+      font-size: var(--termio-number-size);
+    }
+    [data-gutter] [data-column-number][data-line-type=change-addition] { background-color: var(--termio-addition-gutter); color: var(--termio-number-ink); }
+    [data-gutter] [data-column-number][data-line-type=change-deletion] { background-color: var(--termio-deletion-gutter); color: var(--termio-number-ink); }
+    [data-line-number-content] { min-width: var(--termio-column); text-align: right; }
+    [data-column-number]::after {
+      content: ""; display: block; width: 12px; text-align: left;
+      font-family: var(--diffs-font-family); font-size: var(--diffs-font-size); font-variant-numeric: normal;
+    }
+    [data-column-number][data-line-type=change-addition]::after { content: "+"; color: var(--termio-addition-sign); }
+    [data-column-number][data-line-type=change-deletion]::after { content: "\\2212"; color: var(--termio-deletion-sign); }
+    [data-unified] [data-column-number]::before {
+      content: attr(data-old); display: var(--termio-old-column, block);
+      min-width: var(--termio-column); text-align: right;
+    }
+    [data-unified] [data-column-number][data-line-type=change-addition]::before { content: ""; }
+    [data-unified] [data-column-number][data-line-type=change-deletion]::before { content: attr(data-column-number); }
+    [data-unified] [data-column-number] [data-line-number-content] { display: var(--termio-new-column, inline-block); }
+    [data-unified] [data-column-number][data-line-type=change-deletion] [data-line-number-content] { visibility: hidden; }
+
+    [data-separator=line-info-basic] {
+      height: calc(var(--diffs-line-height) + 10px); margin-block: 0;
+      background-color: var(--termio-band); font-family: var(--diffs-font-family);
+    }
+    [data-separator=line-info-basic] [data-separator-wrapper],
+    [data-separator=line-info-basic][data-expand-index] [data-separator-wrapper] {
+      display: flex; align-items: center; background-color: var(--termio-band);
+      position: absolute; inset: 0; padding: 0; border-radius: 0;
+    }
+    [data-gutter] [data-separator=line-info-basic] [data-separator-wrapper] { justify-content: center; gap: 2px; }
+    [data-gutter] [data-separator-content], [data-content] [data-expand-button] { display: none; }
+    [data-content] [data-separator-content] {
+      display: flex; background: none; padding: 0 11px; height: 100%;
+      color: var(--termio-band-ink); border-radius: 0;
+    }
+    [data-expand-index] [data-separator-content]:hover { text-decoration: none; }
+    /* The label fills the band, so a click anywhere on the band opens it. */
+    [data-unmodified-lines] { white-space: pre; flex: auto; align-self: stretch; display: flex; align-items: center; cursor: pointer; }
+    /* The side of a split diff with no line for a row stays blank. */
+    [data-content-buffer] { background-image: none; background-color: var(--diffs-bg); }
+    [data-gutter] [data-expand-button] {
+      flex: none; align-self: center; width: 22px; min-width: 0; height: 22px;
+      border: 0; border-radius: 4px; background: none; color: var(--termio-number-ink);
+    }
+    [data-gutter] [data-expand-button]:hover { background-color: var(--termio-band-control); color: var(--diffs-fg); }
+    [data-gutter] [data-expand-button][data-expand-all-button] { display: none; }
+    [data-expand-button] [data-icon] { display: none; }
+    [data-gutter] [data-expand-button]::before {
+      content: ""; width: 22px; height: 22px; background-color: currentColor;
+      -webkit-mask: ${all} center / 22px 22px no-repeat;
+    }
+    /* The library names a button by the end of the band it opens. The arrow points the
+       way the reveal walks, which is the other way. */
+    [data-gutter] [data-expand-button][data-expand-up]::before { -webkit-mask-image: ${down}; }
+    [data-gutter] [data-expand-button][data-expand-down]::before { -webkit-mask-image: ${up}; }
+    /* The code never scrolls down inside itself, so it holds no room for a scroller. */
+    [data-code] { scrollbar-gutter: auto; }
+    `;
+  }
+
+  /** The item each watched shadow tree draws, by tree. */
+  const watched = new WeakMap();
+
+  /** Restyles the rows of one item's shadow tree now, and again whenever the library redraws them. */
+  function watch(node, id) {
+    const tree = node && node.shadowRoot;
+    if (!tree) return;
+    const known = watched.has(tree);
+    watched.set(tree, id);
+    decorate(tree);
+    if (known) return;
+    new MutationObserver(() => decorate(tree)).observe(tree, { childList: true, subtree: true });
+  }
+
+  function decorate(tree) {
+    // An unchanged row carries its new number in the gutter. Its old number is on the code row.
+    for (const code of tree.querySelectorAll('[data-code][data-unified]')) {
+      const numbers = code.querySelectorAll('[data-gutter] > [data-column-number][data-line-type^=context]:not([data-old])');
+      if (numbers.length === 0) continue;
+      const old = new Map();
+      for (const line of code.querySelectorAll('[data-content] > [data-line][data-alt-line]')) {
+        old.set(line.getAttribute('data-line-index'), line.getAttribute('data-alt-line'));
+      }
+      for (const number of numbers) number.setAttribute('data-old', old.get(number.getAttribute('data-line-index')) || '');
+    }
+    const labels = [...tree.querySelectorAll('[data-content] > [data-separator] [data-unmodified-lines]')];
+    // The new file's column first: the old file's column copies its labels.
+    labels.sort((a, b) => Boolean(a.closest('[data-deletions]')) - Boolean(b.closest('[data-deletions]')));
+    for (const label of labels) {
+      if (label.textContent === label.getAttribute('data-termio-label')) continue;
+      const text = bandLabel(label);
+      label.setAttribute('data-termio-label', text);
+      label.textContent = text;
+    }
+  }
+
+  /**
+   * What a band says: the lines it hides, and git's heading for the hunk under it. A line
+   * range tells the reader what they jump over. A count only describes the control.
+   */
+  function bandLabel(label) {
+    const band = label.closest('[data-separator]');
+    // Both columns of a split diff name the band by the new file's lines.
+    const column = band.closest('[data-deletions]');
+    const twin = column && column.parentNode.querySelector(
+      '[data-additions] [data-content] > [data-separator][data-expand-index="' + band.getAttribute('data-expand-index') + '"] [data-termio-label]');
+    if (twin) return twin.getAttribute('data-termio-label');
+    const count = parseInt(label.textContent, 10);
+    const numbered = (row) => (row && row.hasAttribute('data-line') && row.getAttribute('data-line-type') !== 'change-deletion'
+      ? Number(row.getAttribute('data-line')) : null);
+    const below = numbered(band.nextElementSibling);
+    const above = numbered(band.previousElementSibling);
+    let range = '';
+    if (Number.isFinite(count) && count > 0 && (below !== null || above !== null)) {
+      const first = below !== null ? below - count : above + 1;
+      range = count === 1 ? String(first) : first + '–' + (first + count - 1);
+    }
+    const id = watched.get(band.getRootNode());
+    const entry = id && viewer && viewer.getItem(id);
+    const hunk = entry && entry.fileDiff && entry.fileDiff.hunks[Number(band.getAttribute('data-expand-index'))];
+    const heading = hunk && hunk.hunkContext ? hunk.hunkContext.trim() : '';
+    return [range, heading].filter(Boolean).join('   ') || label.textContent;
   }
 
   // Find. The matches are counted from the diff itself, because the lines off screen are
@@ -344,6 +545,7 @@
     // A timer, not an animation frame: the paint has to run while the pane is covered too.
     setTimeout(() => {
       findPaintQueued = false;
+      sizeGutter();
       recountIfHydrated();
       paintFind();
     }, 30);
@@ -439,6 +641,7 @@
       revealed.clear();
       hydrated.clear();
       viewer.setItems(next);
+      sizeGutter();
       if (single) root.scrollTo(0, 0);
       collectMatches();
       scheduleFindPaint();
