@@ -23,7 +23,7 @@ export const changelog: ChangelogEntry[] = [
     changes: {
       new: [
         "Cards: Files, Search, Changes, Issues, Info and Simulator open as cards you can group with a session, in place of the panel on each terminal.",
-        "Cards: every card's header ends with Zoom and Close.",
+        "Cards: the selected card's header ends with Close, and with Zoom when the card is in a group.",
         "Settings: General has a switch for each app.",
         "CLI: `termio update` updates a Linux box to the newest release in place and keeps its sessions running. `termio -H <host> update` updates another machine.",
       ],
