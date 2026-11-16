@@ -75,15 +75,15 @@ enum GitService {
 
     /// The raw unified-diff text for one changed file — what "Copy Diff" puts on the
     /// pasteboard, so it round-trips cleanly into `git apply` or an agent prompt.
-    static func diffText(for change: GitChange, in repoRoot: String) async -> String {
-        await offMain { loadDiffText(change, repoRoot) }
-    }
-
-    /// Parses ready-made unified-diff text (GitHub's inline PR `patch`) into rows off the
-    /// main thread — the same parser the local `git diff` path uses, so a PR file diffed
-    /// from the API renders identically without a subprocess or a checkout.
-    static func parseDiffText(_ text: String) async -> [DiffRow] {
-        await offMain { DiffParser.lines(from: text) }
+    ///
+    /// With `commit` set, the file's diff *at that commit* instead — the History tab's
+    /// per-file view; with `range`, its change across that range. `context` is the number
+    /// of unchanged lines around each change, git's default of 3 when nil.
+    static func diffText(
+        for change: GitChange, in repoRoot: String,
+        commit: String? = nil, range: String? = nil, context: Int? = nil
+    ) async -> String {
+        await offMain { loadDiffText(change, repoRoot, commit: commit, range: range, context: context) }
     }
 
     /// Discards a whole selection in one confirmed action — the multi-select's

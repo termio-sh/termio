@@ -1,11 +1,10 @@
 import AppKit
 
-/// The one incremental-find engine behind both ⌘F surfaces — the code editor
-/// (`HighlightedTextView`) and the diff overlay (`DiffTextView`). It finds every match of a
-/// query (literal or regex, with case / whole-word modifiers), paints them as temporary
-/// background highlights over any `NSTextView`, and reveals the focused one. Sharing one engine
-/// is what keeps find behaving — and the highlights looking — identical in both places, so the
-/// two `FileFindBar`s aren't just visually alike but back onto the same search.
+/// The incremental-find engine behind the code editor's ⌘F (`HighlightedTextView`). It finds
+/// every match of a query (literal or regex, with case / whole-word modifiers), paints them as
+/// temporary background highlights over any `NSTextView`, and reveals the focused one. The diff
+/// overlay shows the same `FileFindBar`, but its lines live in a web page, so the page runs its
+/// own search with the same options and the same two highlight colors (`diffs-page.js`).
 @MainActor
 final class TextFindEngine {
     private(set) var matches: [NSRange] = []

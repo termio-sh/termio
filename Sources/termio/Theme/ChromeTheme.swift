@@ -286,21 +286,6 @@ extension AppSettings {
         )
     }
 
-    /// The diff's add/delete tints, resolved against the same theme `gutterInk` reads so
-    /// the washes and the numbers drawn on them can never disagree about which slot is
-    /// showing. `terminalBackgroundColor` is dynamic and would resolve against whatever
-    /// `NSAppearance.current` happened to be during the Oklab mix — the theme's own
-    /// background is the already-resolved counterpart.
-    func diffPalette(for colorScheme: ColorScheme) -> DiffPalette {
-        let theme = chromeTheme(for: colorScheme)
-        let dark = theme?.isDark ?? (colorScheme == .dark)
-        let background = theme.map { NSColor($0.background) }
-            ?? (dark
-                ? NSColor(srgbRed: 0x21 / 255.0, green: 0x21 / 255.0, blue: 0x21 / 255.0, alpha: 1)
-                : .white)
-        return DiffPalette(background: background, isDark: dark)
-    }
-
     /// The window's ground — the sidebar, the gaps between the cards, the window's edges — as a
     /// dynamic color: the theme's `panelBackground`, a step off its terminal background, so the
     /// cards read as surfaces on it. Without a theme, the same step off the default background.
@@ -361,5 +346,59 @@ extension Color {
             green: base.greenComponent + (target.greenComponent - base.greenComponent) * t,
             blue: base.blueComponent + (target.blueComponent - base.blueComponent) * t
         )
+    }
+}
+
+/// Björn Ottosson's Oklab, enough of it to interpolate two opaque colors. The
+/// chrome theme's surfaces mix in it.
+struct Oklab {
+    let lightness: CGFloat
+    let a: CGFloat
+    let b: CGFloat
+
+    init(lightness: CGFloat, a: CGFloat, b: CGFloat) {
+        self.lightness = lightness
+        self.a = a
+        self.b = b
+    }
+
+    init?(_ color: NSColor) {
+        guard let srgb = color.usingColorSpace(.sRGB) else { return nil }
+        let r = Self.linear(srgb.redComponent)
+        let g = Self.linear(srgb.greenComponent)
+        let b = Self.linear(srgb.blueComponent)
+
+        let l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+        let m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+        let s = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+
+        lightness = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s
+        self.a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
+        self.b = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+    }
+
+    var color: NSColor {
+        let l = pow(lightness + 0.3963377774 * a + 0.2158037573 * b, 3)
+        let m = pow(lightness - 0.1055613458 * a - 0.0638541728 * b, 3)
+        let s = pow(lightness - 0.0894841775 * a - 1.2914855480 * b, 3)
+
+        let r = Self.encode(+4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s)
+        let g = Self.encode(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s)
+        let blue = Self.encode(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s)
+        return NSColor(srgbRed: r, green: g, blue: blue, alpha: 1)
+    }
+
+    private static func linear(_ component: CGFloat) -> CGFloat {
+        component <= 0.04045 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
+    }
+
+    /// Out-of-gamut mixes are clamped rather than gamut-mapped: the inputs here are a
+    /// theme color and a short step away from it, which never strays far.
+    private static func encode(_ component: CGFloat) -> CGFloat {
+        let clamped = min(max(component, 0), 1)
+        let encoded = clamped <= 0.0031308
+            ? clamped * 12.92
+            : 1.055 * pow(clamped, 1 / 2.4) - 0.055
+        return min(max(encoded, 0), 1)
     }
 }

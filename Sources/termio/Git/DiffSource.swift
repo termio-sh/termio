@@ -5,46 +5,64 @@ import Foundation
 /// on. The one place in the pane that decides which machine runs the command.
 ///
 /// It is a *provider swap and nothing more*: both roads produce unified-diff
-/// **text**, and `DiffParser` / `DiffDocument` / `DiffTextView` already consume
-/// text, so a device diff renders through the identical stack — same fold, same
-/// intraline word diff, same syntax pass. That was the whole bet in
-/// `docs/rfcs/remote-git-plane.md` §2 and it holds.
+/// **text**, and the diff page (`DiffWebView`) consumes text, so a device diff
+/// renders through the identical stack — same bands, same intraline word diff,
+/// same syntax pass. That was the whole bet in `docs/rfcs/remote-git-plane.md`
+/// §2 and it holds.
 enum DiffSource {
-    /// Rendered rows for one changed file. `device` nil means this Mac.
-    static func rows(
+    /// One changed file's diff, as `git` prints it. `device` nil means this Mac.
+    ///
+    /// `fullContext` asks for the whole file as context (`-U999999`), which is how
+    /// the page gets the lines a reader expands. A device answers that for the
+    /// working tree only: its commit and compare verbs take no context, so those
+    /// return nothing and their bands stay shut.
+    static func patch(
         for change: GitChange,
         in repoRoot: String,
         device: TermiodRoute?,
         commit: String? = nil,
-        range: String? = nil
-    ) async -> [DiffRow] {
+        range: String? = nil,
+        fullContext: Bool = false
+    ) async -> String {
+        let context = fullContext ? 999_999 : nil
         guard let device else {
-            return await GitService.diffRows(
-                for: change, in: repoRoot, commit: commit, range: range)
+            return await GitService.diffText(
+                for: change, in: repoRoot, commit: commit, range: range, context: context)
         }
         // Three shapes, three verbs on the box: a commit's file is `git.show`,
         // a compare row is `git.compare`, and the working tree is `git.diff` —
         // inventing a local answer for a remote path would diff the wrong
         // machine's file.
         if let commit {
-            let text = (try? await Termiod.gitShowDiff(
+            guard !fullContext else { return "" }
+            return (try? await Termiod.gitShowDiff(
                 route: device, root: repoRoot, commit: commit, path: change.path)) ?? ""
-            return await GitService.parseDiffText(text)
         }
         if let range {
-            guard let base = compareBase(of: range) else { return [] }
-            let text = (try? await Termiod.gitCompareDiff(
+            guard !fullContext, let base = compareBase(of: range) else { return "" }
+            return (try? await Termiod.gitCompareDiff(
                 route: device, root: repoRoot, base: base, path: change.path)) ?? ""
-            return await GitService.parseDiffText(text)
         }
-        // Full context, exactly as the local path asks for it: the overlay holds
-        // the whole file and collapses the unchanged runs into bands the reader
-        // can expand. `GitService.diffRows` falls back to git's default context
-        // when the row count is pathological; the device caps at 1 MiB instead,
-        // and says so.
-        let text = await text(
-            for: change, in: repoRoot, device: device, context: 999_999)
-        return await GitService.parseDiffText(text)
+        return await text(for: change, in: repoRoot, device: device, context: context)
+    }
+
+    /// Both sides of one changed file in full, for expanding the context its diff
+    /// left out. Nil when the file is too large to carry whole, or the source has
+    /// no way to ask for it.
+    static func fullText(
+        for change: GitChange,
+        in repoRoot: String,
+        device: TermiodRoute?,
+        commit: String? = nil,
+        range: String? = nil
+    ) async -> DiffFullText? {
+        let text = await patch(
+            for: change, in: repoRoot, device: device,
+            commit: commit, range: range, fullContext: true)
+        // ~20k lines of average code ≈ 1.5 MB. Past that the bands stay shut
+        // rather than hand the page a whole huge file twice.
+        guard !text.isEmpty, text.utf8.count <= 1_500_000 else { return nil }
+        return await Task.detached { DiffFullText(fullContextPatch: text) }.value
     }
 
     /// The base a compare row's range names. Every range this pane builds is

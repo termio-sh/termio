@@ -11,6 +11,24 @@ final class ChromeThemeTests: XCTestCase {
         Oklab(NSColor(color))?.lightness ?? -1
     }
 
+    /// Oklab is a pile of magic constants: one transposed digit would shift every surface.
+    func testOklabRoundTripsSRGB() throws {
+        let samples: [NSColor] = [
+            .init(srgbRed: 0, green: 0, blue: 0, alpha: 1),
+            .init(srgbRed: 1, green: 1, blue: 1, alpha: 1),
+            .init(srgbRed: 0.5, green: 0.5, blue: 0.5, alpha: 1),
+            .init(srgbRed: 0.051, green: 0.745, blue: 0.306, alpha: 1),
+            .init(srgbRed: 1, green: 0.18, blue: 0.247, alpha: 1),
+            .init(srgbRed: 0.11, green: 0.13, blue: 0.18, alpha: 1),
+        ]
+        for sample in samples {
+            let back = try XCTUnwrap(Oklab(sample)).color
+            XCTAssertEqual(back.redComponent, sample.redComponent, accuracy: 0.002)
+            XCTAssertEqual(back.greenComponent, sample.greenComponent, accuracy: 0.002)
+            XCTAssertEqual(back.blueComponent, sample.blueComponent, accuracy: 0.002)
+        }
+    }
+
     func testPanelIsTheSameLightnessStepOnEveryTheme() throws {
         for definition in ThemeLibrary.builtInThemes {
             let chrome = try XCTUnwrap(ChromeTheme(definition), definition.name)

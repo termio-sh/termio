@@ -1,9 +1,10 @@
 # Vendored @pierre/diffs
 
-The pull request's Files view, when it stacks every file in one scroll, draws the
-diffs with [@pierre/diffs](https://diffs.com) `1.6.4`
+The diff overlay (`../GitDiffView.swift`) and the pull request's Files view
+(`../PRFilesDiffView.swift`) draw their diffs with
+[@pierre/diffs](https://diffs.com) `1.6.4`
 ([pierrecomputer/pierre](https://github.com/pierrecomputer/pierre)) inside a
-`WKWebView` (`../PRDiffWebView.swift`). Two scripts ship in
+`WKWebView` (`../DiffWebView.swift`). Two scripts ship in
 `termio_termio.bundle` and are read through `Bundle.termioResources`:
 
 - `../../Resources/assets/pierre-diffs.min.js`: one IIFE that sets
@@ -14,7 +15,7 @@ diffs with [@pierre/diffs](https://diffs.com) `1.6.4`
   script with the @pierre/highlights lexers inside, so the page runs it as a blob
   worker. A page loaded from a string has no origin to fetch a worker from.
 
-The page's side of the bridge is `../../Resources/assets/pr-diff.js`. Nothing is
+The page's side of the bridge is `../../Resources/assets/diffs-page.js`. Nothing is
 fetched at runtime.
 
 Shiki is left out on purpose. The page and the worker highlight with
