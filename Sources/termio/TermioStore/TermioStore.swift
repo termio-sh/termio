@@ -1508,6 +1508,8 @@ final class TermioStore: ObservableObject {
     }
 
     init(workspaces: [Workspace], projects: [Project] = [], settings: AppSettings) {
+        // Also here, so a test process that hosts a store gets the app's policy.
+        BrokenPipe.ignore()
         self.settings = settings
         let reconciled = WorkspaceMigration.reconcile(workspaces: workspaces, projects: projects)
         // The scope the app opens in: the one the last run ended in, or the first
