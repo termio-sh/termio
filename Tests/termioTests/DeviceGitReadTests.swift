@@ -184,6 +184,13 @@ final class DiffFullTextTests: XCTestCase {
         XCTAssertEqual(result?.new, "new\nlast")
     }
 
+    /// To a Swift string a CRLF is one character, so a split on "\\n" would miss every line end.
+    func testWindowsLineEndingsStayOnTheirLines() {
+        let result = sides("@@ -1,2 +1,2 @@\n keep\r\n-old\r\n+new\r\n")
+        XCTAssertEqual(result?.old, "keep\r\nold\r\n")
+        XCTAssertEqual(result?.new, "keep\r\nnew\r\n")
+    }
+
     func testAddedFileHasAnEmptyOldSide() {
         let result = sides("@@ -0,0 +1,2 @@\n+one\n+two\n")
         XCTAssertEqual(result?.old, "")

@@ -53,7 +53,9 @@ enum DiffFullText {
         var newEndsWithNewline = true
         var hunks = 0
         var last: Character?
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        // Not `split`: to a Swift string a CRLF is one character, so a file with Windows line
+        // endings would come back as a single line.
+        for line in text.components(separatedBy: "\n") {
             if line.hasPrefix("@@") {
                 hunks += 1
                 guard hunks == 1 else { return nil }
@@ -94,6 +96,8 @@ struct DiffWebSingle {
     /// Nil while the find bar is closed.
     var find: DiffWebFind? = nil
     var onFindCount: (Int) -> Void = { _ in }
+    /// The file changed after its diff was read, so a band could not be expanded.
+    var onStale: () -> Void = {}
     /// Steps to the previous or next file. False at either end.
     var onWalk: (Int) -> Bool = { _ in false }
     /// The argument is the selected text. Nil means no selection.
@@ -372,6 +376,9 @@ final class DiffWebBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (text.reply, nil)
         case "walk":
             if let delta = body["delta"] as? Int { _ = single?.onWalk(delta) }
+            return (nil, nil)
+        case "stale":
+            single?.onStale()
             return (nil, nil)
         case "selection":
             selectedText = body["text"] as? String ?? ""

@@ -103,7 +103,44 @@
       base = Diffs.applyPatch(text, reversed);
       if (base === false) throw new Error('patch does not reverse onto ' + file.path);
     }
+    if (!agrees(fileDiff, base, text)) {
+      // The diff on screen is out of date. Swift reads it again.
+      post({ type: 'stale' });
+      throw new Error(file.path + ' changed since its diff was read');
+    }
     return { oldFile: { name: file.oldPath || file.path, contents: base }, newFile };
+  }
+
+  /**
+   * Whether the two files hold the lines the diff shows, at the line numbers it shows them.
+   * The library keeps the hunks and swaps in the files' lines, so files read after another
+   * edit, or cut short, would put other text under the same hunks.
+   */
+  function agrees(fileDiff, oldText, newText) {
+    const bare = (line) => (line === undefined ? undefined : line.replace(/\r?\n$/, ''));
+    const oldLines = oldText.split('\n');
+    const newLines = newText.split('\n');
+    const same = (shown, index, lines, number, count) => {
+      for (let offset = 0; offset < count; offset++) {
+        const line = lines[number - 1 + offset];
+        if (line === undefined || bare(shown[index + offset]) !== line.replace(/\r$/, '')) return false;
+      }
+      return true;
+    };
+    for (const hunk of fileDiff.hunks) {
+      let oldNumber = hunk.deletionStart;
+      let newNumber = hunk.additionStart;
+      for (const content of hunk.hunkContent) {
+        const context = content.type === 'context';
+        const deletions = context ? content.lines : content.deletions;
+        const additions = context ? content.lines : content.additions;
+        if (!same(fileDiff.deletionLines, content.deletionLineIndex, oldLines, oldNumber, deletions)) return false;
+        if (!same(fileDiff.additionLines, content.additionLineIndex, newLines, newNumber, additions)) return false;
+        oldNumber += deletions;
+        newNumber += additions;
+      }
+    }
+    return true;
   }
 
   /** The fold toggle at the front of each header; `context.item` is the item it heads. */
@@ -186,11 +223,11 @@
   }
 
   function spans(text) {
+    // `matchAll` steps past an empty match by a whole character. A hand-rolled step of one
+    // code unit lands inside a surrogate pair and never ends.
     const found = [];
-    findPattern.lastIndex = 0;
-    for (let match = findPattern.exec(text); match; match = findPattern.exec(text)) {
-      if (match[0].length === 0) findPattern.lastIndex += 1;
-      else found.push([match.index, match.index + match[0].length]);
+    for (const match of text.matchAll(findPattern)) {
+      if (match[0].length > 0) found.push([match.index, match.index + match[0].length]);
     }
     return found;
   }

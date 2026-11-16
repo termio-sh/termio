@@ -11,44 +11,37 @@ import Foundation
 /// §2 and it holds.
 enum DiffSource {
     /// One changed file's diff, as `git` prints it. `device` nil means this Mac.
-    ///
-    /// `fullContext` asks for the whole file as context (`-U999999`), which is how
-    /// the page gets the lines a reader expands. A device answers that for the
-    /// working tree only: its commit and compare verbs take no context, so those
-    /// return nothing and their bands stay shut.
     static func patch(
         for change: GitChange,
         in repoRoot: String,
         device: TermiodRoute?,
         commit: String? = nil,
-        range: String? = nil,
-        fullContext: Bool = false
+        range: String? = nil
     ) async -> String {
-        let context = fullContext ? 999_999 : nil
         guard let device else {
-            return await GitService.diffText(
-                for: change, in: repoRoot, commit: commit, range: range, context: context)
+            return await GitService.diffText(for: change, in: repoRoot, commit: commit, range: range)
         }
         // Three shapes, three verbs on the box: a commit's file is `git.show`,
         // a compare row is `git.compare`, and the working tree is `git.diff` —
         // inventing a local answer for a remote path would diff the wrong
         // machine's file.
         if let commit {
-            guard !fullContext else { return "" }
             return (try? await Termiod.gitShowDiff(
                 route: device, root: repoRoot, commit: commit, path: change.path)) ?? ""
         }
         if let range {
-            guard !fullContext, let base = compareBase(of: range) else { return "" }
+            guard let base = compareBase(of: range) else { return "" }
             return (try? await Termiod.gitCompareDiff(
                 route: device, root: repoRoot, base: base, path: change.path)) ?? ""
         }
-        return await text(for: change, in: repoRoot, device: device, context: context)
+        return await text(for: change, in: repoRoot, device: device)
     }
 
     /// Both sides of one changed file in full, for expanding the context its diff
-    /// left out. Nil when the file is too large to carry whole, or the source has
-    /// no way to ask for it.
+    /// left out. They are read out of a diff that carries the whole file as context
+    /// (`-U999999`). Nil when the file is too large to carry whole, or the source
+    /// has no way to ask for it: a device answers for the working tree only,
+    /// because its commit and compare verbs take no context.
     static func fullText(
         for change: GitChange,
         in repoRoot: String,
@@ -56,9 +49,27 @@ enum DiffSource {
         commit: String? = nil,
         range: String? = nil
     ) async -> DiffFullText? {
-        let text = await patch(
-            for: change, in: repoRoot, device: device,
-            commit: commit, range: range, fullContext: true)
+        let text: String
+        if let device {
+            guard commit == nil, range == nil else { return nil }
+            do {
+                let diff = try await Termiod.gitDiff(
+                    route: device, root: repoRoot, path: change.path,
+                    staged: change.isStaged, context: 999_999)
+                // The device cuts a diff off at 1 MiB. Half a file is not the file.
+                guard !diff.truncated else { return nil }
+                text = diff.text
+            } catch {
+                Log.termiod.error("""
+                device full diff for \(change.path, privacy: .public) failed: \
+                \(String(describing: error), privacy: .public)
+                """)
+                return nil
+            }
+        } else {
+            text = await GitService.diffText(
+                for: change, in: repoRoot, commit: commit, range: range, context: 999_999)
+        }
         // ~20k lines of average code ≈ 1.5 MB. Past that the bands stay shut
         // rather than hand the page a whole huge file twice.
         guard !text.isEmpty, text.utf8.count <= 1_500_000 else { return nil }

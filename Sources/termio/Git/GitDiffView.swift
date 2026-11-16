@@ -277,6 +277,7 @@ struct GitDiffView: View {
                     ? DiffWebFind(query: findQuery, options: findOptions, index: findFocusedIndex)
                     : nil,
                 onFindCount: noteFindCount,
+                onStale: { Task { await load() } },
                 onWalk: { walk($0) },
                 // Cursor's split, like the editor: a selection goes over as the pasted
                 // snippet; no selection means the diffed file, which lands as its path.
