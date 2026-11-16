@@ -111,6 +111,7 @@ struct GitDiffView: View {
         } else {
             findLastSubmittedQuery = findQuery
             findFocusedIndex = 0
+            findStep &+= 1
         }
     }
 
