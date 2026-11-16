@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Simulator": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模拟器"
+          }
+        }
+      }
+    },
     "Click to show it here": {
       "localizations": {
         "zh-Hans": {

@@ -1524,6 +1524,8 @@
 	<string>Signs in with the keys ssh offers by default.</string>
 	<key>Signs this Mac’s device out of your tailnet.</key>
 	<string>Signs this Mac’s device out of your tailnet.</string>
+	<key>Simulator</key>
+	<string>Simulator</string>
 	<key>Simulator Unavailable</key>
 	<string>Simulator Unavailable</string>
 	<key>Size</key>

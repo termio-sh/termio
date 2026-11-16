@@ -1524,6 +1524,8 @@
 	<string>使用 ssh 默认提供的密钥登录。</string>
 	<key>Signs this Mac’s device out of your tailnet.</key>
 	<string>让这台 Mac 的设备退出你的 tailnet。</string>
+	<key>Simulator</key>
+	<string>模拟器</string>
 	<key>Simulator Unavailable</key>
 	<string>模拟器不可用</string>
 	<key>Size</key>
