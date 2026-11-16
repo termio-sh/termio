@@ -77,11 +77,7 @@ pub async fn run(args: UpdateArgs) -> Result<()> {
         return Ok(());
     }
 
-    let daemon = lifecycle::paired_daemon()?;
-    let directory = daemon
-        .parent()
-        .with_context(|| format!("{} has no directory", daemon.display()))?
-        .to_path_buf();
+    let directory = install_directory()?;
     let release = format!("{base}/v{wanted}/linux");
     println!("Downloading termio {wanted} for {target}");
 
@@ -123,9 +119,14 @@ pub async fn run(args: UpdateArgs) -> Result<()> {
 
     // The new build's own handoff, as the installer runs it: the client that
     // asks is the one that knows the build it is asking for.
+    // Named outright, and `TERMIOD_BIN` dropped, so the daemon handed off to
+    // is the file just installed and never one an override points at.
     let client = directory.join("termio");
+    let daemon = directory.join("termiod");
     let status = tokio::process::Command::new(&client)
-        .args(["server", "handoff"])
+        .args(["server", "handoff", "--binary"])
+        .arg(&daemon)
+        .env_remove("TERMIOD_BIN")
         .status()
         .await
         .with_context(|| format!("running {} server handoff", client.display()))?;
@@ -134,6 +135,29 @@ pub async fn run(args: UpdateArgs) -> Result<()> {
         println!("It picks it up at its next start: termio server stop, once its sessions are done.");
     }
     Ok(())
+}
+
+/// Where this `termio` really lives, with every symlink resolved: the
+/// directory the installer put all three binaries in. Only a `termiod` beside
+/// it qualifies. `paired_daemon`'s other answers (`TERMIOD_BIN`, argv0's
+/// directory, a daemon found on PATH) name a daemon to talk to, not the files
+/// this command replaces, and following them updated a different directory
+/// than the one the command ran from, or replaced a symlink with a file.
+fn install_directory() -> Result<PathBuf> {
+    let client = std::env::current_exe()
+        .and_then(|path| path.canonicalize())
+        .context("resolving this termio")?;
+    let directory = client
+        .parent()
+        .with_context(|| format!("{} has no directory", client.display()))?
+        .to_path_buf();
+    if !directory.join("termiod").is_file() {
+        bail!(
+            "no termiod beside {}; install with: curl -fsSL https://www.termio.sh/install | sh",
+            client.display()
+        );
+    }
+    Ok(directory)
 }
 
 /// The release triple of this CPU. termio ships for Linux on two.

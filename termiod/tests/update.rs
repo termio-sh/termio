@@ -57,7 +57,7 @@ fn publish(root: &Path, version: &str, corrupt: &[&str]) {
         let body = if name == "termio" {
             format!(
                 "#!/bin/sh\n# {name} {version}\n\
-                 [ \"$1 $2\" = \"server handoff\" ] && echo handed-off > \"$(dirname \"$0\")/handoff\"\n\
+                 [ \"$1 $2\" = \"server handoff\" ] && echo \"$3 $4 TERMIOD_BIN=$TERMIOD_BIN\" > \"$(dirname \"$0\")/handoff\"\n\
                  exit 0\n"
             )
         } else {
@@ -85,12 +85,22 @@ fn install_old(bin: &Path) {
     }
 }
 
+/// Runs this build's `termio update` from a copy at `bin/termio` reached
+/// through `link/termio`, the way a PATH symlink reaches an install: the
+/// update has to find `bin` on its own. `TERMIOD_BIN` points somewhere else
+/// entirely, and must not move what gets replaced.
 fn update(test: &TestDir, arguments: &[&str]) -> Output {
-    Command::new(CLIENT)
+    let client = test.0.join("bin/termio");
+    std::fs::copy(CLIENT, &client).unwrap();
+    let link = test.0.join("link");
+    std::fs::create_dir_all(&link).unwrap();
+    let _ = std::fs::remove_file(link.join("termio"));
+    std::os::unix::fs::symlink(&client, link.join("termio")).unwrap();
+    Command::new(link.join("termio"))
         .arg("update")
         .args(arguments)
         .env("TERMIO_DOWNLOAD_BASE", format!("file://{}", test.0.join("release").display()))
-        .env("TERMIOD_BIN", test.0.join("bin/termiod"))
+        .env("TERMIOD_BIN", test.0.join("elsewhere/termiod-test"))
         .env("HOME", &test.0)
         .env_remove("TERMIOD_SOCK")
         .output()
@@ -116,7 +126,11 @@ fn an_update_installs_every_binary_and_hands_off() {
         let mode = std::fs::metadata(test.0.join("bin").join(name)).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o755, "{name} is executable");
     }
-    assert_eq!(read(test.0.join("bin/handoff")).trim(), "handed-off");
+    let handoff = read(test.0.join("bin/handoff"));
+    let daemon = test.0.join("bin/termiod").canonicalize().unwrap();
+    assert_eq!(handoff.trim(), format!("--binary {} TERMIOD_BIN=", daemon.display()));
+    assert!(std::fs::symlink_metadata(test.0.join("link/termio")).unwrap().file_type().is_symlink());
+    assert!(!test.0.join("elsewhere").exists(), "TERMIOD_BIN moved nothing");
     let left: Vec<_> = std::fs::read_dir(test.0.join("bin"))
         .unwrap()
         .filter_map(|entry| entry.ok())
@@ -135,20 +149,36 @@ fn one_bad_checksum_installs_nothing() {
     let output = update(&test, &[]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("failed its checksum"));
-    for name in ["termiod", "termio", "termio-tailnet"] {
+    for name in ["termiod", "termio-tailnet"] {
         assert!(read(test.0.join("bin").join(name)).contains("old"), "{name} is untouched");
     }
+    assert_eq!(std::fs::read(test.0.join("bin/termio")).unwrap(), std::fs::read(CLIENT).unwrap());
     assert!(!test.0.join("bin/handoff").exists());
 }
 
 #[test]
-fn a_release_older_than_this_build_is_not_installed() {
+fn a_client_with_no_daemon_beside_it_installs_nothing() {
+    let test = TestDir::new();
+    publish(&test.0.join("release"), "99.0.0", &[]);
+    install_old(&test.0.join("bin"));
+    std::fs::remove_file(test.0.join("bin/termiod")).unwrap();
+
+    let output = update(&test, &[]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no termiod beside"));
+    assert!(!test.0.join("bin/termiod").exists());
+    assert!(read(test.0.join("bin/termio-tailnet")).contains("old"));
+}
+
+#[test]
+fn the_release_this_build_is_is_not_installed_again() {
     let test = TestDir::new();
     publish(&test.0.join("release"), "0.0.0", &[]);
     install_old(&test.0.join("bin"));
 
     let output = update(&test, &[]);
-    // A checkout reports 0.0.0+<commits>, which is the same release as 0.0.0.
+    // A checkout reports 0.0.0+<commits>, which is release 0.0.0. No release
+    // can be older than that, so the older case is the same comparison.
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert!(String::from_utf8_lossy(&output.stdout).contains("is the newest release"));
     assert!(read(test.0.join("bin/termiod")).contains("old"));
