@@ -211,9 +211,14 @@ struct TerminalPane: View {
                 if let link = store.runtime(for: id).streamLink {
                     // Stays mounted while the view comes and goes, so the link
                     // hears a hidden pane stop counting toward the session's size.
+                    // The viewer names the link as well as the window: the view this one
+                    // replaces says it left only after this one said it is showing, and
+                    // under one shared name that late report hid a pane still on screen.
                     StreamLinkReport(isVisible: isVisible, colors: store.streamTheme(dark: colorScheme == .dark),
                                      scrollbackBytes: store.streamScrollbackBytes,
-                                     link: link) { store.reportRendering($0, for: id, viewer: ObjectIdentifier(window)) }
+                                     link: link) {
+                        store.reportRendering($0, for: id, viewer: [ObjectIdentifier(window), ObjectIdentifier(link)])
+                    }
                         .id(ObjectIdentifier(link))
                     // Unlike the embedded surface, which owns its terminal and so
                     // stays mounted at zero opacity, the stream view is mounted
@@ -255,7 +260,9 @@ struct TerminalPane: View {
                         isSelected: isSelected,
                         isVisible: isVisible,
                         onFocused: { selectFocusedSurface(id) },
-                        onVisibility: { store.reportRendering($0, for: id, viewer: ObjectIdentifier(window)) },
+                        onVisibility: {
+                            store.reportRendering($0, for: id, viewer: [ObjectIdentifier(window), ObjectIdentifier(context)])
+                        },
                         requestFocus: { reason in
                             requestTerminalFocus(for: id, reason: reason)
                         }
