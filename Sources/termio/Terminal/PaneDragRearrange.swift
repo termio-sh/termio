@@ -71,7 +71,7 @@ final class PaneDragRearrange {
     /// notched for the window's controls, a full-width handle would sit under a control and
     /// take its press. It narrows to fit, and a run too short for a grip has none.
     static func handleRect(in size: CGSize, notchWidth: CGFloat, controlsMinX: CGFloat?) -> CGRect? {
-        let start = PaneCard.iconSlotEnd(notchWidth: notchWidth)
+        let start = PaneCard.closeSlotEnd(notchWidth: notchWidth)
         let end = controlsMinX ?? size.width
         let width = min(handleSize.width, end - start)
         guard width >= minimumHandleWidth else { return nil }
@@ -167,15 +167,9 @@ final class PaneDragRearrange {
 
     /// Starts a drag from a press on a pane's grab handle. Any press in a card also focuses it.
     private func began(_ event: NSEvent) -> Bool {
-        guard let store, !dragging else { return false }
-        // A press in the live app card is that card's, and makes it the focused one the
-        // way a press in a terminal does. Its views take the press itself.
-        if let window = event.window, MainWindowController.isMain(window),
-           InspectorPanelHost.shared.contains(event.locationInWindow, in: window, store: store),
-           let live = store.liveAppID, store.selectedSessionID != live {
-            store.selectedSessionID = live
-        }
-        guard let hit = rearrangeablePane(under: event) else { return false }
+        guard let store, !dragging,
+              let hit = rearrangeablePane(under: event)
+        else { return false }
         // A press anywhere in a card makes it the focused one — the bright border, the
         // header's buttons, the panel. The surface becoming first responder was the only
         // path, and a click could move the keyboard to a terminal without that report
@@ -191,7 +185,6 @@ final class PaneDragRearrange {
         // A surface that won't cache leaves this nil and the drag runs without a
         // preview rather than showing a blank card.
         store.paneDragPreview = surface(for: hit.id, in: contentView)?.paneSnapshot
-            ?? (store.liveAppID == hit.id ? InspectorPanelHost.shared.snapshot() : store.panelSnapshots[hit.id])
         store.paneDrag = PaneDragState(source: hit.id,
                                        pointer: PanePointer(pane: hit.id, local: hit.point))
         // The overlay washes translucently over live surfaces, which have to
@@ -210,8 +203,7 @@ final class PaneDragRearrange {
         guard !cancelled, let store, var drag = store.paneDrag,
               let window = event.window, let contentView = window.contentView
         else { return true }
-        let hit = paneGeometry(at: event.locationInWindow, in: contentView, window: window,
-                               forDrop: true)
+        let hit = paneGeometry(at: event.locationInWindow, in: contentView, window: window)
         drag.target = hit?.id
         drag.zone = hit.map { PaneDropZone.zone(at: $0.point, in: $0.size) }
         // Off every pane (a divider, the sidebar) the preview holds its last
@@ -289,21 +281,12 @@ final class PaneDragRearrange {
     /// `TerminalContextMenu`: invisible siblings stay mounted and laid out, so
     /// AppKit's topmost hit may be a hidden view. Visible panes tile without
     /// overlapping, so "contains the point and is visible" is unambiguous.
-    ///
-    /// `forDrop`: a card being dragged lands on a whole card, an app card's pane included.
-    /// A press does not: below its header an app card is its pane's own views.
     private func paneGeometry(at point: NSPoint, in contentView: NSView,
-                              window: NSWindow, forDrop: Bool = false) -> PaneHit? {
+                              window: NSWindow) -> PaneHit? {
         guard let store else { return nil }
-        let geometry = PaneCardGeometry.shared
-        // An app card has no surface to find it by; its card frame is all there is.
-        for id in store.visiblePaneIDs where store.session(id)?.isApp == true {
-            guard let card = geometry.cardFrame(for: id, in: window), card.contains(point) else { continue }
-            if !forDrop, point.y < card.maxY - PaneCard.headerHeight { return nil }
-            return (id, CGPoint(x: point.x - card.minX, y: card.maxY - point.y), card.size)
-        }
         // A press on a panel laid over a card's terminal is the panel's, not the pane's.
         if InspectorPanelHost.shared.contains(point, in: window, store: store) { return nil }
+        let geometry = PaneCardGeometry.shared
         for (view, id) in surfaces(in: contentView) {
             guard view.window === window,
                   store.visiblePaneIDs.contains(id) else { continue }

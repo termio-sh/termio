@@ -533,17 +533,6 @@ struct Session: Identifiable, Hashable, Codable {
 
     var isSSH: Bool { sshHost != nil }
 
-    /// When set, this session is an **app card**: a card that shows one inspector
-    /// pane (Files, Changes, Search…) instead of a terminal. It has a row, a place
-    /// in a split group and a tab like any session, and no PTY and no daemon
-    /// session behind it — nothing may ask for its surface (see `isApp`).
-    ///
-    /// It reads the checkout of the row it is filed in: grouping is confined to one
-    /// project and one worktree, so the card beside an agent shows that agent's files.
-    var app: InspectorTab?
-
-    var isApp: Bool { app != nil }
-
     /// When set, this session runs **inside a `termiod` daemon on an SSH host**
     /// rather than locally: the Mac attaches over `ssh <host> termio stdio` and
     /// the shell/agent lives on the remote box (see `TermioStore.addRemoteTerminal`).
@@ -659,7 +648,7 @@ struct Session: Identifiable, Hashable, Codable {
         case id, title, agent, createdAt, worktreePath, resumeID, launched, launchedAt,
              liveTitle, promptTitle, lastWorkingDirectory, spawnDirectory, sshHost, pinned,
              termiodRemoteHost, termiodRemoteCwd, deviceID, termiodSessionName,
-             termiodDaemonID, givenTitle, app
+             termiodDaemonID, givenTitle
     }
 
     /// The name to recover from a state file written before `givenTitle` existed,
@@ -710,11 +699,8 @@ struct Session: Identifiable, Hashable, Codable {
         termiodSessionName = try container.decodeIfPresent(
             String.self, forKey: .termiodSessionName)
         termiodDaemonID = try container.decodeIfPresent(String.self, forKey: .termiodDaemonID)
-        // Read as text: a pane this build does not know must cost one card, not the
-        // whole state file, which a thrown decode would (see `StateFile.load`).
-        app = try container.decodeIfPresent(String.self, forKey: .app).flatMap(InspectorTab.init(rawValue:))
         givenTitle = try container.decodeIfPresent(String.self, forKey: .givenTitle)
-            ?? (app == nil ? Self.recoveredGivenTitle(title, agent: agent, remoteHost: termiodRemoteHost) : nil)
+            ?? Self.recoveredGivenTitle(title, agent: agent, remoteHost: termiodRemoteHost)
     }
 }
 

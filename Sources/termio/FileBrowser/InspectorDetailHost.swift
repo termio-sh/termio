@@ -270,44 +270,54 @@ struct DetailHeaderTitlebarInset: ViewModifier {
     }
 }
 
-/// What leads every detail's header: Back, which closes the detail and returns to the list,
-/// then the list-column toggle where the card has room for both columns.
-///
-/// Back is on the leading side, away from the card's own Close at the trailing edge of the
-/// header above: one × per card, and it always means the card. The toggle is a panel glyph
-/// rather than one of the box-split "layout" marks, which the diff's inline / side-by-side
-/// switch owns: two of those in one header read as one control.
+/// Collapses or restores the inspector's list column. Leads each detail's header, on the side of the
+/// column it acts on, the way a sidebar toggle sits at the sidebar's edge. A panel glyph rather than
+/// one of the box-split "layout" marks, which the diff's inline / side-by-side toggle owns now: two
+/// of those in one header read as one control. Shown only where it can act: while the panel has
+/// room for both columns, and never while the detail is maximized and fills the window.
 struct DetailListColumnToggle: View {
     @EnvironmentObject var store: TermioStore
-    /// How much wider the header's leading padding is than its trailing one. The controls step
-    /// out by that much, so they sit as far from the leading edge as the header's last control
-    /// from the trailing one.
+    /// How much wider the header's leading padding is than its trailing one. The toggle steps out
+    /// by that much, so it sits as far from the leading edge as the close button from the
+    /// trailing one.
     var outset: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: 6) {
-            DetailChromeButton(icon: .chevronLeft, help: "Back (Esc)") {
-                NotificationCenter.default.post(name: .termioCloseContentOverlay, object: nil)
+        if store.inspectorFitsTwoColumns, !store.inspectorMaximized {
+            let showing = store.inspectorListColumnVisible
+            DetailChromeButton(
+                icon: showing ? .panelLeftCollapse : .panelLeftExpand,
+                help: showing ? "Hide the list column" : "Show the list column"
+            ) {
+                store.setInspectorListColumn(visible: !showing)
             }
-            if store.inspectorFitsTwoColumns, !store.inspectorMaximized {
-                let showing = store.inspectorListColumnVisible
-                DetailChromeButton(
-                    icon: showing ? .panelLeftCollapse : .panelLeftExpand,
-                    help: showing ? "Hide the list column" : "Show the list column"
-                ) {
-                    store.setInspectorListColumn(visible: !showing)
-                }
-            }
+            .padding(.leading, -outset)
         }
-        .padding(.leading, -outset)
     }
 }
 
-/// The trailing edge of a detail's header holds the detail's own tools and nothing else. It used
-/// to end on Maximize and Close; a card has one of each now, in its header (`PaneCardChrome`):
-/// Zoom makes the card bigger, and Close closes it.
+/// The detail's own window controls, drawn at the trailing edge of each detail's header. Both
+/// act on the content area, so they live
+/// *in* it rather than in the window toolbar — which also sidesteps the flaky
+/// `NSTrackingSeparatorToolbarItem` layout the toolbar-hosted versions destabilized. Hugeicons
+/// glyphs, matching the inspector's other pane-header buttons.
 struct InspectorDetailChromeButtons: View {
-    var body: some View { EmptyView() }
+    @EnvironmentObject var store: TermioStore
+
+    var body: some View {
+        HStack(spacing: 6) {
+            DetailChromeButton(
+                icon: store.inspectorMaximized ? .collapse : .expand,
+                help: store.inspectorMaximized ? "Restore detail to the inspector"
+                                               : "Maximize detail to fill the window"
+            ) { store.inspectorMaximized.toggle() }
+            // The X is optically heavy (two full-width diagonals), so it's drawn a touch smaller to
+            // sit even with the others.
+            DetailChromeButton(icon: .close, help: "Close (Esc)") {
+                NotificationCenter.default.post(name: .termioCloseContentOverlay, object: nil)
+            }
+        }
+    }
 }
 
 /// One content-area control, wearing the shared `TreeHeaderChip` so the detail's window controls

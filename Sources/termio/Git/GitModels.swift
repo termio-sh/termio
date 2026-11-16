@@ -7,43 +7,8 @@ import SwiftUI
 /// Which inspector pane the trailing column is showing — the file tree, the file
 /// search, the git changes list, the issue tracker, the session Info pane, or the
 /// live iOS Simulator. Drives the segmented switch at the top of `FileBrowserView`.
-enum InspectorTab: String, Hashable, Sendable, Codable, CaseIterable {
+enum InspectorTab: String, Hashable, Sendable, Codable {
     case files, search, changes, issues, info, simulator
-
-    /// The pane's name: an app card's title, its row in the sidebar and its tab.
-    var title: String {
-        switch self {
-        case .files: localized("Files")
-        case .search: localized("Search")
-        case .changes: localized("Changes")
-        case .issues: localized("Issues")
-        case .info: localized("Info")
-        case .simulator: localized("Simulator")
-        }
-    }
-
-    /// What the app's switch in Settings says it does.
-    var settingsSubtext: String {
-        switch self {
-        case .files: localized("Browse and open the project’s files.")
-        case .search: localized("Search the contents of the project’s files.")
-        case .changes: localized("Review uncommitted changes, branch comparisons and history.")
-        case .issues: localized("Read the project’s GitHub issues and pull requests.")
-        case .info: localized("See what a session is running and where.")
-        case .simulator: localized("Mirror and drive an iOS Simulator.")
-        }
-    }
-
-    var icon: HugeIcon {
-        switch self {
-        case .files: .listBullet
-        case .search: .search
-        case .changes: .gitBranch
-        case .issues: .github
-        case .info: .infoCircle
-        case .simulator: .smartPhone
-        }
-    }
 }
 
 /// The git pane's own inner switch, in scope order: what isn't committed yet, what

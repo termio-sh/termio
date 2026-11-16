@@ -212,7 +212,7 @@ extension TermioStore {
         // counting this row itself), so display naming — cwd basename for loose
         // terminals — takes over again. A name the user chose is untouched by this:
         // it lives in `givenTitle` and still outranks the placeholder.
-        let terminalCount = roster(at: home).filter { $0.agent == .terminal && !$0.isApp }.count
+        let terminalCount = roster(at: home).filter { $0.agent == .terminal }.count
         session.title = "Terminal \(terminalCount + 1)"
         session.agent = .terminal
         session.liveTitle = nil

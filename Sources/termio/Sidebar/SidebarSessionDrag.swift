@@ -317,7 +317,7 @@ struct SidebarDragOverlay: View {
                     .frame(width: frame.width, height: row.height)
                     .opacity(stacked ? 0 : 1)
                 HStack(spacing: 6) {
-                    SessionIconView(session: session, size: 15)
+                    AgentIconView(agent: store.effectiveAgent(for: session), size: 15)
                         .frame(width: 16)
                         .rotationEffect(.degrees(stacked ? Self.fanAngle : 0), anchor: .bottom)
                         .offset(x: stacked ? (target?.minX ?? row.minX) - row.minX + Self.fanOffset : 0)

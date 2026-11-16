@@ -299,7 +299,10 @@ extension TermioStore {
     /// Opens the inspector on the Simulator pane, as choosing it from the pane
     /// menu does.
     private func showSimulatorPane() {
-        showApp(.simulator, byPerson: false)
+        inspectorTab = .simulator
+        if !inspectorVisible {
+            NSApp.sendAction(#selector(AppDelegate.toggleFilesInspector(_:)), to: nil, from: nil)
+        }
     }
 
     // MARK: Formatting
