@@ -38,6 +38,15 @@ const ROOT_TEMPLATE: &str = "\
 {about-with-newline}
 {usage-heading} {usage}
 
+Common, each short for `termio session <command>`:
+  ls          List this project's sessions and their status
+  spawn       Start a new agent session on a prompt
+  run         Start a new terminal session that runs a shell command
+  send        Type text into a session, then press Return
+  read        Print a session's screen
+  attach      Attach this terminal to a session
+  close       Close sessions and end their programs
+
 Sessions:
   session     List, start, drive and close sessions [alias: sessions]
   agent       Report an agent's status; install or remove agent hooks
@@ -66,10 +75,11 @@ Options:
 const ROOT_EXAMPLES: &str = "\
 Examples:
   termio .
-  termio session ls
-  termio session spawn \"fix the failing test\" --agent codex
-  termio session send 8de0b387 \"run the tests\" --wait
-  termio -H mybox session ls
+  termio ls
+  termio spawn \"fix the failing test\" --agent codex
+  termio send 8de0b387 \"run the tests\" --wait
+  termio attach 8de0b387
+  termio -H mybox ls
   termio -H mybox server deploy
   termio -H mybox update";
 
@@ -107,6 +117,37 @@ enum Verb {
         #[arg(long)]
         json: bool,
     },
+
+    // The verbs typed most, one word shorter, the way Rex keeps `rex ls` and
+    // `rex send` beside `rex session`. Each is exactly one `session` verb:
+    // `into_session` turns it into that verb before anything else reads it.
+    /// List this project's sessions and their status.
+    #[command(alias = "list", long_about = LIST_HELP, after_help = LIST_EXAMPLES)]
+    Ls(ListArgs),
+
+    /// Start a new agent session on a prompt.
+    #[command(long_about = SPAWN_HELP, after_help = SPAWN_EXAMPLES)]
+    Spawn(SpawnArgs),
+
+    /// Start a new terminal session that runs a shell command.
+    #[command(long_about = RUN_HELP, after_help = RUN_EXAMPLES)]
+    Run(RunArgs),
+
+    /// Type text into a session, then press Return.
+    #[command(long_about = SEND_HELP, after_help = SEND_EXAMPLES)]
+    Send(SendArgs),
+
+    /// Print a session's screen.
+    #[command(long_about = READ_HELP, after_help = READ_EXAMPLES)]
+    Read(ReadArgs),
+
+    /// Attach this terminal to a session.
+    #[command(long_about = ATTACH_HELP, after_help = ATTACH_EXAMPLES)]
+    Attach(termiod::server::AttachArgs),
+
+    /// Close sessions and end their programs.
+    #[command(long_about = CLOSE_HELP, after_help = CLOSE_EXAMPLES)]
+    Close(CloseArgs),
 
     /// List, start, drive and close sessions.
     #[command(alias = "sessions", long_about = SESSION_HELP, after_help = SESSION_EXAMPLES)]
@@ -976,7 +1017,8 @@ async fn main() -> Result<()> {
         format!("{} ({})", lifecycle::BUILD_VERSION, channel.name).into_boxed_str(),
     );
     let command = Cli::command().version(version_line);
-    let cli = Cli::from_arg_matches(&command.get_matches())?;
+    let mut cli = Cli::from_arg_matches(&command.get_matches())?;
+    cli.verb = cli.verb.map(into_session);
 
     let host = match &cli.verb {
         Some(Verb::Server(args)) => cli.host.clone().or_else(|| args.host.clone()),
@@ -1026,6 +1068,15 @@ async fn main() -> Result<()> {
         },
         Some(Verb::Notify(args)) => notify(&channel, args),
         Some(Verb::Sim { verb }) => simulator(&channel, verb),
+        Some(
+            Verb::Ls(_)
+            | Verb::Spawn(_)
+            | Verb::Run(_)
+            | Verb::Send(_)
+            | Verb::Read(_)
+            | Verb::Attach(_)
+            | Verb::Close(_),
+        ) => bail!("a session shortcut reached dispatch without becoming its session verb"),
         Some(Verb::Session { verb }) => {
             sessions(
                 &channel,
@@ -1065,6 +1116,22 @@ async fn on_host(host: String, verb: Option<Verb>) -> Result<()> {
         Some(_) => false,
     };
     termiod::server::run_on_host(&host, tty)
+}
+
+/// A top-level shortcut as the `session` verb it is short for; every other
+/// command as it was parsed.
+fn into_session(verb: Verb) -> Verb {
+    let session = match verb {
+        Verb::Ls(args) => SessionVerb::List(args),
+        Verb::Spawn(args) => SessionVerb::Spawn(args),
+        Verb::Run(args) => SessionVerb::Run(args),
+        Verb::Send(args) => SessionVerb::Send(args),
+        Verb::Read(args) => SessionVerb::Read(args),
+        Verb::Attach(args) => SessionVerb::Attach(args),
+        Verb::Close(args) => SessionVerb::Close(args),
+        other => return other,
+    };
+    Verb::Session { verb: Some(session) }
 }
 
 /// Whether a word was meant as a path, so a missing one is reported as a
@@ -2255,6 +2322,36 @@ mod tests {
             .filter(|name| !name.starts_with('{'));
         for name in listed {
             assert!(visible.iter().any(|v| v == name), "the root help lists `{name}`, which is not a command");
+        }
+    }
+
+    /// Each shortcut parses to the very `session` verb it is short for, with
+    /// the same arguments.
+    #[test]
+    fn a_shortcut_is_its_session_verb() {
+        let parse = |line: &str| {
+            let cli = Cli::try_parse_from(line.split(' ')).expect("parses");
+            cli.verb.map(into_session)
+        };
+        let shortcut = |line: &str| match parse(line) {
+            Some(Verb::Session { verb: Some(verb) }) => std::mem::discriminant(&verb),
+            _ => panic!("`{line}` is not a session verb"),
+        };
+        assert!(matches!(
+            parse("termio ls --all"),
+            Some(Verb::Session { verb: Some(SessionVerb::List(ListArgs { all: true, .. })) })
+        ));
+        for (short, long) in [
+            ("termio ls", "termio session ls"),
+            ("termio list", "termio session list"),
+            ("termio spawn hi", "termio session spawn hi"),
+            ("termio run make", "termio session run make"),
+            ("termio send 8de0b387 hi", "termio session send 8de0b387 hi"),
+            ("termio read 8de0b387", "termio session read 8de0b387"),
+            ("termio attach 8de0b387", "termio session attach 8de0b387"),
+            ("termio close 8de0b387", "termio session close 8de0b387"),
+        ] {
+            assert_eq!(shortcut(short), shortcut(long), "{short}");
         }
     }
 

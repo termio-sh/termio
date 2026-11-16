@@ -280,6 +280,8 @@ pub fn run_on_host(host: &str, tty: bool) -> Result<()> {
 /// `session` goes out as `sessions`, its old name, which every build parses:
 /// a host still on an older build then answers with its own error for the
 /// verb, not by opening a project called `session`.
+/// The top-level shortcuts, such as `ls`, go out the same way, as
+/// `sessions ls`.
 fn verb_words_of(argv: &[String]) -> Vec<String> {
     #[derive(PartialEq)]
     enum Place {
@@ -331,6 +333,13 @@ fn verb_words_of(argv: &[String]) -> Vec<String> {
             "session" => {
                 place = Place::Verbatim;
                 words.push("sessions".to_string());
+            }
+            // `termio ls` and the other shortcuts go out in full, so a host
+            // on a build from before them still knows the command.
+            "ls" | "list" | "spawn" | "run" | "send" | "read" | "attach" | "close" => {
+                place = Place::Verbatim;
+                words.push("sessions".to_string());
+                words.push(word.clone());
             }
             _ => {
                 place = Place::Verbatim;
@@ -1003,6 +1012,18 @@ mod tests {
         assert_eq!(
             words("termio -H box session create -- sh -c -H"),
             ["sessions", "create", "--", "sh", "-c", "-H"]
+        );
+    }
+
+    /// A shortcut reaches the host as the `session` verb it stands for, which
+    /// every build parses. Its own words, a `-H` among them, are untouched.
+    #[test]
+    fn a_shortcut_goes_out_as_its_session_verb() {
+        assert_eq!(words("termio -H box ls --json"), ["sessions", "ls", "--json"]);
+        assert_eq!(words("termio -H box attach 8de0b387"), ["sessions", "attach", "8de0b387"]);
+        assert_eq!(
+            words("termio -H box send 8de0b387 -Hello"),
+            ["sessions", "send", "8de0b387", "-Hello"]
         );
     }
 

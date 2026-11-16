@@ -71,6 +71,18 @@ scoped to the current project automatically, and `termio session <verb> --help`
 prints focused help for any one verb. `ls` is short for `list`, and `sessions`
 is the old name of `session`; both still work.
 
+The verbs you type most also work without `session`: `termio ls`, `termio spawn`,
+`termio run`, `termio send`, `termio read`, `termio attach` and `termio close`.
+Each one is exactly the `termio session` command of the same name, and it works
+with `-H` too: `termio -H mybox ls`.
+
+```bash
+termio ls
+termio spawn "fix the failing test" --agent codex
+termio send 8de0b387 "run the tests" --wait
+termio attach 8de0b387
+```
+
 <DocsImage
   src="/screenshots/docs/18-sessions-list.png?v=20261017"
   alt="The termio session list command showing eight project sessions below Codex and Claude Code"

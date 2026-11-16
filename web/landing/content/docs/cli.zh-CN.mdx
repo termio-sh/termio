@@ -3,8 +3,8 @@ title: 命令行工具
 description: termio 命令——从 shell 打开项目，以及让你或另一个 Agent 派生、驱动、监督会话的 termio session 编排 API。
 x-i18n:
   source_path: cli.mdx
-  source_hash: 12cf140f9621029f8404e12d3bd2f4e2bee53737dcb920e784dc52b01b57743d
-  generated_at: 2026-10-30
+  source_hash: 59ece6572fe92da4b9d753b918cbca0186d94339d1839c3d9be0e980542ae0b0
+  generated_at: 2026-11-16
 ---
 
 `termio` 是这个应用在 shell 一侧的入口：它打开项目，而通过 `termio session`，它就是
@@ -60,6 +60,17 @@ termio ~/code/myapp    # 打开指定文件夹
 `<link>` 就是 `list` 打印的 `termio://session/<uuid>` 地址（裸 id、唯一 id 前缀、会话标题
 或会话名同样可用）。命令会自动限定在当前项目里，而 `termio session <verb> --help` 会为任意
 单个动词打印针对性的帮助。`ls` 是 `list` 的简写，`sessions` 是 `session` 的旧名，两者都仍然可用。
+
+最常用的几个动词不写 `session` 也能用：`termio ls`、`termio spawn`、`termio run`、
+`termio send`、`termio read`、`termio attach` 和 `termio close`。每一个都和同名的
+`termio session` 命令完全相同，也能配合 `-H` 使用：`termio -H mybox ls`。
+
+```bash
+termio ls
+termio spawn "fix the failing test" --agent codex
+termio send 8de0b387 "run the tests" --wait
+termio attach 8de0b387
+```
 
 <DocsImage
   src="/screenshots/docs/18-sessions-list.png?v=20261017"

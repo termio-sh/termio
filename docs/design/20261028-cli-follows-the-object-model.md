@@ -27,8 +27,11 @@ related:
 2. **Nouns first.** The grammar is `termio <noun> <verb>`. The nouns are the
    objects termiod already owns: session, pane, project, server. No noun
    exists only in the CLI.
-3. **Four shortcuts.** `open`, `split`, `focus` and `zoom` stay at the top
-   level. Each one is an alias of exactly one `<noun> <verb>`.
+3. **Shortcuts for the daily verbs.** `open`, `split`, `focus` and `zoom`
+   stay at the top level. So do the session verbs typed most: `ls`, `spawn`,
+   `run`, `send`, `read`, `attach` and `close`, as Rex keeps `rex ls` and
+   `rex send` beside `rex session`. Each one is an alias of exactly one
+   `<noun> <verb>`, and `-H` sends it to a host as that full command.
 4. **One stream.** `termio events` streams every change the host publishes.
    Agent status is one event type in that stream. `session watch` becomes an
    alias of `events --type status`.
@@ -107,6 +110,7 @@ The shortcuts:
 | `termio split [--right\|--down] [-- CMD]` | `termio pane split` beside `TERMIO_PANE` |
 | `termio focus <pane>` | `termio pane focus <pane>` |
 | `termio zoom [--off]` | `termio pane zoom` on `TERMIO_PANE` |
+| `termio ls \| spawn \| run \| send \| read \| attach \| close` | `termio session <verb>`, shipped |
 
 The bare form `termio DIR` stays, with one change. A word that does not exist
 on disk and does not look like a path is an unknown command. clap's own error
