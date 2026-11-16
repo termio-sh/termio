@@ -336,7 +336,8 @@ fn verb_words_of(argv: &[String]) -> Vec<String> {
             }
             // `termio ls` and the other shortcuts go out in full, so a host
             // on a build from before them still knows the command.
-            "ls" | "list" | "spawn" | "run" | "send" | "read" | "attach" | "close" => {
+            "ls" | "list" | "spawn" | "run" | "send" | "read" | "attach" | "close"
+            | "kill" => {
                 place = Place::Verbatim;
                 words.push("sessions".to_string());
                 words.push(word.clone());

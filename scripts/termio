@@ -970,6 +970,11 @@ case "${1:-}" in
         sessions "$@"
         exit 0
         ;;
+    # The top-level shortcuts of the Rust client: each is its `session` verb.
+    ls|list|spawn|run|send|read|attach|close|kill)
+        sessions "$@"
+        exit 0
+        ;;
     agent)
         shift
         agent "$@"

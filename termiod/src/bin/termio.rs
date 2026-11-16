@@ -146,7 +146,7 @@ enum Verb {
     Attach(termiod::server::AttachArgs),
 
     /// Close sessions and end their programs.
-    #[command(long_about = CLOSE_HELP, after_help = CLOSE_EXAMPLES)]
+    #[command(alias = "kill", long_about = CLOSE_HELP, after_help = CLOSE_EXAMPLES)]
     Close(CloseArgs),
 
     /// List, start, drive and close sessions.
@@ -2350,6 +2350,7 @@ mod tests {
             ("termio read 8de0b387", "termio session read 8de0b387"),
             ("termio attach 8de0b387", "termio session attach 8de0b387"),
             ("termio close 8de0b387", "termio session close 8de0b387"),
+            ("termio kill 8de0b387", "termio session kill 8de0b387"),
         ] {
             assert_eq!(shortcut(short), shortcut(long), "{short}");
         }
