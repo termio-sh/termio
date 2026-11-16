@@ -228,6 +228,8 @@
     ::highlight(termio-find-focused) { background-color: rgba(255, 204, 0, 0.7); }
   `;
   let findPattern = null;
+  /** Which of Swift's searches the matches belong to. It goes back with every count. */
+  let findSerial = null;
   /** Every match, in reading order. */
   let findMatches = [];
   let findFocused = null;
@@ -333,7 +335,7 @@
     const index = held ? findMatches.findIndex((match) => match.id === held.id
       && match.side === held.side && match.line === held.line && match.start === held.start) : -1;
     findFocused = index < 0 ? null : findMatches[index];
-    post({ type: 'findCount', count: findMatches.length, index: Math.max(index, 0) });
+    post({ type: 'findCount', serial: findSerial, count: findMatches.length, index: Math.max(index, 0) });
   }
 
   function scheduleFindPaint() {
@@ -456,6 +458,7 @@
      */
     find(spec) {
       findPattern = pattern(spec);
+      findSerial = spec ? spec.serial : null;
       collectMatches();
       findFocused = (spec && findMatches[spec.index]) || null;
       if (findFocused && viewer) {

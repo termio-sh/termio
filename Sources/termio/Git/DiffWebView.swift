@@ -185,6 +185,9 @@ final class DiffWebBridge: NSObject, WKScriptMessageHandlerWithReply {
     private var sentLook: DiffLook?
     private var sentSplit: Bool?
     private var sentFind: DiffWebFind?
+    /// Numbers each search sent to the page. An answer or a recount for an older search is
+    /// dropped, so it cannot write its count over a newer query's.
+    private var findSerial = 0
     private var appliedReclaim = 0
     /// What the reader has selected in the page, kept for the right-click menu, which
     /// opens too soon to ask the page.
@@ -303,12 +306,15 @@ final class DiffWebBridge: NSObject, WKScriptMessageHandlerWithReply {
         guard let single, single.find != sentFind else { return }
         sentFind = single.find
         guard let find = single.find, !find.query.isEmpty else {
+            findSerial += 1
             call("termioDiffs.find(null)", [:])
             single.onFindCount(0, nil)
             return
         }
+        findSerial += 1
+        let serial = findSerial
         let spec: [String: Any] = [
-            "query": find.query, "index": find.index,
+            "query": find.query, "index": find.index, "serial": serial,
             "caseSensitive": find.options.caseSensitive,
             "wholeWord": find.options.wholeWord, "regex": find.options.regex,
         ]
@@ -318,7 +324,7 @@ final class DiffWebBridge: NSObject, WKScriptMessageHandlerWithReply {
             switch result {
             case .success(let count):
                 // An answer for a query the reader has since changed is dropped.
-                guard let self, self.sentFind == find else { return }
+                guard let self, self.findSerial == serial, self.sentFind != nil else { return }
                 self.single?.onFindCount(count as? Int ?? 0, nil)
             case .failure(let error):
                 Log.issues.error("diff page find: \(error.localizedDescription, privacy: .public)")
@@ -393,7 +399,8 @@ final class DiffWebBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (nil, nil)
         case "findCount":
             // The page counted again by itself: a band opened and the whole file came in.
-            if sentFind != nil, let count = body["count"] as? Int, let index = body["index"] as? Int {
+            if sentFind != nil, body["serial"] as? Int == findSerial,
+               let count = body["count"] as? Int, let index = body["index"] as? Int {
                 // The page already holds this index, so it is not sent back.
                 sentFind?.index = index
                 single?.onFindCount(count, index)
