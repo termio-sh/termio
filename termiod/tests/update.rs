@@ -127,8 +127,7 @@ fn an_update_installs_every_binary_and_hands_off() {
         assert_eq!(mode & 0o777, 0o755, "{name} is executable");
     }
     let handoff = read(test.0.join("bin/handoff"));
-    let daemon = test.0.join("bin/termiod").canonicalize().unwrap();
-    assert_eq!(handoff.trim(), format!("--binary {} TERMIOD_BIN=", daemon.display()));
+    assert_eq!(handoff.trim(), "TERMIOD_BIN=", "no flag, and no override to follow");
     assert!(std::fs::symlink_metadata(test.0.join("link/termio")).unwrap().file_type().is_symlink());
     assert!(!test.0.join("elsewhere").exists(), "TERMIOD_BIN moved nothing");
     let left: Vec<_> = std::fs::read_dir(test.0.join("bin"))

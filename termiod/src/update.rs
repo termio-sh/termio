@@ -119,20 +119,24 @@ pub async fn run(args: UpdateArgs) -> Result<()> {
 
     // The new build's own handoff, as the installer runs it: the client that
     // asks is the one that knows the build it is asking for.
-    // Named outright, and `TERMIOD_BIN` dropped, so the daemon handed off to
-    // is the file just installed and never one an override points at.
+    // Run by its absolute path with `TERMIOD_BIN` dropped, a client hands off
+    // to the daemon beside it, so this is the file just installed. That is
+    // the default in every release; `--binary` would name it outright, but
+    // releases before 0.65.0 refuse the flag, and `--version` installs those.
     let client = directory.join("termio");
-    let daemon = directory.join("termiod");
     let status = tokio::process::Command::new(&client)
-        .args(["server", "handoff", "--binary"])
-        .arg(&daemon)
+        .args(["server", "handoff"])
         .env_remove("TERMIOD_BIN")
         .status()
         .await
         .with_context(|| format!("running {} server handoff", client.display()))?;
+    // Installed but not running: the files changed and the daemon did not,
+    // which a script has to be able to tell from a finished update.
     if !status.success() {
-        println!("The running daemon couldn't take the new build in place.");
-        println!("It picks it up at its next start: termio server stop, once its sessions are done.");
+        bail!(
+            "termio {wanted} is installed, but the running daemon couldn't take it in place. \
+             It picks it up at its next start: termio server stop, once its sessions are done."
+        );
     }
     Ok(())
 }
