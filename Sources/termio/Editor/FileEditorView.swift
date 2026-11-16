@@ -364,7 +364,12 @@ struct FileEditorView: View {
     private func activateMode() {
         guard loaded else { return }
         if isDrawing {
-            if mode == .edit { mountedEditor = true }
+            if mode == .edit {
+                mountedEditor = true
+            } else if hasTextSource {
+                // The picture follows the buffer, so an edit to the scene JSON shows on the flip.
+                fileData = Data(text.utf8)
+            }
         } else if mode == .preview {
             // A page loads from disk, not the buffer, so its stylesheets and images resolve as in
             // a browser. Flush first so it shows the edits.

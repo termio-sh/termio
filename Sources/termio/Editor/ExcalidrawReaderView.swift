@@ -5,10 +5,9 @@ import WebKit
 /// The Preview side of `FileEditorView` for Excalidraw drawings: renders the file as the
 /// picture it is, on the app's own background.
 ///
-/// It renders the file's *bytes*, not the editor buffer, because a drawing is authored
-/// elsewhere — Excalidraw, or an agent writing the scene JSON. Flipping to Edit and back
-/// re-renders from what was loaded; the source face is for reading the scene, not drawing
-/// in it.
+/// It renders *bytes*, not a string, because a scene embedded in a PNG has no text form.
+/// For a text scene the caller passes the editor buffer, so an edit to the JSON shows on
+/// the flip back to Preview.
 struct ExcalidrawReaderView: View {
     let data: Data
     @ObservedObject var settings: AppSettings
