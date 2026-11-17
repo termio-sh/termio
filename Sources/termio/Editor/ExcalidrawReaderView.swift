@@ -37,6 +37,8 @@ struct ExcalidrawReaderView: View {
             .task(id: RenderRequest(data: data, theme: drawingTheme, active: isActive)) {
                 guard isActive, drawn == nil else { return }
                 let drawing = await ExcalidrawRenderer.shared.drawing(for: data, theme: drawingTheme)
+                // A render the view has moved on from must not replace the newer picture.
+                guard !Task.isCancelled else { return }
                 rendered = Rendered(data: data, theme: drawingTheme, drawing: drawing)
             }
     }
@@ -118,6 +120,12 @@ private struct ExcalidrawWebView: NSViewRepresentable {
             let isOwnPage = navigationAction.navigationType == .other
                 && navigationAction.request.url?.absoluteString == "about:blank"
             decisionHandler(isOwnPage ? .allow : .cancel)
+        }
+
+        /// The policy above refuses the reload WebKit would make by itself after the page's
+        /// process ends, so the page is loaded again here.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            webView.loadHTMLString(lastHTML, baseURL: nil)
         }
     }
 }
