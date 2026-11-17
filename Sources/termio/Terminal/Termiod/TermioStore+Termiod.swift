@@ -249,8 +249,15 @@ extension TermioStore {
     /// Whether this pane is on screen. A hidden pane keeps its viewport and
     /// stops counting, so a window left open on another workspace never sizes a
     /// session nobody is looking at there — zellij's rule for unviewed tabs.
-    func reportRendering(_ showing: Bool, for id: Session.ID) {
-        termiodLinks[id]?.setRendering(showing)
+    ///
+    /// Each window's pane area reports as its own `viewer`, and the session counts
+    /// as on screen while any of them shows it: a second window must not hide a
+    /// session the first is still showing.
+    func reportRendering(_ showing: Bool, for id: Session.ID, viewer: AnyHashable) {
+        var viewers = renderingViewers[id] ?? []
+        if showing { viewers.insert(viewer) } else { viewers.remove(viewer) }
+        renderingViewers[id] = viewers.isEmpty ? nil : viewers
+        termiodLinks[id]?.setRendering(!viewers.isEmpty)
     }
 
     // MARK: - Host-reported workstream status
@@ -2901,10 +2908,27 @@ extension TermioStore {
             && TermiodStreamRenderer.isAvailable
     }
 
+    /// Prompt themes draw icons from Nerd Fonts' private-use codepoints, which most
+    /// fonts lack; without this face CoreText answers them with `?` boxes (#825).
+    static let symbolsFontFamily: String = {
+        let url = Bundle.termioResources.url(forResource: "SymbolsNerdFont-Regular", withExtension: "ttf")
+        var error: Unmanaged<CFError>?
+        if let url {
+            if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
+                let reason = error.map { CFErrorCopyDescription($0.takeRetainedValue()) as String } ?? "unknown"
+                Log.termiod.error("symbols font not registered: \(reason, privacy: .public)")
+            }
+        } else {
+            Log.termiod.error("symbols font is missing from the resource bundle")
+        }
+        return "Symbols Nerd Font"
+    }()
+
     /// The settings the embedded surface is configured with, in the form the
     /// stream renderer takes (`applyAppearance` is the embedded side).
     func streamAppearance() -> TermiodStreamRenderer.Appearance {
         var fallbacks = settings.ghosttyFontFallbacks.filter { $0 != settings.fontFamily }
+        fallbacks.append(Self.symbolsFontFamily)
         let chain = [settings.fontFamily] + settings.ghosttyFontFallbacks
         if let cjk = InstalledFonts.cjkMonospaceFallback(existingChain: chain) { fallbacks.append(cjk) }
         return TermiodStreamRenderer.Appearance(
@@ -2971,9 +2995,9 @@ extension TermioStore {
         }
         guard let definition else { return nil }
         let cursorStyle = switch settings.cursorStyle {
-        case .block: GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK
-        case .bar: GHOSTTY_TERMINAL_CURSOR_STYLE_BAR
-        case .underline: GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE
+        case .block: GHOSTTY_CURSOR_STYLE_BLOCK
+        case .bar: GHOSTTY_CURSOR_STYLE_BAR
+        case .underline: GHOSTTY_CURSOR_STYLE_UNDERLINE
         }
         return TermiodStreamTerminal.Theme(
             hexForeground: definition.foreground, background: background ?? definition.background,

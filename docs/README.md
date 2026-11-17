@@ -133,6 +133,7 @@ from the real front matter).
 | draft | design | [termiod Session Protocol](design/20260730-termiod-session-protocol.md) |
 | draft | design | [远程访问与中转策略（tunelo / BYO-tunnel）](design/20260705-remote-access-relay-strategy.md) |
 | draft | essay | [How Claude Code Got the Mouse: Reverse-Engineering the Clickable Terminal](essays/how-claude-code-got-the-mouse.md) |
+| draft | research | [Competitive analysis: Rex (Superlogical)](competitive-analysis/12-rex.md) |
 | draft | rfc | [零前置远程访问：把 dev tunnels 的形状搬到 termio](design/20260827-remote-access-dev-tunnels-model.md) |
 | draft | rfc | [Automation — scheduled agent runs](design/20260702-automation-scheduled-agent-runs.md) |
 | draft | rfc | [Feature cut after Superlogical's 28 Aug demo](design/20260829-feature-cut-after-superlogical-demo.md) |

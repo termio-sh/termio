@@ -2456,14 +2456,13 @@ async fn process_control(
                 let out = out.clone();
                 tokio::spawn(async move {
                     let listed = tokio::task::spawn_blocking(move || {
-                        crate::files::list(&root, &paths, after.as_deref())
+                        let mut listings = crate::files::list(&root, &paths, after.as_deref())?;
+                        crate::git::decorate_listings(&mut listings);
+                        Ok::<_, anyhow::Error>(listings)
                     })
                     .await;
                     let response = match listed {
-                        Ok(Ok(mut listings)) => {
-                            crate::git::decorate_listings(&mut listings).await;
-                            Control::FsListed { seq: stamp, listings, re: seq }
-                        },
+                        Ok(Ok(listings)) => Control::FsListed { seq: stamp, listings, re: seq },
                         Ok(Err(e)) => error(seq, ErrorCode::Denied, format!("{e:#}"), false),
                         Err(e) => error(seq, ErrorCode::Internal, e.to_string(), true),
                     };
@@ -2721,8 +2720,6 @@ async fn process_control(
             skills,
             reporter,
             commands,
-            homes,
-            retired_homes,
             seq,
         } => {
             if !connection.capabilities.contains("agents") {
@@ -2740,9 +2737,7 @@ async fn process_control(
                     skills,
                     reporter,
                     commands,
-                )
-                .with_homes(homes)
-                .with_retired_homes(retired_homes);
+                );
                 // A dozen agents is a few dozen small reads, merges and renames.
                 // That is blocking work, and it must not sit on the runtime that
                 // is also carrying somebody's keystrokes.
@@ -2755,7 +2750,6 @@ async fn process_control(
                         Ok(report) => Control::AgentsInstalled {
                             results: report.results,
                             present: report.present,
-                            retired: report.retired,
                             re: seq,
                         },
                         Err(e) => error(seq, ErrorCode::Internal, e.to_string(), true),

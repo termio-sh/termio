@@ -230,12 +230,10 @@ enum RemotePreviewStorage {
 /// A node in the file tree, on whichever device the checkout lives — this Mac
 /// included, since the local tree reads the same `fs.list` over the unix socket.
 ///
-/// Lazy: SwiftUI's `List(_:children:)` realizes a folder on first expand. A
-/// listing cannot block the getter, so an unloaded folder answers an empty list
-/// and kicks the model's async fetch; when the entries land the model publishes
-/// and the rows appear. Identity is the path, so the outline keeps its expansion
-/// state across a refresh even though the nodes are rebuilt (and a
-/// refreshed-but-still-expanded folder re-fetches lazily).
+/// Lazy: a folder is listed the first time the tree expands it
+/// (`DeviceFileTreeModel.expand`); until then it is shown with nothing in it.
+/// Identity is the path, so the tree keeps its expansion state across a refresh
+/// even though the nodes are rebuilt.
 @MainActor
 final class DeviceFileNode: Identifiable {
     let path: String
@@ -318,16 +316,8 @@ final class DeviceFileNode: Identifiable {
         return resolved
     }
 
-    var children: [DeviceFileNode]? {
-        guard isDirectory else { return nil }
-        if let loadedChildren { return loadedChildren }
-        // `loadChildren` adopts a prefetched listing synchronously, so a folder
-        // whose contents were fetched ahead of this click opens with its rows
-        // already in it — read back here rather than published, because a
-        // publish from inside a getter runs during a view update.
-        model?.loadChildren(of: self)
-        return loadedChildren ?? []
-    }
+    /// The rows inside this folder, once it has been listed.
+    var children: [DeviceFileNode]? { loadedChildren }
 }
 
 /// Drives the file tree for a checkout, over its device's `fs.list`/`fs.read`
@@ -464,6 +454,14 @@ final class DeviceFileTreeModel: ObservableObject {
     }
 
     func node(at path: String) -> DeviceFileNode? { nodesByPath[path] }
+
+    /// The tree opened `path`: list it, unless it already is. A folder whose
+    /// contents were prefetched fills in before this returns.
+    func expand(_ path: String) {
+        guard let node = nodesByPath[path], node.isDirectory, node.loadedChildren == nil else { return }
+        loadChildren(of: node)
+        if node.loadedChildren != nil { revision &+= 1 }
+    }
 
     /// Re-lists the tree from the device. Existing rows stay up while the
     /// listing is in flight (no flash to a spinner on an app-focus reconcile);
@@ -744,13 +742,12 @@ final class DeviceFileTreeModel: ObservableObject {
         prefetched = prefetched.filter { reachable[$0.key] != nil }
     }
 
-    /// Fetches one folder's entries — called from the `children` getter on first
-    /// expand, so it must tolerate being re-entered on every list render while
-    /// the fetch is in flight.
+    /// Fetches one folder's entries on first expand. Tolerates being re-entered
+    /// while the fetch is in flight.
     ///
     /// A folder that was prefetched fills in **synchronously**, before this
-    /// returns, so the getter that called it can hand the rows straight to the
-    /// outline. The device is asked either way: a guess is shown, never trusted.
+    /// returns, so the tree can show the rows at once. The device is asked
+    /// either way: a guess is shown, never trusted.
     fileprivate func loadChildren(of node: DeviceFileNode) {
         if let ready = prefetched.removeValue(forKey: node.path) {
             node.loadedChildren = children(of: ready)
@@ -789,9 +786,9 @@ final class DeviceFileTreeModel: ObservableObject {
                 revision &+= 1
                 prefetchChildren(of: node.loadedChildren ?? [])
             } catch {
-                // Settle the folder as empty rather than leaving it unloaded —
-                // the getter would re-fire the fetch on every render otherwise.
-                // The next refresh retries it.
+                // Settle the folder as empty rather than leaving it unloaded, so
+                // the tree does not ask for it again on every change. The next
+                // refresh retries it.
                 node.loadedChildren = []
                 report(error, context: "list \(host):\(node.path)")
             }

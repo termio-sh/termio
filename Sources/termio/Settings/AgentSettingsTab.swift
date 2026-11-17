@@ -235,8 +235,7 @@ struct AgentSettingsTab: View {
             hooks: settings.agentHooksEnabled ? .install : .remove,
             skills: settings.sessionControlEnabled ? .install : .remove,
             target: .thisMac,
-            commands: settings.authoredCommands(),
-            homes: settings.usageAccountFolders)
+            commands: settings.authoredCommands())
         if outcome.failure == nil && outcome.failed.isEmpty {
             DeviceStateCache.stampIntegration(
                 AppInfo.buildStamp, covering: outcome.coveredIDs,

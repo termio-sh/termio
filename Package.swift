@@ -14,7 +14,7 @@ let package = Package(
         // live resize" suspicion that briefly rolled this back to Lakr233 was a
         // misdiagnosis — the real bug was termio's own PTY spawn shape (see
         // docs/bug/terminal-resize-no-reflow-HANDOFF.md §0).
-        .package(url: "https://github.com/termio-sh/libghostty-swift", from: "1.2.0"),
+        .package(url: "https://github.com/termio-sh/libghostty-swift", from: "1.3.0"),
         // Sparkle powers in-app auto-update (the "Check for Updates…" menu item and
         // background update checks). It reads the appcast published with each GitHub
         // release; the matching EdDSA public key is embedded in packaging/Info.plist.
@@ -58,6 +58,8 @@ let package = Package(
             // a build input, so exclude it rather than let SwiftPM flag it as unhandled.
             exclude: [
                 "Editor/Highlightr/README.md",
+                "FileBrowser/PierreTrees",
+                "Git/PierreDiffs",
                 // The String Catalog is the *editing* source for UI strings, not a
                 // shippable resource: `swift build` can't compile .xcstrings
                 // (swiftlang/swift-package-manager#6993), so scripts/compile-strings.sh

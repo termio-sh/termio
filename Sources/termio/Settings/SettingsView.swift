@@ -11,7 +11,6 @@ import SwiftUI
 /// in `AppDelegate.openSettings`.
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
-    @ObservedObject var usage: UsageMonitor
     /// The Workspaces tab's subject. Actions elsewhere are injected as closures so
     /// a pane can't reach past its own concern, but that tab *is* a live view of
     /// the workspace list — a closure would have to hand over a copy that stops
@@ -25,9 +24,6 @@ struct SettingsView: View {
     /// window — injected for the same reason as `onSSHConnect`, since it is also a
     /// terminal launch rather than something this window can do.
     let onSetUpKey: (String, String) -> Void
-    /// Opens a terminal running an agent CLI's login (title, command line) in the
-    /// main window — the Usage tab's Sign In, injected for the same reason.
-    let onSignIn: (String, String) -> Void
     @State private var selection: SettingsTab
     /// The detail column's push stack, which a tab drills into (Agents pushes one
     /// agent's pane). Owned here so switching tabs can empty it: a pushed pane
@@ -41,19 +37,15 @@ struct SettingsView: View {
 
     init(
         settings: AppSettings,
-        usage: UsageMonitor,
         store: TermioStore,
         initialTab: SettingsTab = .general,
         onSSHConnect: @escaping (String) -> Void,
-        onSetUpKey: @escaping (String, String) -> Void,
-        onSignIn: @escaping (String, String) -> Void
+        onSetUpKey: @escaping (String, String) -> Void
     ) {
         self.settings = settings
-        self.usage = usage
         self.store = store
         self.onSSHConnect = onSSHConnect
         self.onSetUpKey = onSetUpKey
-        self.onSignIn = onSignIn
         _selection = State(initialValue: initialTab)
     }
 
@@ -208,7 +200,6 @@ struct SettingsView: View {
         case .keyboard: KeybindingsSettingsTab()
         case .agents:
             AgentSettingsTab(settings: settings, store: store, onOpenMachine: open)
-        case .usage: UsageSettingsTab(settings: settings, usage: usage, onSignIn: onSignIn)
         case .community: CommunitySettingsTab()
         }
     }

@@ -57,7 +57,14 @@ final class TermioStore: ObservableObject {
     /// `AppSettings` keeps a copy only so the next launch starts where this one
     /// ended. Written through `switchToWorkspace(_:)`, which moves the selection
     /// with it.
-    @Published var currentWorkspaceID: Workspace.ID
+    @Published var currentWorkspaceID: Workspace.ID {
+        // Here rather than in `switchToWorkspace`: creating a workspace and following a
+        // session into one change the scope too, and a machine reopens on all of them.
+        didSet {
+            guard let workspace = workspaces.first(where: { $0.id == currentWorkspaceID }) else { return }
+            MachineMemory.remember(workspace.id, on: workspace.device)
+        }
+    }
     @Published var selectedSessionID: Session.ID? {
         // Selecting a session means the user is now looking at it, so any pending
         // "needs attention" (or unseen "done") is, by definition, answered.
@@ -577,7 +584,19 @@ final class TermioStore: ObservableObject {
     @discardableResult
     func addPathToSelectedSessionPrompt(_ url: URL) -> Bool {
         guard let id = selectedSessionID, let session = session(id) else { return false }
-        return surface(for: session).send(Self.promptToken(for: url) + " ")
+        return typeAtPrompt(Self.promptToken(for: url) + " ", in: session)
+    }
+
+    /// Types text into a session's terminal. A stream pane has no embedded surface
+    /// to type through, so its text goes to the session link, which holds it until
+    /// the link is attached.
+    @discardableResult
+    func typeAtPrompt(_ text: String, in session: Session) -> Bool {
+        if let link = runtimes[session.id]?.streamLink, link.isStreaming {
+            link.send(Data(text.utf8))
+            return true
+        }
+        return surface(for: session).send(text)
     }
 
     /// Pastes selected text into the selected session's prompt, wrapped in bracketed
@@ -770,15 +789,19 @@ final class TermioStore: ObservableObject {
         }
     }
 
-    /// Whether the leading project sidebar is expanded. Mirrored from its AppKit split item the
+    /// Whether the active window's leading project sidebar is expanded (see `WindowContext`
+    /// for every window's own). Mirrored from its AppKit split item the
     /// same way `inspectorVisible` is. A maximized detail reads it to know whether the traffic
     /// lights land on its own header (sidebar collapsed) or on the sidebar (sidebar open).
     @Published var sidebarVisible = true
 
-    /// Whether the window is in native macOS fullscreen. Mirrored from the window's own
+    /// Whether the active window is in native macOS fullscreen. Mirrored from the window's own
     /// enter/exit transitions. Fullscreen hides the traffic lights until the pointer summons the
     /// titlebar, so a maximized detail stops reserving room for them there.
     @Published var windowIsFullScreen = false
+
+    /// The pane areas showing each session right now (see `reportRendering`).
+    var renderingViewers: [Session.ID: Set<AnyHashable>] = [:]
 
     /// A per-session snapshot of the inspector's *content* — which tab is showing, which
     /// detail (file / diff / PR-issue) is open, and how that detail splits the
@@ -1265,9 +1288,6 @@ final class TermioStore: ObservableObject {
     /// rewrites the hooks file when this specific setting flips — not on every
     /// unrelated appearance change that also fires `objectWillChange`.
     var installedHooksEnabled: Bool?
-    /// The account folders the last integration sync was sent, for the same
-    /// change-only guard.
-    var installedAccountFolders: [String: [String]]?
 
     /// The socket the `termio` CLI drives the app through. Runs for the app's
     /// lifetime (harmless when the feature is off — the handler refuses with
@@ -1324,6 +1344,8 @@ final class TermioStore: ObservableObject {
     }
 
     init(workspaces: [Workspace], projects: [Project] = [], settings: AppSettings) {
+        // Also here, so a test process that hosts a store gets the app's policy.
+        BrokenPipe.ignore()
         self.settings = settings
         let reconciled = WorkspaceMigration.reconcile(workspaces: workspaces, projects: projects)
         // The scope the app opens in: the one the last run ended in, or the first
@@ -1375,7 +1397,6 @@ final class TermioStore: ObservableObject {
                 self?.applyAppearanceToOpenSurfaces()
                 self?.syncHooksInstallationIfNeeded()
                 self?.syncSessionControlInstallationIfNeeded()
-                self?.syncAccountFoldersIfNeeded()
             }
 
         // A branch label changing is not a change to the persisted tree, so the
@@ -1412,6 +1433,8 @@ final class TermioStore: ObservableObject {
             self.openTerminalLink(url, surfaceWorkingDirectory: nil)
             return nil
         }
+        // `currentWorkspaceID`'s didSet does not run for the restored value.
+        MachineMemory.remember(currentWorkspaceID, on: currentWorkspace.device)
         syncWatchedFolders()
         // The designated init set the selection without firing its didSet, so
         // the selected checkout's device watch has to be armed by hand once.
@@ -1892,16 +1915,20 @@ final class TermioStore: ObservableObject {
     /// task-notification click (which may find the window miniaturized).
     func revealSession(_ id: Session.ID) {
         guard session(id) != nil else { return }
+        // A window already on this session is where it is revealed: its terminal is there.
+        // Otherwise the active window, or the kept first one when every window is closed.
+        // The window takes the session before it is shown: activating it hands its own
+        // selection to the store, so the other order would put back what it showed last.
+        let target = MainWindowController.all.first { $0.context.selectedSessionID == id }
+            ?? MainWindowController.active ?? MainWindowController.all.first
+        target?.context.selectedSessionID = id
+        NSApp.activate(ignoringOtherApps: true)
+        target?.show()
         selectedSessionID = id
         // Explicit, because the didSet above skips a same-value write: revealing
         // a session that was already selected (app in background) must still
         // acknowledge its "your turn" dot and withdraw its banner.
         markSeen(id)
-        NSApp.activate(ignoringOtherApps: true)
-        if let window = AppDelegate.mainWindow {
-            if window.isMiniaturized { window.deminiaturize(nil) }
-            window.makeKeyAndOrderFront(nil)
-        }
     }
 
     /// The agent a session *presents* as. Since identity became persistent this is

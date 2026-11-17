@@ -17,6 +17,142 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.75.0",
+    date: "2026-11-16",
+    title: "Files, changes and issues open as cards",
+    changes: {
+      new: [
+        "Cards: Files, Search, Changes, Issues, Info and Simulator open as cards you can group with a session, in place of the panel on each terminal.",
+        "Cards: the selected card's header ends with Close, and with Zoom when the card is in a group.",
+        "Settings: General has a switch for each app.",
+        "CLI: `termio update` updates a Linux box to the newest release in place and keeps its sessions running. `termio -H <host> update` updates another machine.",
+      ],
+      fixed: [
+        "PDF: the Back and Forward arrows are the same size as the other header buttons.",
+      ],
+    },
+  },
+  {
+    version: "0.74.0",
+    date: "2026-11-14",
+    title: "Read PDFs without losing your place",
+    changes: {
+      new: [
+        "PDF: go back and forward with ⌘[ and ⌘] after following a link, a contents entry or a search result.",
+        "PDF: rest the pointer on a link inside the document to preview where it goes.",
+        "PDF: search the document with ⌘F.",
+      ],
+      improved: [
+        "A PDF reopens on the page where you left it.",
+      ],
+      fixed: [
+        "Files: opening a folder no longer waits on git, so a slow git on the device no longer slows every folder in the tree.",
+      ],
+    },
+  },
+  {
+    version: "0.73.1",
+    date: "2026-11-14",
+    title: "Smooth scrolling through every file of a pull request",
+    changes: {
+      fixed: [
+        "Pull requests: dragging the scroller through a pull request with many files no longer freezes the app.",
+      ],
+    },
+  },
+  {
+    version: "0.73.0",
+    date: "2026-11-14",
+    title: "More than one window",
+    changes: {
+      new: [
+        "Windows: open another window with File ▸ New Window (⌥⌘N), from the Dock, or with Open in New Window on a session. Each window shows its own session, and a session shows live in one window at a time.",
+      ],
+    },
+  },
+  {
+    version: "0.72.0",
+    date: "2026-11-10",
+    title: "Close a pane from its header",
+    changes: {
+      new: [
+        "Pane headers: a close button takes the place of the session icon while the pointer is over the header.",
+      ],
+      improved: [
+        "Settings: the Usage tab is removed. Each agent reports its own usage in the terminal.",
+      ],
+    },
+  },
+  {
+    version: "0.71.1",
+    date: "2026-11-10",
+    title: "Drag panes again",
+    changes: {
+      fixed: [
+        "Dragging a pane by the handle in its header rearranges the split again, instead of selecting text.",
+      ],
+    },
+  },
+  {
+    version: "0.71.0",
+    date: "2026-11-02",
+    title: "A new file tree",
+    changes: {
+      improved: [
+        "Files: the tree in the Files tab is rebuilt. Folders, the row menu, Quick Look and Collapse All work as before.",
+        "Arrow keys in the file tree open the file they land on.",
+        "Dragging several selected files out of the tree carries all of them to the terminal or the Finder.",
+        "A file moved onto a name that already exists gets a numbered name instead of being refused.",
+      ],
+    },
+  },
+  {
+    version: "0.70.1",
+    date: "2026-11-02",
+    title: "Smooth scrolling through large pull requests",
+    changes: {
+      fixed: [
+        "Scrolling the Files tab of a large pull request no longer pins the CPU.",
+        "Changing the font, line height or theme restyles pull request files that are already open.",
+      ],
+    },
+  },
+  {
+    version: "0.70.0",
+    date: "2026-11-02",
+    title: "Terminal fixes for icons, drops and Grok",
+    changes: {
+      improved: [
+        "Settings ▸ Usage reads each agent's default account again. Multiple accounts per agent are removed.",
+      ],
+      fixed: [
+        "Dropping a file from Finder into a terminal types its path again.",
+        "Grok no longer finds stray text in its prompt when it starts.",
+        "Text in a terminal stays on one baseline instead of drifting up and down.",
+        "Nerd Font icons draw in the terminal instead of question-mark boxes.",
+      ],
+    },
+  },
+  {
+    version: "0.69.0",
+    date: "2026-10-30",
+    title: "Every machine in one switcher",
+    changes: {
+      new: [
+        "The sidebar switcher lists every machine with its workspaces. Choose a machine to go back to the workspace you last used there.",
+        "Each machine in the switcher has a button that creates a new workspace on it.",
+      ],
+      improved: [
+        "Cmd-1 through Cmd-9 now reach the workspaces on the machine you are on.",
+        "The welcome page fits your agents and recent projects on one screen.",
+        "Settings splits pairing into iPhone, Network and Pairing, and previews themes in their own colors.",
+      ],
+      fixed: [
+        "The sidebar's controls no longer jump sideways when you switch workspaces.",
+      ],
+    },
+  },
+  {
     version: "0.68.0",
     date: "2026-10-30",
     title: "The size stays with the screen you type on",

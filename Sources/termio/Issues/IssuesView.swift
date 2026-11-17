@@ -345,8 +345,7 @@ struct IssuesView: View {
                 .draggableIssueLink(item)
                 // Right-click menu via an AppKit `NSMenu`, NOT SwiftUI's
                 // `.contextMenu` — the latter rings the targeted row with an
-                // un-styleable accent border (the file tree learned the same, see
-                // `FileTreeList.RowContextMenu`). A secondary-click recognizer on the
+                // un-styleable accent border. A secondary-click recognizer on the
                 // row's own view pops the menu, so nothing emphasizes the row.
                 .background(IssueRowContextMenu(
                     url: item.url,
@@ -495,7 +494,7 @@ private extension View {
 /// `.contextMenu` — the latter rings the targeted row with an un-styleable accent
 /// border. A secondary-click recognizer on the row's own view pops the menu up, so
 /// nothing emphasizes the row. Both items act on the item's GitHub URL, so the whole
-/// menu is suppressed when there is none (mirrors `FileTreeList.RowContextMenu`).
+/// menu is suppressed when there is none.
 private struct IssueRowContextMenu: NSViewRepresentable {
     let url: URL?
     /// "Add to Chat": types the item's GitHub URL into the selected agent session's

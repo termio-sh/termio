@@ -108,8 +108,22 @@ If your tailnet has HTTPS certificates turned on, clients reach the server at
 
 ## Updating without dropping sessions
 
+On a Linux box, one command updates it to the newest release:
+
+```bash
+termio update            # this box
+termio -H mybox update   # another box, over SSH
+termio update --check    # print both versions, change nothing
+```
+
+It downloads the new binaries, checks them against the release's checksums, and
+hands the running daemon off to the new build. It leaves `systemd` and Tailscale
+as they are. `--version 0.63.0` installs that release instead. On a Mac, Termio
+updates with the app.
+
 A new build replaces the running one **in place**: the process keeps its id and
-its PTYs, and the sessions never notice.
+its PTYs, and the sessions never notice. To hand off to a build you put in place
+yourself:
 
 ```bash
 termio server handoff

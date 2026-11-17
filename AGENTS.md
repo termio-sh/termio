@@ -123,13 +123,6 @@ Companion:
 - The Mac serves the iOS app over a WebSocket; the wire protocol is in
   `Shared/Sources/TermioShared/WireProtocol.swift`. The mirror is a live
   surface, not a screenshot feed.
-- The Usage tab reads each agent through a `UsageProvider`
-  (`Sources/termio/Companion/Usage/`) — one file per agent, holding its
-  credential read, its plan-limit endpoint, and its session-log scanner.
-  `UsageMonitor` knows only the list, so supporting another agent is a new
-  provider file plus a line in `UsageMonitor.providers`, not an edit threaded
-  through the fetch and scan paths. Only agents whose CLI leaves a usable
-  credential on disk qualify; termio never runs a login flow.
 
 ## Where to work
 
@@ -137,8 +130,7 @@ Companion:
 - `Sources/termio/TermioStore` — session tree, persistence, split groups,
   agent status.
 - `Sources/termio/Agents` — agent manifests, session control, hook contract.
-- `Sources/termio/Companion` — companion server, tunnel, per-agent usage
-  providers.
+- `Sources/termio/Companion` — companion server, tunnel.
 - `Shared/` — anything both platforms must agree on. Changing the wire protocol
   means changing both ends.
 - `web/landing` — marketing copy and site. See `docs/ARCHITECTURE.md`.

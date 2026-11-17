@@ -931,10 +931,27 @@ struct DeviceFileProvider: Sendable {
         guard !paths.isEmpty else {
             return Termiod.DirectoryListings(listings: [], seq: 0)
         }
-        return try await run { [route, root] in
+        let started = ContinuousClock.now
+        let listed = try await run { [route, root] in
             try Termiod.listDirectories(route: route, root: root, paths: paths)
         }
+        // The whole wait as the tree felt it: the channel, the device, the way
+        // back. A slow tree is otherwise invisible in a bug report.
+        let waited = ContinuousClock.now - started
+        if waited > Self.slowListing {
+            let milliseconds = Int(waited / .milliseconds(1))
+            let entries = listed.listings.reduce(0) { $0 + $1.entries.count }
+            Log.files.notice("""
+            fs.list over \(route.description, privacy: .public) took \
+            \(milliseconds, privacy: .public) ms: \(paths.count, privacy: .public) \
+            directories, \(entries, privacy: .public) entries
+            """)
+        }
+        return listed
     }
+
+    /// Past this a folder's spinner has been up long enough to read as a stall.
+    private static let slowListing: Duration = .milliseconds(250)
 
     /// Subscribes to this checkout's `fs:` resource. Held by the tree for as
     /// long as its pane is alive; releasing it retires the watch.

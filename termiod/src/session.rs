@@ -623,7 +623,9 @@ impl Session {
     /// `SetAnswering` travels the sidecar's FIFO with the bytes, so a reply
     /// exists only for a query parsed while the host was the one to answer.
     /// Held while a paste is open, which it would otherwise join.
-    fn write_replies(&mut self, replies: Vec<u8>) {
+    fn write_replies(&mut self, mut replies: Vec<u8>) {
+        // `SupportQuery` answered this one before the VT parsed it.
+        SupportQuery::strip_other_reply(&mut replies);
         if replies.is_empty() {
             return;
         }
@@ -1325,6 +1327,7 @@ impl Session {
     /// now just "you have the token", kept because it is the only writer signal
     /// a client without the `events` capability ever sees.
     fn emit_writer_changed(&mut self, resize_claim_target: Option<ClientId>) {
+        self.support_query.forget_held();
         if let Some(target) = resize_claim_target {
             if let Some(entry) = self.clients.get_mut(&target) {
                 Self::queue_non_data(
@@ -3292,7 +3295,8 @@ async fn run(
                     // open paste ends here first, or they would cross inside it.
                     session.close_open_paste();
                     while let Ok(result) = sidecar_results.try_recv() {
-                        if let SidecarResult::Replies(replies) = result {
+                        if let SidecarResult::Replies(mut replies) = result {
+                            SupportQuery::strip_other_reply(&mut replies);
                             session.held_replies.extend_from_slice(&replies);
                         }
                     }
@@ -3773,8 +3777,16 @@ fn handle_msg(session: &mut Session, msg: SessionMsg) -> Option<EndReason> {
             // shape `AddClient` uses.
             session.emit_writer_changed(session.writer.clone());
         }
-        SessionMsg::Input { id, data } => {
+        SessionMsg::Input { id, mut data } => {
             if session.writer.as_ref() == Some(&id) {
+                // While the VT is live `SupportQuery` has answered, so the
+                // writer's own answer would be a second one.
+                if session.vt.is_live() {
+                    session.support_query.strip_writer_reply(&mut data);
+                    if data.is_empty() {
+                        return None;
+                    }
+                }
                 // The choke point every human keystroke crosses — this Mac, a
                 // phone, a browser — which is what the screen-streak promotion
                 // has to stand down for. The Mac's own version of this only ever

@@ -254,9 +254,9 @@ final class RemoteFileOpenIntegrationTests: XCTestCase {
             tree.prefetchedPaths().contains(subPath)
         }
 
-        // The first touch of `children` is the expand. It must answer with rows,
-        // not with an empty folder and a promise.
+        // The expand must answer with rows, not with an empty folder and a promise.
         let node = try XCTUnwrap(tree.node(at: subPath))
+        tree.expand(subPath)
         XCTAssertEqual(node.children?.map(\.name), ["deep", "b.txt"])
         XCTAssertFalse(node.isLoading, "nothing to wait for, so nothing to say")
         XCTAssertTrue(tree.loadedDirectories().contains(subPath))
@@ -276,6 +276,7 @@ final class RemoteFileOpenIntegrationTests: XCTestCase {
         try Data("z\n".utf8).write(to: root.appendingPathComponent("sub/new.txt"))
 
         let node = try XCTUnwrap(tree.node(at: subPath))
+        tree.expand(subPath)
         XCTAssertEqual(node.children?.map(\.name), ["deep", "b.txt"], "the guess, as it stood")
 
         try await settle("the device's own answer") {
@@ -290,7 +291,7 @@ final class RemoteFileOpenIntegrationTests: XCTestCase {
         tree.refresh()
         try await settle("the root listing") { !tree.rootNodes.isEmpty }
         try await settle("the first level") { tree.prefetchedPaths().contains(subPath) }
-        _ = tree.node(at: subPath)?.children
+        tree.expand(subPath)
 
         try await settle("the level below it") {
             tree.prefetchedPaths().contains(root.appendingPathComponent("sub/deep").path)

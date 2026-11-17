@@ -28,7 +28,7 @@ let package = Package(
         .package(url: "https://github.com/raspu/Highlightr.git", from: "2.3.0"),
         // libghostty-vt for TermioStream. The same package and requirement as
         // the Mac app's, so both resolve to one pin.
-        .package(url: "https://github.com/termio-sh/libghostty-swift", from: "1.2.0"),
+        .package(url: "https://github.com/termio-sh/libghostty-swift", from: "1.3.0"),
     ],
     targets: [
         .target(

@@ -323,8 +323,7 @@ struct GitChangesView: View {
     }
 
     private var changeList: some View {
-        // A native `List` with a `selection:` binding — the same shape as the file tree
-        // (`FileTreeList`). Selection drives "open the diff", which is what lets each row
+        // A native `List` with a `selection:` binding. Selection drives "open the diff", which is what lets each row
         // be `.draggable` at the same time: a SwiftUI tap gesture would strangle the drag,
         // but List's AppKit-level selection coexists with it. The Set binding gives ⌘- and
         // ⇧-click multi-selection for free.

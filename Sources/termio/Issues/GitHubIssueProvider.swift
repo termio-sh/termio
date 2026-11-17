@@ -2,8 +2,8 @@ import Foundation
 
 // MARK: - GitHub provider (REST, read)
 
-/// The GitHub conformance, over the REST API with a bare `URLSession` — no SDK,
-/// matching `UsageMonitor`'s API-client shape. One `/issues` request serves both
+/// The GitHub conformance, over the REST API with a bare `URLSession` — no SDK.
+/// One `/issues` request serves both
 /// kinds: GitHub models a pull request as an issue with a `pull_request` key
 /// (plus `draft` / `merged_at` for the PR-only states), so the kind filter is
 /// applied client-side over a single fetch.

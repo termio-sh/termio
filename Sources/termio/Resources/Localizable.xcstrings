@@ -1,6 +1,153 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ theme": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@主题"
+          }
+        }
+      }
+    },
+    "Current": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前"
+          }
+        }
+      }
+    },
+    "Layout": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "布局"
+          }
+        }
+      }
+    },
+    "Manage": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理"
+          }
+        }
+      }
+    },
+    "Sidebar font": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "侧栏字体"
+          }
+        }
+      }
+    },
+    "Sidebar row spacing": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "侧栏行距"
+          }
+        }
+      }
+    },
+    "Sidebar text size": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "侧栏字号"
+          }
+        }
+      }
+    },
+    "Simulator": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模拟器"
+          }
+        }
+      }
+    },
+    "Click to show it here": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点按以在此处显示"
+          }
+        }
+      }
+    },
+    "New Window": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建窗口"
+          }
+        }
+      }
+    },
+    "Open in New Window": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在新窗口中打开"
+          }
+        }
+      }
+    },
+    "Showing in another window": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正显示在另一个窗口中"
+          }
+        }
+      }
+    },
+    "Couldn’t add the dropped item": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法添加拖入的项目"
+          }
+        }
+      }
+    },
+    "Offline": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "离线"
+          }
+        }
+      }
+    },
     "The token wasn’t rotated: %@": {
       "comment": "Settings ▸ Server ▸ Pairing, under Rotate Token; %@ is termiod's error message.",
       "localizations": {
@@ -151,6 +298,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "退出登录"
+          }
+        }
+      }
+    },
+    "This session has no running terminal.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此会话没有正在运行的终端。"
           }
         }
       }
@@ -530,16 +687,6 @@
         }
       }
     },
-    " Cost is estimated at API rates.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "费用按 API 价格估算。"
-          }
-        }
-      }
-    },
     "%1$@ changed on %2$@": {
       "localizations": {
         "zh-Hans": {
@@ -816,26 +963,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 只在你登录期间保持发布。Termio 无法让它在登出后继续运行服务。"
-          }
-        }
-      }
-    },
-    "%@ tokens": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ token"
-          }
-        }
-      }
-    },
-    "%@ · %@ tokens": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ · %@ token"
           }
         }
       }
@@ -1376,16 +1503,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "对“%@”的所有更改都将丢失。此操作无法撤销。"
-          }
-        }
-      }
-    },
-    "Allow Usage Access": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "允许访问用量"
           }
         }
       }
@@ -3172,16 +3289,6 @@
         }
       }
     },
-    "Enable Claude Code, Codex, Kimi, or Grok in the Agents tab to see their usage here.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在 Agents 标签页中启用 Claude Code、Codex、Kimi 或 Grok，即可在此查看其用量。"
-          }
-        }
-      }
-    },
     "Ended": {
       "localizations": {
         "zh-Hans": {
@@ -4029,26 +4136,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "语言、通知和 GitHub"
-          }
-        }
-      }
-    },
-    "Last 30 days": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "过去 30 天"
-          }
-        }
-      }
-    },
-    "Last 7 days": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "过去 7 天"
           }
         }
       }
@@ -7275,36 +7362,6 @@
         }
       }
     },
-    "Termio can show %@'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Termio 可通过读取 %@ 的本地会话日志及其 `auth.json` 登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容。"
-          }
-        }
-      }
-    },
-    "Termio can show %@'s token usage and plan limits by reading its local session logs and its `credentials/kimi-code.json` sign-in. Nothing is read until you allow it.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Termio 可通过读取 %@ 的本地会话日志及其 `credentials/kimi-code.json` 登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容。"
-          }
-        }
-      }
-    },
-    "Termio can show %@'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Termio 可通过读取 %@ 的本地会话日志及登录钥匙串中的登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容；macOS 会就钥匙串询问一次。"
-          }
-        }
-      }
-    },
     "Termio could not append to the repository’s .gitignore. Check its permissions and try again.": {
       "localizations": {
         "zh-Hans": {
@@ -8025,16 +8082,6 @@
         }
       }
     },
-    "Today": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "今天"
-          }
-        }
-      }
-    },
     "Toggle Full Screen": {
       "localizations": {
         "zh-Hans": {
@@ -8232,16 +8279,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "已更新。"
-          }
-        }
-      }
-    },
-    "Usage": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "用量"
           }
         }
       }
@@ -9034,126 +9071,6 @@
         }
       }
     },
-    "Accounts": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "账户"
-          }
-        }
-      }
-    },
-    "Add Account…": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "添加账户…"
-          }
-        }
-      }
-    },
-    "Add Account": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "添加账户"
-          }
-        }
-      }
-    },
-    "Remove Account": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "移除账户"
-          }
-        }
-      }
-    },
-    "Choose the folder %@ signed in to.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择 %@ 登录时使用的文件夹。"
-          }
-        }
-      }
-    },
-    "%@ Sign-In": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 登录"
-          }
-        }
-      }
-    },
-    "%@ is already added": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 已经添加过了"
-          }
-        }
-      }
-    },
-    "Add a %@ Account": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "添加 %@ 账户"
-          }
-        }
-      }
-    },
-    "Allow…": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "允许…"
-          }
-        }
-      }
-    },
-    "Couldn't read plan limits.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法读取套餐限额。"
-          }
-        }
-      }
-    },
-    "Finish signing in in the terminal": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请在终端里完成登录"
-          }
-        }
-      }
-    },
-    "Limits need Keychain access.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "读取限额需要钥匙串访问权限。"
-          }
-        }
-      }
-    },
     "More": {
       "localizations": {
         "zh-Hans": {
@@ -9164,172 +9081,12 @@
         }
       }
     },
-    "No sessions on this Mac yet.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本机上还没有会话。"
-          }
-        }
-      }
-    },
-    "Resets in %@": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@后重置"
-          }
-        }
-      }
-    },
-    "Resetting": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在重置"
-          }
-        }
-      }
-    },
     "Sign In…": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "登录…"
-          }
-        }
-      }
-    },
-    "Sign in again to see this account's limits.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重新登录即可查看此账户的限额。"
-          }
-        }
-      }
-    },
-    "Sign in with a different account in the terminal, or cancel.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请在终端里换一个账户登录，或者取消。"
-          }
-        }
-      }
-    },
-    "Signed out": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已退出登录"
-          }
-        }
-      }
-    },
-    "Stop Reading %@ Data": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "停止读取 %@ 数据"
-          }
-        }
-      }
-    },
-    "Termio opens a terminal where %@ signs you in. Your other accounts stay signed in.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Termio 会打开一个终端，由 %@ 完成登录。其他账户保持登录。"
-          }
-        }
-      }
-    },
-    "This closes by itself once %@ is signed in.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 登录完成后，此窗口会自动关闭。"
-          }
-        }
-      }
-    },
-    "Use a Signed-In Folder…": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "使用已登录的文件夹…"
-          }
-        }
-      }
-    },
-    "tokens": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "token"
-          }
-        }
-      }
-    },
-    "Every %@ session on this Mac, from all accounts.%@": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本机上所有账户的 %1$@ 会话。%2$@"
-          }
-        }
-      }
-    },
-    "Use for New Sessions": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "用于新会话"
-          }
-        }
-      }
-    },
-    "New sessions use this account.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新会话使用此账户。"
-          }
-        }
-      }
-    },
-    "Choose a folder named like “%@-work”": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请选择名称类似“%@-work”的文件夹"
-          }
-        }
-      }
-    },
-    "Termio keeps each account in a folder beside %@ so its sessions can report their status.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Termio 把每个账户放在 %@ 旁边的文件夹里，这样它的会话才能报告状态。"
           }
         }
       }
@@ -10334,79 +10091,22 @@
         }
       }
     },
-    "Current": {
-      "comment": "Settings ▸ Appearance",
+    "Back (⌘[)": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前"
+            "value": "后退 (⌘[)"
           }
         }
       }
     },
-    "Layout": {
-      "comment": "Settings ▸ Appearance",
+    "Forward (⌘])": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "布局"
-          }
-        }
-      }
-    },
-    "Manage": {
-      "comment": "Settings ▸ Appearance",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "管理"
-          }
-        }
-      }
-    },
-    "Sidebar font": {
-      "comment": "Settings ▸ Appearance",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "侧栏字体"
-          }
-        }
-      }
-    },
-    "Sidebar text size": {
-      "comment": "Settings ▸ Appearance",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "侧栏字号"
-          }
-        }
-      }
-    },
-    "Sidebar row spacing": {
-      "comment": "Settings ▸ Appearance",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "侧栏行距"
-          }
-        }
-      }
-    },
-    "%@ theme": {
-      "comment": "Settings ▸ Appearance",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@主题"
+            "value": "前进 (⌘])"
           }
         }
       }
