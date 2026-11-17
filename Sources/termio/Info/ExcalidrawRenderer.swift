@@ -15,9 +15,10 @@ import WebKit
 /// `Resources/ExcalidrawFonts/Excalidraw-README.md` for how that build is produced.
 ///
 /// The security argument is `MermaidRenderer`'s: a drawing is somebody else's file, the
-/// harness has no scheme handler and loads nothing but a string, embeddable elements
-/// (which carry third-party URLs) are drawn as placeholders rather than live frames, and
-/// the SVG is checked again on the way out so a drawing can at worst paint pixels.
+/// harness has no scheme handler and loads nothing but a string, its content policy
+/// allows no network, embeddable elements (which carry third-party URLs) are drawn as
+/// placeholders rather than live frames, and the SVG is checked again on the way out so
+/// a drawing can at worst paint pixels.
 @MainActor
 final class ExcalidrawRenderer: NSObject {
     static let shared = ExcalidrawRenderer()
@@ -53,6 +54,7 @@ final class ExcalidrawRenderer: NSObject {
     }
 
     private var cache: [Key: Drawing] = [:]
+    private var cachedBytes = 0
     private var webView: WKWebView?
     private var window: NSWindow?
     private var loadContinuations: [CheckedContinuation<Void, Never>] = []
@@ -88,11 +90,26 @@ final class ExcalidrawRenderer: NSObject {
         let key = Key(digest: Self.digest(data), theme: theme)
         if let drawing = cache[key] { return drawing }
         guard let drawing = await render(data, theme: theme) else { return nil }
-        // A drawing's SVG is tens of KB and a session opens a handful; the cap is a
-        // runaway guard, not a working-set limit.
-        if cache.count >= 32 { cache.removeAll(keepingCapacity: true) }
+        // A drawing's SVG is tens of KB and a session opens a handful; the caps are a
+        // runaway guard, not a working-set limit. The byte cap is there because an SVG
+        // carries every embedded image, and each edit of such a scene is a new entry.
+        let bytes = Self.size(of: drawing)
+        guard bytes <= Self.largestCachedDrawing else { return drawing }
+        if cache.count >= 32 || cachedBytes + bytes > Self.cacheBudget {
+            cache.removeAll(keepingCapacity: true)
+            cachedBytes = 0
+        }
         cache[key] = drawing
+        cachedBytes += bytes
         return drawing
+    }
+
+    private static let largestCachedDrawing = 4 << 20
+    private static let cacheBudget = 16 << 20
+
+    private static func size(of drawing: Drawing) -> Int {
+        if case .drawing(let svg) = drawing { return svg.utf8.count }
+        return 0
     }
 
     private static func digest(_ data: Data) -> String {
@@ -115,7 +132,7 @@ final class ExcalidrawRenderer: NSObject {
             guard let payload = result as? [String: Any] else { return nil }
             if payload["empty"] as? Bool == true { return .empty }
             guard let svg = payload["svg"] as? String, !svg.isEmpty else { return nil }
-            guard isInert(svg) else {
+            guard Self.isInert(svg) else {
                 Log.markdown.error("excalidraw: dropped a drawing whose SVG carried script")
                 return nil
             }
@@ -175,6 +192,7 @@ final class ExcalidrawRenderer: NSObject {
         // host makes that a guarantee rather than an assumption.
         """
         <!doctype html><html><head><meta charset="utf-8">
+        <meta http-equiv="Content-Security-Policy" content="\(Self.harnessPolicy)">
         <style>body { margin: 0; background: transparent; }</style>
         <script>window.EXCALIDRAW_ASSET_PATH = "termio-no-assets:///";</script>
         <script>\(engine)</script>
@@ -182,16 +200,57 @@ final class ExcalidrawRenderer: NSObject {
         """
     }
 
-    /// Last guard before the SVG is inlined into a page that isn't sandboxed — the same
-    /// check `MermaidRenderer` applies, for the same reason. Excalidraw's exporter should
-    /// make every one of these impossible; this is the check that doesn't depend on it.
-    private func isInert(_ svg: String) -> Bool {
+    /// The engine runs inline script and measures images, and a scene can name any URL as
+    /// an image. Nothing here leaves the machine: only `data:` and `blob:` load.
+    private static let harnessPolicy =
+        "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; "
+        + "img-src data: blob:; font-src data:; connect-src data: blob:; worker-src blob:"
+
+    /// Last guard before the SVG is inlined into the preview page. Excalidraw's exporter
+    /// should make every one of these impossible; this is the check that doesn't depend
+    /// on it.
+    ///
+    /// It reads the markup as a tree, because a label is free text: "use javascript: with
+    /// care" in a text element is a drawing, and the same words in an attribute are not.
+    nonisolated static func isInert(_ svg: String) -> Bool {
+        guard let document = try? XMLDocument(xmlString: svg, options: [.nodeLoadExternalEntitiesNever]),
+              let root = document.rootElement()
+        else {
+            // Markup that is not well-formed XML gets the blunt scan, which errs toward
+            // refusing a drawing.
+            return isInertText(svg)
+        }
+        return isInert(root)
+    }
+
+    private nonisolated static func isInert(_ element: XMLElement) -> Bool {
+        let name = (element.localName ?? element.name ?? "").lowercased()
+        if ["script", "foreignobject", "iframe", "object", "embed"].contains(name) { return false }
+        for attribute in element.attributes ?? [] {
+            let key = (attribute.localName ?? attribute.name ?? "").lowercased()
+            let value = (attribute.stringValue ?? "").lowercased()
+            if key.hasPrefix("on") { return false }
+            if value.filter({ !$0.isWhitespace && !$0.isNewline }).hasPrefix("javascript:") { return false }
+            if key == "style", loadsRemoteStyle(value) { return false }
+        }
+        if name == "style", loadsRemoteStyle((element.stringValue ?? "").lowercased()) { return false }
+        for case let child as XMLElement in element.children ?? [] where !isInert(child) {
+            return false
+        }
+        return true
+    }
+
+    private nonisolated static func loadsRemoteStyle(_ css: String) -> Bool {
+        ["@import", "url(http", "url('http", "url(\"http", "url(//"].contains { css.contains($0) }
+    }
+
+    private nonisolated static func isInertText(_ svg: String) -> Bool {
         let lowered = svg.lowercased()
-        for marker in ["<script", "javascript:", "<foreignobject", "@import", "url(http", "url('http", "url(\"http"]
+        for marker in ["<script", "javascript:", "<foreignobject", "<iframe", "<object", "<embed"]
         where lowered.contains(marker) {
             return false
         }
-        return lowered.firstMatch(of: #/\son[a-z]+\s*=/#) == nil
+        return !loadsRemoteStyle(lowered) && lowered.firstMatch(of: #/\son[a-z]+\s*=/#) == nil
     }
 
     private func finishLoading(loaded: Bool) {
@@ -206,6 +265,15 @@ final class ExcalidrawRenderer: NSObject {
 extension ExcalidrawRenderer: WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in self.finishLoading(loaded: true) }
+    }
+
+    /// A WebContent process that died takes the loaded engine with it. Forgetting the
+    /// load makes the next render start a fresh one instead of calling into a dead page.
+    nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Task { @MainActor in
+            Log.markdown.error("excalidraw: the harness process ended; it reloads on the next render")
+            self.finishLoading(loaded: false)
+        }
     }
 
     nonisolated func webView(

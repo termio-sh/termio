@@ -15,6 +15,7 @@ enum ExcalidrawReaderRenderer {
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta http-equiv="Content-Security-Policy" content="\(contentPolicy)">
         <style>
         \(fontFaces)
         :root { --background: \(theme.background); --secondary: \(theme.secondary); }
@@ -50,6 +51,7 @@ enum ExcalidrawReaderRenderer {
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta http-equiv="Content-Security-Policy" content="\(contentPolicy)">
         <style>
         :root { --background: \(theme.background); --secondary: \(theme.secondary); }
         \(css)
@@ -59,6 +61,11 @@ enum ExcalidrawReaderRenderer {
         </html>
         """
     }
+
+    /// A drawing is somebody else's file, and a scene can name any URL as an image. The
+    /// page loads what it carries inline and nothing else.
+    private static let contentPolicy =
+        "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:"
 
     private static func escape(_ text: String) -> String {
         text.replacingOccurrences(of: "&", with: "&amp;")

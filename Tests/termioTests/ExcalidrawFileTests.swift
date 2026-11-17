@@ -104,6 +104,29 @@ final class ExcalidrawFileTests: XCTestCase {
         XCTAssertTrue(page.contains("This drawing is empty."))
         XCTAssertFalse(page.contains("No drawing in this file."))
     }
+    /// A scene can name any URL as an image. The page that shows it loads nothing remote.
+    func testPageLoadsNothingRemote() {
+        let page = ExcalidrawReaderRenderer.document(svg: "<svg></svg>", theme: .reader(dark: false))
+        XCTAssertTrue(page.contains("Content-Security-Policy"))
+        XCTAssertTrue(page.contains("default-src 'none'"))
+        XCTAssertTrue(page.contains("img-src data:;"))
+    }
+
+    /// A label is free text. Words that look like script are a drawing when they sit in a
+    /// text element, and are refused when they sit in markup.
+    func testInertnessReadsMarkupNotLabels() {
+        XCTAssertTrue(ExcalidrawRenderer.isInert("<svg><text>Use javascript: URLs carefully</text></svg>"))
+        XCTAssertTrue(ExcalidrawRenderer.isInert("<svg><text>Use onload = callback</text></svg>"))
+        XCTAssertTrue(ExcalidrawRenderer.isInert("<svg><text>&lt;script&gt; is a tag</text></svg>"))
+
+        XCTAssertFalse(ExcalidrawRenderer.isInert("<svg onload=\"x()\"><rect/></svg>"))
+        XCTAssertFalse(ExcalidrawRenderer.isInert("<svg><script>x()</script></svg>"))
+        XCTAssertFalse(ExcalidrawRenderer.isInert("<svg><a href=\" java\nscript:x()\"><rect/></a></svg>"))
+        XCTAssertFalse(ExcalidrawRenderer.isInert("<svg><foreignObject><p>x</p></foreignObject></svg>"))
+        XCTAssertFalse(ExcalidrawRenderer.isInert("<svg><style>@import url(https://example.com/a.css);</style></svg>"))
+        // Not well-formed: the blunt scan still refuses it.
+        XCTAssertFalse(ExcalidrawRenderer.isInert("<svg><g onload=x()><rect></svg>"))
+    }
 }
 
 /// The renderer itself, driven the way the preview drives it: real bytes in, finished SVG
