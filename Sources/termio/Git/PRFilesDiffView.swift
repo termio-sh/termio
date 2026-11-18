@@ -6,16 +6,14 @@ import SwiftUI
 
 /// GitHub Desktop's "Files changed": a file list on the left, the selected file's diff
 /// on the right. Diffs come from the GitHub API's inline `patch` (no checkout, no git),
-/// rendered by the single-file diff renderer (`DiffDocument` / `DiffTextPane`), so the
-/// list stays put while you review and you always see where you are in the PR.
+/// drawn by @pierre/diffs in a web view (`DiffWebView`), so the list stays put while you
+/// review and you always see where you are in the PR.
 struct PRFilesSplitView: View {
     let files: [GitChange]
     /// Each file's inline unified-diff `patch` from the GitHub API, keyed by path.
     let patches: [String: String]
     /// Reads a file at the PR head, for expanding a hunk boundary the patch left out.
     let fileText: (String) async -> String?
-    /// Only used to resolve each file's language for syntax coloring.
-    let repoRoot: String
     @ObservedObject var settings: AppSettings
     /// Esc closes the whole PR detail (there's no per-file overlay to pop back to).
     let onClose: () -> Void
@@ -73,9 +71,9 @@ struct PRFilesSplitView: View {
     /// Narrow: no room for a list rail beside a readable diff, so every file's diff stacks in one
     /// continuous scroll (github.com "Files changed"), drawn by @pierre/diffs in a web view.
     private var narrow: some View {
-        PRDiffWebView(
-            files: files, patches: patches, fileText: fileText,
-            look: PRDiffLook(settings: settings, colorScheme: colorScheme), onClose: onClose
+        DiffWebView(
+            files: files, patches: patches, fileText: { await fileText($0).map(DiffFullText.new) },
+            look: DiffLook(settings: settings, colorScheme: colorScheme), onClose: onClose
         )
     }
 
@@ -114,13 +112,10 @@ struct PRFilesSplitView: View {
                 change: change,
                 patch: patches[change.path],
                 fileText: fileText,
-                repoRoot: repoRoot,
                 settings: settings,
                 onClose: onClose,
                 onWalk: walk
             )
-            // Rebuild for each file so the diff, syntax colors, and scroll reset cleanly.
-            .id(change.path)
         } else {
             PaneEmptyState(
                 localized("No File Selected"),
@@ -145,29 +140,20 @@ struct PRFilesSplitView: View {
 
 // MARK: - One file's diff (from an API patch)
 
-/// The right pane: one file's diff, parsed from the GitHub API `patch` (no git) and
-/// rendered by the shared `DiffTextPane`. A compact header names the file; a binary or
-/// oversized file (no patch) shows a note instead.
+/// The right pane: one file's diff, from the GitHub API `patch` (no git), drawn by the
+/// same page as the stack. A compact header names the file; a binary or oversized file
+/// (no patch) shows a note instead.
 private struct PRFileDiffBody: View {
     let change: GitChange
     let patch: String?
     /// Reads the file at the PR head. GitHub's patch carries three lines of context, so a
-    /// hunk boundary can only be opened from the file itself; until this lands the bands
-    /// draw inert, the way GitHub Desktop draws a gap it cannot expand.
+    /// band can only be opened from the file itself.
     let fileText: (String) async -> String?
-    let repoRoot: String
     @ObservedObject var settings: AppSettings
     let onClose: () -> Void
     let onWalk: (Int) -> Bool
 
     @Environment(\.colorScheme) private var colorScheme
-
-    @State private var rows: [DiffRow] = []
-    @State private var gapText: DiffGapText = .unavailable
-    @State private var document: DiffDocument?
-    @State private var styledLines: [Int: NSAttributedString] = [:]
-    @State private var expansion = DiffExpansion()
-    @State private var isLoading = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -175,18 +161,12 @@ private struct PRFileDiffBody: View {
             content
         }
         .background(Color(nsColor: settings.terminalBackgroundColor))
-        // The diff view owns the keys once mounted; these cover the loading / note states.
+        // The diff's web view owns the keys once mounted; these cover the note state.
         .focusable()
         .focusEffectDisabled()
         .onExitCommand(perform: onClose)
         .onKeyPress(.leftArrow) { onWalk(-1) ? .handled : .ignored }
         .onKeyPress(.rightArrow) { onWalk(+1) ? .handled : .ignored }
-        .task(id: change.path) { await load() }
-        .task(id: colorScheme) {
-            guard !rows.isEmpty else { return }
-            rebuildDocument()
-            await buildStyledLines(rows)
-        }
     }
 
     private var header: some View {
@@ -224,24 +204,14 @@ private struct PRFileDiffBody: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading {
-            ProgressView()
-                .controlSize(.small)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let document {
-            DiffTextPane(
-                document: document,
-                styled: styledLines,
-                font: settings.resolvedTerminalFont(),
-                thickenGlyphs: settings.fontThicken,
-                backgroundColor: settings.terminalBackgroundColor,
-                numberColor: settings.gutterInk(for: colorScheme),
-                onExpand: { anchor, direction in
-                    expansion.reveal(anchor, direction)
-                    rebuildDocument()
-                },
-                onWalk: onWalk,
-                onClose: onClose
+        if let patch, !patch.isEmpty {
+            DiffWebView(
+                files: [change],
+                patches: [change.path: patch],
+                fileText: { await fileText($0).map(DiffFullText.new) },
+                look: DiffLook(settings: settings, colorScheme: colorScheme),
+                onClose: onClose,
+                single: DiffWebSingle(onWalk: onWalk)
             )
         } else {
             PaneEmptyState(
@@ -253,59 +223,6 @@ private struct PRFileDiffBody: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    private func load() async {
-        guard let patch, !patch.isEmpty else {
-            rows = []
-            document = nil
-            isLoading = false
-            return
-        }
-        let parsed = await GitService.parseDiffText(patch)
-        rows = parsed
-        rebuildDocument()
-        isLoading = false
-        await loadGapText()
-        await buildStyledLines(parsed)
-    }
-
-    /// The palette is baked into the document (opaque tints, mixed against the terminal
-    /// background), so an appearance flip needs a rebuild rather than re-resolving itself.
-    private func rebuildDocument() {
-        document = rows.isEmpty
-            ? nil
-            : DiffDocument.build(rows: rows, expansion: expansion,
-                                 palette: settings.diffPalette(for: colorScheme),
-                                 codeFont: settings.resolvedTerminalFont(),
-                                 lineSpacing: settings.codeLineSpacing(for: settings.resolvedTerminalFont()),
-                                 gapText: gapText)
-    }
-
-
-    /// One read per opened file, behind the diff so the patch renders immediately. A file
-    /// that comes back empty (binary, too large, no access) leaves `gapText` unavailable.
-    private func loadGapText() async {
-        guard gapText.isEmpty, let text = await fileText(change.path) else { return }
-        gapText = DiffGapText(fileLines: text.components(separatedBy: "\n"))
-        rebuildDocument()
-    }
-
-    private func buildStyledLines(_ rows: [DiffRow]) async {
-        let url = URL(fileURLWithPath: repoRoot).appendingPathComponent(change.path)
-        guard let language = FileEditorView.highlightLanguage(for: url) else { return }
-        let code = rows.filter { $0.kind != .hunk }
-        guard code.count <= 8000, code.reduce(0, { $0 + $1.text.count }) <= 600_000 else { return }
-
-        let styled = await DiffHighlighter.shared.styledLines(
-            newSide: code.filter { $0.kind == .context || $0.kind == .addition },
-            oldSide: code.filter { $0.kind == .context || $0.kind == .deletion },
-            language: language,
-            theme: colorScheme == .dark ? "xcode-dark" : "xcode",
-            font: settings.resolvedTerminalFont()
-        )
-        guard !Task.isCancelled else { return }
-        styledLines = styled.byRow
     }
 }
 

@@ -261,4 +261,20 @@ final class DiffIntralineSpanTests: XCTestCase {
         XCTAssertTrue(lines[1].emphasis.isEmpty)
         XCTAssertTrue(lines[2].emphasis.isEmpty)
     }
+
+    func testHunkHeadingIsTheSectionAfterTheRanges() {
+        XCTAssertEqual(DiffParser.hunkHeading("@@ -8,7 +8,7 @@ func reload() {"),
+                       "func reload() {")
+    }
+
+    func testHunkHeadingIsNilWhenGitOffersNone() {
+        XCTAssertNil(DiffParser.hunkHeading("@@ -8,7 +8,7 @@"))
+        XCTAssertNil(DiffParser.hunkHeading("@@ -8,7 +8,7 @@   "))
+    }
+
+    /// A heading can itself contain `@@` — an operator, a string, a comment.
+    func testHunkHeadingKeepsAtSignsInsideTheHeading() {
+        XCTAssertEqual(DiffParser.hunkHeading("@@ -1,2 +1,2 @@ let mark = \"@@\""),
+                       "let mark = \"@@\"")
+    }
 }

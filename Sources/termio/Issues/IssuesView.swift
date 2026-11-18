@@ -790,7 +790,7 @@ struct IssueDetailView: View {
             PRFilesSplitView(
                 files: model.prFiles, patches: model.prFilePatches,
                 fileText: { await model.prFileText($0) },
-                repoRoot: model.repoRoot, settings: settings, onClose: onBack
+                settings: settings, onClose: onBack
             )
         } else if model.prFilesLoading || (model.detail == nil && model.detailError == nil) {
             // The file list streams in behind the conversation (see `loadDetail`); show a

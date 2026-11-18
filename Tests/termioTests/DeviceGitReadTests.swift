@@ -136,3 +136,70 @@ final class DeviceGitReadTests: XCTestCase {
         XCTAssertNil(DiffSource.compareBase(of: "a..b"))
     }
 }
+
+/// Both sides of a file, read back out of a diff that carries the whole file as context. The
+/// diff page expands hidden lines from these, so a line dropped or a final newline invented
+/// here would show a file that does not exist.
+final class DiffFullTextTests: XCTestCase {
+    private func sides(_ patch: String) -> (old: String, new: String)? {
+        guard case .sides(let old, let new) = DiffFullText(fullContextPatch: patch) else { return nil }
+        return (old, new)
+    }
+
+    func testOneHunkYieldsBothFiles() {
+        let patch = """
+        diff --git a/a.txt b/a.txt
+        index 1111111..2222222 100644
+        --- a/a.txt
+        +++ b/a.txt
+        @@ -1,3 +1,3 @@
+         first
+        -old
+        +new
+         last
+
+        """
+        let result = sides(patch)
+        XCTAssertEqual(result?.old, "first\nold\nlast\n")
+        XCTAssertEqual(result?.new, "first\nnew\nlast\n")
+    }
+
+    /// The header's `---` and `+++` lines start with the same characters as a change.
+    func testHeaderLinesAreNotContent() {
+        let result = sides("--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n")
+        XCTAssertEqual(result?.old, "a\n")
+        XCTAssertEqual(result?.new, "b\n")
+    }
+
+    func testMissingFinalNewlineIsKeptPerSide() {
+        let patch = "@@ -1,2 +1,2 @@\n keep\n-old\n\\ No newline at end of file\n+new\n"
+        let result = sides(patch)
+        XCTAssertEqual(result?.old, "keep\nold")
+        XCTAssertEqual(result?.new, "keep\nnew\n")
+    }
+
+    func testMissingFinalNewlineOnAnUnchangedLineCoversBothSides() {
+        let result = sides("@@ -1,2 +1,2 @@\n-old\n+new\n last\n\\ No newline at end of file\n")
+        XCTAssertEqual(result?.old, "old\nlast")
+        XCTAssertEqual(result?.new, "new\nlast")
+    }
+
+    /// To a Swift string a CRLF is one character, so a split on "\\n" would miss every line end.
+    func testWindowsLineEndingsStayOnTheirLines() {
+        let result = sides("@@ -1,2 +1,2 @@\n keep\r\n-old\r\n+new\r\n")
+        XCTAssertEqual(result?.old, "keep\r\nold\r\n")
+        XCTAssertEqual(result?.new, "keep\r\nnew\r\n")
+    }
+
+    func testAddedFileHasAnEmptyOldSide() {
+        let result = sides("@@ -0,0 +1,2 @@\n+one\n+two\n")
+        XCTAssertEqual(result?.old, "")
+        XCTAssertEqual(result?.new, "one\ntwo\n")
+    }
+
+    /// Two hunks mean lines between them are missing, so neither file can be rebuilt.
+    func testSeveralHunksYieldNothing() {
+        XCTAssertNil(DiffFullText(fullContextPatch: "@@ -1 +1 @@\n-a\n+b\n@@ -9 +9 @@\n-c\n+d\n"))
+        XCTAssertNil(DiffFullText(fullContextPatch: "diff --git a/a b/a\n"))
+    }
+}
