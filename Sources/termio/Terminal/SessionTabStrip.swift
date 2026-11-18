@@ -130,6 +130,7 @@ struct SessionTabStrip: View {
         }
         .frame(height: WindowChrome.rowHeight)
         .background(WindowDragArea())
+        .glassTileTheme(store.settings)
     }
 
     /// Safari's tab drag: past a few points of travel the tab leaves its slot and follows the
@@ -349,12 +350,15 @@ struct GlassTile: View {
     /// corner or it reads as a square with nicked edges.
     var cornerRadius: CGFloat = 6
     @Environment(\.colorScheme) private var colorScheme
+    /// The theme's raised surface, when a terminal theme is picked. The sheen and
+    /// the rim are white over it, so the tile is glass of the theme's own colour.
+    @Environment(\.glassTileBase) private var themeBase
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         let dark = colorScheme == .dark
         shape
-            .fill(Color(nsColor: .windowBackgroundColor))
+            .fill(themeBase ?? Color(nsColor: .windowBackgroundColor))
             .overlay(
                 shape.fill(LinearGradient(
                     colors: [.white.opacity(dark ? 0.20 : 0.9), .white.opacity(dark ? 0.04 : 0.35)],
@@ -379,6 +383,34 @@ struct GlassTile: View {
             // A hard 1pt drop, not `.shadow`: a blurred shadow costs an offscreen pass per tile,
             // and the sidebar draws dozens of these while it scrolls.
             .background(shape.fill(Color.black.opacity(dark ? 0.35 : 0.12)).offset(y: 1))
+    }
+}
+
+private struct GlassTileBaseKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
+
+extension EnvironmentValues {
+    var glassTileBase: Color? {
+        get { self[GlassTileBaseKey.self] }
+        set { self[GlassTileBaseKey.self] = newValue }
+    }
+}
+
+/// Hands every `GlassTile` below it the theme's raised surface, and again when
+/// the theme or the appearance changes.
+private struct GlassTileTheme: ViewModifier {
+    @ObservedObject var settings: AppSettings
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content.environment(\.glassTileBase, settings.chromeTheme(for: colorScheme)?.raisedBackground)
+    }
+}
+
+extension View {
+    func glassTileTheme(_ settings: AppSettings) -> some View {
+        modifier(GlassTileTheme(settings: settings))
     }
 }
 

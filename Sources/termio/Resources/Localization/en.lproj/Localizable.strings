@@ -24,10 +24,6 @@
 	<string>%@ exited — shell</string>
 	<key>%@ has nothing to pair against</key>
 	<string>%@ has nothing to pair against</string>
-	<key>%@ is a dark theme in the %@ slot.</key>
-	<string>%@ is a dark theme in the %@ slot.</string>
-	<key>%@ is a light theme in the %@ slot.</key>
-	<string>%@ is a light theme in the %@ slot.</string>
 	<key>%@ is not an address the iPhone could dial.</key>
 	<string>%@ is not an address the iPhone could dial.</string>
 	<key>%@ is published, but the connection an iPhone would make was refused.
@@ -68,8 +64,6 @@
 %@</string>
 	<key>%@ stays published only until you log out of it. Termio couldn’t set it to keep services running after that.</key>
 	<string>%@ stays published only until you log out of it. Termio couldn’t set it to keep services running after that.</string>
-	<key>%@ theme</key>
-	<string>%@ theme</string>
 	<key>%@ — %@.</key>
 	<string>%@ — %@.</string>
 	<key>%@ — %@. Couldn’t update %@.</key>
@@ -92,8 +86,6 @@
 	<string>%lld of %lld</string>
 	<key>%lld pt</key>
 	<string>%lld pt</string>
-	<key>%lld results</key>
-	<string>%lld results</string>
 	<key>%lld%@ matches in %lld files</key>
 	<string>%lld%@ matches in %lld files</string>
 	<key>%lldd</key>
@@ -104,8 +96,6 @@
 	<string>%lldm</string>
 	<key>%lldw</key>
 	<string>%lldw</string>
-	<key>1 result</key>
-	<string>1 result</string>
 	<key>9:41</key>
 	<string>9:41</string>
 	<key>9:41, Full Signal and Battery</key>
@@ -234,6 +224,8 @@
 	<string>Auth failed</string>
 	<key>Available when Termio runs from the built app bundle.</key>
 	<string>Available when Termio runs from the built app bundle.</string>
+	<key>Back</key>
+	<string>Back</string>
 	<key>Back (⌘[)</key>
 	<string>Back (⌘[)</string>
 	<key>Bar</key>
@@ -264,8 +256,6 @@
 	<string>Bring All to Front</string>
 	<key>Built-In Tailscale</key>
 	<string>Built-In Tailscale</string>
-	<key>Built-in</key>
-	<string>Built-in</string>
 	<key>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.</key>
 	<string>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.</string>
 	<key>Cancel</key>
@@ -530,6 +520,8 @@
 	<string>Custom</string>
 	<key>Custom Agent…</key>
 	<string>Custom Agent…</string>
+	<key>Custom themes</key>
+	<string>Custom themes</string>
 	<key>Custom…</key>
 	<string>Custom…</string>
 	<key>Cut</key>
@@ -684,10 +676,10 @@
 	<string>Font</string>
 	<key>Font name</key>
 	<string>Font name</string>
+	<key>Forward</key>
+	<string>Forward</string>
 	<key>Forward (⌘])</key>
 	<string>Forward (⌘])</string>
-	<key>From your Ghostty config</key>
-	<string>From your Ghostty config</string>
 	<key>From your session history</key>
 	<string>From your session history</string>
 	<key>General</key>
@@ -862,8 +854,6 @@
 	<string>Machines</string>
 	<key>Machines signed in to Tailscale. Choose one to fill in its address.</key>
 	<string>Machines signed in to Tailscale. Choose one to fill in its address.</string>
-	<key>Manage</key>
-	<string>Manage</string>
 	<key>Match Case</key>
 	<string>Match Case</string>
 	<key>Match Whole Word</key>
@@ -1036,8 +1026,6 @@
 	<string>No simulator is booted. Boot one with `xcrun simctl boot &lt;device&gt;`, or pick one in the Simulator pane.</string>
 	<key>No textual changes to show.</key>
 	<string>No textual changes to show.</string>
-	<key>No theme matches “%@”</key>
-	<string>No theme matches “%@”</string>
 	<key>No tunnel selected.</key>
 	<string>No tunnel selected.</string>
 	<key>Nobody: a tagged device has no owner</key>
@@ -1422,8 +1410,6 @@
 	<string>Search Project</string>
 	<key>Search commands</key>
 	<string>Search commands</string>
-	<key>Search themes</key>
-	<string>Search themes</string>
 	<key>Search themes…</key>
 	<string>Search themes…</string>
 	<key>Searching…</key>
@@ -1940,8 +1926,6 @@
 	<string>Your Host entries from ~/.ssh/config — the same aliases `ssh` resolves. Right-click a host to connect.</string>
 	<key>Your iPhone must be on the same network as this Mac.</key>
 	<string>Your iPhone must be on the same network as this Mac.</string>
-	<key>Your themes</key>
-	<string>Your themes</string>
 	<key>Zoom</key>
 	<string>Zoom</string>
 	<key>Zoom In</key>

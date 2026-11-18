@@ -142,7 +142,7 @@ struct WorkspaceSwitcherToolbarView: View {
                              lineWidthOverride: ChromeGlyph.lineWidth(base: ChromeGlyph.prominentSize))
                 .padding(.horizontal, Self.chipInset)
                 .frame(height: ChromeGlyph.prominentFrame.height)
-                .modifier(ChromeGlass(isVisible: true))
+                .background(SelectionGlass(shape: Capsule(style: .continuous)))
                 .overlay(Capsule(style: .continuous).fill(Color.primary.opacity(isHighlighted ? 0.08 : 0)))
                 .padding(.leading, -Self.chipInset)
                 .overlay(WorkspaceMenuPopper(store: store, highlighted: $isHighlighted))
@@ -171,7 +171,10 @@ struct WorkspaceSwitcherToolbarView: View {
                 .padding(.horizontal, Self.chipInset)
                 .frame(height: ChromeGlyph.prominentFrame.height)
                 // Always on: this is the one thing that says the word is a control.
-                .modifier(ChromeGlass(isVisible: true))
+                // `SelectionGlass`, not the system glass: that one floats on a drop
+                // shadow, and the toolbar item cut the shadow off in a straight line
+                // beside the capsule.
+                .background(SelectionGlass(shape: Capsule(style: .continuous)))
                 .overlay(Capsule(style: .continuous).fill(Color.primary.opacity(isHighlighted ? 0.08 : 0)))
                 // The leading inset given back, so the capsule fills the gap beside the toggle
                 // rather than pushing the name away from it: the two read as one band.

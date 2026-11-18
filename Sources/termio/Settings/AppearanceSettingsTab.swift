@@ -5,8 +5,8 @@ struct AppearanceSettingsTab: View {
     @ObservedObject var settings: AppSettings
 
     /// Names of the user's own theme files, loaded from termio's `Themes` folder.
-    /// Held in state so dropping in (or editing) a file and hitting Reload — or just
-    /// reopening this tab — refreshes the pickers without a relaunch.
+    /// Held in state so dropping in (or editing) a file refreshes the theme rows
+    /// without a relaunch.
     @State private var userThemeNames: [String] = ThemeLibrary.userThemeNames
     @State private var themesFolderError: String?
     @Environment(\.colorScheme) private var colorScheme
@@ -23,8 +23,9 @@ struct AppearanceSettingsTab: View {
 
     var body: some View {
         Form {
-            // One big picture on the page, the themes: they are the only choice
-            // here that has to be seen to be judged. Everything else is a word.
+            // One card for how the terminal is painted: the mode as a word, then
+            // each slot's themes as pictures, because a theme has to be seen to
+            // be judged. Every row starts on the card's one leading edge.
             Section {
                 LabeledContent(localized("Appearance")) {
                     Picker(localized("Appearance"), selection: $settings.appearanceMode) {
@@ -32,19 +33,19 @@ struct AppearanceSettingsTab: View {
                     }
                     .segmentedChoice()
                 }
-            }
-            Section {
-                HStack(alignment: .top, spacing: 16) {
-                    ThemePickerField(
-                        title: localized("Light"), prefersDark: false, selection: $settings.lightThemeName,
-                        userThemeNames: userThemeNames, onDuplicate: duplicate,
-                        onOpenFolder: openThemesFolder, onReload: reloadUserThemes, isActive: !showsDark)
-                    ThemePickerField(
-                        title: localized("Dark"), prefersDark: true, selection: $settings.darkThemeName,
-                        userThemeNames: userThemeNames, onDuplicate: duplicate,
-                        onOpenFolder: openThemesFolder, onReload: reloadUserThemes, isActive: showsDark)
+                ThemeStrip(
+                    title: localized("Light"), prefersDark: false, selection: $settings.lightThemeName,
+                    userThemeNames: userThemeNames, onDuplicate: duplicate, isActive: !showsDark)
+                ThemeStrip(
+                    title: localized("Dark"), prefersDark: true, selection: $settings.darkThemeName,
+                    userThemeNames: userThemeNames, onDuplicate: duplicate, isActive: showsDark)
+                LabeledContent {
+                    Button(localized("Open Themes Folder…"), action: openThemesFolder)
+                } label: {
+                    SettingsLabel(
+                        title: localized("Custom themes"),
+                        subtext: localized("Drop a Ghostty theme file into the Themes folder to add your own."))
                 }
-                .padding(.vertical, 4)
             } header: {
                 SectionHeaderLabel(title: localized("Theme"))
             }
@@ -61,21 +62,15 @@ struct AppearanceSettingsTab: View {
                     families: InstalledFonts.all,
                     previewSize: settings.interfaceFontSize,
                     monospacedDefault: false,
+                    showsSample: false,
                     family: $settings.interfaceFontFamily
                 )
                 SettingsStepper(
                     title: localized("Sidebar text size"), value: $settings.interfaceFontSize, range: 9...20, step: 1,
                     display: localized("\(Int(settings.interfaceFontSize)) pt"))
-                LabeledContent(localized("Sidebar row spacing")) {
-                    HStack(spacing: 8) {
-                        Slider(value: $settings.interfaceRowPadding, in: 0...12, step: 1)
-                            .frame(width: 160)
-                        Text(localized("\(Int(settings.interfaceRowPadding)) pt"))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .frame(width: 40, alignment: .trailing)
-                    }
-                }
+                SettingsStepper(
+                    title: localized("Sidebar row spacing"), value: $settings.interfaceRowPadding, range: 0...12, step: 1,
+                    display: localized("\(Int(settings.interfaceRowPadding)) pt"))
             } header: {
                 SectionHeaderLabel(title: localized("Layout"))
             }
@@ -94,6 +89,11 @@ struct AppearanceSettingsTab: View {
         }
         .formStyle(.grouped)
         .onAppear(perform: reloadUserThemes)
+        // A file dropped into the Themes folder shows up when the user comes back
+        // from the Finder, so there is no Reload to press.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            reloadUserThemes()
+        }
         .alert(
             localized("Couldn’t change the Themes folder"),
             isPresented: Binding(get: { themesFolderError != nil }, set: { if !$0 { themesFolderError = nil } }),

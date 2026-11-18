@@ -24,10 +24,6 @@
 	<string>%@ 已退出——已回到 shell</string>
 	<key>%@ has nothing to pair against</key>
 	<string>%@ 上没有可配对的目标</string>
-	<key>%@ is a dark theme in the %@ slot.</key>
-	<string>“%@”是深色主题，与“%@”插槽不匹配。</string>
-	<key>%@ is a light theme in the %@ slot.</key>
-	<string>“%@”是浅色主题，与“%@”插槽不匹配。</string>
 	<key>%@ is not an address the iPhone could dial.</key>
 	<string>%@ 不是 iPhone 能拨通的地址。</string>
 	<key>%@ is published, but the connection an iPhone would make was refused.
@@ -68,8 +64,6 @@
 %3$@</string>
 	<key>%@ stays published only until you log out of it. Termio couldn’t set it to keep services running after that.</key>
 	<string>%@ 只在你登录期间保持发布。Termio 无法让它在登出后继续运行服务。</string>
-	<key>%@ theme</key>
-	<string>%@主题</string>
 	<key>%@ — %@.</key>
 	<string>%@ — %@。</string>
 	<key>%@ — %@. Couldn’t update %@.</key>
@@ -92,8 +86,6 @@
 	<string>第 %lld 项（共 %lld 项）</string>
 	<key>%lld pt</key>
 	<string>%lld 点</string>
-	<key>%lld results</key>
-	<string>%lld 个结果</string>
 	<key>%lld%@ matches in %lld files</key>
 	<string>在 %3$lld 个文件中找到 %1$lld%2$@ 个匹配项</string>
 	<key>%lldd</key>
@@ -104,8 +96,6 @@
 	<string>%lld 分钟</string>
 	<key>%lldw</key>
 	<string>%lld 周</string>
-	<key>1 result</key>
-	<string>1 个结果</string>
 	<key>9:41</key>
 	<string>9:41</string>
 	<key>9:41, Full Signal and Battery</key>
@@ -234,6 +224,8 @@
 	<string>认证失败</string>
 	<key>Available when Termio runs from the built app bundle.</key>
 	<string>仅当 Termio 从构建的应用包运行时可用。</string>
+	<key>Back</key>
+	<string>后退</string>
 	<key>Back (⌘[)</key>
 	<string>后退 (⌘[)</string>
 	<key>Bar</key>
@@ -264,8 +256,6 @@
 	<string>前置全部窗口</string>
 	<key>Built-In Tailscale</key>
 	<string>内置 Tailscale</string>
-	<key>Built-in</key>
-	<string>内置</string>
 	<key>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.</key>
 	<string>内置 Tailscale 尚未连接。请在“设置 ▸ Termio server ▸ 网络”中完成登录。</string>
 	<key>Cancel</key>
@@ -530,6 +520,8 @@
 	<string>自定义</string>
 	<key>Custom Agent…</key>
 	<string>自定义 Agent…</string>
+	<key>Custom themes</key>
+	<string>自定义主题</string>
 	<key>Custom…</key>
 	<string>自定…</string>
 	<key>Cut</key>
@@ -684,10 +676,10 @@
 	<string>字体</string>
 	<key>Font name</key>
 	<string>字体名称</string>
+	<key>Forward</key>
+	<string>前进</string>
 	<key>Forward (⌘])</key>
 	<string>前进 (⌘])</string>
-	<key>From your Ghostty config</key>
-	<string>来自 Ghostty 配置</string>
 	<key>From your session history</key>
 	<string>来自你的会话历史</string>
 	<key>General</key>
@@ -862,8 +854,6 @@
 	<string>设备</string>
 	<key>Machines signed in to Tailscale. Choose one to fill in its address.</key>
 	<string>已登录 Tailscale 的机器。选择一台即可填入它的地址。</string>
-	<key>Manage</key>
-	<string>管理</string>
 	<key>Match Case</key>
 	<string>区分大小写</string>
 	<key>Match Whole Word</key>
@@ -1036,8 +1026,6 @@
 	<string>没有已启动的模拟器。请用 `xcrun simctl boot &lt;device&gt;` 启动一台，或在模拟器窗格中选取一台。</string>
 	<key>No textual changes to show.</key>
 	<string>没有可显示的文本更改。</string>
-	<key>No theme matches “%@”</key>
-	<string>没有主题与“%@”匹配</string>
 	<key>No tunnel selected.</key>
 	<string>尚未选择隧道。</string>
 	<key>Nobody: a tagged device has no owner</key>
@@ -1422,8 +1410,6 @@
 	<string>搜索项目</string>
 	<key>Search commands</key>
 	<string>搜索命令</string>
-	<key>Search themes</key>
-	<string>搜索主题</string>
 	<key>Search themes…</key>
 	<string>搜索主题…</string>
 	<key>Searching…</key>
@@ -1940,8 +1926,6 @@
 	<string>来自 ~/.ssh/config 的 Host 条目，与 `ssh` 解析的别名一致。右键点按主机即可连接。</string>
 	<key>Your iPhone must be on the same network as this Mac.</key>
 	<string>iPhone 须与这台 Mac 处于同一网络。</string>
-	<key>Your themes</key>
-	<string>你的主题</string>
 	<key>Zoom</key>
 	<string>缩放</string>
 	<key>Zoom In</key>

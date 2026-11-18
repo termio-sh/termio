@@ -47,7 +47,7 @@ struct WorkspaceSettingsTab: View {
         }
         .formStyle(.grouped)
         .navigationDestination(for: WorkspaceRoute.self) { route in
-            WorkspacePane(store: store, id: route.id)
+            WorkspacePane(store: store, id: route.id).navigationBarBackButtonHidden()
         }
     }
 

@@ -89,6 +89,7 @@ struct DevicePane: View {
         .formStyle(.grouped)
         .navigationDestination(for: MachineAgentsRoute.self) { _ in
             MachineAgentsPane(machine: machine, settings: settings, model: model)
+                .navigationBarBackButtonHidden()
         }
         // On the Form, not the Pairing section: the section is the last row of a
         // lazy list, and the menu bar's Pair iPhone… must open the sheet before
