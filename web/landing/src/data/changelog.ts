@@ -17,6 +17,27 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.76.0",
+    date: "2026-11-17",
+    title: "Pick a theme by looking at it",
+    changes: {
+      new: [
+        "Settings: Appearance shows every theme as a tile in its own colors. Click one to use it.",
+        "Settings: Back and Forward buttons in the header, with ⌘[ and ⌘].",
+        "Files: open a `.excalidraw` file and see the drawing. Zoom it, and open the links it holds.",
+      ],
+      improved: [
+        "Settings: the window follows your theme, and so do the icon tiles in the sidebar.",
+        "Themes: the sidebar and muted text keep a steady contrast across every built-in theme.",
+        "Files, Changes and the other panes open beside the terminal from the pane header again, in place of cards.",
+      ],
+      fixed: [
+        "The Sessions switch in the sidebar no longer shows a cut-off shadow.",
+        "A new session takes its size from the pane that replaced its first view.",
+      ],
+    },
+  },
+  {
     version: "0.75.0",
     date: "2026-11-16",
     title: "Files, changes and issues open as cards",
