@@ -112,6 +112,17 @@ final class ExcalidrawFileTests: XCTestCase {
         XCTAssertTrue(page.contains("img-src data:;"))
     }
 
+    /// A link on a shape goes to the browser only when it is a web link.
+    func testOnlyWebLinksOpen() {
+        let open = ExcalidrawWebView.Coordinator.externalLink
+        XCTAssertEqual(open(URL(string: "https://example.com/a"))?.host, "example.com")
+        XCTAssertNotNil(open(URL(string: "HTTP://example.com")))
+        XCTAssertNil(open(URL(string: "file:///etc/passwd")))
+        XCTAssertNil(open(URL(string: "termio://session/1")))
+        XCTAssertNil(open(URL(string: "about:blank")))
+        XCTAssertNil(open(nil))
+    }
+
     /// A label is free text. Words that look like script are a drawing when they sit in a
     /// text element, and are refused when they sit in markup.
     func testInertnessReadsMarkupNotLabels() {

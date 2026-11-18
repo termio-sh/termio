@@ -78,11 +78,11 @@ struct ExcalidrawReaderView: View {
 /// A `WKWebView` host for the rendered drawing. Deliberately thinner than the Markdown
 /// reader's: the page is one self-contained SVG, so there are no local files to resolve
 /// through a scheme handler. A drawing is somebody else's file, so the page runs no
-/// script and goes nowhere: a link on a shape is refused, not followed.
+/// script and goes nowhere: a web link on a shape opens in the browser instead.
 ///
 /// It also never claims first responder, unlike the Markdown reader. There is nothing here
 /// to select or copy, and taking focus would swallow the Escape that closes the overlay.
-private struct ExcalidrawWebView: NSViewRepresentable {
+struct ExcalidrawWebView: NSViewRepresentable {
     let html: String
     var isActive: Bool
 
@@ -91,6 +91,9 @@ private struct ExcalidrawWebView: NSViewRepresentable {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
+        // A drawing is fit to the pane, and a large one is then too small to read. Pinch
+        // zooms in and scrolling pans, with no script in the page.
+        view.allowsMagnification = true
         // Cleared so the terminal background shows through until the themed page paints,
         // rather than a white flash.
         view.setValue(false, forKey: "drawsBackground")
@@ -120,6 +123,19 @@ private struct ExcalidrawWebView: NSViewRepresentable {
             let isOwnPage = navigationAction.navigationType == .other
                 && navigationAction.request.url?.absoluteString == "about:blank"
             decisionHandler(isOwnPage ? .allow : .cancel)
+            if navigationAction.navigationType == .linkActivated,
+               let link = Self.externalLink(navigationAction.request.url) {
+                NSWorkspace.shared.open(link)
+            }
+        }
+
+        /// A link on a shape opens in the browser, never in this view. Only web links: a
+        /// drawing is somebody else's file and does not get to open a local path or an
+        /// app's URL scheme.
+        static func externalLink(_ url: URL?) -> URL? {
+            guard let url, let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https", url.host != nil else { return nil }
+            return url
         }
 
         /// The policy above refuses the reload WebKit would make by itself after the page's
