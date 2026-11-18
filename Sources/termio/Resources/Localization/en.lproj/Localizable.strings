@@ -998,6 +998,8 @@
 	<string>No contents</string>
 	<key>No description provided.</key>
 	<string>No description provided.</string>
+	<key>No drawing in this file.</key>
+	<string>No drawing in this file.</string>
 	<key>No element there.</key>
 	<string>No element there.</string>
 	<key>No file changes</key>
@@ -1758,6 +1760,8 @@
 	<string>This device’s termiod is too old to report its agents.</string>
 	<key>This diff is too large to show here — open the file on GitHub.</key>
 	<string>This diff is too large to show here — open the file on GitHub.</string>
+	<key>This drawing is empty.</key>
+	<string>This drawing is empty.</string>
 	<key>This file is binary — open it on GitHub to view.</key>
 	<string>This file is binary — open it on GitHub to view.</string>
 	<key>This folder has no git “origin” remote to clone.</key>
