@@ -574,6 +574,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         openSettings(initialTab: .server)
     }
 
+    private static let settingsMinSize = NSSize(width: 720, height: 540)
+    private static let settingsMaxSize = NSSize(width: 900, height: 750)
+
     /// Opens (or refocuses) the preferences window on a specific tab. The content
     /// view is rebuilt each call so the requested tab takes effect even when the
     /// window is reused — harmless because every control binds straight to
@@ -602,8 +605,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // A bounded window, like System Settings: the pages are columns of
             // rows, and past this size a row is a label and a control with an
             // empty stretch between them.
-            let minSize = NSSize(width: 720, height: 540)
-            let maxSize = NSSize(width: 900, height: 750)
+            let minSize = Self.settingsMinSize
+            let maxSize = Self.settingsMaxSize
             window.minSize = minSize
             window.contentMinSize = minSize
             window.maxSize = maxSize
@@ -625,9 +628,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.backgroundColor = settings.terminalBackgroundColor
             settingsWindow = window
         }
-        // `.frame(minWidth:minHeight:)` on the root: NSHostingView forwards the
-        // SwiftUI tree's small intrinsic minimum up into contentMinSize, which
-        // would otherwise let the window shrink below the size set above.
+        // The same bounds on the root: NSHostingView writes the SwiftUI tree's
+        // minimum and maximum into the window's content limits, replacing the
+        // ones set above.
         settingsWindow?.contentView = NSHostingView(rootView: SettingsView(
             settings: settings,
             store: store,
@@ -646,7 +649,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 // password prompt waiting to be answered.
                 self.revealSelection()
             }
-        ).frame(minWidth: 640, minHeight: 480))
+        ).frame(minWidth: Self.settingsMinSize.width, maxWidth: Self.settingsMaxSize.width,
+                 minHeight: Self.settingsMinSize.height, maxHeight: Self.settingsMaxSize.height))
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
