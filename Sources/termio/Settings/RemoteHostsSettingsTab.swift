@@ -124,6 +124,7 @@ struct RemoteHostsSettingsTab: View {
                 )
                 .id(route.key)
                 .navigationTitle(machine.name)
+                .navigationBarBackButtonHidden()
             } else {
                 // The alias left `~/.ssh/config` while its pane was open.
                 ContentUnavailableView {
@@ -131,6 +132,7 @@ struct RemoteHostsSettingsTab: View {
                 } description: {
                     Text(localized("This host is no longer in your configuration."))
                 }
+                .navigationBarBackButtonHidden()
             }
         }
         .onAppear(perform: reload)

@@ -66,11 +66,26 @@ final class PaneDragRearrange {
     static let handleSize = CGSize(width: 80, height: 12)
 
     /// The handle's rect in a card of `size`, top-left origin — the space both
-    /// this hit test and `TerminalPane`'s overlay work in.
-    static func handleRect(in size: CGSize) -> CGRect {
-        CGRect(x: (size.width - handleSize.width) / 2,
-               y: (PaneCard.headerHeight - handleSize.height) / 2,
-               width: handleSize.width, height: handleSize.height)
+    /// this hit test and `TerminalPane`'s overlay work in. Centred, but only in the header's
+    /// free run between the leading close and the trailing buttons: on a narrow card, or one
+    /// notched for the window's controls, a full-width handle would sit under a control and
+    /// take its press. It narrows to fit, and a run too short for a grip has none.
+    static func handleRect(in size: CGSize, notchWidth: CGFloat, controlsMinX: CGFloat?) -> CGRect? {
+        let start = PaneCard.closeSlotEnd(notchWidth: notchWidth)
+        let end = controlsMinX ?? size.width
+        let width = min(handleSize.width, end - start)
+        guard width >= minimumHandleWidth else { return nil }
+        let x = min(max((size.width - width) / 2, start), end - width)
+        return CGRect(x: x, y: (PaneCard.headerHeight - handleSize.height) / 2,
+                      width: width, height: handleSize.height)
+    }
+
+    private static let minimumHandleWidth: CGFloat = 24
+
+    private func isOnHandle(_ hit: PaneHit) -> Bool {
+        let geometry = PaneCardGeometry.shared
+        return Self.handleRect(in: hit.size, notchWidth: geometry.notchWidth(hit.id),
+                               controlsMinX: geometry.controlsMinX(hit.id))?.contains(hit.point) ?? false
     }
 
     /// The header reveals the handle.
@@ -120,8 +135,7 @@ final class PaneDragRearrange {
         guard !dragging, let hit = rearrangeablePane(under: event),
               Self.isInHoverRegion(hit.point, in: hit.size)
         else { return setHover(nil) }
-        setHover(PaneHandleHover(pane: hit.id,
-                                 overHandle: Self.handleRect(in: hit.size).contains(hit.point)))
+        setHover(PaneHandleHover(pane: hit.id, overHandle: isOnHandle(hit)))
     }
 
     /// Takes down a sidebar-drag cue that outlived its drag.
@@ -162,7 +176,7 @@ final class PaneDragRearrange {
         // arriving, leaving the border on the card the user had just left. Not consumed:
         // the press still reaches the terminal.
         if store.selectedSessionID != hit.id { store.selectedSessionID = hit.id }
-        guard Self.handleRect(in: hit.size).contains(hit.point),
+        guard isOnHandle(hit),
               let contentView = event.window?.contentView
         else { return false }
         dragging = true
@@ -170,7 +184,7 @@ final class PaneDragRearrange {
         // Snapshot before anything moves, the way ghostty builds its drag image.
         // A surface that won't cache leaves this nil and the drag runs without a
         // preview rather than showing a blank card.
-        store.paneDragPreview = terminalView(for: hit.id, in: contentView)?.paneSnapshot
+        store.paneDragPreview = surface(for: hit.id, in: contentView)?.paneSnapshot
         store.paneDrag = PaneDragState(source: hit.id,
                                        pointer: PanePointer(pane: hit.id, local: hit.point))
         // The overlay washes translucently over live surfaces, which have to
@@ -252,7 +266,7 @@ final class PaneDragRearrange {
         guard let store, store.splitRoot != nil, !store.isPaneZoomed,
               !(store.isDetailPresented && store.inspectorMaximized),
               let window = event.window, window.isKeyWindow,
-              window.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName,
+              MainWindowController.isMain(window),
               let contentView = window.contentView
         else { return nil }
         return paneGeometry(at: event.locationInWindow, in: contentView, window: window)
@@ -273,9 +287,8 @@ final class PaneDragRearrange {
         // A press on a panel laid over a card's terminal is the panel's, not the pane's.
         if InspectorPanelHost.shared.contains(point, in: window, store: store) { return nil }
         let geometry = PaneCardGeometry.shared
-        for view in terminalViews(in: contentView) {
+        for (view, id) in surfaces(in: contentView) {
             guard view.window === window,
-                  let id = sessionID(for: view),
                   store.visiblePaneIDs.contains(id) else { continue }
             // The surface sits inside its card: under the header, inside the border, and before
             // any panel beside it. Window space is bottom-left-origin, so the header is above `maxY`.
@@ -295,20 +308,22 @@ final class PaneDragRearrange {
         return nil
     }
 
-    private func terminalView(for id: Session.ID, in root: NSView) -> TerminalView? {
-        terminalViews(in: root).first { sessionID(for: $0) == id }
+    private func surface(for id: Session.ID, in root: NSView) -> NSView? {
+        surfaces(in: root).first { $0.id == id }?.view
     }
 
-    // The two resolution helpers below mirror `TerminalContextMenu`'s private
-    // copies — small enough that sharing them isn't worth coupling the two
-    // interceptors.
-
-    /// All terminal surface views under `root`, in tree order.
-    private func terminalViews(in root: NSView) -> [TerminalView] {
-        var found: [TerminalView] = []
+    /// Every pane surface under `root` with its session, in tree order: the embedded
+    /// Ghostty surface, and the stream pane that termiod sessions draw in by default.
+    /// Looking for the embedded kind alone left a stream pane with no handle to drag.
+    private func surfaces(in root: NSView) -> [(view: NSView, id: Session.ID)] {
+        var found: [(view: NSView, id: Session.ID)] = []
         var stack: [NSView] = [root]
         while let view = stack.popLast() {
-            if let terminal = view as? TerminalView { found.append(terminal) }
+            if let stream = view as? TermiodStreamView, let id = stream.sessionID {
+                found.append((stream, id))
+            } else if let terminal = view as? TerminalView, let id = sessionID(for: terminal) {
+                found.append((terminal, id))
+            }
             stack.append(contentsOf: view.subviews)
         }
         return found
@@ -316,6 +331,7 @@ final class PaneDragRearrange {
 
     /// Maps a surface view back to its session through the store's surface
     /// cache — the view and its cached `TerminalViewState` share a controller.
+    /// Mirrors `TerminalContextMenu`'s private copy.
     private func sessionID(for view: TerminalView) -> Session.ID? {
         store?.surfaces.first { $0.value.controller === view.controller }?.key
     }
@@ -326,8 +342,12 @@ private extension NSView {
     /// (`SurfaceView.asImage`). Nil for an empty or uncacheable view, so callers
     /// degrade to no preview.
     var paneSnapshot: NSImage? {
-        guard bounds.width > 1, bounds.height > 1,
-              let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
+        guard bounds.width > 1, bounds.height > 1 else { return nil }
+        // A stream pane draws into a Metal layer, which `cacheDisplay` cannot read.
+        if let stream = self as? TermiodStreamView {
+            return stream.screenImage().map { NSImage(cgImage: $0, size: bounds.size) }
+        }
+        guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
         cacheDisplay(in: bounds, to: rep)
         let image = NSImage(size: bounds.size)
         image.addRepresentation(rep)

@@ -141,10 +141,9 @@ struct SectionHeaderLabel: View {
 
     var body: some View {
         Text(title)
-            .font(.headline)
+            .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(.primary)
             .textCase(nil)
-            .padding(.bottom, 2)
     }
 }
 
@@ -208,7 +207,7 @@ struct SettingsStepper<Value: Strideable>: View {
                     .foregroundStyle(.secondary)
                 Stepper(title, value: $value, in: range, step: step)
                     .labelsHidden()
-                    .controlSize(.small)
+                    .fixedSize()
             }
         }
     }
@@ -465,6 +464,10 @@ struct FontFamilyField: View {
     /// Whether the default (empty value) is the system *monospaced* font. Drives
     /// which face the preview falls back to so it matches the real default.
     let monospacedDefault: Bool
+    /// Off where the font's own target shows the change as it is made: the
+    /// app's sidebar redraws in the chosen font, so a sample line under the
+    /// picker says it twice.
+    var showsSample = true
     @Binding var family: String
 
     /// Set when the user picks "Custom…" so the text field stays open even while
@@ -540,11 +543,13 @@ struct FontFamilyField: View {
                     .padding(.top, 4)
                     .padding(.bottom, 2)
             }
-            Text(Self.sample)
-                .font(Font(preview.font))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundStyle(preview.isFallback ? .tertiary : .secondary)
+            if showsSample {
+                Text(Self.sample)
+                    .font(Font(preview.font))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(preview.isFallback ? .tertiary : .secondary)
+            }
             if preview.isFallback {
                 Text(localized("“\(family)” isn’t installed — showing the system default."))
                     .font(.settingsDetail)

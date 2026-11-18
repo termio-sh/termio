@@ -54,7 +54,7 @@ final class TerminalContextMenu: NSObject {
     private func intercept(_ event: NSEvent) -> Bool {
         guard let store,
               let window = event.window,
-              window.frameAutosaveName == AppDelegate.mainWindowFrameAutosaveName,
+              window === MainWindowController.active?.window,
               let contentView = window.contentView,
               // Details (editor, diff, trace, PR/issue) open in the right inspector now, so the
               // terminal is always fully visible and owns its right-clicks — except when a detail

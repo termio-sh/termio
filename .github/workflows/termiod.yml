@@ -105,7 +105,7 @@ jobs:
 
       # target/ is deliberately not cached: the Zig build stages a full ghostty
       # clone and a ReleaseFast archive per target, which runs to gigabytes.
-      # Caching the registry and the git checkout of the libghostty-rs fork is
+      # Caching the registry and the git checkout of libghostty-rs is
       # the cheap half; rebuilding the engine every run is the point.
       - name: Cache cargo downloads
         uses: actions/cache@v6

@@ -28,7 +28,7 @@ final class DiffPaneInteractionTests: XCTestCase {
 
     private func pane(document: DiffDocument, side: DiffPaneScrollSync.Side) -> DiffTextPane.PaneViews {
         let views = DiffTextPane.makeViews(
-            wraps: false, embedded: false, showsVerticalScroller: true,
+            wraps: false, showsVerticalScroller: true,
             backgroundColor: .black, numberColor: .gray, font: font)
         views.textView.frame = NSRect(x: 0, y: 0, width: 300, height: 4000)
         // The pane's coordinator does this in `apply`; the hit-test and the washes both read the

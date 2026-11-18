@@ -38,6 +38,13 @@ const ROOT_TEMPLATE: &str = "\
 {about-with-newline}
 {usage-heading} {usage}
 
+Common:
+  session list        List this project's sessions and their status
+  session spawn       Start a new agent session on a prompt
+  session send        Type text into a session, then press Return
+  session read        Print a session's screen
+  session attach      Attach this terminal to a session
+
 Sessions:
   session     List, start, drive and close sessions [alias: sessions]
   agent       Report an agent's status; install or remove agent hooks
@@ -46,6 +53,7 @@ Sessions:
 
 Machines:
   server      A machine's termiod: status, logs, deploy, service, Tailscale
+  update      Update this machine's termio to the newest release
   pair        Print the link that pairs a phone or a browser
   view        This machine's projects and how their sessions are grouped
 
@@ -69,7 +77,8 @@ Examples:
   termio session spawn \"fix the failing test\" --agent codex
   termio session send 8de0b387 \"run the tests\" --wait
   termio -H mybox session ls
-  termio -H mybox server deploy";
+  termio -H mybox server deploy
+  termio -H mybox update";
 
 #[derive(Parser)]
 #[command(
@@ -148,6 +157,15 @@ enum Verb {
     /// This machine's by default; `termio -H <host> server …` acts on another.
     /// Sessions are `termio session`'s.
     Server(termiod::server::ServerArgs),
+
+    /// Update this machine's termio to the newest release.
+    ///
+    /// On Linux: downloads termiod, termio and termio-tailnet for this CPU,
+    /// checks each against the release's SHA256SUMS, puts them in place, and
+    /// hands the running daemon off to the new build, so its sessions keep
+    /// running. `termio -H <host> update` updates another machine. On a Mac,
+    /// termio updates with the app.
+    Update(termiod::update::UpdateArgs),
 
     /// Bridge the framed protocol over stdin/stdout to the local daemon.
     ///
@@ -1006,6 +1024,7 @@ async fn main() -> Result<()> {
         }
         Some(Verb::Pair(args)) => termiod::server::pair(args),
         Some(Verb::Server(args)) => termiod::server::run(args, None).await,
+        Some(Verb::Update(args)) => termiod::update::run(args).await,
         Some(Verb::Stdio) => termiod::client::stdio().await,
         Some(Verb::Agent { verb }) => match verb {
             AgentVerb::Report(args) => agent_report(args).await,

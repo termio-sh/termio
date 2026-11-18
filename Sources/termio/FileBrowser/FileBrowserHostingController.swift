@@ -157,18 +157,25 @@ final class InspectorPanelHost {
 /// scroll — but *hidden*, not merely transparent: a transparent view still takes Finder drops
 /// over the terminal it sits on, and an editor inside it keeps the keyboard and keeps saving
 /// what is typed. A hidden view takes neither, and hiding it hands its first responder on.
-struct InspectorPanelView: NSViewControllerRepresentable {
+///
+/// Each main window's active pane area mounts its own empty container and moves the one
+/// inspector view into it. The view is never handed to SwiftUI directly: a window going
+/// inactive tears its container down, and doing that to the shared view itself would pull
+/// it out of the window that just took it.
+struct InspectorPanelView: NSViewRepresentable {
     let isShown: Bool
 
-    func makeNSViewController(context: Context) -> NSViewController {
-        if let controller = InspectorPanelHost.shared.controller { return controller }
-        let empty = NSViewController()
-        empty.view = NSView()
-        return empty
+    func makeNSView(context: Context) -> NSView {
+        NSView()
     }
 
-    func updateNSViewController(_ controller: NSViewController, context: Context) {
-        let view = controller.view
+    func updateNSView(_ container: NSView, context: Context) {
+        guard let view = InspectorPanelHost.shared.controller?.view else { return }
+        if view.superview !== container {
+            view.frame = container.bounds
+            view.autoresizingMask = [.width, .height]
+            container.addSubview(view)
+        }
         guard view.isHidden == isShown else { return }
         if !isShown, let window = view.window,
            let responder = window.firstResponder as? NSView, responder.isDescendant(of: view) {

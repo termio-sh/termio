@@ -109,7 +109,7 @@ final class StreamTerminalTests: XCTestCase {
                 foreground: GhosttyColorRgb(r: 128, g: 128, b: 128),
                 background: GhosttyColorRgb(r: background, g: background, b: background),
                 cursor: nil, palette: [GhosttyColorRgb](repeating: GhosttyColorRgb(r: 0, g: 0, b: 0), count: 256),
-                cursorStyle: GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK, cursorBlink: false, dark: dark)
+                cursorStyle: GHOSTTY_CURSOR_STYLE_BLOCK, cursorBlink: false, dark: dark)
         }
         func answer(_ query: String, theme: TermiodStreamTerminal.Theme? = nil) throws -> String {
             var replies = ""

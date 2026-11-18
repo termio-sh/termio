@@ -6,12 +6,8 @@
 …and %lld more</key>
 	<string>
 …还有 %lld 个</string>
-	<key> Cost is estimated at API rates.</key>
-	<string>费用按 API 价格估算。</string>
 	<key>%1$@ changed on %2$@</key>
 	<string>%1$@ 在 %2$@ 上已被修改</string>
-	<key>%@ Sign-In</key>
-	<string>%@ 登录</string>
 	<key>%@ and %@</key>
 	<string>%1$@ 和 %2$@</string>
 	<key>%@ answered as a different machine than %@. Its address is being served by something else.</key>
@@ -28,12 +24,6 @@
 	<string>%@ 已退出——已回到 shell</string>
 	<key>%@ has nothing to pair against</key>
 	<string>%@ 上没有可配对的目标</string>
-	<key>%@ is a dark theme in the %@ slot.</key>
-	<string>“%@”是深色主题，与“%@”插槽不匹配。</string>
-	<key>%@ is a light theme in the %@ slot.</key>
-	<string>“%@”是浅色主题，与“%@”插槽不匹配。</string>
-	<key>%@ is already added</key>
-	<string>%@ 已经添加过了</string>
 	<key>%@ is not an address the iPhone could dial.</key>
 	<string>%@ 不是 iPhone 能拨通的地址。</string>
 	<key>%@ is published, but the connection an iPhone would make was refused.
@@ -74,10 +64,6 @@
 %3$@</string>
 	<key>%@ stays published only until you log out of it. Termio couldn’t set it to keep services running after that.</key>
 	<string>%@ 只在你登录期间保持发布。Termio 无法让它在登出后继续运行服务。</string>
-	<key>%@ tokens</key>
-	<string>%@ token</string>
-	<key>%@ · %@ tokens</key>
-	<string>%@ · %@ token</string>
 	<key>%@ — %@.</key>
 	<string>%@ — %@。</string>
 	<key>%@ — %@. Couldn’t update %@.</key>
@@ -92,8 +78,6 @@
 	<string>%lld 个文件</string>
 	<key>%lld files</key>
 	<string>%lld 个文件</string>
-	<key>%lld in your Themes folder</key>
-	<string>主题文件夹里有 %lld 个</string>
 	<key>%lld installed</key>
 	<string>已安装 %lld 个</string>
 	<key>%lld not installed</key>
@@ -102,8 +86,6 @@
 	<string>第 %lld 项（共 %lld 项）</string>
 	<key>%lld pt</key>
 	<string>%lld 点</string>
-	<key>%lld results</key>
-	<string>%lld 个结果</string>
 	<key>%lld%@ matches in %lld files</key>
 	<string>在 %3$lld 个文件中找到 %1$lld%2$@ 个匹配项</string>
 	<key>%lldd</key>
@@ -114,8 +96,6 @@
 	<string>%lld 分钟</string>
 	<key>%lldw</key>
 	<string>%lld 周</string>
-	<key>1 result</key>
-	<string>1 个结果</string>
 	<key>9:41</key>
 	<string>9:41</string>
 	<key>9:41, Full Signal and Battery</key>
@@ -144,16 +124,10 @@
 	<string>接受 Xcode 许可协议</string>
 	<key>Access</key>
 	<string>访问</string>
-	<key>Accounts</key>
-	<string>账户</string>
 	<key>Add</key>
 	<string>添加</string>
 	<key>Add &amp; Connect</key>
 	<string>添加并连接</string>
-	<key>Add Account</key>
-	<string>添加账户</string>
-	<key>Add Account…</key>
-	<string>添加账户…</string>
 	<key>Add Agent</key>
 	<string>添加 Agent</string>
 	<key>Add Device</key>
@@ -166,8 +140,6 @@
 	<string>添加远程主机</string>
 	<key>Add SSH Host</key>
 	<string>添加 SSH 主机</string>
-	<key>Add a %@ Account</key>
-	<string>添加 %@ 账户</string>
 	<key>Add a host you reach over SSH and Termio can run sessions on it, with agents that keep working after you disconnect.</key>
 	<string>添加一台你用 SSH 连接的主机，Termio 就能在上面运行会话；断开连接后 Agent 仍会继续工作。</string>
 	<key>Add to Chat</key>
@@ -214,12 +186,8 @@
 	<string>允许</string>
 	<key>Allow Paired Devices</key>
 	<string>允许已配对设备</string>
-	<key>Allow Usage Access</key>
-	<string>允许访问用量</string>
 	<key>Allow agents to use %@?</key>
 	<string>允许 Agent 使用“%@”吗？</string>
-	<key>Allow…</key>
-	<string>允许…</string>
 	<key>An older install points at %@. Update it to this version of Termio.</key>
 	<string>旧的安装指向 %@。请将其更新到此版本的 Termio。</string>
 	<key>Annotate</key>
@@ -256,6 +224,10 @@
 	<string>认证失败</string>
 	<key>Available when Termio runs from the built app bundle.</key>
 	<string>仅当 Termio 从构建的应用包运行时可用。</string>
+	<key>Back</key>
+	<string>后退</string>
+	<key>Back (⌘[)</key>
+	<string>后退 (⌘[)</string>
 	<key>Bar</key>
 	<string>竖线</string>
 	<key>Base Branch Missing</key>
@@ -284,8 +256,6 @@
 	<string>前置全部窗口</string>
 	<key>Built-In Tailscale</key>
 	<string>内置 Tailscale</string>
-	<key>Built-in</key>
-	<string>内置</string>
 	<key>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.</key>
 	<string>内置 Tailscale 尚未连接。请在“设置 ▸ Termio server ▸ 网络”中完成登录。</string>
 	<key>Cancel</key>
@@ -346,8 +316,6 @@
 	<string>在上方选取一台设备以启动它。</string>
 	<key>Choose a different name.</key>
 	<string>请选取其他名称。</string>
-	<key>Choose a folder named like “%@-work”</key>
-	<string>请选择名称类似“%@-work”的文件夹</string>
 	<key>Choose a name for this workspace.</key>
 	<string>为这个工作区取个名字。</string>
 	<key>Choose a project folder on %@.</key>
@@ -360,14 +328,14 @@
 	<string>请另选一个用于对比的分支。</string>
 	<key>Choose how projects are ordered</key>
 	<string>选取项目的排序方式</string>
-	<key>Choose the folder %@ signed in to.</key>
-	<string>选择 %@ 登录时使用的文件夹。</string>
 	<key>Choose which repository’s issues to show</key>
 	<string>选择显示哪个仓库的 issue</string>
 	<key>Choose…</key>
 	<string>选取…</string>
 	<key>Clear</key>
 	<string>清除</string>
+	<key>Click to show it here</key>
+	<string>点按以在此处显示</string>
 	<key>Clone</key>
 	<string>克隆</string>
 	<key>Clone a Repository</key>
@@ -488,8 +456,8 @@
 	<string>无法运行 ssh：%@</string>
 	<key>Could not run termio: %@</key>
 	<string>无法运行 termio：%@</string>
-	<key>Couldn't read plan limits.</key>
-	<string>无法读取套餐限额。</string>
+	<key>Couldn’t add the dropped item</key>
+	<string>无法添加拖入的项目</string>
 	<key>Couldn’t change the Themes folder</key>
 	<string>无法修改主题文件夹</string>
 	<key>Couldn’t copy the capture.</key>
@@ -542,6 +510,8 @@
 	<string>创建</string>
 	<key>Credentials</key>
 	<string>登录凭据</string>
+	<key>Current</key>
+	<string>当前</string>
 	<key>Current workspace</key>
 	<string>当前工作区</string>
 	<key>Cursor</key>
@@ -550,6 +520,8 @@
 	<string>自定义</string>
 	<key>Custom Agent…</key>
 	<string>自定义 Agent…</string>
+	<key>Custom themes</key>
+	<string>自定义主题</string>
 	<key>Custom…</key>
 	<string>自定…</string>
 	<key>Cut</key>
@@ -638,8 +610,6 @@
 	<string>编辑…</string>
 	<key>Enable</key>
 	<string>启用</string>
-	<key>Enable Claude Code, Codex, Kimi, or Grok in the Agents tab to see their usage here.</key>
-	<string>在 Agents 标签页中启用 Claude Code、Codex、Kimi 或 Grok，即可在此查看其用量。</string>
 	<key>Ended</key>
 	<string>已结束</string>
 	<key>Enter Code on GitHub</key>
@@ -656,8 +626,6 @@
 	<string>抹掉所有内容和设置…</string>
 	<key>Erase all content and settings on %@?</key>
 	<string>要抹掉“%@”上的所有内容和设置吗？</string>
-	<key>Every %@ session on this Mac, from all accounts.%@</key>
-	<string>本机上所有账户的 %1$@ 会话。%2$@</string>
 	<key>Every iPhone paired with %@ is signed out and must re-scan the new QR to reconnect.</key>
 	<string>所有与 %@ 配对的 iPhone 都会退出登录，需重新扫描新的二维码才能重新连接。</string>
 	<key>Every paired iPhone is signed out and must re-scan the new QR to reconnect.</key>
@@ -692,8 +660,6 @@
 	<string>查找…</string>
 	<key>Finish Setting Up Xcode</key>
 	<string>完成 Xcode 设置</string>
-	<key>Finish signing in in the terminal</key>
-	<string>请在终端里完成登录</string>
 	<key>Finish updating Termio’s session host?</key>
 	<string>要完成 Termio server 的更新吗？</string>
 	<key>Fit to Pane</key>
@@ -710,8 +676,10 @@
 	<string>字体</string>
 	<key>Font name</key>
 	<string>字体名称</string>
-	<key>From your Ghostty config</key>
-	<string>来自 Ghostty 配置</string>
+	<key>Forward</key>
+	<string>前进</string>
+	<key>Forward (⌘])</key>
+	<string>前进 (⌘])</string>
 	<key>From your session history</key>
 	<string>来自你的会话历史</string>
 	<key>General</key>
@@ -836,16 +804,14 @@
 	<string>语言</string>
 	<key>Language, notifications, and GitHub</key>
 	<string>语言、通知和 GitHub</string>
-	<key>Last 30 days</key>
-	<string>过去 30 天</string>
-	<key>Last 7 days</key>
-	<string>过去 7 天</string>
 	<key>Last used</key>
 	<string>上次使用</string>
 	<key>Later</key>
 	<string>稍后</string>
 	<key>Launch</key>
 	<string>启动</string>
+	<key>Layout</key>
+	<string>布局</string>
 	<key>Leave a path empty to launch the agent the way %@’s login shell would. Which agents appear at all is Settings ▸ Agents.</key>
 	<string>留空则按 %@ 的登录 shell 的方式启动该 Agent。要显示哪些 Agent 在“设置 ▸ Agents”中设定。</string>
 	<key>Let your agents coordinate?</key>
@@ -856,8 +822,6 @@
 	<string>允许 Agent 通过 `termio session` 命令查看并驱动本项目中的其他会话。会将 termio 技能安装到各 Agent 的技能文件夹中。</string>
 	<key>Light</key>
 	<string>浅色</string>
-	<key>Limits need Keychain access.</key>
-	<string>读取限额需要钥匙串访问权限。</string>
 	<key>Line height</key>
 	<string>行高</string>
 	<key>Line height applies to the file editor and diffs; the terminal keeps the font’s own.</key>
@@ -966,6 +930,8 @@
 	<string>新建终端</string>
 	<key>New Terminal at Home</key>
 	<string>在个人文件夹新建终端</string>
+	<key>New Window</key>
+	<string>新建窗口</string>
 	<key>New Workspace</key>
 	<string>新建工作区</string>
 	<key>New Workspace on %@</key>
@@ -978,8 +944,6 @@
 	<string>新建 Worktree…</string>
 	<key>New chat</key>
 	<string>新建聊天</string>
-	<key>New sessions use this account.</key>
-	<string>新会话使用此账户。</string>
 	<key>New terminal or project</key>
 	<string>新建终端或项目</string>
 	<key>Next Match</key>
@@ -1030,6 +994,8 @@
 	<string>没有目录</string>
 	<key>No description provided.</key>
 	<string>未提供描述。</string>
+	<key>No drawing in this file.</key>
+	<string>这个文件里没有图。</string>
 	<key>No element there.</key>
 	<string>那里没有元素。</string>
 	<key>No file changes</key>
@@ -1058,14 +1024,10 @@
 	<string>没有结果</string>
 	<key>No route to host</key>
 	<string>无法到达主机</string>
-	<key>No sessions on this Mac yet.</key>
-	<string>本机上还没有会话。</string>
 	<key>No simulator is booted. Boot one with `xcrun simctl boot &lt;device&gt;`, or pick one in the Simulator pane.</key>
 	<string>没有已启动的模拟器。请用 `xcrun simctl boot &lt;device&gt;` 启动一台，或在模拟器窗格中选取一台。</string>
 	<key>No textual changes to show.</key>
 	<string>没有可显示的文本更改。</string>
-	<key>No theme matches “%@”</key>
-	<string>没有主题与“%@”匹配</string>
 	<key>No tunnel selected.</key>
 	<string>尚未选择隧道。</string>
 	<key>Nobody: a tagged device has no owner</key>
@@ -1116,6 +1078,8 @@
 	<string>好</string>
 	<key>Off — SSH only</key>
 	<string>关闭 — 仅 SSH</string>
+	<key>Offline</key>
+	<string>离线</string>
 	<key>Offline · %@</key>
 	<string>离线 · %@</string>
 	<key>On Your Tailnet</key>
@@ -1168,6 +1132,8 @@
 	<string>在浏览器中打开</string>
 	<key>Open in Editor</key>
 	<string>在编辑器中打开</string>
+	<key>Open in New Window</key>
+	<string>在新窗口中打开</string>
 	<key>Open on GitHub</key>
 	<string>在 GitHub 上打开</string>
 	<key>Open one to see how it is reached and what it runs.</key>
@@ -1340,8 +1306,6 @@
 	<string>远程主机</string>
 	<key>Remove</key>
 	<string>移除</string>
-	<key>Remove Account</key>
-	<string>移除账户</string>
 	<key>Remove Highlight</key>
 	<string>移除标注</string>
 	<key>Remove Project</key>
@@ -1384,10 +1348,6 @@
 	<string>请求权限</string>
 	<key>Reset Font Size</key>
 	<string>重设字体大小</string>
-	<key>Resets in %@</key>
-	<string>%@后重置</string>
-	<key>Resetting</key>
-	<string>正在重置</string>
 	<key>Restart</key>
 	<string>重新启动</string>
 	<key>Restarting the tunnel changes the address, and every paired iPhone has to scan again.</key>
@@ -1406,8 +1366,6 @@
 	<string>更换 Token…</string>
 	<key>Rotate the pairing token?</key>
 	<string>要更换配对 Token 吗？</string>
-	<key>Row padding</key>
-	<string>行边距</string>
 	<key>Run Termio from the built app to install its command-line tool.</key>
 	<string>从打包后的 App 运行 Termio 才能安装其命令行工具。</string>
 	<key>Run a command…</key>
@@ -1454,8 +1412,6 @@
 	<string>搜索项目</string>
 	<key>Search commands</key>
 	<string>搜索命令</string>
-	<key>Search themes</key>
-	<string>搜索主题</string>
 	<key>Search themes…</key>
 	<string>搜索主题…</string>
 	<key>Searching…</key>
@@ -1528,6 +1484,8 @@
 	<string>显示单栏（行内差异）</string>
 	<key>Show two columns (side-by-side diff)</key>
 	<string>显示双栏（并排差异）</string>
+	<key>Showing in another window</key>
+	<string>正显示在另一个窗口中</string>
 	<key>Shows files and folders ignored by Git in a muted color.</key>
 	<string>以较淡的颜色显示 Git 忽略的文件和文件夹。</string>
 	<key>Shows the Issues pane in the inspector for projects whose remote is on GitHub.</key>
@@ -1542,28 +1500,30 @@
 	<string>侧边按钮</string>
 	<key>Sidebar</key>
 	<string>侧栏</string>
+	<key>Sidebar font</key>
+	<string>侧栏字体</string>
+	<key>Sidebar row spacing</key>
+	<string>侧栏行距</string>
+	<key>Sidebar text size</key>
+	<string>侧栏字号</string>
 	<key>Sign In…</key>
 	<string>登录…</string>
 	<key>Sign Out</key>
 	<string>退出登录</string>
 	<key>Sign Out…</key>
 	<string>退出登录…</string>
-	<key>Sign in again to see this account's limits.</key>
-	<string>重新登录即可查看此账户的限额。</string>
-	<key>Sign in with a different account in the terminal, or cancel.</key>
-	<string>请在终端里换一个账户登录，或者取消。</string>
 	<key>Sign in with the Tailscale account your iPhone uses.</key>
 	<string>用你的 iPhone 所用的 Tailscale 账号登录。</string>
 	<key>Sign this Mac out of Tailscale?</key>
 	<string>让这台 Mac 退出 Tailscale 登录？</string>
-	<key>Signed out</key>
-	<string>已退出登录</string>
 	<key>Signs in with %@</key>
 	<string>使用 %@ 登录</string>
 	<key>Signs in with the keys ssh offers by default.</key>
 	<string>使用 ssh 默认提供的密钥登录。</string>
 	<key>Signs this Mac’s device out of your tailnet.</key>
 	<string>让这台 Mac 的设备退出你的 tailnet。</string>
+	<key>Simulator</key>
+	<string>模拟器</string>
 	<key>Simulator Unavailable</key>
 	<string>模拟器不可用</string>
 	<key>Size</key>
@@ -1614,8 +1574,6 @@
 	<string>状态</string>
 	<key>Status Bar</key>
 	<string>状态栏</string>
-	<key>Stop Reading %@ Data</key>
-	<string>停止读取 %@ 数据</string>
 	<key>Stop Recording</key>
 	<string>停止录制</string>
 	<key>Stop Selecting</key>
@@ -1652,12 +1610,6 @@
 	<string>终端默认</string>
 	<key>Terminals</key>
 	<string>终端</string>
-	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its `auth.json` sign-in. Nothing is read until you allow it.</key>
-	<string>Termio 可通过读取 %@ 的本地会话日志及其 `auth.json` 登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容。</string>
-	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its `credentials/kimi-code.json` sign-in. Nothing is read until you allow it.</key>
-	<string>Termio 可通过读取 %@ 的本地会话日志及其 `credentials/kimi-code.json` 登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容。</string>
-	<key>Termio can show %@'s token usage and plan limits by reading its local session logs and its sign-in from your login Keychain. Nothing is read until you allow it; macOS will ask once about the Keychain.</key>
-	<string>Termio 可通过读取 %@ 的本地会话日志及登录钥匙串中的登录信息，显示其 token 用量和套餐限额。在你允许之前不会读取任何内容；macOS 会就钥匙串询问一次。</string>
 	<key>Termio could not append to the repository’s .gitignore. Check its permissions and try again.</key>
 	<string>Termio 无法将内容追加到该仓库的 .gitignore。请检查其权限后重试。</string>
 	<key>Termio couldn’t open a channel for the simulator’s screen.</key>
@@ -1666,12 +1618,8 @@
 	<string>Termio for iPhone 正在测试中</string>
 	<key>Termio is open source — star the repo, report bugs, and request features.</key>
 	<string>Termio 是开源软件：欢迎给仓库加星标、报告 bug 和提出功能请求。</string>
-	<key>Termio keeps each account in a folder beside %@ so its sessions can report their status.</key>
-	<string>Termio 把每个账户放在 %@ 旁边的文件夹里，这样它的会话才能报告状态。</string>
 	<key>Termio notifies you about the agents above, wherever they run.</key>
 	<string>无论上面的 Agent 在哪里运行，Termio 都会通知你。</string>
-	<key>Termio opens a terminal where %@ signs you in. Your other accounts stay signed in.</key>
-	<string>Termio 会打开一个终端，由 %@ 完成登录。其他账户保持登录。</string>
 	<key>Termio server</key>
 	<string>Termio server</string>
 	<key>Test</key>
@@ -1702,8 +1650,6 @@
 	<string>无法添加忽略规则。</string>
 	<key>The install page — the same one whichever machine you are installing on.</key>
 	<string>安装页面 —— 无论装在哪台机器上都是同一个页面。</string>
-	<key>The light and dark themes below follow this choice.</key>
-	<string>下方的浅色与深色主题随此选择切换。</string>
 	<key>The listing failed.</key>
 	<string>读取目录失败。</string>
 	<key>The machine answered with no listing for that folder.</key>
@@ -1714,8 +1660,6 @@
 	<string>该设备无法读取这个对比。</string>
 	<key>The machine everything filed under this workspace lives on.</key>
 	<string>归入这个工作区的一切所在的机器。</string>
-	<key>The project and session list.</key>
-	<string>项目与会话列表。</string>
 	<key>The public keys in ~/.ssh. Copy one to paste into a server’s authorized_keys — private keys are never read.</key>
 	<string>~/.ssh 中的公钥。可拷贝一个粘贴到服务器的 authorized_keys——私钥永远不会被读取。</string>
 	<key>The read failed.</key>
@@ -1790,8 +1734,6 @@
 	<string>此版本的 Termio 不包含模拟器辅助程序。</string>
 	<key>This checkout has no other branch to compare with.</key>
 	<string>这个检出没有其他分支可以对比。</string>
-	<key>This closes by itself once %@ is signed in.</key>
-	<string>%@ 登录完成后，此窗口会自动关闭。</string>
 	<key>This device didn’t answer. Its termiod may be too old to search.</key>
 	<string>该设备没有响应，其 termiod 版本可能过旧，不支持搜索。</string>
 	<key>This device is no longer in your configuration.</key>
@@ -1810,6 +1752,8 @@
 	<string>该设备上的 termiod 版本过旧，无法查询其 Agent。</string>
 	<key>This diff is too large to show here — open the file on GitHub.</key>
 	<string>此差异太大，无法在此显示，请在 GitHub 上打开该文件。</string>
+	<key>This drawing is empty.</key>
+	<string>这幅图是空的。</string>
 	<key>This file is binary — open it on GitHub to view.</key>
 	<string>此文件为二进制文件，请在 GitHub 上打开查看。</string>
 	<key>This folder has no git “origin” remote to clone.</key>
@@ -1842,12 +1786,12 @@
 	<string>这个中转没有有效的 URL 正则，它的地址永远读不回来。</string>
 	<key>This session couldn’t be started.</key>
 	<string>这个会话没能启动。</string>
+	<key>This session has no running terminal.</key>
+	<string>此会话没有正在运行的终端。</string>
 	<key>This workspace is no longer on your list.</key>
 	<string>这个工作区已不在你的列表中。</string>
 	<key>Timed out</key>
 	<string>连接超时</string>
-	<key>Today</key>
-	<string>今天</string>
 	<key>Toggle Appearance</key>
 	<string>切换外观</string>
 	<key>Toggle Full Screen</key>
@@ -1900,18 +1844,12 @@
 	<string>更新已就绪</string>
 	<key>Updated.</key>
 	<string>已更新。</string>
-	<key>Usage</key>
-	<string>用量</string>
 	<key>Usage statistics</key>
 	<string>使用统计</string>
 	<key>Use Regular Expression</key>
 	<string>使用正则表达式</string>
 	<key>Use Selection for Find</key>
 	<string>用所选内容查找</string>
-	<key>Use a Signed-In Folder…</key>
-	<string>使用已登录的文件夹…</string>
-	<key>Use for New Sessions</key>
-	<string>用于新会话</string>
 	<key>Used for this invite only. To make it stick, start the daemon there with --wss-origin.</key>
 	<string>仅用于本次邀请。要长期生效，请在那台机器上用 --wss-origin 启动守护进程。</string>
 	<key>User</key>
@@ -1992,8 +1930,6 @@
 	<string>来自 ~/.ssh/config 的 Host 条目，与 `ssh` 解析的别名一致。右键点按主机即可连接。</string>
 	<key>Your iPhone must be on the same network as this Mac.</key>
 	<string>iPhone 须与这台 Mac 处于同一网络。</string>
-	<key>Your themes</key>
-	<string>你的主题</string>
 	<key>Zoom</key>
 	<string>缩放</string>
 	<key>Zoom In</key>
@@ -2076,8 +2012,6 @@ Enabling adds a short note to your ~/.claude/CLAUDE.md and installs status hooks
 	<string>这台 Mac 上的 termiod 版本过旧，不支持搜索。</string>
 	<key>this Mac</key>
 	<string>本机</string>
-	<key>tokens</key>
-	<string>token</string>
 	<key>“%@” already exists.</key>
 	<string>“%@”已存在。</string>
 	<key>“%@” is already in your config.</key>

@@ -9,31 +9,22 @@ publish = false
 # script. What stays here is termiod's own snapshot boundary: the wire cell is
 # ours, not the engine's.
 #
-# Pinned to termio-sh/libghostty-rs, our fork, which builds ghostty cec8b92 —
-# the same one libghostty-swift ships to the Mac and iOS clients, so the host
-# and its clients run one VT. That parity is why this engine was chosen over
-# alacritty_terminal in the first place.
+# Pinned to upstream Uzaaft/libghostty-rs, which builds ghostty's `vt-1.0.1`
+# tag (108cacb): libghostty-vt's first stable C ABI, whose CI rejects any
+# change that is not an addition. termio keeps no fork and no patch series
+# here. A fix termio needs goes to ghostty or libghostty-rs, not into a patch.
 #
-# It has to be a fork rather than a rev bump: `libghostty-vt-sys` checks its
-# bindings in, so they must be regenerated against the ghostty they build.
-# Pointing GHOSTTY_SOURCE_DIR at a different one does not fail to build — it
-# corrupts the heap. Bumping ghostty here means bumping the fork's
-# GHOSTTY_COMMIT and regenerating in the same commit, never one without the
-# other.
+# Bump by moving `rev` to a libghostty-rs commit that builds a newer `vt-*`
+# tag. The crate checks its bindings in and regenerates them with each ghostty
+# pin, so never point GHOSTTY_SOURCE_DIR at a different ghostty: that builds
+# and then corrupts the heap.
 #
-# The fork also carries a patch series against that ghostty, under its
-# `Patches/ghostty/`, applied to the pinned checkout at build time. `0001` stops
-# the Vt formatter emitting blank cells under the preceding run's style, which
-# made every snapshot replay paint a background the host's screen never held —
-# the black rectangle beside Claude Code's banner. Delete the patch when ghostty
-# lands the fix; a patch that no longer applies fails the build rather than
-# being skipped.
+# The Mac and iOS clients decode this engine's native snapshot with the
+# ghostty libghostty-swift ships, so the two need not match exactly, but the
+# snapshot envelope version must: ghostty's `snapshot/envelope.zig`.
 #
-# Track libghostty-swift when it releases: its title carries the ghostty it
-# built (`1.1.9 · ghostty v1.3.1-3193-gcec8b92`), and that sha is the one to
-# match here. Since ghostty#13759 dropped iOS from the full build, that release
-# also carries a patch putting iOS back, so the two forks move together.
+# Needs Rust 1.96 or newer, libghostty-rs's minimum.
 [dependencies]
-libghostty-vt = { git = "https://github.com/termio-sh/libghostty-rs", rev = "6424b77efd0356ce20bba7f993de1a425637edd9" }
+libghostty-vt = { git = "https://github.com/Uzaaft/libghostty-rs", rev = "483ea3d5247b214060da58ef6037a95f30ae89fb" }
 png = "0.18"
 crc32fast = "1"

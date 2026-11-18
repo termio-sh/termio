@@ -15,6 +15,10 @@ struct ChromeTheme {
     /// The sidebar fill: a subtle step off the terminal background so the seam
     /// between the columns reads without a hard divider.
     let panelBackground: Color
+    /// A surface that stands up off the panel: the icon tiles in both sidebars.
+    /// Lighter than the background in a dark theme and in a light one, so a tile
+    /// reads as raised on either.
+    let raisedBackground: Color
     /// Primary chrome text (session titles).
     let foreground: Color
     /// Muted chrome text (project labels, icons).
@@ -40,17 +44,31 @@ struct ChromeTheme {
         let dark = definition.isDark
         self.background = background
         self.foreground = foreground
-        // Lift the sidebar a touch off the terminal background — lighter in a dark
-        // theme, darker in a light one, like VSCode's activity bar.
-        self.panelBackground = background.blended(
-            with: dark ? .white : .black,
-            amount: dark ? 0.06 : 0.04
-        )
-        // One alpha for both brightnesses is too thin over a light panel: at 0.6
-        // Catppuccin Latte's project labels measure 2.69 against `panelBackground`
-        // and Rose Pine Dawn's 2.62, under the 3.0 floor muted chrome text needs.
-        // Dark themes already clear it, so only the light side is lifted.
-        self.secondaryForeground = foreground.opacity(dark ? 0.6 : 0.75)
+        // Every surface is a step in Oklab lightness, not a mix with white or
+        // black in sRGB. The sRGB mix was measured across the built-in themes: a
+        // dark panel landed anywhere from 0.030 to 0.170 lighter than its
+        // terminal, so Vesper's sidebar stood far off its background and Nord's
+        // barely left it. A fixed lightness step is the same seam on every theme.
+        //
+        // Large surfaces also give up a quarter of the background's colour. A
+        // theme's background is tuned for a pane of text; spread over a whole
+        // sidebar, a warm or saturated one (Coffee Theme, Ocean) shouts.
+        let panel = Self.surface(background, lightness: dark ? 0.035 : -0.035, chroma: 0.75)
+        self.panelBackground = panel
+        // Lighter than the panel in a dark theme and in a light one, so a tile
+        // reads as raised on either: 0.05 above a dark panel, and up to 0.06
+        // above a light background, less where that is already near white.
+        self.raisedBackground = Self.surface(
+            background,
+            lightness: dark ? 0.085 : min(0.06, (1 - Self.lightness(background)) * 0.6),
+            chroma: 0.6)
+        // A solid ink at a set contrast, not the foreground at an alpha. At
+        // 0.6 and 0.75 alpha the muted text measured from 2.36 to 9.9 against
+        // the panel, and 28 of the 69 built-in themes fell under 4.5. Walking
+        // the foreground toward the panel until 4.5 gives every theme the same
+        // step between its two text levels. A theme whose own foreground cannot
+        // reach 4.5 on the panel keeps the foreground.
+        self.secondaryForeground = Self.ink(from: foreground, toward: panel, contrast: 4.5)
         // The active row reads as accent-tinted (VSCode's active list item) and the
         // same color inks document links, so a theme whose ANSI blue is deep enough to
         // vanish on its own background (Melange Light 2.80, Cobalt2 2.64) must use
@@ -65,6 +83,38 @@ struct ChromeTheme {
             ?? definition.selectionBackground.flatMap(Color.init(hex:))
             ?? foreground
         self.isDark = dark
+    }
+
+    /// `color` moved by `lightness` in Oklab, keeping `chroma` of its colourfulness.
+    static func surface(_ color: Color, lightness delta: CGFloat, chroma: CGFloat) -> Color {
+        guard let lab = Oklab(NSColor(color)) else { return color }
+        return Color(nsColor: Oklab(
+            lightness: max(0, min(1, lab.lightness + delta)),
+            a: lab.a * chroma,
+            b: lab.b * chroma
+        ).color)
+    }
+
+    private static func lightness(_ color: Color) -> CGFloat {
+        Oklab(NSColor(color))?.lightness ?? 0.5
+    }
+
+    /// The dimmest colour between `ink` and `ground`, mixed in Oklab, that still
+    /// holds `contrast` against `ground`.
+    static func ink(from ink: Color, toward ground: Color, contrast: Double) -> Color {
+        guard let from = Oklab(NSColor(ink)), let to = Oklab(NSColor(ground)) else { return ink }
+        var best = ink
+        for step in 1...100 {
+            let t = CGFloat(step) / 100
+            let candidate = Color(nsColor: Oklab(
+                lightness: from.lightness + (to.lightness - from.lightness) * t,
+                a: from.a + (to.a - from.a) * t,
+                b: from.b + (to.b - from.b) * t
+            ).color)
+            guard contrastRatio(candidate, ground) >= contrast else { break }
+            best = candidate
+        }
+        return best
     }
 
     /// WCAG contrast ratio between two opaque colors (1…21). Colors that can't be

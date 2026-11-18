@@ -201,7 +201,7 @@ struct AgentSettingsTab: View {
         }
         .formStyle(.grouped)
         .navigationDestination(for: AgentRoute.self) { route in
-            detail(for: route.id)
+            detail(for: route.id).navigationBarBackButtonHidden()
         }
         .task(id: integrationKey) { await refreshIntegrationGap() }
         // Custom agents are edited in their manifest, in another app. Re-reading
@@ -235,8 +235,7 @@ struct AgentSettingsTab: View {
             hooks: settings.agentHooksEnabled ? .install : .remove,
             skills: settings.sessionControlEnabled ? .install : .remove,
             target: .thisMac,
-            commands: settings.authoredCommands(),
-            homes: settings.usageAccountFolders)
+            commands: settings.authoredCommands())
         if outcome.failure == nil && outcome.failed.isEmpty {
             DeviceStateCache.stampIntegration(
                 AppInfo.buildStamp, covering: outcome.coveredIDs,

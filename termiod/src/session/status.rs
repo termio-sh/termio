@@ -453,7 +453,8 @@ impl ProgramFeed {
 }
 
 /// Finds the support query, `OSC 7501 ; ?`, in raw PTY output, and builds
-/// the reply: the query echoed with its own terminator.
+/// the reply: the query, what this terminal reports, and the query's own
+/// terminator.
 ///
 /// This runs on the read path, before the bytes go out, rather than in the VT.
 /// Claude Code and pi send the query in one batch with DA1 and read a DA1 reply
@@ -467,10 +468,17 @@ impl ProgramFeed {
 #[derive(Debug, Default)]
 pub struct SupportQuery {
     matched: usize,
+    /// The start of the writer's answer, when its input frame ended inside it.
+    held: Vec<u8>,
 }
 
 impl SupportQuery {
     const QUERY: &'static [u8] = b"\x1b]7501;?";
+    /// The same words Ghostty's own terminal answers with.
+    const SUPPORTED: &'static [u8] =
+        b":states=idle,working,done,blocked,error:kinds=permission,question,auth";
+    /// Far past any answer's body, so a tail this long is someone's typing.
+    const MAX_HELD: usize = 256;
 
     pub fn scan(&mut self, chunk: &[u8]) -> Vec<u8> {
         let mut reply = Vec::new();
@@ -492,12 +500,14 @@ impl SupportQuery {
                 }
             } else if self.matched == length && byte == 0x07 {
                 reply.extend_from_slice(Self::QUERY);
+                reply.extend_from_slice(Self::SUPPORTED);
                 reply.push(0x07);
                 0
             } else if self.matched == length && byte == 0x1b {
                 length + 1
             } else if self.matched > length && byte == b'\\' {
                 reply.extend_from_slice(Self::QUERY);
+                reply.extend_from_slice(Self::SUPPORTED);
                 reply.extend_from_slice(b"\x1b\\");
                 0
             } else {
@@ -506,6 +516,63 @@ impl SupportQuery {
             index += 1;
         }
         reply
+    }
+
+    /// Takes another terminal's answer to the query out of bytes bound for the
+    /// PTY. The sidecar VT and the writer's terminal both answer too, and a second
+    /// answer lands in a program that has stopped listening for one: Grok typed it
+    /// into its prompt (#831). An answer is the query, a printable body of at most
+    /// `MAX_HELD` bytes, and a terminator; anything else stays. Returns where an
+    /// answer that has no terminator yet starts; those bytes stay too.
+    pub fn strip_other_reply(data: &mut Vec<u8>) -> Option<usize> {
+        let mut start = 0;
+        while let Some(offset) = data[start..]
+            .windows(Self::QUERY.len())
+            .position(|window| window == Self::QUERY)
+        {
+            let at = start + offset;
+            let body = at + Self::QUERY.len();
+            let printable = data[body..].iter().take_while(|byte| matches!(byte, b' '..=b'~')).count();
+            let stop = body + printable;
+            if printable > Self::MAX_HELD {
+                start = at + 1;
+                continue;
+            }
+            let end = match (data.get(stop), data.get(stop + 1)) {
+                (Some(0x07), _) => stop + 1,
+                (Some(0x1b), Some(b'\\')) => stop + 2,
+                (None, _) | (Some(0x1b), None) => return Some(at),
+                _ => {
+                    start = at + 1;
+                    continue;
+                }
+            };
+            data.drain(at..end);
+            start = at;
+        }
+        None
+    }
+
+    /// `strip_other_reply` for the writer's input, whose answer reads can split
+    /// across frames. A frame that ends inside an answer keeps that tail back
+    /// until a byte finishes it or shows it is not one, which sends it on to the
+    /// PTY untouched. Only a whole `QUERY` prefix is held, never a lone ESC, so a
+    /// key press is never delayed; a split inside the prefix itself still gets
+    /// through.
+    pub fn strip_writer_reply(&mut self, data: &mut Vec<u8>) {
+        if !self.held.is_empty() {
+            let mut joined = std::mem::take(&mut self.held);
+            joined.append(data);
+            *data = joined;
+        }
+        if let Some(at) = Self::strip_other_reply(data) {
+            self.held = data.split_off(at);
+        }
+    }
+
+    /// A new writer's input never finishes the old writer's answer.
+    pub fn forget_held(&mut self) {
+        self.held.clear();
     }
 }
 
@@ -1956,16 +2023,67 @@ mod tests {
     /// near misses that must not be answered.
     #[test]
     fn the_support_query_is_answered_with_its_own_terminator() {
+        const BEL: &[u8] = b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x07";
+        const ST: &[u8] = b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\";
         let mut query = SupportQuery::default();
-        assert_eq!(query.scan(b"text\x1b]7501;?\x07more"), b"\x1b]7501;?\x07");
-        assert_eq!(query.scan(b"\x1b]7501;?\x1b\\"), b"\x1b]7501;?\x1b\\");
+        assert_eq!(query.scan(b"text\x1b]7501;?\x07more"), BEL);
+        assert_eq!(query.scan(b"\x1b]7501;?\x1b\\"), ST);
         assert!(query.scan(b"\x1b]75").is_empty());
         assert_eq!(query.scan(b"01;?\x1b"), b"");
-        assert_eq!(query.scan(b"\\"), b"\x1b]7501;?\x1b\\");
+        assert_eq!(query.scan(b"\\"), ST);
         assert!(query.scan(b"\x1b]7501;state=working\x07").is_empty());
         assert!(query.scan(b"\x1b]7501;?x\x07").is_empty());
         // An ESC that breaks a match can start the next one.
-        assert_eq!(query.scan(b"\x1b]75\x1b]7501;?\x07"), b"\x1b]7501;?\x07");
+        assert_eq!(query.scan(b"\x1b]75\x1b]7501;?\x07"), BEL);
+    }
+
+    /// Another terminal's answer goes, whatever arrives around it; anything else stays.
+    #[test]
+    fn another_terminals_answer_to_the_support_query_is_stripped() {
+        let strip = |input: &[u8]| {
+            let mut data = input.to_vec();
+            SupportQuery::strip_other_reply(&mut data);
+            data
+        };
+        assert_eq!(strip(b"\x1b]7501;?:states=idle\x1b\\\x1b[?62;22c"), b"\x1b[?62;22c");
+        assert_eq!(strip(b"a\x1b]7501;?\x07b\x1b]7501;?:x\x1b\\c"), b"abc");
+        assert!(strip(b"\x1b]7501;?\x07").is_empty());
+        assert_eq!(strip(b"plain typing"), b"plain typing");
+        assert_eq!(strip(b"\x1b]7501;state=done\x07"), b"\x1b]7501;state=done\x07");
+        // Unterminated: not a whole answer, so nothing is guessed away.
+        assert_eq!(strip(b"\x1b]7501;?:states"), b"\x1b]7501;?:states");
+    }
+
+    /// The writer's answer split across any number of input frames still goes;
+    /// a held tail that stops looking like an answer reaches the PTY untouched.
+    #[test]
+    fn a_writers_answer_split_across_frames_is_stripped() {
+        let mut query = SupportQuery::default();
+        let mut feed = |input: &[u8]| {
+            let mut data = input.to_vec();
+            query.strip_writer_reply(&mut data);
+            data
+        };
+        assert_eq!(feed(b"a\x1b]7501;?:states=idle"), b"a");
+        assert_eq!(feed(b"\x1b\\\x1b[?62;22c"), b"\x1b[?62;22c");
+        assert_eq!(feed(b"\x1b]7501;?:states="), b"");
+        assert_eq!(feed(b"idle"), b"");
+        assert_eq!(feed(b"\x1b"), b"");
+        assert_eq!(feed(b"\\b"), b"b");
+        assert_eq!(feed(b"\x1b]7501;?:x"), b"");
+        assert_eq!(feed(b"y\r"), b"\x1b]7501;?:xy\r");
+        assert_eq!(feed(b"q"), b"q");
+        let long = [b"\x1b]7501;?".as_slice(), &[b'x'; 300]].concat();
+        assert_eq!(feed(&long), long);
+        // Bytes that are not an answer are never taken, however the frames fall.
+        assert_eq!(feed(b"\x1b]7501;?:x"), b"");
+        assert_eq!(feed(b"\rtyped\x1b\\"), b"\x1b]7501;?:x\rtyped\x1b\\");
+        assert_eq!(feed(b"\x1b]7501;?:x\rtyped\x1b\\"), b"\x1b]7501;?:x\rtyped\x1b\\");
+        assert_eq!(feed(b"\x1b]7501;?"), b"");
+        let rest = [[b'x'; 300].as_slice(), b"\x1b\\"].concat();
+        assert_eq!(feed(&rest), [b"\x1b]7501;?".as_slice(), &rest].concat());
+        // A lone ESC is a key press, and goes at once.
+        assert_eq!(feed(b"\x1b"), b"\x1b");
     }
 
     /// A report is the program's own word: blocked lights the blocking dot, and

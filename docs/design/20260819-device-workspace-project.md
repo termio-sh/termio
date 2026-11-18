@@ -3,7 +3,7 @@ title: Device → Workspace → Project
 status: draft
 type: design
 created: 2026-08-19
-updated: 2026-08-22
+updated: 2026-10-30
 related:
   - 20260805-termiod-device-architecture.md
   - 20260819-workspace-switch-latency.md
@@ -49,10 +49,11 @@ other, so a purely local user has one device holding all their workspaces — an
 the device level stays invisible until there is a second machine, the same
 collapse `New Terminal` and `Open Project…` already do.
 
-The device is the workspace's **owner**, not a navigation level. The sidebar
-scope stays the workspace; you switch workspaces, never machines. That
-distinction is what keeps this compatible with #345, which removed
-machine-scoped navigation — it did not make the machine stop existing.
+The device is the workspace's **owner**. The sidebar scope stays the workspace,
+but the switcher groups workspaces by machine, and entering a machine reopens
+the workspace last used there. `⌘1…9` number the current machine's workspaces.
+This narrows #345, which removed machine-scoped navigation: there is still no
+machine scope in the sidebar, only a machine you can reach directly.
 
 ## 3. What the hierarchy deletes
 
