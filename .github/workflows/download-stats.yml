@@ -40,7 +40,28 @@ jobs:
           ref: stats
           path: _stats
 
+      - name: Check that the digest is configured
+        id: config
+        env:
+          CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        # The secrets below are set per-repo and a fork or a fresh clone has
+        # none of them. Without this the nightly cron fails every single night,
+        # and a check that is always red is one nobody reads — which is exactly
+        # what happened here: this workflow had never once succeeded.
+        run: |
+          missing=""
+          [ -n "$CF_ANALYTICS_TOKEN" ] || missing="$missing CF_ANALYTICS_TOKEN"
+          [ -n "$CF_ZONE_ID" ]         || missing="$missing CF_ZONE_ID"
+          if [ -n "$missing" ]; then
+            echo "::notice::Download digest is not configured — missing secrets:$missing. Skipping."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Collect + post
+        if: steps.config.outputs.configured == 'true'
         env:
           CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
@@ -52,6 +73,7 @@ jobs:
             ${{ github.event.inputs.date && format('--date {0}', github.event.inputs.date) || '' }}
 
       - name: Commit ledger
+        if: steps.config.outputs.configured == 'true'
         run: |
           cd _stats
           git config user.name  "termio-stats-bot"
