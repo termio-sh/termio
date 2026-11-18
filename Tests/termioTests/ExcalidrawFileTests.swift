@@ -197,6 +197,10 @@ final class ExcalidrawRenderIntegrationTests: XCTestCase {
     func testDecodesASceneEmbeddedInAPng() async throws {
         try XCTSkipUnless(Self.canRunWebKit, "needs a window server for the WebKit harness")
         let data = try fixture("drawing-embedded.excalidraw.png")
+        // The first drawing pays for the web view and the engine's load, which alone ran
+        // past the deadline on the Intel runner. That cost is not what the deadline measures.
+        _ = await ExcalidrawRenderer.shared.drawing(
+            for: try fixture("drawing.excalidraw"), theme: ExcalidrawRenderer.Theme(.reader(dark: true)))
         let started = Date()
         let rendered = await ExcalidrawRenderer.shared.drawing(
             for: data, theme: ExcalidrawRenderer.Theme(.reader(dark: false)))
