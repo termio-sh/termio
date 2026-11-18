@@ -87,8 +87,8 @@ struct DiffPalette {
     }
 }
 
-/// Björn Ottosson's Oklab, enough of it to interpolate two opaque colors. Kept here
-/// rather than in a general color utility because the diff is its only client.
+/// Björn Ottosson's Oklab, enough of it to interpolate two opaque colors. The
+/// diff's washes and the chrome theme's surfaces (`ChromeTheme`) both mix in it.
 struct Oklab {
     let lightness: CGFloat
     let a: CGFloat

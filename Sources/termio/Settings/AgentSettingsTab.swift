@@ -201,7 +201,7 @@ struct AgentSettingsTab: View {
         }
         .formStyle(.grouped)
         .navigationDestination(for: AgentRoute.self) { route in
-            detail(for: route.id)
+            detail(for: route.id).navigationBarBackButtonHidden()
         }
         .task(id: integrationKey) { await refreshIntegrationGap() }
         // Custom agents are edited in their manifest, in another app. Re-reading

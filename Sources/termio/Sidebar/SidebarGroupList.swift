@@ -8,10 +8,13 @@ struct SidebarColumn: View {
     @EnvironmentObject var settings: AppSettings
 
     var body: some View {
-        switch settings.tabLayout {
-        case .vertical: SidebarView()
-        case .horizontal: SidebarGroupList()
+        Group {
+            switch settings.tabLayout {
+            case .vertical: SidebarView()
+            case .horizontal: SidebarGroupList()
+            }
         }
+        .glassTileTheme(settings)
     }
 }
 

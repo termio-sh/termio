@@ -1,6 +1,94 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Back": {
+      "comment": "Settings window header",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后退"
+          }
+        }
+      }
+    },
+    "Current": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前"
+          }
+        }
+      }
+    },
+    "Custom themes": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自定义主题"
+          }
+        }
+      }
+    },
+    "Forward": {
+      "comment": "Settings window header",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前进"
+          }
+        }
+      }
+    },
+    "Layout": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "布局"
+          }
+        }
+      }
+    },
+    "Sidebar font": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "侧栏字体"
+          }
+        }
+      }
+    },
+    "Sidebar row spacing": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "侧栏行距"
+          }
+        }
+      }
+    },
+    "Sidebar text size": {
+      "comment": "Settings ▸ Appearance",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "侧栏字号"
+          }
+        }
+      }
+    },
     "Simulator": {
       "localizations": {
         "zh-Hans": {
@@ -700,26 +788,6 @@
         }
       }
     },
-    "%@ is a dark theme in the %@ slot.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "“%@”是深色主题，与“%@”插槽不匹配。"
-          }
-        }
-      }
-    },
-    "%@ is a light theme in the %@ slot.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "“%@”是浅色主题，与“%@”插槽不匹配。"
-          }
-        }
-      }
-    },
     "%@ is not an address the iPhone could dial.": {
       "localizations": {
         "zh-Hans": {
@@ -960,16 +1028,6 @@
         }
       }
     },
-    "%lld in your Themes folder": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "主题文件夹里有 %lld 个"
-          }
-        }
-      }
-    },
     "%lld installed": {
       "localizations": {
         "zh-Hans": {
@@ -1006,16 +1064,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld 点"
-          }
-        }
-      }
-    },
-    "%lld results": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 个结果"
           }
         }
       }
@@ -1066,16 +1114,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld 周"
-          }
-        }
-      }
-    },
-    "1 result": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "1 个结果"
           }
         }
       }
@@ -1677,16 +1715,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "前置全部窗口"
-          }
-        }
-      }
-    },
-    "Built-in": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "内置"
           }
         }
       }
@@ -3483,16 +3511,6 @@
         }
       }
     },
-    "From your Ghostty config": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "来自 Ghostty 配置"
-          }
-        }
-      }
-    },
     "From your session history": {
       "localizations": {
         "zh-Hans": {
@@ -5033,16 +5051,6 @@
         }
       }
     },
-    "No theme matches “%@”": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "没有主题与“%@”匹配"
-          }
-        }
-      }
-    },
     "No tunnel selected.": {
       "localizations": {
         "zh-Hans": {
@@ -5650,16 +5658,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "固定"
-          }
-        }
-      }
-    },
-    "The light and dark themes below follow this choice.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "下方的浅色与深色主题随此选择切换。"
           }
         }
       }
@@ -6414,16 +6412,6 @@
         }
       }
     },
-    "Row padding": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "行边距"
-          }
-        }
-      }
-    },
     "Run Termio from the built app to install its command-line tool.": {
       "localizations": {
         "zh-Hans": {
@@ -6631,16 +6619,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "搜索命令"
-          }
-        }
-      }
-    },
-    "Search themes": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "搜索主题"
           }
         }
       }
@@ -7531,16 +7509,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "归入这个工作区的一切所在的机器。"
-          }
-        }
-      }
-    },
-    "The project and session list.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "项目与会话列表。"
           }
         }
       }
@@ -8624,16 +8592,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "iPhone 须与这台 Mac 处于同一网络。"
-          }
-        }
-      }
-    },
-    "Your themes": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "你的主题"
           }
         }
       }

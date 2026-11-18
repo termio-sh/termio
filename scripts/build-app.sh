@@ -152,6 +152,28 @@ rm -rf "$app_dir"
 mkdir -p "$macos_dir" "$resources_dir" "$frameworks_dir"
 lipo -create "${slice_binaries[@]}" -output "$macos_dir/$product_name"
 chmod +x "$macos_dir/$product_name"
+
+# macOS picks the style of every system control from the SDK version stamped in
+# the binary. Some local toolchains stamp the deployment target there instead
+# (Xcode 27.1's `swift build` writes 14.0), and such a build draws the pre-26
+# pop-ups, switches and toolbar while the CI-built release draws the current
+# ones. Restamp with the SDK that built it, so a local build looks like the
+# release. A binary already stamped at or above the SDK is left alone.
+sdk_version="$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || true)"
+build_version="$(xcrun vtool -show-build "$macos_dir/$product_name" 2>/dev/null || true)"
+stamped_sdk="$(awk '$1 == "sdk" { print $2; exit }' <<<"$build_version")"
+stamped_minos="$(awk '$1 == "minos" { print $2; exit }' <<<"$build_version")"
+if [[ -n "$sdk_version" && -n "$stamped_sdk" && -n "$stamped_minos" && "$stamped_sdk" != "$sdk_version" ]] \
+    && [[ "$(printf '%s\n%s\n' "$stamped_sdk" "$sdk_version" | sort -V | head -1)" == "$stamped_sdk" ]]; then
+    echo "==> Restamping SDK version $stamped_sdk -> $sdk_version"
+    # vtool crashes on the lipo output while it carries the linker's ad-hoc
+    # signature. The whole bundle is signed further down, so drop this one.
+    codesign --remove-signature "$macos_dir/$product_name"
+    xcrun vtool -set-build-version macos "$stamped_minos" "$sdk_version" -replace \
+        -output "$macos_dir/$product_name.restamped" "$macos_dir/$product_name"
+    mv "$macos_dir/$product_name.restamped" "$macos_dir/$product_name"
+    chmod +x "$macos_dir/$product_name"
+fi
 cp "$repo_root/packaging/Info.plist" "$contents_dir/Info.plist"
 
 # Fail loudly rather than shipping a DMG that Intel Macs refuse to open: a build

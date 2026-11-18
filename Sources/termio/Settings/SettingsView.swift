@@ -5,10 +5,10 @@ import SwiftUI
 /// it runs, and the machines that run it. Controls bind straight to
 /// `AppSettings`, which persists on change, so there is no separate save step.
 ///
-/// The layout follows macOS System Settings: a left sidebar of groups and a detail
-/// pane that carries the group's title + subtitle in the toolbar with a grouped
-/// `Form` below. Window chrome (resizable, unified toolbar, saved size) is set up
-/// in `AppDelegate.openSettings`.
+/// The layout follows macOS System Settings: a left sidebar of groups, and a
+/// detail pane whose header holds Back, Forward and the page's name above a
+/// grouped `Form`. Window chrome (bounded size, unified toolbar, saved frame) is
+/// set up in `AppDelegate.openSettings`.
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     /// The Workspaces tab's subject. Actions elsewhere are injected as closures so
@@ -34,6 +34,18 @@ struct SettingsView: View {
     /// landed. Held rather than pushed inline because the switch clears the
     /// stack; see the `onChange` below.
     @State private var pendingMachine: String?
+    /// Every page the window has shown, in order, for the Back and Forward
+    /// buttons in the header. A page is a tab plus whatever it pushed, so Back
+    /// from a host's pane lands on the host list, and Back again on the tab
+    /// before it. The pushed panes hide the stack's own back button: one Back,
+    /// in one place, on every page.
+    @State private var history: [SettingsPage]
+    @State private var historyIndex = 0
+    /// The stack a Back or Forward step is restoring. The tab switch reads it
+    /// in place of clearing the stack.
+    @State private var restoringPath: NavigationPath?
+    /// The window's title, which is the name of the page on top of the stack.
+    @State private var pageTitle = ""
 
     init(
         settings: AppSettings,
@@ -47,11 +59,16 @@ struct SettingsView: View {
         self.onSSHConnect = onSSHConnect
         self.onSetUpKey = onSetUpKey
         _selection = State(initialValue: initialTab)
+        _history = State(initialValue: [SettingsPage(tab: initialTab, path: NavigationPath())])
     }
 
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
+                // Clears the traffic lights, now that the list runs behind them.
+                Color.clear
+                    .frame(height: settingsSidebarTopMargin)
+                    .selectionDisabled()
                 ForEach(Array(SettingsTab.groups.enumerated()), id: \.offset) { index, group in
                     ForEach(Array(group.enumerated()), id: \.element) { position, tab in
                         row(for: tab)
@@ -79,6 +96,17 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
+            // The window wears the terminal theme, like the main window: this
+            // list on the theme's panel colour, the page on its background. A
+            // theme picked on the Appearance page repaints the window it was
+            // picked in.
+            .scrollContentBackground(.hidden)
+            .background(Color(nsColor: settings.panelBackgroundColor).ignoresSafeArea())
+            // One tone from the traffic lights to the bottom edge: the window is
+            // two surfaces, this list and the page. The list has to run up behind
+            // the title bar itself, because its split view is not the window's
+            // and the bar's own material otherwise shows as a band above the rows.
+            .ignoresSafeArea(.container, edges: .top)
             .navigationSplitViewColumnWidth(min: 184, ideal: 204, max: 240)
         } detail: {
             NavigationStack(path: $path) {
@@ -90,15 +118,34 @@ struct SettingsView: View {
                     .navigationTitle(selection.title)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            // The page sits on a ground a shade off the window white, so the
-            // sidebar reads as the lighter panel floating above it and each grouped
-            // card as a well sunk into it. On white all three were one sheet, told
-            // apart only by the sidebar's shadow. Set on the stack, not the root
-            // page, so a pushed pane (an agent, a remote host) stands on it too.
+            .toolbarBackground(.hidden, for: .windowToolbar)
+            // Every page is a grouped form, and each would paint the system's
+            // grey over the theme. The cards keep their own fill, a step off
+            // whatever is behind them.
             .scrollContentBackground(.hidden)
-            .background(Color.primary.opacity(settingsCanvasInk).ignoresSafeArea())
+            .background(Color(nsColor: settings.terminalBackgroundColor).ignoresSafeArea())
+            .background(WindowTitleReader(title: $pageTitle))
         }
         .navigationSplitViewStyle(.balanced)
+        .glassTileTheme(settings)
+        .toolbar {
+            // On the split view, not the stack: a toolbar set on the stack
+            // belongs to its root page, and a pushed pane would lose the buttons
+            // that leave it.
+            //
+            // One item, so the order is ours: the buttons, then the page's name,
+            // as System Settings has them. Two items came out in the other
+            // order. The item draws its own capsule under the buttons alone, so
+            // the system's shared one, which would also take in the name, is
+            // turned off.
+            if #available(macOS 26.0, *) {
+                ToolbarItem(placement: .navigation) { header }
+                    .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .navigation) { header }
+            }
+        }
+        .onChange(of: path) { recordPage() }
         .labeledContentStyle(.settingsCentered)
         // Remember where the user is, so the next ⌘, reopens the same tab
         // (see `AppDelegate.showSettings`). Written on every switch — cheap,
@@ -109,6 +156,11 @@ struct SettingsView: View {
             // what writes a deep-linked tab to `lastOpenKey`, and it has no stack
             // to clear.
             guard previous != tab else { return }
+            if let restoring = restoringPath {
+                path = restoring
+                restoringPath = nil
+                return
+            }
             path = NavigationPath()
             // …and the same clear is why a jump to a machine has to re-push
             // afterwards rather than set both at once: the switch it just made
@@ -117,6 +169,50 @@ struct SettingsView: View {
                 path = NavigationPath([DeviceRoute(key: pending)])
                 pendingMachine = nil
             }
+            recordPage()
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 0) {
+                SettingsHistoryButton(
+                    title: localized("Back"), symbol: "chevron.left", isEnabled: historyIndex > 0
+                ) { show(historyIndex - 1) }
+                .keyboardShortcut("[", modifiers: .command)
+                SettingsHistoryButton(
+                    title: localized("Forward"), symbol: "chevron.right",
+                    isEnabled: historyIndex < history.count - 1
+                ) { show(historyIndex + 1) }
+                .keyboardShortcut("]", modifiers: .command)
+            }
+            .background(SelectionGlass(shape: Capsule(style: .continuous)))
+            .accessibilityElement(children: .contain)
+            Text(pageTitle.isEmpty ? selection.title : pageTitle)
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(1)
+        }
+    }
+
+    /// Adds the page on screen to the history, dropping whatever lay forward of
+    /// it. A Back or Forward step lands on a page the history already holds at
+    /// `historyIndex`, so it records nothing.
+    private func recordPage() {
+        let page = SettingsPage(tab: selection, path: path)
+        guard history.indices.contains(historyIndex), history[historyIndex] != page else { return }
+        history = Array(history.prefix(historyIndex + 1)) + [page]
+        historyIndex += 1
+    }
+
+    private func show(_ index: Int) {
+        guard history.indices.contains(index) else { return }
+        let page = history[index]
+        historyIndex = index
+        if page.tab == selection {
+            path = page.path
+        } else {
+            restoringPath = page.path
+            selection = page.tab
         }
     }
 
@@ -143,8 +239,8 @@ struct SettingsView: View {
     /// fill covers the whole row — including the group gap the first row of a
     /// group carries.
     ///
-    /// The pill is the main sidebar's selection glass, not the accent: Termio marks
-    /// state with ink, and the same "this one" in both sidebars reads as one app.
+    /// The pill is plain ink, not the accent: Termio marks state with ink. Glass
+    /// is white, so on this light sidebar it had nothing to stand against.
     /// The selected row keeps the full-strength label and takes a medium weight.
     private func row(for tab: SettingsTab) -> some View {
         let isSelected = selection == tab
@@ -166,13 +262,14 @@ struct SettingsView: View {
             Text(tab.title)
                 .fontWeight(isSelected ? .medium : .regular)
         }
-        .padding(.vertical, isServer ? 4 : 0)
+        .padding(.vertical, isServer ? 2 : 0)
         .foregroundStyle(Color.primary)
         .padding(.horizontal, settingsSidebarPillPadding)
         .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
         .background {
             if isSelected {
-                SelectionGlass(shape: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(settingsSelectionInk))
             }
         }
         // Applied *after* the pill so the pill widens with the row rather than
@@ -201,6 +298,64 @@ struct SettingsView: View {
     }
 }
 
+/// Back or Forward in the header. A disabled one stays in place and dims, so the
+/// pair never changes width under the title.
+private struct SettingsHistoryButton: View {
+    let title: String
+    let symbol: String
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isEnabled ? .primary : .tertiary)
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+}
+
+/// Reads the window's title into the header. Every page, pushed or not, already
+/// names itself with `navigationTitle`, and the window's title follows the page
+/// on top of the stack, so the header shows that one name instead of keeping a
+/// second copy that each pane would have to feed.
+private struct WindowTitleReader: NSViewRepresentable {
+    @Binding var title: String
+
+    func makeNSView(context: Context) -> TitleView {
+        let view = TitleView()
+        view.onChange = { title = $0 }
+        return view
+    }
+
+    func updateNSView(_ view: TitleView, context: Context) {}
+
+    final class TitleView: NSView {
+        var onChange: ((String) -> Void)?
+        private var observation: NSKeyValueObservation?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observation = window?.observe(\.title, options: [.initial, .new]) { [weak self] window, _ in
+                let title = window.title
+                DispatchQueue.main.async { self?.onChange?(title) }
+            }
+        }
+    }
+}
+
+/// One stop in the Settings window's history: a tab and the panes pushed on it.
+private struct SettingsPage: Equatable {
+    let tab: SettingsTab
+    let path: NavigationPath
+}
+
 /// Where a sidebar row lands. `pillInset + pillPadding` is the icon's leading
 /// edge, aimed at the close button's — a sidebar whose items hang to the right of
 /// the traffic lights reads as a column that was nudged and never lined back up,
@@ -223,6 +378,6 @@ private let settingsSidebarBaseIndent: CGFloat = 18.7
 private let settingsSidebarPillInset: CGFloat = 10
 private let settingsSidebarPillPadding: CGFloat = 6
 
-/// How much ink the detail page's ground carries over the window background:
-/// #F4F4F4 on light, and the matching lift on dark.
-private let settingsCanvasInk: Double = 0.045
+/// Clears the traffic lights and the sidebar button.
+private let settingsSidebarTopMargin: CGFloat = 40
+private let settingsSelectionInk: Double = 0.1

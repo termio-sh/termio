@@ -24,10 +24,6 @@
 	<string>%@ exited — shell</string>
 	<key>%@ has nothing to pair against</key>
 	<string>%@ has nothing to pair against</string>
-	<key>%@ is a dark theme in the %@ slot.</key>
-	<string>%@ is a dark theme in the %@ slot.</string>
-	<key>%@ is a light theme in the %@ slot.</key>
-	<string>%@ is a light theme in the %@ slot.</string>
 	<key>%@ is not an address the iPhone could dial.</key>
 	<string>%@ is not an address the iPhone could dial.</string>
 	<key>%@ is published, but the connection an iPhone would make was refused.
@@ -82,8 +78,6 @@
 	<string>%lld file</string>
 	<key>%lld files</key>
 	<string>%lld files</string>
-	<key>%lld in your Themes folder</key>
-	<string>%lld in your Themes folder</string>
 	<key>%lld installed</key>
 	<string>%lld installed</string>
 	<key>%lld not installed</key>
@@ -92,8 +86,6 @@
 	<string>%lld of %lld</string>
 	<key>%lld pt</key>
 	<string>%lld pt</string>
-	<key>%lld results</key>
-	<string>%lld results</string>
 	<key>%lld%@ matches in %lld files</key>
 	<string>%lld%@ matches in %lld files</string>
 	<key>%lldd</key>
@@ -104,8 +96,6 @@
 	<string>%lldm</string>
 	<key>%lldw</key>
 	<string>%lldw</string>
-	<key>1 result</key>
-	<string>1 result</string>
 	<key>9:41</key>
 	<string>9:41</string>
 	<key>9:41, Full Signal and Battery</key>
@@ -234,6 +224,8 @@
 	<string>Auth failed</string>
 	<key>Available when Termio runs from the built app bundle.</key>
 	<string>Available when Termio runs from the built app bundle.</string>
+	<key>Back</key>
+	<string>Back</string>
 	<key>Back (⌘[)</key>
 	<string>Back (⌘[)</string>
 	<key>Bar</key>
@@ -264,8 +256,6 @@
 	<string>Bring All to Front</string>
 	<key>Built-In Tailscale</key>
 	<string>Built-In Tailscale</string>
-	<key>Built-in</key>
-	<string>Built-in</string>
 	<key>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.</key>
 	<string>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.</string>
 	<key>Cancel</key>
@@ -520,6 +510,8 @@
 	<string>Create</string>
 	<key>Credentials</key>
 	<string>Credentials</string>
+	<key>Current</key>
+	<string>Current</string>
 	<key>Current workspace</key>
 	<string>Current workspace</string>
 	<key>Cursor</key>
@@ -528,6 +520,8 @@
 	<string>Custom</string>
 	<key>Custom Agent…</key>
 	<string>Custom Agent…</string>
+	<key>Custom themes</key>
+	<string>Custom themes</string>
 	<key>Custom…</key>
 	<string>Custom…</string>
 	<key>Cut</key>
@@ -682,10 +676,10 @@
 	<string>Font</string>
 	<key>Font name</key>
 	<string>Font name</string>
+	<key>Forward</key>
+	<string>Forward</string>
 	<key>Forward (⌘])</key>
 	<string>Forward (⌘])</string>
-	<key>From your Ghostty config</key>
-	<string>From your Ghostty config</string>
 	<key>From your session history</key>
 	<string>From your session history</string>
 	<key>General</key>
@@ -816,6 +810,8 @@
 	<string>Later</string>
 	<key>Launch</key>
 	<string>Launch</string>
+	<key>Layout</key>
+	<string>Layout</string>
 	<key>Leave a path empty to launch the agent the way %@’s login shell would. Which agents appear at all is Settings ▸ Agents.</key>
 	<string>Leave a path empty to launch the agent the way %@’s login shell would. Which agents appear at all is Settings ▸ Agents.</string>
 	<key>Let your agents coordinate?</key>
@@ -1032,8 +1028,6 @@
 	<string>No simulator is booted. Boot one with `xcrun simctl boot &lt;device&gt;`, or pick one in the Simulator pane.</string>
 	<key>No textual changes to show.</key>
 	<string>No textual changes to show.</string>
-	<key>No theme matches “%@”</key>
-	<string>No theme matches “%@”</string>
 	<key>No tunnel selected.</key>
 	<string>No tunnel selected.</string>
 	<key>Nobody: a tagged device has no owner</key>
@@ -1372,8 +1366,6 @@
 	<string>Rotate Token…</string>
 	<key>Rotate the pairing token?</key>
 	<string>Rotate the pairing token?</string>
-	<key>Row padding</key>
-	<string>Row padding</string>
 	<key>Run Termio from the built app to install its command-line tool.</key>
 	<string>Run Termio from the built app to install its command-line tool.</string>
 	<key>Run a command…</key>
@@ -1420,8 +1412,6 @@
 	<string>Search Project</string>
 	<key>Search commands</key>
 	<string>Search commands</string>
-	<key>Search themes</key>
-	<string>Search themes</string>
 	<key>Search themes…</key>
 	<string>Search themes…</string>
 	<key>Searching…</key>
@@ -1510,6 +1500,12 @@
 	<string>Side Button</string>
 	<key>Sidebar</key>
 	<string>Sidebar</string>
+	<key>Sidebar font</key>
+	<string>Sidebar font</string>
+	<key>Sidebar row spacing</key>
+	<string>Sidebar row spacing</string>
+	<key>Sidebar text size</key>
+	<string>Sidebar text size</string>
 	<key>Sign In…</key>
 	<string>Sign In…</string>
 	<key>Sign Out</key>
@@ -1654,8 +1650,6 @@
 	<string>The ignore rule couldn’t be added.</string>
 	<key>The install page — the same one whichever machine you are installing on.</key>
 	<string>The install page — the same one whichever machine you are installing on.</string>
-	<key>The light and dark themes below follow this choice.</key>
-	<string>The light and dark themes below follow this choice.</string>
 	<key>The listing failed.</key>
 	<string>The listing failed.</string>
 	<key>The machine answered with no listing for that folder.</key>
@@ -1666,8 +1660,6 @@
 	<string>The machine couldn’t read this comparison.</string>
 	<key>The machine everything filed under this workspace lives on.</key>
 	<string>The machine everything filed under this workspace lives on.</string>
-	<key>The project and session list.</key>
-	<string>The project and session list.</string>
 	<key>The public keys in ~/.ssh. Copy one to paste into a server’s authorized_keys — private keys are never read.</key>
 	<string>The public keys in ~/.ssh. Copy one to paste into a server’s authorized_keys — private keys are never read.</string>
 	<key>The read failed.</key>
@@ -1938,8 +1930,6 @@
 	<string>Your Host entries from ~/.ssh/config — the same aliases `ssh` resolves. Right-click a host to connect.</string>
 	<key>Your iPhone must be on the same network as this Mac.</key>
 	<string>Your iPhone must be on the same network as this Mac.</string>
-	<key>Your themes</key>
-	<string>Your themes</string>
 	<key>Zoom</key>
 	<string>Zoom</string>
 	<key>Zoom In</key>

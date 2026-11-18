@@ -549,6 +549,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.appearance = appearance
         for controller in MainWindowController.all { controller.window.appearance = appearance }
         settingsWindow?.appearance = appearance
+        // Behind the transparent title bar, so the header band is the page's colour.
+        settingsWindow?.backgroundColor = settings.terminalBackgroundColor
     }
 
     /// Opens (or refocuses) the preferences window. Reached via the responder
@@ -572,6 +574,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         openSettings(initialTab: .server)
     }
 
+    private static let settingsMinSize = NSSize(width: 720, height: 540)
+    private static let settingsMaxSize = NSSize(width: 900, height: 750)
+
     /// Opens (or refocuses) the preferences window on a specific tab. The content
     /// view is rebuilt each call so the requested tab takes effect even when the
     /// window is reused — harmless because every control binds straight to
@@ -579,7 +584,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func openSettings(initialTab: SettingsTab) {
         if settingsWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 720, height: 540),
+                contentRect: NSRect(x: 0, y: 0, width: 900, height: 680),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
@@ -589,28 +594,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // separator and the detail pane's title/subtitle. The window is
             // resizable so short panes don't force a fixed slab of empty space.
             window.toolbarStyle = .unified
+            // No band or rule of its own: each surface runs up behind the title.
+            window.titlebarAppearsTransparent = true
+            window.titlebarSeparatorStyle = .none
+            // The header draws the page's name itself, after the Back and Forward
+            // buttons. The window keeps its title for the Window menu and VoiceOver.
+            window.titleVisibility = .hidden
             window.isReleasedWhenClosed = false
 
-            let minSize = NSSize(width: 640, height: 480)
+            // A bounded window, like System Settings: the pages are columns of
+            // rows, and past this size a row is a label and a control with an
+            // empty stretch between them.
+            let minSize = Self.settingsMinSize
+            let maxSize = Self.settingsMaxSize
             window.minSize = minSize
             window.contentMinSize = minSize
+            window.maxSize = maxSize
+            window.contentMaxSize = maxSize
 
             // Remember the user's size/position across launches. The restore path
             // uses setFrame:, which ignores minSize, so clamp any stale tiny frame.
             let restored = window.setFrameAutosaveName("TermioSettingsWindow")
             let frame = window.frame
-            if frame.width < minSize.width || frame.height < minSize.height {
+            let fitted = NSSize(
+                width: min(max(frame.width, minSize.width), maxSize.width),
+                height: min(max(frame.height, minSize.height), maxSize.height))
+            if fitted != frame.size {
                 var clamped = frame
-                clamped.size.width = max(frame.width, minSize.width)
-                clamped.size.height = max(frame.height, minSize.height)
+                clamped.size = fitted
                 window.setFrame(clamped, display: false)
             }
             if !restored { window.center() }
+            window.backgroundColor = settings.terminalBackgroundColor
             settingsWindow = window
         }
-        // `.frame(minWidth:minHeight:)` on the root: NSHostingView forwards the
-        // SwiftUI tree's small intrinsic minimum up into contentMinSize, which
-        // would otherwise let the window shrink below the size set above.
+        // The same bounds on the root: NSHostingView writes the SwiftUI tree's
+        // minimum and maximum into the window's content limits, replacing the
+        // ones set above.
         settingsWindow?.contentView = NSHostingView(rootView: SettingsView(
             settings: settings,
             store: store,
@@ -629,7 +649,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 // password prompt waiting to be answered.
                 self.revealSelection()
             }
-        ).frame(minWidth: 640, minHeight: 480))
+        ).frame(minWidth: Self.settingsMinSize.width, maxWidth: Self.settingsMaxSize.width,
+                 minHeight: Self.settingsMinSize.height, maxHeight: Self.settingsMaxSize.height))
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

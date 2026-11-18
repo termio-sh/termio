@@ -24,10 +24,6 @@
 	<string>%@ 已退出——已回到 shell</string>
 	<key>%@ has nothing to pair against</key>
 	<string>%@ 上没有可配对的目标</string>
-	<key>%@ is a dark theme in the %@ slot.</key>
-	<string>“%@”是深色主题，与“%@”插槽不匹配。</string>
-	<key>%@ is a light theme in the %@ slot.</key>
-	<string>“%@”是浅色主题，与“%@”插槽不匹配。</string>
 	<key>%@ is not an address the iPhone could dial.</key>
 	<string>%@ 不是 iPhone 能拨通的地址。</string>
 	<key>%@ is published, but the connection an iPhone would make was refused.
@@ -82,8 +78,6 @@
 	<string>%lld 个文件</string>
 	<key>%lld files</key>
 	<string>%lld 个文件</string>
-	<key>%lld in your Themes folder</key>
-	<string>主题文件夹里有 %lld 个</string>
 	<key>%lld installed</key>
 	<string>已安装 %lld 个</string>
 	<key>%lld not installed</key>
@@ -92,8 +86,6 @@
 	<string>第 %lld 项（共 %lld 项）</string>
 	<key>%lld pt</key>
 	<string>%lld 点</string>
-	<key>%lld results</key>
-	<string>%lld 个结果</string>
 	<key>%lld%@ matches in %lld files</key>
 	<string>在 %3$lld 个文件中找到 %1$lld%2$@ 个匹配项</string>
 	<key>%lldd</key>
@@ -104,8 +96,6 @@
 	<string>%lld 分钟</string>
 	<key>%lldw</key>
 	<string>%lld 周</string>
-	<key>1 result</key>
-	<string>1 个结果</string>
 	<key>9:41</key>
 	<string>9:41</string>
 	<key>9:41, Full Signal and Battery</key>
@@ -234,6 +224,8 @@
 	<string>认证失败</string>
 	<key>Available when Termio runs from the built app bundle.</key>
 	<string>仅当 Termio 从构建的应用包运行时可用。</string>
+	<key>Back</key>
+	<string>后退</string>
 	<key>Back (⌘[)</key>
 	<string>后退 (⌘[)</string>
 	<key>Bar</key>
@@ -264,8 +256,6 @@
 	<string>前置全部窗口</string>
 	<key>Built-In Tailscale</key>
 	<string>内置 Tailscale</string>
-	<key>Built-in</key>
-	<string>内置</string>
 	<key>Built-in Tailscale isn’t connected yet. Finish signing in under Settings ▸ Server ▸ Network.</key>
 	<string>内置 Tailscale 尚未连接。请在“设置 ▸ Termio server ▸ 网络”中完成登录。</string>
 	<key>Cancel</key>
@@ -520,6 +510,8 @@
 	<string>创建</string>
 	<key>Credentials</key>
 	<string>登录凭据</string>
+	<key>Current</key>
+	<string>当前</string>
 	<key>Current workspace</key>
 	<string>当前工作区</string>
 	<key>Cursor</key>
@@ -528,6 +520,8 @@
 	<string>自定义</string>
 	<key>Custom Agent…</key>
 	<string>自定义 Agent…</string>
+	<key>Custom themes</key>
+	<string>自定义主题</string>
 	<key>Custom…</key>
 	<string>自定…</string>
 	<key>Cut</key>
@@ -682,10 +676,10 @@
 	<string>字体</string>
 	<key>Font name</key>
 	<string>字体名称</string>
+	<key>Forward</key>
+	<string>前进</string>
 	<key>Forward (⌘])</key>
 	<string>前进 (⌘])</string>
-	<key>From your Ghostty config</key>
-	<string>来自 Ghostty 配置</string>
 	<key>From your session history</key>
 	<string>来自你的会话历史</string>
 	<key>General</key>
@@ -816,6 +810,8 @@
 	<string>稍后</string>
 	<key>Launch</key>
 	<string>启动</string>
+	<key>Layout</key>
+	<string>布局</string>
 	<key>Leave a path empty to launch the agent the way %@’s login shell would. Which agents appear at all is Settings ▸ Agents.</key>
 	<string>留空则按 %@ 的登录 shell 的方式启动该 Agent。要显示哪些 Agent 在“设置 ▸ Agents”中设定。</string>
 	<key>Let your agents coordinate?</key>
@@ -1032,8 +1028,6 @@
 	<string>没有已启动的模拟器。请用 `xcrun simctl boot &lt;device&gt;` 启动一台，或在模拟器窗格中选取一台。</string>
 	<key>No textual changes to show.</key>
 	<string>没有可显示的文本更改。</string>
-	<key>No theme matches “%@”</key>
-	<string>没有主题与“%@”匹配</string>
 	<key>No tunnel selected.</key>
 	<string>尚未选择隧道。</string>
 	<key>Nobody: a tagged device has no owner</key>
@@ -1372,8 +1366,6 @@
 	<string>更换 Token…</string>
 	<key>Rotate the pairing token?</key>
 	<string>要更换配对 Token 吗？</string>
-	<key>Row padding</key>
-	<string>行边距</string>
 	<key>Run Termio from the built app to install its command-line tool.</key>
 	<string>从打包后的 App 运行 Termio 才能安装其命令行工具。</string>
 	<key>Run a command…</key>
@@ -1420,8 +1412,6 @@
 	<string>搜索项目</string>
 	<key>Search commands</key>
 	<string>搜索命令</string>
-	<key>Search themes</key>
-	<string>搜索主题</string>
 	<key>Search themes…</key>
 	<string>搜索主题…</string>
 	<key>Searching…</key>
@@ -1510,6 +1500,12 @@
 	<string>侧边按钮</string>
 	<key>Sidebar</key>
 	<string>侧栏</string>
+	<key>Sidebar font</key>
+	<string>侧栏字体</string>
+	<key>Sidebar row spacing</key>
+	<string>侧栏行距</string>
+	<key>Sidebar text size</key>
+	<string>侧栏字号</string>
 	<key>Sign In…</key>
 	<string>登录…</string>
 	<key>Sign Out</key>
@@ -1654,8 +1650,6 @@
 	<string>无法添加忽略规则。</string>
 	<key>The install page — the same one whichever machine you are installing on.</key>
 	<string>安装页面 —— 无论装在哪台机器上都是同一个页面。</string>
-	<key>The light and dark themes below follow this choice.</key>
-	<string>下方的浅色与深色主题随此选择切换。</string>
 	<key>The listing failed.</key>
 	<string>读取目录失败。</string>
 	<key>The machine answered with no listing for that folder.</key>
@@ -1666,8 +1660,6 @@
 	<string>该设备无法读取这个对比。</string>
 	<key>The machine everything filed under this workspace lives on.</key>
 	<string>归入这个工作区的一切所在的机器。</string>
-	<key>The project and session list.</key>
-	<string>项目与会话列表。</string>
 	<key>The public keys in ~/.ssh. Copy one to paste into a server’s authorized_keys — private keys are never read.</key>
 	<string>~/.ssh 中的公钥。可拷贝一个粘贴到服务器的 authorized_keys——私钥永远不会被读取。</string>
 	<key>The read failed.</key>
@@ -1938,8 +1930,6 @@
 	<string>来自 ~/.ssh/config 的 Host 条目，与 `ssh` 解析的别名一致。右键点按主机即可连接。</string>
 	<key>Your iPhone must be on the same network as this Mac.</key>
 	<string>iPhone 须与这台 Mac 处于同一网络。</string>
-	<key>Your themes</key>
-	<string>你的主题</string>
 	<key>Zoom</key>
 	<string>缩放</string>
 	<key>Zoom In</key>
