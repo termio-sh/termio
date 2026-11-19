@@ -61,11 +61,9 @@ export function AskAIMenu({
                 key={destination.name}
                 className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] no-underline outline-none data-[highlighted]:bg-fd-accent data-[highlighted]:text-fd-accent-foreground"
                 render={
-                  <a
-                    href={destination.href}
-                    target="_blank"
-                    rel="noreferrer"
-                  />
+                  // Menu.Item puts its children, the destination's name, inside this anchor.
+                  // oxlint-disable-next-line jsx-a11y/control-has-associated-label
+                  <a href={destination.href} target="_blank" rel="noreferrer" />
                 }
               >
                 {destination.name}

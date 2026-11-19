@@ -17,7 +17,9 @@ export function generateStaticParams() {
     const slug = page.slugs.length ? page.slugs : ["index"];
     const lang = page.locale ?? i18n.defaultLanguage;
     // English stays at /docs-md/<slug>; a locale carries its prefix.
-    return [lang === i18n.defaultLanguage ? { slug } : { slug: [lang, ...slug] }];
+    return [
+      lang === i18n.defaultLanguage ? { slug } : { slug: [lang, ...slug] },
+    ];
   });
 }
 
@@ -32,10 +34,7 @@ export async function GET(
   const lang = localized ? head : i18n.defaultLanguage;
   const path = localized ? rest : slug;
 
-  const page = source.getPage(
-    path.join("/") === "index" ? [] : path,
-    lang,
-  );
+  const page = source.getPage(path.join("/") === "index" ? [] : path, lang);
   if (!page) return new Response("Not found", { status: 404 });
 
   const raw = await page.data.getText("raw");

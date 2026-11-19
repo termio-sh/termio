@@ -53,9 +53,7 @@ function Callout({
 // A card grid for hub navigation and "Next steps" sections — the pattern Ghostty
 // and the JetBrains AI docs use to point readers at the next thing to read.
 function Cards({ children }: { children: ReactNode }) {
-  return (
-    <div className="mt-6 grid gap-3 sm:grid-cols-2">{children}</div>
-  );
+  return <div className="mt-6 grid gap-3 sm:grid-cols-2">{children}</div>;
 }
 
 function Card({
@@ -183,6 +181,8 @@ function DocsLink({ href = "", ...props }: ComponentProps<"a">) {
   if (isInternal) {
     return <Link href={href} {...props} />;
   }
+  // The link text arrives as `children` inside `props`.
+  // oxlint-disable-next-line jsx-a11y/anchor-has-content
   return <a href={href} target="_blank" rel="noreferrer" {...props} />;
 }
 
@@ -212,7 +212,16 @@ export function getMDXComponents(extra?: MDXComponents): MDXComponents {
 
 function InfoIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
       <circle cx="12" cy="12" r="10" />
       <path d="M12 16v-4M12 8h.01" />
     </svg>
@@ -220,14 +229,32 @@ function InfoIcon({ className }: { className?: string }) {
 }
 function BulbIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
       <path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1v.2h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z" />
     </svg>
   );
 }
 function WarnIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
       <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
       <path d="M12 9v4M12 17h.01" />
     </svg>
@@ -235,7 +262,16 @@ function WarnIcon({ className }: { className?: string }) {
 }
 function ArrowIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
       <path d="M5 12h14M13 6l6 6-6 6" />
     </svg>
   );

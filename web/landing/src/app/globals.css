@@ -117,8 +117,12 @@
   /* The CJK families at the tail only ever come into play for glyphs the Latin
      faces don't have — which is what the translated docs need on a machine whose
      system font isn't Apple's. */
-  --font-system-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-  --font-mono-stack: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-system-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono-stack:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   /* fumadocs' shadcn theme styles #nd-sidebar from the shadcn `--sidebar*` family,
      which this site never defined. An undefined var() with no fallback makes the
      whole declaration invalid, so `border-color: var(--sidebar-border)` fell back
@@ -184,9 +188,10 @@
    differ. */
 html:has(.docs-surface) {
   --ring: var(--foreground);
-  --font-docs-sans: cursorSans, "cursorSans Fallback", system-ui, "Helvetica Neue",
-    Helvetica, Arial, sans-serif, "PingFang SC", "Hiragino Sans GB",
-    "Microsoft YaHei", "Noto Sans SC";
+  --font-docs-sans:
+    cursorSans, "cursorSans Fallback", system-ui, "Helvetica Neue", Helvetica,
+    Arial, sans-serif, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans SC";
 }
 
 /* The site's appearance: the reader's system by default, overridable by the
@@ -469,11 +474,21 @@ html[data-theme-switching] *::after {
     animation: grain-shift 6s steps(4) infinite;
   }
   @keyframes grain-shift {
-    0% { transform: translate(0, 0); }
-    25% { transform: translate(-3%, 2%); }
-    50% { transform: translate(2%, -3%); }
-    75% { transform: translate(-2%, -1%); }
-    100% { transform: translate(0, 0); }
+    0% {
+      transform: translate(0, 0);
+    }
+    25% {
+      transform: translate(-3%, 2%);
+    }
+    50% {
+      transform: translate(2%, -3%);
+    }
+    75% {
+      transform: translate(-2%, -1%);
+    }
+    100% {
+      transform: translate(0, 0);
+    }
   }
   @media (prefers-reduced-motion: reduce) {
     .grain-overlay {
@@ -483,7 +498,12 @@ html[data-theme-switching] *::after {
 
   /* Cool accent for keywords: blue → violet → magenta, deepened for white. */
   .brand-text-gradient {
-    background-image: linear-gradient(105deg, #2f6bff 0%, #7c3aed 50%, #c026a8 100%);
+    background-image: linear-gradient(
+      105deg,
+      #2f6bff 0%,
+      #7c3aed 50%,
+      #c026a8 100%
+    );
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -538,9 +558,16 @@ html[data-theme-switching] *::after {
 
   /* Faint character-grid texture behind statement sections. */
   .dot-grid {
-    background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+    background-image: radial-gradient(
+      rgba(255, 255, 255, 0.06) 1px,
+      transparent 1px
+    );
     background-size: 24px 24px;
-    -webkit-mask-image: radial-gradient(70% 60% at 50% 40%, #000 0%, transparent 75%);
+    -webkit-mask-image: radial-gradient(
+      70% 60% at 50% 40%,
+      #000 0%,
+      transparent 75%
+    );
     mask-image: radial-gradient(70% 60% at 50% 40%, #000 0%, transparent 75%);
   }
 
@@ -665,7 +692,6 @@ html[data-theme-switching] *::after {
       margin-right: var(--docs-pane-inset);
     }
   }
-
 }
 
 /* Fumadocs' Shiki rules are unlayered and follow the landing's permanent .dark

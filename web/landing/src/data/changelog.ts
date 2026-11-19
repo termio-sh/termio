@@ -79,9 +79,7 @@ export const changelog: ChangelogEntry[] = [
         "PDF: rest the pointer on a link inside the document to preview where it goes.",
         "PDF: search the document with ⌘F.",
       ],
-      improved: [
-        "A PDF reopens on the page where you left it.",
-      ],
+      improved: ["A PDF reopens on the page where you left it."],
       fixed: [
         "Files: opening a folder no longer waits on git, so a slow git on the device no longer slows every folder in the tree.",
       ],
@@ -298,9 +296,7 @@ export const changelog: ChangelogEntry[] = [
         "Add SSH Host lists the machines on your tailnet.",
         "A zoom button on the focused pane's header when the window is split.",
       ],
-      improved: [
-        "Updated the terminal engine to a newer Ghostty.",
-      ],
+      improved: ["Updated the terminal engine to a newer Ghostty."],
     },
   },
   {
@@ -375,7 +371,7 @@ export const changelog: ChangelogEntry[] = [
         "Rows in the file tree and the issue list select with rounded corners.",
       ],
       fixed: [
-        "OpenCode 2 no longer reports \"1 plugin failed\" for Termio's plugin on every launch.",
+        'OpenCode 2 no longer reports "1 plugin failed" for Termio\'s plugin on every launch.',
       ],
     },
   },
@@ -736,7 +732,7 @@ export const changelog: ChangelogEntry[] = [
         "termio version prints one table — this client, the app, this Mac's session host, and every known remote's — so version skew is visible before it bites.",
       ],
       improved: [
-        "When a machine can't be reached, its dot now carries ssh's own last words — \"Permission denied (publickey)\" instead of \"the connection closed\" — and a box without the session host installed says exactly that. Fix the network, switch back to the app, and it reconnects by itself.",
+        'When a machine can\'t be reached, its dot now carries ssh\'s own last words — "Permission denied (publickey)" instead of "the connection closed" — and a box without the session host installed says exactly that. Fix the network, switch back to the app, and it reconnects by itself.',
       ],
       fixed: [
         "A session whose pane wasn't on screen could freeze mid-turn: its screen served the same stale frame for minutes, watch missed the moment an agent finished, and send --wait came back while the target was still working. Hidden panes now keep processing their output; only the drawing pauses.",
@@ -829,7 +825,7 @@ export const changelog: ChangelogEntry[] = [
         "The terminal engine is ghostty v1.3.1-2293, on the Mac, on the phone, and on every machine's daemon.",
       ],
       fixed: [
-        "Installing agent hooks — on this Mac and on devices — failed in 0.43.0 with \"unknown variant\". It works again.",
+        'Installing agent hooks — on this Mac and on devices — failed in 0.43.0 with "unknown variant". It works again.',
         "The remote file explorer is titled with the folder it shows, not the device.",
       ],
     },
@@ -869,7 +865,7 @@ export const changelog: ChangelogEntry[] = [
     changes: {
       new: [
         "Drag a session out of the sidebar and onto a pane to group it in beside what's already there. Every part of the pane is a live edge, so releasing anywhere picks a side rather than landing in a dead middle. A pane the session can't join declines the drag, and the pane already holding it dims.",
-        "Inside the sidebar, where a dragged row lands decides what happens to it: the middle of a row groups the two sessions, the top or bottom edge reorders into that gap. A line means \"between these\", a lifted row means \"into this one\".",
+        'Inside the sidebar, where a dragged row lands decides what happens to it: the middle of a row groups the two sessions, the top or bottom edge reorders into that gap. A line means "between these", a lifted row means "into this one".',
         "`termio sessions spawn` and `run` take `--direction right|down` and `--ratio`, so a spawned session can say where it goes and how much of the split it takes. `--direction down --ratio 0.25` is a log strip.",
       ],
       improved: [
@@ -932,7 +928,7 @@ export const changelog: ChangelogEntry[] = [
     changes: {
       new: [
         "A workspace can live on a box you own — a VPS, or the Mac mini on the same desk — and termio sets up the session host there for you. It copies one binary into ~/.local/bin over SSH — no root, no package manager. A machine already running one is upgraded in place.",
-        "Settings ▸ Workspaces: every workspace on one screen, with renaming and removing beside the one they act on. The switcher menu could only ever offer those for the workspace you were already in, which is why they read as \"Rename Workspace\" with no name in them.",
+        'Settings ▸ Workspaces: every workspace on one screen, with renaming and removing beside the one they act on. The switcher menu could only ever offer those for the workspace you were already in, which is why they read as "Rename Workspace" with no name in them.',
         "The phone groups projects by workspace, and each section names the machine that workspace is on. The roster used to arrive as one flat list, so a checkout on a VPS and one on this Mac looked the same.",
       ],
       improved: [
@@ -1494,9 +1490,7 @@ export const changelog: ChangelogEntry[] = [
       new: [
         "Antigravity and Hermes join the built-in lineup, each with its real brand icon and a working install link.",
       ],
-      improved: [
-        "The Files tab is more compact and always shows dotfiles.",
-      ],
+      improved: ["The Files tab is more compact and always shows dotfiles."],
     },
   },
   {
@@ -1625,9 +1619,7 @@ export const changelog: ChangelogEntry[] = [
     date: "2026-07-12",
     title: "The nine-dot T",
     changes: {
-      improved: [
-        "The app icon now spells a T in its nine-dot grid.",
-      ],
+      improved: ["The app icon now spells a T in its nine-dot grid."],
       fixed: [
         "Rows in the Changes list reliably open their diff.",
         "A display-sleep memory runaway in the terminal renderer is fixed.",

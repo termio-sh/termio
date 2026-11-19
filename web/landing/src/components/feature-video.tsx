@@ -77,7 +77,13 @@ export function FeatureVideo({ name, label }: { name: string; label: string }) {
         aria-label={playing ? "Pause video" : "Play video"}
         className="absolute bottom-3 right-3 inline-flex size-8 items-center justify-center rounded-full bg-black/40 text-white/80 backdrop-blur-md transition-colors hover:bg-black/60 hover:text-white"
       >
-        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="currentColor">
+        <svg
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          aria-hidden="true"
+          fill="currentColor"
+        >
           {playing ? (
             <path d="M4 3h3v10H4zM9 3h3v10H9z" />
           ) : (

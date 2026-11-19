@@ -59,9 +59,9 @@ export default function PrivacyPage() {
 
               <h2>What Termio stores</h2>
               <p>
-                Settings and session metadata are stored locally on your Mac,
-                in your user library. They stay on your device and are removed
-                when you delete the app and its data.
+                Settings and session metadata are stored locally on your Mac, in
+                your user library. They stay on your device and are removed when
+                you delete the app and its data.
               </p>
 
               <h2>When Termio touches the network</h2>
@@ -72,9 +72,9 @@ export default function PrivacyPage() {
                 <li>
                   <strong>Auto-updates.</strong> Termio periodically checks our
                   download server for a newer version (powered by Sparkle). The
-                  check carries no account or device identifier — like any
-                  HTTPS request, the server sees an IP address and the app
-                  version being asked about, nothing more.
+                  check carries no account or device identifier — like any HTTPS
+                  request, the server sees an IP address and the app version
+                  being asked about, nothing more.
                 </li>
                 <li>
                   <strong>Your own usage dashboards.</strong> If you open the
@@ -87,9 +87,9 @@ export default function PrivacyPage() {
               </ul>
               <p>
                 The coding agents you run inside Termio (Claude Code, Codex and
-                friends) talk to their own providers under your own accounts
-                and their own privacy policies. Termio does not proxy,
-                intercept or store that traffic.
+                friends) talk to their own providers under your own accounts and
+                their own privacy policies. Termio does not proxy, intercept or
+                store that traffic.
               </p>
 
               <h2>The iOS app</h2>
@@ -107,21 +107,23 @@ export default function PrivacyPage() {
               <p>
                 termio.sh uses no analytics, no tracking pixels and sets no
                 cookies. That is also why you don&apos;t see a cookie banner.
-                Our hosting provider keeps standard, short-lived server logs
-                (IP address, user agent) to operate the service, as any web
-                host does.
+                Our hosting provider keeps standard, short-lived server logs (IP
+                address, user agent) to operate the service, as any web host
+                does.
               </p>
 
               <h2>Data sharing</h2>
-              <p>We do not share your data with anyone — we hold none to share.</p>
+              <p>
+                We do not share your data with anyone — we hold none to share.
+              </p>
 
               <h2>Your rights</h2>
               <p>
                 Regulations like the GDPR and CCPA give you rights over data a
                 company holds about you. Termio&apos;s answer is structural:
-                since we collect nothing, there is nothing to request, export
-                or delete on our side. Everything lives on your devices, under
-                your control.
+                since we collect nothing, there is nothing to request, export or
+                delete on our side. Everything lives on your devices, under your
+                control.
               </p>
 
               <h2>Changes to this policy</h2>

@@ -84,7 +84,9 @@ export default function ChangelogPage() {
                         <span className="inline-flex shrink-0 items-center justify-center rounded-full bg-white/[0.08] px-3 py-1 font-mono text-[13px] font-medium leading-none text-foreground/80">
                           v{entry.version}
                         </span>
-                        <time dateTime={entry.date}>{formatDate(entry.date)}</time>
+                        <time dateTime={entry.date}>
+                          {formatDate(entry.date)}
+                        </time>
                       </div>
                     </aside>
 

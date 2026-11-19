@@ -39,86 +39,84 @@ export async function GET(
   const trail = ["termio.sh", "docs", ...path].join("/");
 
   return new ImageResponse(
-    (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+        height: "100%",
+        backgroundColor: "#08080a",
+        color: "#fafafa",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          height: 8,
+          width: "100%",
+          backgroundImage:
+            "linear-gradient(90deg, #00d3c7 0%, #0088ff 55%, #b855e7 100%)",
+        }}
+      />
       <div
         style={{
           display: "flex",
           flexDirection: "column",
-          width: "100%",
-          height: "100%",
-          backgroundColor: "#08080a",
-          color: "#fafafa",
+          flex: 1,
+          justifyContent: "space-between",
+          padding: "68px 76px 60px",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            height: 8,
-            width: "100%",
-            backgroundImage:
-              "linear-gradient(90deg, #00d3c7 0%, #0088ff 55%, #b855e7 100%)",
-          }}
-        />
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            flex: 1,
-            justifyContent: "space-between",
-            padding: "68px 76px 60px",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <div style={{ display: "flex", fontSize: 30, letterSpacing: -0.5 }}>
-              termio
-            </div>
-            <div
-              style={{
-                display: "flex",
-                borderRadius: 8,
-                border: "1px solid #2a2a30",
-                padding: "3px 10px",
-                fontSize: 20,
-                color: "#9b9ba4",
-              }}
-            >
-              Docs
-            </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ display: "flex", fontSize: 30, letterSpacing: -0.5 }}>
+            termio
           </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-            <div
-              style={{
-                display: "flex",
-                fontSize: 74,
-                lineHeight: 1.08,
-                letterSpacing: -2,
-                maxWidth: 960,
-              }}
-            >
-              {title}
-            </div>
-            {description ? (
-              <div
-                style={{
-                  display: "flex",
-                  fontSize: 30,
-                  lineHeight: 1.4,
-                  color: "#9b9ba4",
-                  maxWidth: 900,
-                }}
-              >
-                {clamp(description, 150)}
-              </div>
-            ) : null}
-          </div>
-
-          <div style={{ display: "flex", fontSize: 24, color: "#6d6d78" }}>
-            {trail}
+          <div
+            style={{
+              display: "flex",
+              borderRadius: 8,
+              border: "1px solid #2a2a30",
+              padding: "3px 10px",
+              fontSize: 20,
+              color: "#9b9ba4",
+            }}
+          >
+            Docs
           </div>
         </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+          <div
+            style={{
+              display: "flex",
+              fontSize: 74,
+              lineHeight: 1.08,
+              letterSpacing: -2,
+              maxWidth: 960,
+            }}
+          >
+            {title}
+          </div>
+          {description ? (
+            <div
+              style={{
+                display: "flex",
+                fontSize: 30,
+                lineHeight: 1.4,
+                color: "#9b9ba4",
+                maxWidth: 900,
+              }}
+            >
+              {clamp(description, 150)}
+            </div>
+          ) : null}
+        </div>
+
+        <div style={{ display: "flex", fontSize: 24, color: "#6d6d78" }}>
+          {trail}
+        </div>
       </div>
-    ),
+    </div>,
     size,
   );
 }

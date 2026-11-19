@@ -29,6 +29,5 @@
 const SCRIPT = `try{var t=localStorage.getItem("termio-theme")||localStorage.getItem("termio-docs-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t;}catch(e){}try{var r=document.documentElement,s=function(){var t=r.dataset.theme;document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){if(m.dataset.media===undefined)m.dataset.media=m.media;var o=m.dataset.media;m.media=t&&o?(o.indexOf(t)>-1?"all":"not all"):o})};s();var o=new MutationObserver(s);o.observe(document.head,{childList:true});o.observe(r,{attributes:true,attributeFilter:["data-theme"]})}catch(e){}`;
 
 export function ThemeScript() {
-  // eslint-disable-next-line @next/next/no-before-interactive-script-outside-document
   return <script dangerouslySetInnerHTML={{ __html: SCRIPT }} />;
 }

@@ -21,7 +21,8 @@ const rows = [
   },
   {
     title: "Quit Termio. Agents keep going.",
-    blurb: "Sessions live in the background, so reopening brings back the same screen.",
+    blurb:
+      "Sessions live in the background, so reopening brings back the same screen.",
     video: "survive-quit",
     label:
       "Termio quits with Command-Q and reopens on the same session, where the agent has read further",
@@ -30,8 +31,11 @@ const rows = [
     title: "Agents test your iOS app in a pane.",
     blurb: (
       <>
-        They launch and tap it with <code className="whitespace-nowrap font-mono text-[0.9em]">termio sim</code>, and you can
-        type into the same simulator.
+        They launch and tap it with{" "}
+        <code className="whitespace-nowrap font-mono text-[0.9em]">
+          termio sim
+        </code>
+        , and you can type into the same simulator.
       </>
     ),
     video: "ios-simulator",
