@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 80,
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "content",
+    "public",
+    ".source",
+    "pnpm-lock.yaml",
+    "og-template.html",
+    "src/data/keybindings.json"
+  ]
+}
