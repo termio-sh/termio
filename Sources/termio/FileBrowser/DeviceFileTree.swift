@@ -185,10 +185,7 @@ enum RemotePreviewStorage {
 
         let directory = URL(fileURLWithPath: directoryPath, isDirectory: true).standardizedFileURL
         let ext = (name as NSString).pathExtension
-        // `drawing.excalidraw.png` is a drawing only by its doubled extension, so the staged
-        // copy keeps both parts and still opens as one.
-        let marker = name.lowercased().hasSuffix(".excalidraw.\(ext.lowercased())") ? "excalidraw." : ""
-        let localName = ext.isEmpty ? "preview" : "preview.\(marker)\(ext)"
+        let localName = ext.isEmpty ? "preview" : "preview.\(ext)"
         guard isSafeComponent(localName) else {
             try? FileManager.default.removeItem(at: directory)
             throw DeviceFileError.unsafeName
