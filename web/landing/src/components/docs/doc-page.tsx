@@ -94,7 +94,12 @@ export async function docPageMetadata(
       },
     },
     openGraph: { title, description, url: docUrl(lang, slug), images: [card] },
-    twitter: { card: "summary_large_image", title, description, images: [card] },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: [card],
+    },
   };
 }
 

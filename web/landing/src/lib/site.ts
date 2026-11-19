@@ -7,24 +7,44 @@
 // manifests than this — an agent joins the list once it has a brand mark and
 // someone has run it.
 export const supportedAgents = [
-  { name: "Claude Code", command: "claude", href: "https://claude.com/claude-code" },
-  { name: "Codex", command: "codex", href: "https://developers.openai.com/codex/cli" },
+  {
+    name: "Claude Code",
+    command: "claude",
+    href: "https://claude.com/claude-code",
+  },
+  {
+    name: "Codex",
+    command: "codex",
+    href: "https://developers.openai.com/codex/cli",
+  },
   { name: "OpenCode", command: "opencode", href: "https://opencode.ai" },
   { name: "Pi", command: "pi", href: "https://pi.dev" },
   { name: "Amp", command: "amp", href: "https://ampcode.com/manual" },
-  { name: "Cursor", command: "cursor-agent", href: "https://cursor.com/docs/cli" },
+  {
+    name: "Cursor",
+    command: "cursor-agent",
+    href: "https://cursor.com/docs/cli",
+  },
   {
     name: "Copilot",
     command: "copilot",
     href: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
   },
-  { name: "Kimi", command: "kimi", href: "https://moonshotai.github.io/kimi-code" },
+  {
+    name: "Kimi",
+    command: "kimi",
+    href: "https://moonshotai.github.io/kimi-code",
+  },
   {
     name: "Antigravity",
     command: "agy",
     href: "https://antigravity.google/product/antigravity-cli",
   },
-  { name: "Crush", command: "crush", href: "https://github.com/charmbracelet/crush" },
+  {
+    name: "Crush",
+    command: "crush",
+    href: "https://github.com/charmbracelet/crush",
+  },
   { name: "Grok", command: "grok", href: "https://x.ai/cli" },
 ] as const;
 

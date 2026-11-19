@@ -73,7 +73,9 @@ export async function CtaBand() {
                 <GitHubStarCount initialStars={starCount} />
               </a>
             </div>
-            <p className="mt-4 text-sm text-white/60">Requires macOS 14 or later</p>
+            <p className="mt-4 text-sm text-white/60">
+              Requires macOS 14 or later
+            </p>
           </div>
         </div>
       </Reveal>

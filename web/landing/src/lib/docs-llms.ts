@@ -9,7 +9,9 @@ type DocPage = NonNullable<ReturnType<typeof source.getPage>>;
 // callers get frontmatter and raw Markdown, not just tree nodes. Shared by the
 // llms.txt / llms-full.txt routes, which index the English docs — the source of
 // truth every translation is generated from.
-export function orderedDocPages(lang: string = i18n.defaultLanguage): DocPage[] {
+export function orderedDocPages(
+  lang: string = i18n.defaultLanguage,
+): DocPage[] {
   const byUrl = new Map(source.getPages(lang).map((page) => [page.url, page]));
   const out: DocPage[] = [];
   const walk = (nodes: ReturnType<typeof source.getPageTree>["children"]) => {

@@ -45,9 +45,7 @@ export function HeroTabs({ slides }: { slides: readonly HeroSlide[] }) {
             aria-selected={i === active}
             onClick={() => select(i)}
             onMouseEnter={() =>
-              setVisited((prev) =>
-                prev.has(i) ? prev : new Set(prev).add(i),
-              )
+              setVisited((prev) => (prev.has(i) ? prev : new Set(prev).add(i)))
             }
             className={cn(
               "shrink-0 rounded-full px-3 py-1.5 text-sm font-medium sm:px-4",
@@ -88,7 +86,9 @@ export function HeroTabs({ slides }: { slides: readonly HeroSlide[] }) {
                 aria-hidden={i !== active}
                 className={cn(
                   "absolute inset-0 h-full w-full object-cover transition-opacity duration-200",
-                  i === active ? "opacity-100" : "pointer-events-none opacity-0",
+                  i === active
+                    ? "opacity-100"
+                    : "pointer-events-none opacity-0",
                 )}
               />
             ) : null,

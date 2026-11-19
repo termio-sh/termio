@@ -3,11 +3,7 @@ import { cn } from "@/lib/utils";
 import { Reveal } from "@/components/reveal";
 import { HeroTabs } from "@/components/hero-tabs";
 import { AppleMark, GitHubMark } from "@/components/section-label";
-import {
-  downloadUrl,
-  githubUrl,
-  heroSlides,
-} from "@/lib/site";
+import { downloadUrl, githubUrl, heroSlides } from "@/lib/site";
 
 // A flat hero (Antimetal / Dovetail): the download sits directly under the
 // headline so it is above the fold, and one tabbed window shows the app on the
@@ -26,8 +22,7 @@ export function Hero() {
         </Reveal>
         <Reveal delayMs={60}>
           <p className="mx-auto mt-6 max-w-xl text-balance text-lg leading-relaxed text-muted-foreground">
-            A native Mac terminal for Claude Code, Codex and every other
-            agent.
+            A native Mac terminal for Claude Code, Codex and every other agent.
           </p>
         </Reveal>
         <Reveal delayMs={120}>
@@ -63,7 +58,6 @@ export function Hero() {
         <Reveal delayMs={180} className="mt-16 w-full max-w-5xl">
           <HeroTabs slides={heroSlides} />
         </Reveal>
-
       </div>
     </section>
   );

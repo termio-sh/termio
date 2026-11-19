@@ -33,10 +33,7 @@ export function DocsFrame({
   const chrome = docsChrome(lang);
 
   return (
-    <div
-      className="docs-surface flex min-h-full flex-1 flex-col"
-      lang={lang}
-    >
+    <div className="docs-surface flex min-h-full flex-1 flex-col" lang={lang}>
       <RootProvider
         theme={{ enabled: false }}
         i18n={{

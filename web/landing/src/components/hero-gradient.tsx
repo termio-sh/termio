@@ -27,7 +27,11 @@ function subscribeReducedMotion(onChange: () => void) {
 
 export function HeroGradient({ className }: { className?: string }) {
   // False on the server and during hydration, true after: WebGL has no server render.
-  const mounted = useSyncExternalStore(subscribeNever, () => true, () => false);
+  const mounted = useSyncExternalStore(
+    subscribeNever,
+    () => true,
+    () => false,
+  );
   const reduceMotion = useSyncExternalStore(
     subscribeReducedMotion,
     () => window.matchMedia(REDUCED_MOTION).matches,

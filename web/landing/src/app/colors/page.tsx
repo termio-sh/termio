@@ -95,9 +95,7 @@ function Tile({ opt, dark }: { opt: Option; dark: boolean }) {
       <div
         className="relative flex items-center justify-between border-t border-border px-4 py-2 text-xs"
         style={{
-          backgroundColor: dark
-            ? "rgba(0,0,0,0.35)"
-            : "rgba(255,255,255,0.7)",
+          backgroundColor: dark ? "rgba(0,0,0,0.35)" : "rgba(255,255,255,0.7)",
         }}
       >
         <span className="font-semibold text-foreground">{opt.name}</span>
@@ -124,9 +122,9 @@ export default function ColorsPage() {
         Hero shader — pick a color
       </h1>
       <p className="mt-2 text-muted-foreground">
-        The real Dithering shader in both hero contexts. Tell me the name (or hex)
-        you like — and whether it&apos;s from the light or dark set — and I&apos;ll
-        wire it in.
+        The real Dithering shader in both hero contexts. Tell me the name (or
+        hex) you like — and whether it&apos;s from the light or dark set — and
+        I&apos;ll wire it in.
       </p>
 
       <h2 className="mt-12 text-xl font-semibold text-foreground">

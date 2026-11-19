@@ -36,10 +36,7 @@ test("strips inline markup rather than slugifying it", () => {
 // run here produced `command-palette-p` for a heading the site serves at
 // `command-palette--p`.
 test("keeps one hyphen per space, so dropped glyphs leave their gap", () => {
-  assert.equal(
-    headingAnchor("Command Palette — `⇧⌘P`"),
-    "command-palette--p",
-  );
+  assert.equal(headingAnchor("Command Palette — `⇧⌘P`"), "command-palette--p");
   assert.equal(headingAnchor("Open Quickly — `⇧⌘O`"), "open-quickly--o");
   assert.equal(headingAnchor("命令面板 —— `⇧⌘P`"), "命令面板--p");
 });
@@ -67,8 +64,5 @@ test("pageAnchors collects every heading and ignores fenced code", () => {
     "#not-a-heading-either",
   ].join("\n");
 
-  assert.deepEqual(
-    [...pageAnchors(page)].sort(),
-    ["pinned", "real-heading"],
-  );
+  assert.deepEqual([...pageAnchors(page)].sort(), ["pinned", "real-heading"]);
 });

@@ -113,7 +113,6 @@ function checkChangelog() {
   notes.push(`changelog: newest entry ${newestEntry[1]} covers v${tag}`);
 }
 
-
 // The mechanical half of the translation conventions in
 // content/docs/.i18n/glossary.<locale>.json — the rules a reader feels as
 // "this was typed carefully" and that drift silently otherwise: a half-width
@@ -302,14 +301,18 @@ function checkLinks() {
           continue;
         }
         if (anchor && !anchorsByHref.get(target).has(anchor)) {
-          fail(`links: ${name}:${index + 1} → ${href} (no heading anchors to #${anchor})`);
+          fail(
+            `links: ${name}:${index + 1} → ${href} (no heading anchors to #${anchor})`,
+          );
         }
       }
     }
   }
 
   if (errors.length === 0) {
-    notes.push(`links: ${checked} internal links resolve to a page and an anchor`);
+    notes.push(
+      `links: ${checked} internal links resolve to a page and an anchor`,
+    );
   }
 }
 
@@ -336,14 +339,17 @@ function checkI18n() {
     }
 
     if (!present.has(`meta.${locale}.json`)) {
-      fail(`i18n: content/docs/meta.${locale}.json is missing — the sidebar would fall back to English`);
+      fail(
+        `i18n: content/docs/meta.${locale}.json is missing — the sidebar would fall back to English`,
+      );
     } else {
-      const base = JSON.parse(readFileSync(resolve(docsDir, "meta.json"), "utf8"));
+      const base = JSON.parse(
+        readFileSync(resolve(docsDir, "meta.json"), "utf8"),
+      );
       const translated = JSON.parse(
         readFileSync(resolve(docsDir, `meta.${locale}.json`), "utf8"),
       );
-      const strip = (pages) =>
-        pages.filter((page) => !page.startsWith("---"));
+      const strip = (pages) => pages.filter((page) => !page.startsWith("---"));
       if (
         JSON.stringify(strip(base.pages ?? [])) !==
         JSON.stringify(strip(translated.pages ?? []))
@@ -360,7 +366,9 @@ function checkI18n() {
       if (!name.endsWith(`.${locale}.mdx`)) continue;
       const base = name.replace(`.${locale}.mdx`, ".mdx");
       if (!english.includes(base)) {
-        fail(`i18n: ${name} has no English source (${base} was renamed or removed)`);
+        fail(
+          `i18n: ${name} has no English source (${base} was renamed or removed)`,
+        );
       }
     }
 
@@ -372,7 +380,10 @@ function checkI18n() {
       }
 
       const sourceText = readFileSync(resolve(docsDir, name), "utf8");
-      const translatedText = readFileSync(resolve(docsDir, translatedName), "utf8");
+      const translatedText = readFileSync(
+        resolve(docsDir, translatedName),
+        "utf8",
+      );
 
       const declared = frontmatter(translatedText).match(
         /source_hash:\s*([0-9a-f]{64})/,
@@ -393,9 +404,7 @@ function checkI18n() {
 
       const sourceOutline = headingOutline(sourceText);
       const translatedOutline = headingOutline(translatedText);
-      if (
-        JSON.stringify(sourceOutline) !== JSON.stringify(translatedOutline)
-      ) {
+      if (JSON.stringify(sourceOutline) !== JSON.stringify(translatedOutline)) {
         fail(
           `i18n: ${translatedName} has a different heading structure than ${name} ` +
             `(${sourceOutline.join("/")} vs ${translatedOutline.join("/")}) — ` +

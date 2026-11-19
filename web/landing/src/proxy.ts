@@ -49,7 +49,9 @@ export function proxy(request: NextRequest) {
   const head = segments[0];
   // The default language has no prefix of its own, so `/en/docs` is not a route.
   const localized =
-    isDocsLanguage(head) && head !== i18n.defaultLanguage && segments[1] === "docs";
+    isDocsLanguage(head) &&
+    head !== i18n.defaultLanguage &&
+    segments[1] === "docs";
   if (!localized && head !== "docs") return NextResponse.next();
 
   const slug = segments.slice(localized ? 2 : 1);

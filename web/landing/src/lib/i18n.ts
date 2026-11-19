@@ -35,6 +35,10 @@ export const languageTags: Record<string, string> = {
   "zh-CN": "zh-Hans",
 };
 
-export function isDocsLanguage(value: string | undefined): value is DocsLanguage {
-  return value !== undefined && (i18n.languages as readonly string[]).includes(value);
+export function isDocsLanguage(
+  value: string | undefined,
+): value is DocsLanguage {
+  return (
+    value !== undefined && (i18n.languages as readonly string[]).includes(value)
+  );
 }

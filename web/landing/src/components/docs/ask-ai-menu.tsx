@@ -63,11 +63,7 @@ export function AskAIMenu({
                 render={
                   // Menu.Item puts its children, the destination's name, inside this anchor.
                   // oxlint-disable-next-line jsx-a11y/control-has-associated-label
-                  <a
-                    href={destination.href}
-                    target="_blank"
-                    rel="noreferrer"
-                  />
+                  <a href={destination.href} target="_blank" rel="noreferrer" />
                 }
               >
                 {destination.name}
