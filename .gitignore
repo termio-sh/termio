@@ -34,8 +34,8 @@ ios/build-sim/
 # Per-project termio session state
 /.termio/
 
-# Python bytecode caches left by the repo's own scripts (download stats, icon
-# generation, the termiod smoke tests and bench).
+# Python bytecode caches left by the repo's own scripts (icon generation, the
+# termiod smoke tests and bench).
 __pycache__/
 
 # LaTeX build intermediates (talk decks under docs/talks/)
