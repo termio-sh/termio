@@ -120,6 +120,14 @@ fn program_name() -> String {
         .unwrap_or_else(|| "termio".to_string())
 }
 
+/// Whether `channel` came from the stamp on the session this runs in, not
+/// from the name the binary was called by. A stamp outlives the app that
+/// wrote it: a session a probe build started keeps the probe's channel after
+/// that build is gone.
+pub fn named_by_session(channel: &Channel) -> bool {
+    program_name() == "termio" && channel.name != "release"
+}
+
 fn explicit_socket() -> bool {
     std::env::var_os("TERMIOD_SOCK").is_some_and(|value| !value.is_empty())
 }

@@ -1904,9 +1904,32 @@ async fn open_project(channel: &Channel, directory: &Path) -> Result<()> {
     if !cfg!(target_os = "macos") {
         return open_on_this_host(&absolute).await;
     }
+    // The session's stamp can name an app that is no longer installed. The
+    // folder still opens, in the release app, and the line says why. A channel
+    // asked for by name (`termio-dev`) is not second-guessed: its error stands.
+    let release;
+    let mut bundle_id = channel.bundle_id.as_str();
+    if channel::named_by_session(channel) {
+        let attempt = Command::new("open")
+            .arg("-b")
+            .arg(bundle_id)
+            .arg(&absolute)
+            .stderr(std::process::Stdio::null())
+            .status()
+            .context("running open")?;
+        if attempt.success() {
+            return Ok(());
+        }
+        eprintln!(
+            "termio: this session belongs to the '{}' channel, and its app did not open; opening in Termio instead",
+            channel.name
+        );
+        release = Channel::from_program_name("termio");
+        bundle_id = release.bundle_id.as_str();
+    }
     let error = Command::new("open")
         .arg("-b")
-        .arg(&channel.bundle_id)
+        .arg(bundle_id)
         .arg(&absolute)
         .exec();
     Err(error).context("running open")
