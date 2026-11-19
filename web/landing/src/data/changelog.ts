@@ -17,6 +17,22 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "0.77.0",
+    date: "2026-11-18",
+    title: "See what changed, word by word",
+    changes: {
+      improved: [
+        "Changes: the diff view marks changes at word level and scrolls more smoothly on large files.",
+        "Files: the Excalidraw drawing preview is removed.",
+      ],
+      fixed: [
+        "The terminal's right-click menu opens again.",
+        "Switching workspace in one window no longer changes the sidebar of every window.",
+        "CLI: `termio open` works in a session whose original app build is no longer installed.",
+      ],
+    },
+  },
+  {
     version: "0.76.0",
     date: "2026-11-17",
     title: "Pick a theme by looking at it",
