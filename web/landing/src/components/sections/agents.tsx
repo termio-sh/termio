@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Reveal } from "@/components/reveal";
 import { Section } from "@/components/section-label";
 import { AgentIcon } from "@/components/agent-icons";
@@ -44,7 +45,7 @@ export function Agents() {
               </li>
             ))}
             <li>
-              <a href="/docs/custom-agents" className={cardClass}>
+              <Link href="/docs/custom-agents" className={cardClass}>
                 <span
                   aria-hidden="true"
                   className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg border border-dashed border-foreground/30 text-lg text-muted-foreground"
@@ -59,7 +60,7 @@ export function Agents() {
                     Add any CLI →
                   </span>
                 </span>
-              </a>
+              </Link>
             </li>
           </ul>
         </Reveal>

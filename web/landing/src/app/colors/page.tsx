@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Dithering } from "@paper-design/shaders-react";
 
 // A scratch gallery to pick the hero shader color — renders the REAL Dithering
@@ -110,8 +110,12 @@ function Tile({ opt, dark }: { opt: Option; dark: boolean }) {
 }
 
 export default function ColorsPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  // False on the server and during hydration, true after: WebGL has no server render.
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   if (!mounted) return null;
 
   return (

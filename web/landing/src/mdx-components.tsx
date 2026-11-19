@@ -183,6 +183,8 @@ function DocsLink({ href = "", ...props }: ComponentProps<"a">) {
   if (isInternal) {
     return <Link href={href} {...props} />;
   }
+  // The link text arrives as `children` inside `props`.
+  // oxlint-disable-next-line jsx-a11y/anchor-has-content
   return <a href={href} target="_blank" rel="noreferrer" {...props} />;
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { MeshGradient } from "@paper-design/shaders-react";
 import { cn } from "@/lib/utils";
 import { useInView } from "@/lib/use-in-view";
@@ -13,19 +13,29 @@ import { useInView } from "@/lib/use-in-view";
 // users who prefer reduced motion.
 const PALETTE = ["#070710", "#102a5e", "#1f63b0", "#2f8aa0", "#191636"];
 
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
+function subscribeNever() {
+  return () => {};
+}
+
+function subscribeReducedMotion(onChange: () => void) {
+  const query = window.matchMedia(REDUCED_MOTION);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
 export function HeroGradient({ className }: { className?: string }) {
-  const [mounted, setMounted] = useState(false);
-  const [reduceMotion, setReduceMotion] = useState(false);
+  // False on the server and during hydration, true after: WebGL has no server render.
+  const mounted = useSyncExternalStore(subscribeNever, () => true, () => false);
+  const reduceMotion = useSyncExternalStore(
+    subscribeReducedMotion,
+    () => window.matchMedia(REDUCED_MOTION).matches,
+    () => false,
+  );
   // speed=0 cancels the shader's rAF loop entirely, so an offscreen aurora
   // (there are two on the page — hero and footer) costs nothing.
   const { ref, inView } = useInView<HTMLDivElement>();
-
-  useEffect(() => {
-    setReduceMotion(
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    );
-    setMounted(true);
-  }, []);
 
   if (!mounted) return null;
 
