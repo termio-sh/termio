@@ -447,7 +447,7 @@ final class TerminalAccessoryBar: UIInputView {
         attachMenuCard = card
 
         // UIMenu's entrance: grow from the bottom-left corner (the (+) key)
-        // with a soft spring — the translate keeps that corner pinned while
+        // on the app spring — the translate keeps that corner pinned while
         // the card scales up out of it. Under Reduce Motion it's a plain fade,
         // no scale-from-corner (matches showVoiceBar's pattern).
         let reduce = UIAccessibility.isReduceMotionEnabled
@@ -455,10 +455,14 @@ final class TerminalAccessoryBar: UIInputView {
             .translatedBy(x: -size.width * 0.5, y: size.height * 0.5)
         card.alpha = 0
         card.transform = reduce ? .identity : collapsed
-        UIView.animate(withDuration: reduce ? 0.2 : 0.4, delay: 0,
-                       usingSpringWithDamping: 0.78, initialSpringVelocity: 0) {
+        let reveal = {
             card.alpha = 1
             card.transform = .identity
+        }
+        if reduce {
+            UIView.animate(withDuration: 0.2, animations: reveal)
+        } else {
+            Motion.animate(reveal)
         }
         setAttachButtonOpen(true)
     }

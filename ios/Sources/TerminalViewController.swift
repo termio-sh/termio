@@ -367,10 +367,7 @@ final class TerminalViewController: UIViewController {
         // Even when the estimated viewport matches, pixel rounding can leave
         // the renderer a column short. Always give the shared grid its slack;
         // switching back to the full host frame would reintroduce the mismatch.
-        guard case .device = backend,
-              let grid = sharedGrid,
-              let cell = cellSize, grid.cols > 0, grid.rows > 0
-        else {
+        guard let letterbox else {
             // Full-height surface, slid up by exactly the content-aware pan:
             // enough that the deepest drawn row clears the keys, never more.
             // The host clips whatever the slide pushes past the top, and the
@@ -381,23 +378,41 @@ final class TerminalViewController: UIViewController {
                 x: 0, y: -lastAppliedPan, width: host.width, height: fullHeight)
             return
         }
+        terminalView.bounds = CGRect(origin: .zero, size: letterbox.size)
+        terminalView.transform = CGAffineTransform(scaleX: letterbox.fit, y: letterbox.fit)
+        lastAppliedPan = letterboxPan(letterbox)
+        terminalView.center = CGPoint(
+            x: host.midX, y: letterbox.size.height * letterbox.fit / 2 - lastAppliedPan)
+    }
+
+    /// The unscaled frame and scale of a surface laid out at another screen's
+    /// grid, or `nil` when it fills this host.
+    private var letterbox: (size: CGSize, fit: CGFloat, cell: CGSize)? {
+        guard case .device = backend,
+              let grid = sharedGrid,
+              let cell = cellSize, grid.cols > 0, grid.rows > 0
+        else { return nil }
         let padding = terminalPadding
-        let width = CGFloat(grid.cols) * cell.width + 2 * padding.width + cell.width / 2
-        let height = CGFloat(grid.rows) * cell.height + 2 * padding.height + cell.height / 2
-        let fit = min(1, host.width / width, fullHeight / height)
-        terminalView.bounds = CGRect(x: 0, y: 0, width: width, height: height)
-        terminalView.transform = CGAffineTransform(scaleX: fit, y: fit)
-        // The same cursor-anchored slide as the full-size path, in scaled
-        // space: with the keys up, the letterboxed picture rises just enough
-        // to keep the cursor's row above them.
+        let size = CGSize(
+            width: CGFloat(grid.cols) * cell.width + 2 * padding.width + cell.width / 2,
+            height: CGFloat(grid.rows) * cell.height + 2 * padding.height + cell.height / 2)
+        let fullHeight = terminalHost.bounds.height + keyboardOverlap
+        let fit = min(1, terminalHost.bounds.width / size.width, fullHeight / size.height)
+        return (size, fit, cell)
+    }
+
+    /// The same cursor-anchored slide as `keyboardPan`, in scaled space: with
+    /// the keys up, the letterboxed picture rises just enough to keep the
+    /// cursor's row above them.
+    private func letterboxPan(_ letterbox: (size: CGSize, fit: CGFloat, cell: CGSize)) -> CGFloat {
+        guard keyboardOverlap > 0 else { return 0 }
         let caret = streamView?.cursorRect ?? terminalView.caretRect(for: terminalView.beginningOfDocument)
-        var pan: CGFloat = 0
-        if keyboardOverlap > 0, caret.maxY.isFinite, caret.maxY > 0 {
-            let anchor = (caret.maxY + 2 * cell.height) * fit
-            pan = min(max(0, anchor - host.height), max(0, height * fit - host.height))
-        }
-        lastAppliedPan = pan
-        terminalView.center = CGPoint(x: host.midX, y: height * fit / 2 - pan)
+        guard caret.maxY.isFinite, caret.maxY > 0 else { return 0 }
+        let hostHeight = terminalHost.bounds.height
+        let anchor = (caret.maxY + 2 * letterbox.cell.height) * letterbox.fit
+        return min(
+            max(0, anchor - hostHeight),
+            max(0, letterbox.size.height * letterbox.fit - hostHeight))
     }
 
     /// How much of a session this screen could show. The same
@@ -432,10 +447,14 @@ final class TerminalViewController: UIViewController {
     private var lastAppliedPan: CGFloat = 0
 
     /// Called on every output chunk: if the cursor moved enough to change the
-    /// pan while the keyboard is showing, re-frame the surface.
+    /// pan while the keyboard is showing, re-frame the surface. The pan it
+    /// compares is the one the active layout path would set; comparing the
+    /// full-size pan against a letterboxed one never matched, so every chunk
+    /// re-framed the surface.
     private func followContentUnderKeyboard() {
         guard keyboardOverlap > 0 else { return }
-        guard abs(keyboardPan - lastAppliedPan) > 0.5 else { return }
+        let pan = letterbox.map(letterboxPan) ?? keyboardPan
+        guard abs(pan - lastAppliedPan) > 0.5 else { return }
         layoutTerminalSurface()
     }
 
@@ -1323,9 +1342,7 @@ final class TerminalViewController: UIViewController {
         if open { setTerminalFocused(false) }
         let animations = { self.layoutDrawer() }
         if animated {
-            UIView.animate(withDuration: 0.35, delay: 0,
-                           usingSpringWithDamping: 0.9, initialSpringVelocity: initialVelocity,
-                           animations: animations)
+            Motion.animate(velocity: initialVelocity, animations)
         } else {
             animations()
         }
