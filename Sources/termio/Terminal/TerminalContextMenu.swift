@@ -12,6 +12,8 @@ import GhosttyTerminal
 /// subclass override can't be injected. So the menu is added one level up: a
 /// local `rightMouseDown` monitor that spots clicks landing on a terminal
 /// surface in the main window and consumes them with termio's menu instead.
+/// A stream pane (`TermiodStreamView`) has no menu of its own either, so the
+/// same monitor serves it.
 ///
 /// It claims only the clicks Ghostty itself would leave unclaimed. Ghostty's
 /// contract is that a program which turned on mouse reporting owns every mouse
@@ -29,7 +31,7 @@ final class TerminalContextMenu: NSObject {
     // Held for the app's lifetime; never removed.
     private var monitor: Any?
     /// The surface the open menu acts on, resolved at click time.
-    private weak var clickedView: TerminalView?
+    private weak var clickedView: NSView?
     /// The web link under the pointer at click time (ghostty's hover-link report,
     /// the same state the cmd+click interceptor reads), or nil off-link. Captured
     /// when the menu opens so the actions don't chase a moved mouse.
@@ -219,12 +221,13 @@ final class TerminalContextMenu: NSObject {
         NSWorkspace.shared.open(url)
     }
 
-    /// All terminal surface views under `root`, in tree order.
-    private func terminalViews(in root: NSView) -> [TerminalView] {
-        var found: [TerminalView] = []
+    /// All terminal views under `root`, embedded surfaces and stream panes
+    /// alike, in tree order.
+    private func terminalViews(in root: NSView) -> [NSView] {
+        var found: [NSView] = []
         var stack: [NSView] = [root]
         while let view = stack.popLast() {
-            if let terminal = view as? TerminalView { found.append(terminal) }
+            if view is TerminalView || view is TermiodStreamView { found.append(view) }
             stack.append(contentsOf: view.subviews)
         }
         return found
@@ -233,9 +236,11 @@ final class TerminalContextMenu: NSObject {
     /// Whether the program on this surface turned on mouse reporting (DECSET
     /// 1000/1002/1003). `ghostty_surface_mouse_captured` reads the terminal's
     /// `mouse_event` flag, which is the same state the core consults before it
-    /// reports a click and swallows it.
-    private func programCapturesMouse(_ view: TerminalView) -> Bool {
-        guard let handle = store?.surfaces
+    /// reports a click and swallows it. A stream pane reads the same mode from
+    /// its own terminal, as its `rightMouseDown` does.
+    private func programCapturesMouse(_ view: NSView) -> Bool {
+        if let stream = view as? TermiodStreamView { return stream.terminal()?.tracksMouse ?? false }
+        guard let view = view as? TerminalView, let handle = store?.surfaces
             .first(where: { $0.value.controller === view.controller })?
             .value.surface?.rawValue
         else { return false }
@@ -244,7 +249,10 @@ final class TerminalContextMenu: NSObject {
 
     /// Maps a surface view back to its session through the store's surface
     /// cache — the view and its cached `TerminalViewState` share a controller.
-    private func sessionID(for view: TerminalView) -> Session.ID? {
-        store?.surfaces.first { $0.value.controller === view.controller }?.key
+    /// A stream pane carries its session itself.
+    private func sessionID(for view: NSView) -> Session.ID? {
+        if let stream = view as? TermiodStreamView { return stream.sessionID }
+        guard let view = view as? TerminalView else { return nil }
+        return store?.surfaces.first { $0.value.controller === view.controller }?.key
     }
 }
