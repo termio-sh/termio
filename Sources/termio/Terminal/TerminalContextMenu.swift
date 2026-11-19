@@ -94,7 +94,7 @@ final class TerminalContextMenu: NSObject {
         // reached by reading the terminal's mouse-reporting flag before the click
         // is sent. Returning false leaves the event to the wrapper, which forwards
         // it as it would if this monitor did not exist.
-        if !event.modifierFlags.contains(.shift), programCapturesMouse(target) { return false }
+        if programTakesPress(event, on: target) { return false }
 
         // Focus follows the right-click (the wrapper's own `rightMouseDown`
         // does the same), and the selection is moved synchronously so the
@@ -236,11 +236,13 @@ final class TerminalContextMenu: NSObject {
     /// Whether the program on this surface turned on mouse reporting (DECSET
     /// 1000/1002/1003). `ghostty_surface_mouse_captured` reads the terminal's
     /// `mouse_event` flag, which is the same state the core consults before it
-    /// reports a click and swallows it. A stream pane reads the same mode from
-    /// its own terminal, as its `rightMouseDown` does.
-    private func programCapturesMouse(_ view: NSView) -> Bool {
-        if let stream = view as? TermiodStreamView { return stream.terminal()?.tracksMouse ?? false }
-        guard let view = view as? TerminalView, let handle = store?.surfaces
+    /// reports a click and swallows it. Shift hands the click back to the
+    /// terminal. A stream pane answers with the rule its own `rightMouseDown`
+    /// applies, which also leaves the program out of a press off the grid.
+    private func programTakesPress(_ event: NSEvent, on view: NSView) -> Bool {
+        if let stream = view as? TermiodStreamView { return stream.programTakesPress(event) }
+        guard !event.modifierFlags.contains(.shift),
+              let view = view as? TerminalView, let handle = store?.surfaces
             .first(where: { $0.value.controller === view.controller })?
             .value.surface?.rawValue
         else { return false }

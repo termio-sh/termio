@@ -656,6 +656,19 @@ extension TermiodStreamView: @preconcurrency NSTextInputClient {
         needsFullDraw = true
     }
 
+    /// Where the program would see a press from this event, or nil when the
+    /// press is the terminal's to answer.
+    private func reportedPoint(_ event: NSEvent) -> Termiod.InputEvent.Pointer? {
+        guard let terminal = terminal(), terminal.tracksMouse, !event.modifierFlags.contains(.shift),
+              let at = pointer(event), onGrid(at)
+        else { return nil }
+        return at
+    }
+
+    /// Whether a press from this event goes to the program. The right-click
+    /// menu asks, so it opens exactly where the program gets nothing.
+    func programTakesPress(_ event: NSEvent) -> Bool { reportedPoint(event) != nil }
+
     /// A press on the grid goes to a program tracking the mouse, unless Shift
     /// is held: Ghostty keeps Shift-click for the terminal's own selection.
     /// A program can ask Ghostty for Shift-clicks too (`XTSHIFTESCAPE`);
@@ -663,9 +676,7 @@ extension TermiodStreamView: @preconcurrency NSTextInputClient {
     /// the terminal's.
     private func press(_ event: NSEvent, _ button: UInt8) {
         window?.makeFirstResponder(self)
-        guard let terminal = terminal(), terminal.tracksMouse, !event.modifierFlags.contains(.shift),
-              let at = pointer(event), onGrid(at)
-        else { return }
+        guard let at = reportedPoint(event) else { return }
         reportedButtons.insert(button)
         lastPointer = at
         sendInput(.mouse(.init(action: .press, button: button, mods: TermiodStreamKeyboard.mods(event.modifierFlags),
