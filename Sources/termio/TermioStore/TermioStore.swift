@@ -52,6 +52,9 @@ final class TermioStore: ObservableObject {
     /// ones they never stop on; only the last arrival settles (see
     /// `finishArriving`).
     var workspaceArrival: UInt64 = 0
+    /// The workspace a switch has shown and not yet picked a row in. Set for the one
+    /// turn between `switchToWorkspace` and `finishArriving`.
+    var workspaceAwaitingSelection: Workspace.ID?
 
     /// Which workspace the sidebar is showing. Live state, like the selection —
     /// `AppSettings` keeps a copy only so the next launch starts where this one
