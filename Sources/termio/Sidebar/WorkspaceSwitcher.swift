@@ -113,6 +113,7 @@ enum WorkspaceMenu {
 /// sees it.
 struct WorkspaceSwitcherToolbarView: View {
     @EnvironmentObject var store: TermioStore
+    @EnvironmentObject private var window: WindowContext
     @EnvironmentObject var settings: AppSettings
     @Environment(\.controlActiveState) private var controlActive
 
@@ -132,7 +133,7 @@ struct WorkspaceSwitcherToolbarView: View {
     private static let chipInset: CGFloat = 8
 
     var body: some View {
-        let current = store.currentWorkspace
+        let current = store.workspace(shownIn: window.workspaceID)
         let machineIcon: HugeIcon = current.device.isThisMac ? .laptop : .network
         // One machine and one workspace: the icon alone, still the way to add either.
         if !store.hasMultipleWorkspaces && store.switcherMachines.count == 1 {
@@ -145,7 +146,7 @@ struct WorkspaceSwitcherToolbarView: View {
                 .background(SelectionGlass(shape: Capsule(style: .continuous)))
                 .overlay(Capsule(style: .continuous).fill(Color.primary.opacity(isHighlighted ? 0.08 : 0)))
                 .padding(.leading, -Self.chipInset)
-                .overlay(WorkspaceMenuPopper(store: store, highlighted: $isHighlighted))
+                .overlay(WorkspaceMenuPopper(store: store, workspaceName: current.name, highlighted: $isHighlighted))
                 .accessibilityHidden(true)
         } else {
             // One button: the capsule hugs the icon and the name. The spacer beside it
@@ -183,7 +184,7 @@ struct WorkspaceSwitcherToolbarView: View {
                 // accessibility of this control — it is the view under the pointer, so a
                 // `.help()` here would be shadowed by it and a SwiftUI accessibility
                 // element here would hide it. See `WorkspaceMenuHost`.
-                .overlay(WorkspaceMenuPopper(store: store, highlighted: $isHighlighted))
+                .overlay(WorkspaceMenuPopper(store: store, workspaceName: current.name, highlighted: $isHighlighted))
                 .accessibilityHidden(true)
         }
     }
@@ -209,6 +210,8 @@ struct WorkspaceSwitcherToolbarView: View {
 /// File ▸ Workspace for the same keystroke.
 private struct WorkspaceMenuPopper: NSViewRepresentable {
     let store: TermioStore
+    /// The workspace this window shows, which the tooltip and VoiceOver name.
+    let workspaceName: String
     /// Driven by the host below: the pointer entering or leaving, and the menu
     /// being up. Hover is answered here rather than by a SwiftUI `.onHover` on the
     /// label, for the same reason the tooltip is — this view is the one the pointer
@@ -217,15 +220,16 @@ private struct WorkspaceMenuPopper: NSViewRepresentable {
 
     /// The name as well as the sentence, because the label above has only the row's slack
     /// and a name too long for it is middle-truncated with nowhere else to be read in place.
-    private static func toolTip(for store: TermioStore) -> String {
-        "\(store.currentWorkspace.name) — \(localized("The sidebar shows this workspace"))"
+    private var toolTip: String {
+        "\(workspaceName) — \(localized("The sidebar shows this workspace"))"
     }
 
     func makeNSView(context: Context) -> WorkspaceMenuHost {
         let view = WorkspaceMenuHost()
         view.store = store
         view.onHighlight = { highlighted = $0 }
-        view.toolTip = Self.toolTip(for: store)
+        view.workspaceName = workspaceName
+        view.toolTip = toolTip
         return view
     }
 
@@ -235,7 +239,8 @@ private struct WorkspaceMenuPopper: NSViewRepresentable {
         // stale one writes to a view tree that has been replaced.
         nsView.onHighlight = { highlighted = $0 }
         // Set here too: the scope changes far more often than this view is made.
-        nsView.toolTip = Self.toolTip(for: store)
+        nsView.workspaceName = workspaceName
+        nsView.toolTip = toolTip
     }
 }
 
@@ -244,6 +249,7 @@ private struct WorkspaceMenuPopper: NSViewRepresentable {
 /// view already holds, so there is no second place for its contents to live.
 private final class WorkspaceMenuHost: NSView {
     weak var store: TermioStore?
+    var workspaceName = ""
     private var lastClose: TimeInterval = 0
     private var panel: SwitcherPanel?
     private var resignObserver: NSObjectProtocol?
@@ -312,7 +318,7 @@ private final class WorkspaceMenuHost: NSView {
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
     override func accessibilityLabel() -> String? { localized("Workspace") }
-    override func accessibilityValue() -> Any? { store?.currentWorkspace.name }
+    override func accessibilityValue() -> Any? { workspaceName }
 
     override func accessibilityPerformPress() -> Bool {
         showMenu()

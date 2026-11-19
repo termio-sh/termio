@@ -23,20 +23,25 @@ extension TermioStore {
 
     /// The groups the sidebar lists in the horizontal layout: Terminals and Chats while they
     /// hold anything, then the workspace's projects in the sidebar's own order.
-    var sessionGroups: [TabGroup] {
-        let workspace = currentWorkspace
+    var sessionGroups: [TabGroup] { sessionGroups(of: currentWorkspace) }
+
+    /// The same list for one window's workspace, which is the current one only in
+    /// the active window.
+    func sessionGroups(of workspace: Workspace) -> [TabGroup] {
         var groups: [TabGroup] = []
         if !workspace.terminals.isEmpty { groups.append(.terminals) }
         if !workspace.chats.isEmpty { groups.append(.chats) }
-        groups += orderedProjects.map { .project($0.id) }
+        groups += projects(inWorkspace: workspace.id).map { .project($0.id) }
         return groups
     }
 
-    func sessions(in group: TabGroup) -> [Session] {
+    func sessions(in group: TabGroup) -> [Session] { sessions(in: group, of: currentWorkspace) }
+
+    func sessions(in group: TabGroup, of workspace: Workspace) -> [Session] {
         switch group {
         case .project(let id): return projects.first { $0.id == id }?.sessions ?? []
-        case .terminals: return currentWorkspace.terminals
-        case .chats: return currentWorkspace.chats
+        case .terminals: return workspace.terminals
+        case .chats: return workspace.chats
         }
     }
 

@@ -30,7 +30,7 @@ struct SidebarGroupList: View {
         let selected = window.selectedSessionID.flatMap(store.group(of:))
         let chrome = settings.chromeTheme(for: colorScheme)
         List {
-            ForEach(store.sessionGroups, id: \.self) { group in
+            ForEach(store.sessionGroups(of: store.workspace(shownIn: window.workspaceID)), id: \.self) { group in
                 SidebarGroupRow(group: group, isSelected: group == selected, chrome: chrome)
             }
         }
@@ -42,6 +42,7 @@ struct SidebarGroupList: View {
 
 private struct SidebarGroupRow: View {
     @EnvironmentObject var store: TermioStore
+    @EnvironmentObject var window: WindowContext
     @EnvironmentObject var settings: AppSettings
     let group: TabGroup
     let isSelected: Bool
@@ -51,7 +52,7 @@ private struct SidebarGroupRow: View {
     @State private var isMenuOpen = false
 
     var body: some View {
-        let members = store.sessions(in: group)
+        let members = store.sessions(in: group, of: store.workspace(shownIn: window.workspaceID))
         let status = store.combinedStatus(of: members.map(\.id))
         HStack(spacing: 8) {
             Group {
@@ -93,8 +94,9 @@ private struct SidebarGroupRow: View {
         case .project(let id):
             guard let project = store.projects.first(where: { $0.id == id }) else { return [] }
             return projectMenuItems(store: store, settings: settings, project: project)
-        case .terminals: return terminalsMenuItems(store: store, workspace: store.currentWorkspace.id)
-        case .chats: return chatsMenuItems(store: store, workspace: store.currentWorkspace.id)
+        // The window's workspace: a right-click does not make its window active.
+        case .terminals: return terminalsMenuItems(store: store, workspace: store.workspace(shownIn: window.workspaceID).id)
+        case .chats: return chatsMenuItems(store: store, workspace: store.workspace(shownIn: window.workspaceID).id)
         }
     }
 

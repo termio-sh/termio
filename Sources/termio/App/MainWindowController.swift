@@ -9,6 +9,9 @@ import SwiftUI
 @MainActor
 final class WindowContext: ObservableObject {
     @Published var selectedSessionID: Session.ID?
+    /// The workspace this window's sidebar shows. The store's current workspace is the
+    /// active window's, by the same rule as the selection.
+    @Published var workspaceID: Workspace.ID
     /// Whether this is the window the store's selection belongs to.
     @Published fileprivate(set) var isActive = false
     /// Whether this window's sidebar is expanded, mirrored from its split item.
@@ -19,8 +22,9 @@ final class WindowContext: ObservableObject {
     /// reopen, and a closed window must not keep showing, or sizing, a session.
     @Published fileprivate(set) var isOpen = true
 
-    init(selectedSessionID: Session.ID?) {
+    init(selectedSessionID: Session.ID?, workspaceID: Workspace.ID) {
         self.selectedSessionID = selectedSessionID
+        self.workspaceID = workspaceID
     }
 }
 
@@ -75,6 +79,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     private var titleObserver: AnyCancellable?
     private var settingsObserver: AnyCancellable?
     private var selectionObserver: AnyCancellable?
+    private var workspaceObserver: AnyCancellable?
+    private var workspacesObserver: AnyCancellable?
     // Whether `DetailHost.shared` is currently parented here, covering the content area, rather
     // than docked in the inspector's slot.
     private var detailMaximized = false
@@ -97,7 +103,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     init(store: TermioStore, settings: AppSettings, selecting selection: Session.ID?, cascadingFrom parent: NSWindow?) {
         self.store = store
         self.settings = settings
-        context = WindowContext(selectedSessionID: selection)
+        context = WindowContext(
+            selectedSessionID: selection,
+            workspaceID: selection.flatMap { store.workspace(for: $0)?.id } ?? store.currentWorkspaceID)
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -230,6 +238,26 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                     self.context.selectedSessionID = id
                 }
             }
+        // An inactive window whose workspace is deleted takes the first one left, so it
+        // does not fall back to following the active window.
+        workspacesObserver = store.$workspaces
+            .sink { [weak self] workspaces in
+                MainActor.assumeIsolated {
+                    guard let self, !self.context.isActive,
+                          !workspaces.contains(where: { $0.id == self.context.workspaceID }),
+                          let first = workspaces.first
+                    else { return }
+                    self.context.workspaceID = first.id
+                    self.context.selectedSessionID = self.store.arrivalSelection(inWorkspace: first.id)
+                }
+            }
+        workspaceObserver = store.$currentWorkspaceID
+            .sink { [weak self] id in
+                MainActor.assumeIsolated {
+                    guard let self, self.context.isActive, self.context.workspaceID != id else { return }
+                    self.context.workspaceID = id
+                }
+            }
     }
 
     // MARK: - Active window
@@ -241,6 +269,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         guard Self.active !== self else { return }
         if let previous = Self.active {
             previous.context.isActive = false
+            // Left in the turn between a workspace switch and its selection: the window
+            // lands on the row the switch was about to pick.
+            let shown = previous.context.workspaceID
+            if store.workspaceAwaitingSelection == shown {
+                previous.context.selectedSessionID = store.arrivalSelection(inWorkspace: shown)
+            }
             previous.setDetailMaximized(false)
         }
         Self.active = self
@@ -250,11 +284,15 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         store.objectWillChange.send()
         store.sidebarVisible = context.sidebarVisible
         store.windowIsFullScreen = context.isFullScreen
+        // The workspace before the selection: a window on an empty workspace has no
+        // session to follow into it.
+        store.adoptWorkspace(context.workspaceID)
         let selection = context.selectedSessionID.flatMap { store.session($0) == nil ? nil : $0 }
         if store.selectedSessionID != selection {
             store.selectedSessionID = selection
         }
         context.selectedSessionID = store.selectedSessionID
+        context.workspaceID = store.currentWorkspaceID
         setDetailMaximized(store.inspectorMaximized && store.isDetailPresented)
         store.repaintSelectedSurface()
     }

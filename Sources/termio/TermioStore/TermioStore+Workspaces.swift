@@ -201,6 +201,13 @@ extension TermioStore {
             ?? Workspace(name: Workspace.defaultName)
     }
 
+    /// The workspace a window's sidebar draws. Each window keeps its own
+    /// (`WindowContext.workspaceID`); only the active window's is `currentWorkspace`.
+    /// A window whose workspace was deleted draws the current one.
+    func workspace(shownIn id: Workspace.ID) -> Workspace {
+        workspaces.first { $0.id == id } ?? currentWorkspace
+    }
+
     /// Whether the switcher has anything to switch between. With one workspace it
     /// stays out of sight: a control that always reads the same thing is a label
     /// for a decision nobody took.
@@ -358,6 +365,7 @@ extension TermioStore {
         settings.currentWorkspaceID = id
         workspaceArrival &+= 1
         let arrival = workspaceArrival
+        workspaceAwaitingSelection = id
         // Everything below is about the *session* the new scope lands on — its
         // terminal becoming the visible surface, its saved inspector layout
         // reopening a file, its machine being asked for a roster. None of it
@@ -376,6 +384,7 @@ extension TermioStore {
             MainActor.assumeIsolated {
                 Trace.workspace.end(column)
                 guard let self, self.workspaceArrival == arrival else { return }
+                self.workspaceAwaitingSelection = nil
                 self.finishArriving(in: id)
             }
         }
@@ -426,6 +435,23 @@ extension TermioStore {
         guard let workspace = workspace(for: id), workspace.id != currentWorkspaceID else { return }
         currentWorkspaceID = workspace.id
         settings.currentWorkspaceID = workspace.id
+    }
+
+    /// Makes `id` the current workspace because the window that shows it became
+    /// active. The selection is the window's to hand over, so nothing here moves it.
+    func adoptWorkspace(_ id: Workspace.ID) {
+        // A switch still settling belongs to the window being left. Its selection
+        // must not land in this one; that window settles its own (see
+        // `MainWindowController.activate`).
+        workspaceArrival &+= 1
+        workspaceAwaitingSelection = nil
+        guard currentWorkspaceID != id, workspaces.contains(where: { $0.id == id }) else { return }
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            currentWorkspaceID = id
+        }
+        settings.currentWorkspaceID = id
     }
 
     /// Every session filed under one workspace, in sidebar order.

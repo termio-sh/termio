@@ -131,6 +131,7 @@ private struct SidebarSectionHeader: View {
 
 struct SidebarView: View {
     @EnvironmentObject var store: TermioStore
+    @EnvironmentObject private var window: WindowContext
     @EnvironmentObject var settings: AppSettings
     /// A row drag's state, on its own object so that a drag redraws the sidebar and only
     /// the sidebar (`TermioStore.sidebarDrag`).
@@ -170,12 +171,13 @@ struct SidebarView: View {
         // pinned rows carry no per-row badge. Both groups keep the user's chosen sort
         // (already applied by `orderedProjects`, which we only partition here — never reorder).
         //
-        // The sidebar shows one WORKSPACE, and `store.currentWorkspace` says which.
+        // The sidebar shows one WORKSPACE, and the window says which: each window
+        // keeps its own, and only the active window's is `store.currentWorkspace`.
         // A workspace spans machines: a project row's session that runs on a VPS
         // draws here, beside its siblings, wearing that machine's mark — the device
         // is a property of the row now, not a filter over the column.
-        let workspace = store.currentWorkspace
-        let ordered = store.orderedProjects
+        let workspace = store.workspace(shownIn: window.workspaceID)
+        let ordered = store.projects(inWorkspace: workspace.id)
         let pinnedProjects = ordered.filter(\.pinned)
         let others = ordered.filter { !$0.pinned }
         // Pinned worktrees are gathered only from *unpinned* projects: a pinned project
@@ -1094,6 +1096,13 @@ struct SidebarRowContextMenu: NSViewRepresentable {
 
         @objc private func showMenu(_ recognizer: NSClickGestureRecognizer) {
             guard let hostView else { return }
+            // A right-click does not make its window key, and the menu's commands act on
+            // the active window's workspace and selection. Make this window key first,
+            // which makes it active, so they act where the menu opened.
+            if let window = hostView.window, !window.isKeyWindow {
+                window.makeKeyAndOrderFront(nil)
+                MainWindowController.all.first { $0.window === window }?.activate()
+            }
             let menu = sidebarMenu(items())
             menu.delegate = self
             menu.popUp(positioning: nil, at: recognizer.location(in: hostView), in: hostView)
