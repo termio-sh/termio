@@ -4791,16 +4791,6 @@
         }
       }
     },
-    "No drawing in this file.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "这个文件里没有图。"
-          }
-        }
-      }
-    },
     "No File Selected": {
       "localizations": {
         "zh-Hans": {
@@ -7739,16 +7729,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "这个检出没有其他分支可以对比。"
-          }
-        }
-      }
-    },
-    "This drawing is empty.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "这幅图是空的。"
           }
         }
       }
