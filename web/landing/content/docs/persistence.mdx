@@ -112,9 +112,15 @@ Termio does hold the machine out of *idle* sleep while there is work worth
 protecting. While any session is working or waiting on you, the server renews a
 short `caffeinate` lease, so a Mac plugged into power stays reachable for the
 agent that went quiet on a permission prompt — exactly the moment your phone
-needs to answer it. On battery it takes no lease at all, and closing the lid
-sleeps the machine regardless: nothing in user space can override clamshell
-sleep.
+needs to answer it. On battery it takes no lease at all.
+
+A `caffeinate` lease doesn't cover a closed lid. macOS keeps a closed MacBook
+running only in closed-display mode (on power, with an external display and a
+keyboard or mouse attached), or when sleep is turned off system-wide:
+`sudo pmset -a disablesleep 1` does that until you run
+`sudo pmset -a disablesleep 0`, on battery too. Apps that keep a MacBook awake
+with the lid closed, such as [Keep Mac Awake](https://keepmacawake.com/?utm_source=termio&utm_medium=referral&utm_campaign=partner-docs), turn that same setting
+off for a session and back on when it ends.
 
 <Callout type="warning">
   If you want a session you can always reach, run it on a machine that stays
